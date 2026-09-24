@@ -96,8 +96,11 @@ function readText(bytes: Uint8Array): string | undefined {
  * A `data:<media-type>[;parameter=value...];base64,<blob>` run. The blob's
  * character class stops at the delimiters a data URI is embedded behind -- `)`
  * in a CSS `url(...)`, a quote in markup -- so only the blob is captured.
+ * Spaces or tabs after each `;` are accepted, because real producers emit
+ * `text/plain; charset=utf-8`; `[ \t]` rather than `\s` keeps that separator
+ * from crossing a line.
  */
-const DATA_URI_BASE64 = /(data:[\w.+-]+\/[\w.+-]+(?:;[\w.+-]+=[^;,]*)*;base64,)([A-Za-z0-9+/=_-]+)/gu;
+const DATA_URI_BASE64 = /(data:[\w.+-]+\/[\w.+-]+(?:;[ \t]*[\w.+-]+=[^;,]*)*;base64,)([A-Za-z0-9+/=_-]+)/gu;
 
 function isBase64Field(key: string | undefined, isDsseEnvelope: boolean): boolean {
   if (key === undefined) return false;

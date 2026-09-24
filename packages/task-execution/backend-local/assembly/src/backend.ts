@@ -76,16 +76,19 @@ import type {
   AttemptIdentity,
   JournalEvent,
   OutcomeFile,
+  ProcessGroupTable,
+  ShimFingerprint,
   SpawnRequest,
 } from "@jinn-network/task-execution-supervisor";
 import {
   foldAttemptRecord,
   heartbeatIsStale,
-  listProcessGroupPids,
   openAttemptJournal,
   openSubmissionSegment,
   probeShimAlive,
+  ProcessTableProbeError,
   readHeartbeat,
+  readProcessGroupTable,
   readShimCancellationResult,
   readOutcome,
   readShimFingerprint,
@@ -636,6 +639,16 @@ export interface LocalBackendFaults {
       | "after-evidence"
       | "before-delivery-checkpoint",
   ) => void | Promise<void>;
+  /** Test-only process-table injection (#4395/#4396); production compositions leave this absent. */
+  readonly processGroupTable?: () => ProcessGroupTable;
+}
+
+/** One rehydrated nonterminal attempt's result from `reconcileNonterminal` (#4397). */
+export interface NonterminalSweepEntry {
+  readonly attempt: AttemptUri;
+  readonly outcome: "reconciled" | "failed";
+  readonly classification?: ReconciliationReport["classification"];
+  readonly detail?: string;
 }
 
 export interface LocalTaskExecutionBackendConfig {
@@ -2098,34 +2111,112 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     };
   }
 
+  private readProcessGroupTable(): ProcessGroupTable {
+    return this.config.faults?.processGroupTable?.() ?? readProcessGroupTable();
+  }
+
+  private groupMembers(pgid: number, table: ProcessGroupTable = this.readProcessGroupTable()): readonly number[] {
+    return table.get(pgid) ?? [];
+  }
+
   private async waitForHarnessGroupEmpty(paths: WorkspacePaths): Promise<void> {
     const fingerprint = readShimFingerprint(paths.meta);
     if (fingerprint?.harnessPid === undefined) return;
+    let lastProbeFailure: string | undefined;
     for (let tries = 0; tries < 200; tries += 1) {
-      if (listProcessGroupPids(fingerprint.harnessPid).length === 0) return;
+      try {
+        if (this.groupMembers(fingerprint.harnessPid).length === 0) return;
+        lastProbeFailure = undefined; // a later successful read supersedes an earlier failure
+      } catch (error) {
+        if (!(error instanceof ProcessTableProbeError)) throw error;
+        lastProbeFailure = error.message; // not yet proven empty (#4395)
+      }
       await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
-    throw new TaskExecutionError("backend-unavailable", { detail: "harness group is not empty; refusing harvest" });
+    throw new TaskExecutionError("backend-unavailable", {
+      detail: `harness group is not empty${lastProbeFailure === undefined ? "" : ` or unverifiable (${lastProbeFailure})`}; refusing harvest`,
+    });
   }
 
+  /** Throws `ProcessTableProbeError` when the table cannot be read (#4395); callers choose the direction. */
   private harnessGroupPids(paths: WorkspacePaths): readonly number[] {
     const fingerprint = readShimFingerprint(paths.meta);
     if (fingerprint?.harnessPid === undefined) return [];
-    return listProcessGroupPids(fingerprint.harnessPid);
+    return this.groupMembers(fingerprint.harnessPid);
+  }
+
+  // Does anything of this Attempt still exist on the host? Exactly `reconcileResolvedRef`'s
+  // `processAlive` term — the one that separates `absent` (nothing left, so nothing to bound) from
+  // `orphaned` and `matching` (something is still running) — short-circuited so the group lookup
+  // runs only once the shim is known dead. It answers from evidence the host has published, so it
+  // is blind in the window `reconcileResolvedRef` is blind in: the shim writes `shim.json` AFTER
+  // spawning the harness, so a backend that dies between those two points leaves a running harness
+  // with no fingerprint and the next boot reads the Attempt as gone.
+  //
+  // An unverifiable answer is not proof of death, so it reads as alive and keeps the slot — the
+  // behavior this Attempt had before #3192 — and is reported as such so the caller can journal it
+  // (#4395). Both directions are explicit here: an unreadable fingerprint and an unreadable
+  // process table each hold. The one probe this does not own is `probeShimAlive`'s start-time
+  // read, which by the supervisor's documented contract treats an unverifiable start time as
+  // not-alive; a shim whose `ps -o lstart` fails therefore still falls through to the group check.
+  private attemptLiveness(paths: WorkspacePaths, table: () => ProcessGroupTable): {
+    readonly alive: boolean;
+    readonly unverifiable?: {
+      readonly reason: "process-table-unavailable" | "shim-fingerprint-unreadable";
+      readonly detail: string;
+    };
+  } {
+    let fingerprint: ShimFingerprint | null;
+    try {
+      const shim = probeShimAlive(paths.meta);
+      if (shim.alive) return { alive: true };
+      fingerprint = shim.fingerprint;
+    } catch (error) {
+      return {
+        alive: true,
+        unverifiable: {
+          reason: "shim-fingerprint-unreadable",
+          detail: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+    if (fingerprint?.harnessPid === undefined) return { alive: false };
+    try {
+      return { alive: this.groupMembers(fingerprint.harnessPid, table()).length > 0 };
+    } catch (error) {
+      if (!(error instanceof ProcessTableProbeError)) throw error;
+      return { alive: true, unverifiable: { reason: "process-table-unavailable", detail: error.message } };
+    }
   }
 
   private async killHarnessGroup(paths: WorkspacePaths): Promise<readonly number[]> {
     const fingerprint = readShimFingerprint(paths.meta);
     if (fingerprint?.harnessPid === undefined) return [];
-    const pids = [...listProcessGroupPids(fingerprint.harnessPid)];
+    let pids: number[];
+    try {
+      pids = [...this.groupMembers(fingerprint.harnessPid)];
+    } catch (error) {
+      // The caller's reconcile listing just succeeded, so this is a refusal, not a diagnosis.
+      if (!(error instanceof ProcessTableProbeError)) throw error;
+      throw new TaskExecutionError("backend-unavailable", { detail: error.message });
+    }
     if (pids.length === 0) return [];
+    // Inside the ladder a failed read is "not yet proven empty" (#4395); the final listing decides.
+    const groupEmpty = (): boolean => {
+      try {
+        return this.groupMembers(fingerprint.harnessPid!).length === 0;
+      } catch (error) {
+        if (!(error instanceof ProcessTableProbeError)) throw error;
+        return false;
+      }
+    };
     try {
       process.kill(-fingerprint.harnessPid, "SIGTERM");
     } catch {
       // Exited races are verified by the process-group scan below.
     }
     for (let attempt = 0; attempt < 20; attempt += 1) {
-      if (listProcessGroupPids(fingerprint.harnessPid).length === 0) return pids;
+      if (groupEmpty()) return pids;
       await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
     try {
@@ -2134,11 +2225,17 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       // Exited races are verified by the process-group scan below.
     }
     for (let attempt = 0; attempt < 200; attempt += 1) {
-      if (listProcessGroupPids(fingerprint.harnessPid).length === 0) return pids;
+      if (groupEmpty()) return pids;
       await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
+    let remaining: string;
+    try {
+      remaining = this.groupMembers(fingerprint.harnessPid).join(",");
+    } catch (error) {
+      remaining = error instanceof Error ? error.message : String(error);
+    }
     throw new TaskExecutionError("backend-unavailable", {
-      detail: `recovery kill ladder left live process-group members: ${listProcessGroupPids(fingerprint.harnessPid).join(",")}`,
+      detail: `recovery kill ladder left live or unverifiable process-group members: ${remaining}`,
     });
   }
 
@@ -2282,6 +2379,23 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     }
 
     const live: AttemptUri[] = [];
+    // #4396: one lazily-taken process-table snapshot per boot, memoized including its failure, so
+    // rehydration costs a bounded number of table reads however many nonterminal attempts exist.
+    let snapshot: { readonly table?: ProcessGroupTable; readonly failure?: ProcessTableProbeError } | undefined;
+    const table = (): ProcessGroupTable => {
+      snapshot ??= (() => {
+        try {
+          return { table: this.readProcessGroupTable() };
+        } catch (error) {
+          if (error instanceof ProcessTableProbeError) return { failure: error };
+          // Anything else lands in the loop's swallow-all catch below and takes the RELEASING branch;
+          // only the typed probe failure is the fail-closed hold, so keep every table-read failure typed.
+          throw error;
+        }
+      })();
+      if (snapshot.failure !== undefined) throw snapshot.failure;
+      return snapshot.table!;
+    };
     const attemptsRoot = join(this.config.stateRoot, "attempts");
     if (existsSync(attemptsRoot)) {
       for (const entry of readdirSync(attemptsRoot, { withFileTypes: true })) {
@@ -2292,7 +2406,21 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         try {
           const metadata = JSON.parse(readFileSync(metadataPath, "utf8")) as PersistedAttempt;
           this.attempts.set(attempt, metadata);
-          if (!foldAttemptRecord(this.journal(attempt).read()).terminal) live.push(attempt);
+          // The ceiling bounds concurrent *execution*, not nonterminal journals: a rehydrated
+          // Attempt whose shim and harness group are both gone consumes nothing on this host and
+          // must not hold a slot, or a crash permanently narrows the backend it is restarted into
+          // (#3192). Releasing here is safe against the terminal a later `recover` appends —
+          // `release` is a set delete, so that append is a no-op rather than a double-release.
+          // It does widen slightly beyond the evaluation Attempt of #3192: a `harvesting` or
+          // `recording` Attempt released here has its `recover` re-run harvest or re-write the
+          // delivery outside the ceiling. Deliberate — those actions spawn nothing, so they are not
+          // the concurrency the ceiling exists to bound.
+          if (foldAttemptRecord(this.journal(attempt).read()).terminal) continue;
+          const liveness = this.attemptLiveness(this.paths(attempt), table);
+          if (liveness.alive) live.push(attempt);
+          if (liveness.unverifiable !== undefined) {
+            this.recordLivenessUnverifiable(attempt, liveness.unverifiable.reason, liveness.unverifiable.detail);
+          }
         } catch {
           // recover(ref) is the fail-loud reconciliation surface for corrupt attempts.
         }
@@ -2525,6 +2653,27 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     }
   }
 
+  // The slot decision is already made by the time this runs; a failed diagnostic append must not
+  // change it, and a backend that does not own the writer must not append into someone else's root.
+  private recordLivenessUnverifiable(
+    attempt: AttemptUri,
+    reason: "process-table-unavailable" | "shim-fingerprint-unreadable",
+    detail: string,
+  ): void {
+    if (this.shutdownStarted || !this.writer.acquired) return;
+    try {
+      if (this.journal(attempt).read().some((event) => event.type === "progress" && event.details["degradation"] === "liveness-unverifiable")) return;
+      this.journal(attempt).append({
+        attemptId: attempt,
+        type: "progress",
+        time: this.now(),
+        details: { degradation: "liveness-unverifiable", reason, detail, source: this.config.source },
+      });
+    } catch {
+      // See above: the diagnostic is best-effort.
+    }
+  }
+
   private reconstructRecoveryContext(
     attempt: AttemptUri,
     events: readonly JournalEvent[],
@@ -2695,6 +2844,38 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     return this.trackInflight(this.recoverRef(ref));
   }
 
+  /**
+   * Boot-time convergence for attempts no caller will `recover` (#4397): runs the ordinary
+   * reconciliation for every rehydrated nonterminal attempt, in order, one failure per attempt.
+   * Backend-local surface — the frozen `TaskExecutionBackend` contract is untouched.
+   */
+  async reconcileNonterminal(): Promise<readonly NonterminalSweepEntry[]> {
+    const entries: NonterminalSweepEntry[] = [];
+    for (const attempt of [...this.attempts.keys()]) {
+      try {
+        if (foldAttemptRecord(this.journal(attempt).read()).terminal) continue;
+      } catch {
+        // Not known terminal — `recover` below is the fail-loud surface for a corrupt journal.
+      }
+      try {
+        const report = await this.recover(attempt);
+        entries.push({
+          attempt,
+          outcome: "reconciled",
+          classification: report.classification,
+          ...(report.detail === undefined ? {} : { detail: report.detail }),
+        });
+      } catch (error) {
+        entries.push({
+          attempt,
+          outcome: "failed",
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return entries;
+  }
+
   private async recoverRef(ref: SubmissionUri | AttemptUri): Promise<ReconciliationReport> {
     this.assertWriter();
     const override = this.reconciliationOverrides.get(ref);
@@ -2725,7 +2906,20 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     const shim = probeShimAlive(paths.meta);
     const rawOutcome = readOutcome(paths.meta);
     const outcome = rawOutcome !== null && rawOutcome.nonce === record.nonce ? rawOutcome : null;
-    const groupPids = this.harnessGroupPids(paths);
+    let groupPids: readonly number[];
+    try {
+      groupPids = this.harnessGroupPids(paths);
+    } catch (error) {
+      // An unverifiable table is a refusal, never a `lost` terminal (#4395).
+      if (!(error instanceof ProcessTableProbeError)) throw error;
+      this.recordLivenessUnverifiable(attempt, "process-table-unavailable", error.message);
+      throw new TaskExecutionError("backend-unavailable", { detail: error.message });
+    }
+    // `processAlive` below is the same question `attemptLiveness` asks at rehydration, kept
+    // inline here because the surrounding fields need `shim` and `groupPids` separately. Change one
+    // and change the other: give this a third liveness signal that rehydration does not have, and
+    // rehydration frees the slot of an Attempt this then classifies `orphaned` — one whose harness
+    // group is still on the host and still to be killed — so the ceiling stops bounding it.
     let reconciliation = reconcileAttempt(record, {
       processAlive: shim.alive || groupPids.length > 0,
       shimAlive: shim.alive,

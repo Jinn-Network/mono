@@ -7,6 +7,7 @@ export type {
   LocalBackendFaults,
   LocalProvisionerInput,
   LocalTaskExecutionBackendConfig,
+  NonterminalSweepEntry,
   ProvisionerCapabilities,
 } from "./backend.js";
 export { deliveryOutputsFromHarvest } from "./delivery-outputs.js";

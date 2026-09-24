@@ -172,7 +172,6 @@ test('legacy task_runs store coupling stays confined to its declared inventory a
 test('marketplace-binding is the only capability package that composes its low-level postTask primitive', () => {
   const capabilityFiles = [
     ...sourceFiles(resolve(root, 'packages/task-supply/posting/src')),
-    ...sourceFiles(resolve(root, 'packages/benchmarking/marketplace/src')),
     ...sourceFiles(resolve(root, 'operator/src/native-requester')),
     ...sourceFiles(resolve(root, 'operator/src/daemon')),
   ];

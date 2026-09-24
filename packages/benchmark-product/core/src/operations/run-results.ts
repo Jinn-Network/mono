@@ -33,11 +33,12 @@ import {
 } from "@jinn-network/benchmarking-records";
 import {
   ANCHORED_PRE_REGISTRATION,
+  IMPORTED_RUN_PINNING_LIMIT,
   STRUCTURAL_PRE_REGISTRATION,
   anchoredPreRegistration,
   anchoredVenueLimits,
-} from "@colophon-claims/verify";
-import type { ClaimAnchor } from "@colophon-claims/verify";
+} from "@colophon-claims/check";
+import type { ClaimAnchor } from "@colophon-claims/check";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { refuse } from "../errors.js";
 import {
@@ -48,6 +49,7 @@ import { atomicWriteFileSync } from "../fs/atomic.js";
 import { venueIsolationPostureForPolicy } from "../venue/isolation.js";
 import { ClaimPackageSchema, type ClaimPackage } from "../report/claim.js";
 import { foldRunJournal, readRunJournalEntries, type CellJournalFold } from "../run/journal.js";
+import { externalRunImportMarker } from "../run/imported-run.js";
 import { requireRunState } from "../run/state.js";
 import { claimPackageArtifactPath, resultsArtifactPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
@@ -174,22 +176,26 @@ export const LOCAL_VENUE_LIMITS: readonly string[] = [
 const MULTI_POLICY_ISOLATION_LIMIT =
   "Run pinning on the harness, model, and loadout axes is enforced by an admission gate at dispatch time. The isolation axis is unverifiable: this configured venue admits both unrestricted and OCI-container execution, so its multi-policy inventory cannot establish containment from admission alone.";
 
-/** Run-derived disclosure; the unrestricted branch returns the historical array byte-for-byte. */
+/** Run-derived disclosure; the unrestricted branch returns the historical array byte-for-byte.
+ * `imported` replaces the admission-gate pinning sentence: no venue dispatched those cells. */
 export function localVenueLimitsForRun(
   runRecord: Pick<RunRecord, "policy">,
+  imported = false,
 ): readonly string[] {
   const posture = venueIsolationPostureForPolicy(
     runRecord.policy.submissionBaseline?.["isolationPolicy"],
   );
-  if (posture.inventory.length === 1) {
-    return LOCAL_VENUE_LIMITS;
-  }
-  return [
-    LOCAL_VENUE_LIMITS[0]!,
-    LOCAL_VENUE_LIMITS[1]!,
-    MULTI_POLICY_ISOLATION_LIMIT,
-    ...LOCAL_VENUE_LIMITS.slice(3),
-  ];
+  const limits = posture.inventory.length === 1
+    ? LOCAL_VENUE_LIMITS
+    : [
+      LOCAL_VENUE_LIMITS[0]!,
+      LOCAL_VENUE_LIMITS[1]!,
+      MULTI_POLICY_ISOLATION_LIMIT,
+      ...LOCAL_VENUE_LIMITS.slice(3),
+    ];
+  return imported
+    ? [limits[0]!, limits[1]!, IMPORTED_RUN_PINNING_LIMIT, ...limits.slice(3)]
+    : limits;
 }
 
 function bareSha256(digest: string): string {
@@ -272,11 +278,12 @@ export function buildLocalVenueHonesty(
   cells: readonly MatrixCell[],
   runRecord: Pick<RunRecord, "policy">,
   anchors: readonly ClaimAnchor[] = [],
+  imported = false,
 ): VenueHonesty {
   return {
     venue: "self-run",
     preRegistration: anchoredPreRegistration(anchors),
-    limits: anchoredVenueLimits(localVenueLimitsForRun(runRecord), anchors),
+    limits: anchoredVenueLimits(localVenueLimitsForRun(runRecord, imported), anchors),
     unverifiableAxisCounts: unverifiableAxisCounts(cells),
   };
 }
@@ -404,6 +411,7 @@ export function runResults(
           matrix.cells,
           runRecord,
           readRunAnchorCarriage(context.workspaceDir, runState).anchors,
+          externalRunImportMarker(context.workspaceDir, input.draftId, runState) !== undefined,
         ),
         ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
         ...(document.state === "reported" || document.state === "published-bundle"

@@ -16,7 +16,7 @@
  * here (out of this change's scope).
  */
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { resolveDefaultStateDir } from '../state-dir.js';
 
@@ -30,9 +30,14 @@ export function daemonApiTokenPath(earningDir: string): string {
 /**
  * The default `earningDir` an out-of-daemon consumer (the stop-hook CLI)
  * resolves WITHOUT loading the full config — mirrors `config.ts`'s
- * `earningDir` default + its `JINN_EARNING_DIR` env override, since the CLI
+ * `earningDir` default and its env precedence (`JINN_EARNING_DIR` first, then
+ * `<JINN_STATE_DIR>/earning`, via `resolveDefaultStateDir`), since the CLI
  * only needs this one field and pulling in the whole config loader for it
  * would be a heavier dependency than a hook binary should carry.
+ *
+ * A `stateDir` set in the *config file* rather than the environment is out of
+ * reach here by construction; the hook's loud exit 3 names `JINN_EARNING_DIR`
+ * as the remedy for that case.
  */
 export function resolveEarningDirFromEnv(env: NodeJS.ProcessEnv = process.env): string {
   return env['JINN_EARNING_DIR'] ?? join(resolveDefaultStateDir({ env }), 'earning');
@@ -47,12 +52,26 @@ export function resolveEarningDirFromEnv(env: NodeJS.ProcessEnv = process.env): 
 export function ensureDaemonApiToken(path: string): { token: string; source: 'file' | 'generated' } {
   if (existsSync(path)) {
     const v = readFileSync(path, 'utf-8').trim();
-    if (v.length >= 32) return { token: v, source: 'file' };
+    if (v.length >= 32) {
+      tightenSecretFileMode(path);
+      return { token: v, source: 'file' };
+    }
   }
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const token = randomBytes(32).toString('hex');
   writeFileSync(path, token + '\n', { mode: 0o600 });
+  // `mode` is ignored when the path already exists (too-short regenerate).
+  tightenSecretFileMode(path);
   return { token, source: 'generated' };
+}
+
+/** Best-effort 0600. A refused chmod must not block boot on a usable token. */
+function tightenSecretFileMode(path: string): void {
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    /* the token is still the one the daemon will accept */
+  }
 }
 
 /** Read-only resolution for non-daemon consumers (the stop-hook CLI). Never generates. */
@@ -60,4 +79,97 @@ export function readDaemonApiToken(path: string): string | null {
   if (!existsSync(path)) return null;
   const v = readFileSync(path, 'utf-8').trim();
   return v.length >= 32 ? v : null;
+}
+
+/**
+ * What `resolveDaemonApiToken` did to the on-disk token file:
+ * `written` (refreshed or created), `unchanged` (already current),
+ * `skipped` (env token below the reader trust floor — file left intact),
+ * `failed` (write rejected; the daemon still boots on the env token).
+ */
+export type DaemonApiTokenPersistence = 'written' | 'unchanged' | 'skipped' | 'failed';
+
+export type DaemonApiTokenResolution = {
+  token: string;
+  source: 'env' | 'file' | 'generated';
+  persisted: DaemonApiTokenPersistence;
+};
+
+/**
+ * Daemon-side token resolution: `DAEMON_API_TOKEN` when set, otherwise the
+ * persisted file (generating it once on first boot).
+ *
+ * Issue #2418: an env-supplied token used to short-circuit persistence
+ * entirely, so an externally-installed stop-hook kept resolving whatever the
+ * file held from an earlier boot and got HTTP 401 — loud, but far less
+ * obvious than the missing-token path's exit 3. Refreshing the file collapses
+ * the two cases: after any boot, the file holds the token the daemon is
+ * actually accepting.
+ *
+ * A write failure is never fatal. The env token still authenticates every
+ * daemon-spawned harness (they receive it directly in their subprocess env);
+ * only the out-of-daemon hook degrades, and it degrades loudly on its own.
+ */
+export function resolveDaemonApiToken(options: {
+  path: string;
+  envToken?: string | undefined;
+  warn?: ((message: string) => void) | undefined;
+}): DaemonApiTokenResolution {
+  const envToken = options.envToken?.trim();
+  if (envToken) {
+    return { token: envToken, source: 'env', persisted: persistDaemonApiToken(options.path, envToken, options.warn) };
+  }
+  const resolved = ensureDaemonApiToken(options.path);
+  return {
+    token: resolved.token,
+    source: resolved.source,
+    persisted: resolved.source === 'generated' ? 'written' : 'unchanged',
+  };
+}
+
+/**
+ * Write `token` to `path` (mode 0600) so a hook consumer reads the live value.
+ *
+ * Refuses tokens below the 32-char floor `readDaemonApiToken` enforces:
+ * persisting one would leave a file every reader rejects, destroying a
+ * usable credential to no end. The existing file is left alone and the
+ * mismatch is named instead.
+ */
+function persistDaemonApiToken(
+  path: string,
+  token: string,
+  warn: ((message: string) => void) | undefined,
+): DaemonApiTokenPersistence {
+  const emit = warn ?? ((message: string) => {
+    console.warn(message);
+  });
+  if (token.length < 32) {
+    emit(
+      `DAEMON_API_TOKEN is shorter than the 32-character minimum readers accept, so ${path} was not ` +
+      'refreshed. An externally-installed stop-hook will keep resolving the previous token (HTTP 401) ' +
+      'until DAEMON_API_TOKEN is set to a value of at least 32 characters.',
+    );
+    return 'skipped';
+  }
+  if (readDaemonApiToken(path) === token) {
+    tightenSecretFileMode(path);
+    return 'unchanged';
+  }
+  const tmp = `${path}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  try {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    // A fresh file renamed into place: `mode` then always applies (it is ignored for an existing
+    // file), and a concurrent reader sees the old token or the new one, never a truncated file.
+    writeFileSync(tmp, token + '\n', { mode: 0o600, flag: 'wx' });
+    renameSync(tmp, path);
+    return 'written';
+  } catch (err) {
+    try { rmSync(tmp, { force: true }); } catch { /* the parent may not be a directory */ }
+    emit(
+      `Failed to persist DAEMON_API_TOKEN to ${path}: ${err instanceof Error ? err.message : String(err)}. ` +
+      'The daemon is using the environment token, but an externally-installed stop-hook resolving this ' +
+      'file will present a stale token and be rejected with HTTP 401.',
+    );
+    return 'failed';
+  }
 }

@@ -135,14 +135,22 @@ function hasNoEmptyQueryOrFragment(value: string): boolean {
  * rather than as a spelling variant.
  *
  * So say the cost plainly rather than let the sentence above absorb it. Three classes have no
- * accepted spelling here at all, by policy and not by oversight: `https://r.example./v1`,
+ * accepted spelling here at all, and they are policy and not oversight: `https://r.example./v1`,
  * `https://r.example/v1?`, and `https://r.example/v1#`. A rail vocabulary that mints an
  * FQDN-rooted identifier, or means something by a delimiter it leaves empty, cannot be spelled by
- * this check and needs a vocabulary-level rule the same way an opaque scheme does. A string
- * carrying a malformed escape is refused for a different reason: it is not an RFC 3986 URI to
- * begin with. `extensions.test.ts` runs both directions over two sweeps of hand-picked
+ * this check and needs a vocabulary-level rule the same way an opaque scheme does. A fourth
+ * *string* is refused without being anyone's policy: a raw U+0027 in the query under a special
+ * scheme, such as `https://r.example/v1?a'b`, because WHATWG's special-query encode set rewrites
+ * it and the round-trip check above refuses anything WHATWG rewrites. `%27` is the accepted
+ * spelling, so the identifier is reachable — unlike the three policy classes, which are not. The
+ * scope is exactly the query: `https://r.example/v1'x` and `https://r.example/v1#a'b` both pass
+ * raw. A string carrying a malformed escape is refused for a different reason: it is not an
+ * RFC 3986 URI to begin with. `extensions.test.ts` runs both directions over two sweeps of hand-picked
  * special-scheme spellings — every component spelling against a few authorities, every authority
- * spelling against a few components — because a rule that claims more than it delivers is worse
+ * spelling against a few components — and then over an explicit seed of spellings WHATWG
+ * rewrites. The seed is there because the sweeps build their corpus out of what `new URL` emits,
+ * so they range over WHATWG's image and structurally cannot reach a preimage such as the
+ * apostrophe case above. All of it because a rule that claims more than it delivers is worse
  * than a modest one, which is the whole reason this function grew past its round-trip check.
  *
  * Under any other scheme the raw-octet rule still applies, so a string carrying an octet outside

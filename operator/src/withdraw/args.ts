@@ -170,22 +170,48 @@ export function parseWithdrawArgv(argv: string[]): WithdrawParsedArgs {
     masterGasReserveWei = BigInt(s);
   }
 
-  const configIdx = args.indexOf('--config');
+  const configIdx = args.findIndex((a) => a === '--config' || a.startsWith('--config='));
   if (configIdx !== -1) {
-    const configPath = args[configIdx + 1];
-    if (configPath === undefined || configPath.startsWith('--')) {
-      throw new Error('Missing value for --config');
+    // An empty value (`--config ''` or `--config=`) is rejected in both forms
+    // so they fail identically — otherwise the token is consumed, escapes the
+    // unexpected-argument check, and this funds-moving command silently falls
+    // back to the default config.
+    if (args[configIdx] === '--config') {
+      const configPath = args[configIdx + 1];
+      if (configPath === undefined || configPath === '' || configPath.startsWith('--')) {
+        throw new Error('Missing value for --config');
+      }
+      args.splice(configIdx, 2);
+    } else {
+      // Single-token `--config=<path>` form: one element, not two.
+      if (args[configIdx]!.slice('--config='.length) === '') {
+        throw new Error('Missing value for --config');
+      }
+      args.splice(configIdx, 1);
     }
-    args.splice(configIdx, 2);
   }
 
-  const passwordFdIdx = args.indexOf('--password-fd');
+  const passwordFdIdx = args.findIndex(
+    (a) => a === '--password-fd' || a.startsWith('--password-fd='),
+  );
+  // Both forms are stripped, and both reject an empty value (the bare form
+  // also refuses a following `--flag` token), so the equals form does not trip
+  // the unexpected-argument check below.
+  // Numeric validity stays `parsePasswordFdFromArgv`'s job, exactly as this
+  // stripper does not validate the config path.
   if (passwordFdIdx !== -1) {
-    const fdVal = args[passwordFdIdx + 1];
-    if (fdVal === undefined || fdVal.startsWith('--')) {
-      throw new Error('Missing value for --password-fd');
+    if (args[passwordFdIdx] === '--password-fd') {
+      const fdVal = args[passwordFdIdx + 1];
+      if (fdVal === undefined || fdVal === '' || fdVal.startsWith('--')) {
+        throw new Error('Missing value for --password-fd');
+      }
+      args.splice(passwordFdIdx, 2);
+    } else {
+      if (args[passwordFdIdx]!.slice('--password-fd='.length) === '') {
+        throw new Error('Missing value for --password-fd');
+      }
+      args.splice(passwordFdIdx, 1);
     }
-    args.splice(passwordFdIdx, 2);
   }
 
   if (args.length > 0) {

@@ -730,7 +730,7 @@ Packed spike: importing the four verifier symbols from the package root **succee
 | Structural DSSE admission-receipt checks | `task-execution-profiles` `checkAdmissionReceipt` / `AdmissionReceiptStatementSchema` | **no** — does not export prediction-snapshot policy URI or `PredictionSnapshotAdmissionReceiptV1` |
 | `PREDICTION_SNAPSHOT_ADMISSION_POLICY_V1` + receipt type | **only** `task-admission` | this is the load-bearing sealed-contract gap |
 
-Colophon verify (`packages/benchmark-product/verify/src/profile/admission-receipts.ts`) parses a sealed envelope; it does not call `admitCandidate`. Colophon core uses authoring APIs (`admitPredictionSnapshot`, fixtures, seal) in `packages/benchmark-product/core/src/intake/sample.ts`.
+Colophon verify (`packages/benchmark-product/check/src/profile/admission-receipts.ts`) parses a sealed envelope; it does not call `admitCandidate`. Colophon core uses authoring APIs (`admitPredictionSnapshot`, fixtures, seal) in `packages/benchmark-product/core/src/intake/sample.ts`.
 
 Golden fixture: `packages/task-supply/admission/fixtures/prediction-snapshot-v1/`. Protocol kits do **not** own this sealed-receipt contract today.
 

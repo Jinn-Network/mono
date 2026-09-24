@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import importlib
 import importlib.util
 import json
@@ -185,7 +186,8 @@ def test_the_hooks_write_the_feed_the_runtime_will_seal(monkeypatch, tmp_path, l
     # repository-state is an observation of the working directory, so it is present only when
     # one is readable; the turn sequence around it is what this test pins.
     assert [event["type"] for event in events if event["type"] != "repository-state"] == [
-        "session-open", "environment", "user-turn", "tool-call", "assistant-turn", "tokens", "session-close",
+        "session-open", "environment", "controlled-input", "controlled-input", "user-turn",
+        "tool-call", "assistant-turn", "tokens", "session-close",
     ]
     assert events[-1]["outcome"] == "completed"
     assert ("capture_seal", {"sessionId": "cap-1"}) in client.calls
@@ -280,7 +282,9 @@ def test_an_unreadable_repository_costs_the_base_state_and_nothing_else(
         .read_text(encoding="utf-8")
         .splitlines()
     ]
-    assert [event["type"] for event in events] == ["session-open", "environment", "user-turn"]
+    assert [event["type"] for event in events] == [
+        "session-open", "environment", "controlled-input", "controlled-input", "user-turn",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -419,3 +423,116 @@ def test_the_base_state_comes_from_the_session_directory_not_the_process_directo
         ["git", "-C", str(session), "rev-parse", "HEAD"],
         capture_output=True, text=True, check=True,
     ).stdout.strip()
+
+
+# -- controlled inputs (#3260) ----------------------------------------------
+
+
+def _feed_events(tmp_path):
+    return [
+        json.loads(line)
+        for line in (tmp_path / "capture" / "sessions" / "cap-1" / "feed.ndjson")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+
+
+def _controlled(tmp_path):
+    return {
+        event["role"]: event
+        for event in _feed_events(tmp_path)
+        if event["type"] == "controlled-input"
+    }
+
+
+def test_the_first_turn_binds_the_prompt_and_the_effective_configuration(
+    monkeypatch, tmp_path, lines
+):
+    """Gap 2a fires: the instruction that drove the session is content-bound, not labelled."""
+    install_client(monkeypatch, tmp_path)
+    jinn._on_session_start(session_id="s", platform="cli", cwd=str(tmp_path))
+    jinn._on_pre_llm_call(
+        session_id="s", user_message="Implement issue #3223.", is_first_turn=True,
+        model="anthropic/claude-opus-5",
+    )
+
+    bound = _controlled(tmp_path)
+    assert sorted(bound) == ["config", "prompt"]
+
+    prompt = bound["prompt"]
+    assert base64.b64decode(prompt["contentBase64"]).decode("utf-8") == "Implement issue #3223."
+    assert prompt["mediaType"] == "text/markdown"
+
+    config = bound["config"]
+    assert config["mediaType"] == "application/json"
+    document = json.loads(base64.b64decode(config["contentBase64"]).decode("utf-8"))
+    assert document["selectionRule"] == jinn.CONTROLLED_INPUT_SELECTION_RULE
+    assert document["host"]["name"] == "hermes-agent"
+    assert document["model"]["service"]["iri"].endswith("/anthropic/claude-opus-5")
+
+
+def test_the_effective_configuration_carries_no_path_and_no_environment(
+    monkeypatch, tmp_path, lines
+):
+    """The config artifact is durable and publicly projectable, so it is assembled from
+    values the adapter computed rather than copied out of the machine it ran on."""
+    install_client(monkeypatch, tmp_path)
+    jinn._on_session_start(session_id="s", platform="cli", cwd=str(tmp_path))
+    jinn._on_pre_llm_call(session_id="s", user_message="x", is_first_turn=True, model="p/m")
+
+    raw = base64.b64decode(_controlled(tmp_path)["config"]["contentBase64"]).decode("utf-8")
+    assert "/" not in raw.replace("https://spec.jinn.network/services/p/m", "") \
+        .replace("@jinn-network/plugin-runtime", "")
+    assert str(tmp_path) not in raw
+    # Deterministic bytes: the same session state must not produce two digests.
+    assert raw == json.dumps(json.loads(raw), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def test_a_later_turn_binds_nothing_further(monkeypatch, tmp_path, lines):
+    install_client(monkeypatch, tmp_path)
+    jinn._on_session_start(session_id="s", platform="cli", cwd=str(tmp_path))
+    jinn._on_pre_llm_call(session_id="s", user_message="first", is_first_turn=True, model="p/m")
+    jinn._on_pre_llm_call(session_id="s", user_message="second", is_first_turn=False, model="p/m")
+    assert len([e for e in _feed_events(tmp_path) if e["type"] == "controlled-input"]) == 2
+
+
+def test_an_unbindable_first_message_costs_itself_and_nothing_else(
+    monkeypatch, tmp_path, lines
+):
+    """The bounds are respected by the selection, not assumed generous."""
+    install_client(monkeypatch, tmp_path)
+    jinn._on_session_start(session_id="s", platform="cli", cwd=str(tmp_path))
+    jinn._on_pre_llm_call(
+        session_id="s",
+        user_message="x" * (feed_module.CONTROLLED_INPUT_MAX_BYTES + 1),
+        is_first_turn=True,
+        model="p/m",
+    )
+    bound = _controlled(tmp_path)
+    assert sorted(bound) == ["config"]
+    assert [e["type"] for e in _feed_events(tmp_path)][-1] == "user-turn"
+
+
+def test_an_empty_first_message_binds_no_prompt(monkeypatch, tmp_path, lines):
+    install_client(monkeypatch, tmp_path)
+    jinn._on_session_start(session_id="s", platform="cli", cwd=str(tmp_path))
+    jinn._on_pre_llm_call(session_id="s", user_message="", is_first_turn=True, model="p/m")
+    assert sorted(_controlled(tmp_path)) == ["config"]
+
+
+def test_binding_survives_an_unreadable_runtime_pin(monkeypatch, tmp_path, lines):
+    """The pin is context on the config artifact; losing it must not lose the artifact."""
+    install_client(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        jinn.runtime_pin, "read_pin", _raise_pin_error
+    )
+    jinn._on_session_start(session_id="s", platform="cli", cwd=str(tmp_path))
+    jinn._on_pre_llm_call(session_id="s", user_message="x", is_first_turn=True, model="p/m")
+    document = json.loads(
+        base64.b64decode(_controlled(tmp_path)["config"]["contentBase64"]).decode("utf-8")
+    )
+    assert "runtime" not in document
+
+
+def _raise_pin_error(*_args, **_kwargs):
+    raise importlib.import_module("jinn_plugin.runtime_pin").RuntimePinError("unreadable")

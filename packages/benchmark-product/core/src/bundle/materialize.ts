@@ -31,18 +31,18 @@ import { canonicalJsonBytes, dssePreAuthEncoding, parseDsseEnvelope } from "@jin
 import { refuse } from "../errors.js";
 import { parseDraftDocument } from "../domain/draft.js";
 import { atomicWriteFileSync, fsyncDirectorySync } from "../fs/atomic.js";
+import { loadPublicExternalImport } from "../run/imported-run.js";
 import {
   additionalClaimPackagePath,
   ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   ClaimPackageSchema,
+  COMPOSED_CLAIM_PACKAGE_SCHEMA_ID,
   DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID,
 } from "../report/claim.js";
-import { verifyBinaryJudgmentAdmissionClosureInWorkspace } from "../human-review/verification-workspace.js";
-import type { AdmissionAuthorityRole, BinaryJudgmentAdmissionRecordRole } from "../human-review/verification.js";
-import {
-  parseBinaryItemBankIntakeExtension,
-} from "../intake/binary-item-bank.js";
+import { verifyBinaryJudgmentAdmissionClosureInWorkspace } from "../run/admission-workspace.js";
+import type { AdmissionAuthorityRole, BinaryJudgmentAdmissionRecordRole } from "@colophon-claims/check/admission";
+import { parseBinaryItemBankIntakeExtension } from "../run/binary-instrument-profile.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
 import {
   scanPredictionSnapshotAdmissionReceiptRecords,
@@ -57,7 +57,7 @@ import { claimPackageArtifactPath, draftPath, publicBundlePath, publicBundlesDir
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { assertWorkspace } from "../workspace/workspace.js";
 import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT } from "../legacy-closures.js";
-import { BUNDLE_V8_FORMAT, buildBundleManifest, verifyBundleManifest } from "./manifest.js";
+import { BUNDLE_V8_FORMAT, BUNDLE_V10_FORMAT, buildBundleManifest, verifyBundleManifest } from "./manifest.js";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { buildPublicAssets } from "./assets.js";
@@ -98,7 +98,7 @@ import {
 } from "../runtime/inspect/binary-judge-manifest.js";
 import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
-import { derivePublicComparison } from "@colophon-claims/verify";
+import { activeCapabilityVector, derivePublicComparison, EXTERNAL_IMPORT_BUNDLE_MEMBER } from "@colophon-claims/check";
 
 const ROLE_ORDER: readonly BundleV4EvidenceRole[] = BUNDLE_V4_EVIDENCE_ROLES;
 
@@ -245,13 +245,18 @@ function exactJson<T>(bytes: Uint8Array, schema: { parse(value: unknown): T }, l
 function recordClosure(input: MaterializeBundleInput): {
   readonly files: Map<string, Uint8Array>;
   readonly evidenceRecords: Map<string, Set<BundleV4EvidenceRole>>;
-  readonly format:
-    | typeof BUNDLE_FORMAT
-    | typeof BUNDLE_V4_FORMAT
-    | typeof BUNDLE_V6_FORMAT
-    | typeof BUNDLE_V7_FORMAT
-    | typeof BUNDLE_V8_FORMAT;
-} {
+} & (
+  | {
+    readonly format:
+      | typeof BUNDLE_FORMAT
+      | typeof BUNDLE_V4_FORMAT
+      | typeof BUNDLE_V6_FORMAT
+      | typeof BUNDLE_V7_FORMAT
+      | typeof BUNDLE_V8_FORMAT;
+  }
+  /** Emitted only for a run whose `report` was explicitly asked for the composed generation. */
+  | { readonly format: typeof BUNDLE_V10_FORMAT; readonly capabilities: readonly string[] }
+) {
   const { workspaceDir, draftId, benchmarkSha256, runState, reportSelector } = input;
   if (
     runState.runSha256 === undefined
@@ -317,6 +322,10 @@ function recordClosure(input: MaterializeBundleInput): {
   if (!Buffer.from(canonicalJsonBytes(claim)).equals(Buffer.from(claimBytes))) {
     refuse("record-integrity", "claim-package.json", "claim package is not in exact canonical JSON encoding");
   }
+  // Which generation `report` was asked for (issue #3403). It is the one fact this function takes
+  // from the claim's schema id: the operator's choice, sealed at `report` and recorded nowhere
+  // else. Every capability the bundle then DECLARES is derived below from the run's own records.
+  const composedGeneration = claim.claimSchema === COMPOSED_CLAIM_PACKAGE_SCHEMA_ID;
   // Both binary allocations project the same qualification and carry the same `qualification.json`:
   // claim-package/5 is /2 plus the anchors section (issue #3205). Whether the run is ALSO anchored
   // is read below from the run's own recorded anchors, never from the claim's schema id.
@@ -325,7 +334,11 @@ function recordClosure(input: MaterializeBundleInput): {
     // claim-package/6 is /5 plus a disclosure section (issue #2839): same projection, same
     // `qualification.json`. Whether the run is also disclosed is read below from the run's own
     // sealed declaration, never from the claim's schema id.
-    || claim.claimSchema === DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID;
+    || claim.claimSchema === DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID
+    // The composed claim carries one id for every vector, so it says whether it projects a
+    // qualification by carrying the section (issue #3403). The guard below binds that to the
+    // sealed Report's method exactly as it binds the three ids above.
+    || (composedGeneration && claim.qualification !== undefined);
   if (binaryQualification !== (report.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument)) {
     refuse("record-integrity", "claim-package.json", "claim schema and sealed Report method disagree on binary qualification");
   }
@@ -383,11 +396,15 @@ function recordClosure(input: MaterializeBundleInput): {
   // contents, for the same reason the anchors section is: an undisclosed claim inside a disclosed
   // closure is exactly as wrong as a disclosed claim whose section drifted.
   const disclosureCarriage = readRunDisclosureCarriage(workspaceDir, runState);
+  const importedCarriage = loadPublicExternalImport(workspaceDir, draftId, runState);
   // A run publishes one bundle per analysis. Only the QUALIFICATION bundle can be disclosed, because
   // `/8` is the one disclosed cell; a sibling headline or comparison analysis publishes on its own
   // closure without the section, exactly as it did before this feature existed.
-  const disclosed = disclosureCarriage !== undefined && anchored && binaryQualification;
-  if (disclosureCarriage !== undefined && binaryQualification && !anchored) {
+  //
+  // The composed generation has no such cell to run out of: its registry lets the record ride any
+  // qualification bundle, anchored or not, so there the guard below never fires (issue #3403).
+  const disclosed = disclosureCarriage !== undefined && binaryQualification && (anchored || composedGeneration);
+  if (disclosureCarriage !== undefined && binaryQualification && !anchored && !composedGeneration) {
     // The one enumerated cell this closure occupies. Refusing loudly here rather than inventing a
     // second disclosed allocation is deliberate: every extra cell doubles the enumeration that the
     // capability-composition design (issue #2889) exists to replace, and the flagship case is
@@ -1065,6 +1082,9 @@ function recordClosure(input: MaterializeBundleInput): {
     })
     : BundleTrustSchema.parse({ format: BUNDLE_TRUST_FORMAT, ...trustBase });
   files.set("trust/public-keys.json", canonicalJsonBytes(trust));
+  if (composedGeneration && importedCarriage !== undefined) {
+    files.set(EXTERNAL_IMPORT_BUNDLE_MEMBER, importedCarriage.bytes);
+  }
   const dissentCellKeys = assemblyCells
     .filter((cell) => new Set(cell.verdicts.map((verdict) => verdict.verdict)).size > 1)
     .map((cell) => cell.cellKey)
@@ -1078,7 +1098,28 @@ function recordClosure(input: MaterializeBundleInput): {
       getSealedBytes(workspaceDir, record.sha256),
     ])),
   });
+  // Hoisted above the render because `buildPublicAssets` now needs it: the format selects which
+  // presentation generation's page is rendered, and the verifier byte-compares the result against
+  // the same selection read from `bundle.json`.
+  //
+  // D1 clean cutover (issue #3405): a run whose sealed claim is the composed generation emits
+  // `/10` and states capability in its vector rather than in the choice of number (issue #3403).
+  // The vector comes from the registry's activation predicates over the facts derived above --
+  // the same facts, and the same predicates, `report` sealed the claim's sections from. An
+  // imported run is a fourth fact (issue #3417). `composedFormat: false` at `report` still seals
+  // a legacy claim, and this function then emits the enumerated cell that claim implies.
+  const legacyFormat = anchored
+    ? binaryQualification
+      ? disclosed
+        ? BUNDLE_V8_FORMAT
+        : BUNDLE_V7_FORMAT
+      : BUNDLE_V6_FORMAT
+    : binaryQualification
+      ? BUNDLE_V4_FORMAT
+      : BUNDLE_FORMAT;
+  const format = composedGeneration ? BUNDLE_V10_FORMAT : legacyFormat;
   for (const [path, bytes] of Object.entries(buildPublicAssets({
+    format,
     claim,
     matrix,
     report,
@@ -1094,19 +1135,23 @@ function recordClosure(input: MaterializeBundleInput): {
   return {
     files,
     evidenceRecords,
-    // Three independent axes: carrying an anchor moves a bundle onto an anchored closure,
-    // projecting a binary qualification moves it onto a qualification closure, and declaring a
-    // disclosure record moves it onto the disclosed one. Everything else emits exactly the version
-    // it emitted before any of these features existed, byte for byte.
-    format: anchored
-      ? binaryQualification
-        ? disclosed
-          ? BUNDLE_V8_FORMAT
-          : BUNDLE_V7_FORMAT
-        : BUNDLE_V6_FORMAT
-      : binaryQualification
-        ? BUNDLE_V4_FORMAT
-        : BUNDLE_FORMAT,
+    // The enumerated-cell axes stay independent: carrying an anchor, projecting a binary
+    // qualification, declaring a disclosure record. `external-import` is additive and has no
+    // pre-composition cell. Everything else emits exactly the version it emitted before any of
+    // these features existed, byte for byte. Derived above, where the presentation render also
+    // reads it -- one selection, so the manifest and the page can never disagree about which
+    // generation this bundle is.
+    ...(composedGeneration
+      ? {
+        format: BUNDLE_V10_FORMAT,
+        capabilities: activeCapabilityVector({
+          anchoredClosure: anchored,
+          projectsBinaryQualification: binaryQualification,
+          declaresDisclosure: disclosureCarriage !== undefined,
+          importedRun: importedCarriage !== undefined,
+        }),
+      }
+      : { format: legacyFormat }),
   };
 }
 
@@ -1130,7 +1175,13 @@ export function materializePublicBundle(
       }
       atomicWriteFileSync(join(stage, ...path.split("/")), bytes);
     }
-    const built = buildBundleManifest(stage, paths, { format: closure.format });
+    const built = buildBundleManifest(
+      stage,
+      paths,
+      closure.format === BUNDLE_V10_FORMAT
+        ? { format: closure.format, capabilities: closure.capabilities }
+        : { format: closure.format },
+    );
     atomicWriteFileSync(join(stage, "bundle.json"), built.bytes);
     fsyncDirectorySync(stage);
     const target = publicBundlePath(input.workspaceDir, input.draftId, built.identity);

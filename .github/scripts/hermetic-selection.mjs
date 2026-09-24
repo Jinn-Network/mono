@@ -10,6 +10,9 @@
 // `push` always selects on: that run is the SHA-bound evidence the publish
 // guard queries.
 
+import { existsSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 export const IGNORABLE_PREFIXES = Object.freeze([
   'docs/',
   'log/',
@@ -93,7 +96,13 @@ function parseArgs(argv) {
   return parsed;
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
+// Paths, not URLs, and both resolved: Node realpaths the entry module but not
+// `argv[1]`, so a checkout reached through a symlink would otherwise print nothing.
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   const { changedFiles } = parseArgs(process.argv.slice(2));
   const stdinFiles = process.stdin.isTTY
     ? []

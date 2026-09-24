@@ -1,10 +1,14 @@
-import { describe, expect, it, afterEach } from 'vitest';
+import { describe, expect, it, afterEach, beforeEach } from 'vitest';
 import { Hono } from 'hono';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../../src/store/store.js';
 import { addOperatorArtifactsRoutes } from '../../src/api/operator-artifacts-endpoint.js';
+import {
+  isRestartRequired,
+  resetRestartRequiredForTest,
+} from '../../src/api/restart-required-state.js';
 
 let stores: Store[] = [];
 
@@ -284,6 +288,16 @@ describe('GET /v1/operator/artifacts', () => {
 });
 
 describe('POST /v1/operator/pricing', () => {
+  beforeEach(() => {
+    resetRestartRequiredForTest();
+  });
+
+  // The flag is a process-wide singleton; leave it clean for any file that
+  // shares the module under a relaxed-isolation vitest config.
+  afterEach(() => {
+    resetRestartRequiredForTest();
+  });
+
   it('persists future-artifact pricing under config.operator', async () => {
     const store = memoryStore();
     const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
@@ -321,6 +335,44 @@ describe('POST /v1/operator/pricing', () => {
     });
   });
 
+  // Issue #4241: `operator` also carries non-pricing keys (verticalMode,
+  // native). A pricing save must merge into the block, not replace it.
+  it('preserves non-pricing keys in the operator block', async () => {
+    const store = memoryStore();
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
+    const configPath = join(dir, 'config.json');
+    const native = { fleet: { workers: 2 }, sources: ['a', 'b'] };
+    writeFileSync(configPath, `${JSON.stringify({
+      network: 'testnet',
+      operator: {
+        verticalMode: 'native-v1',
+        native,
+        publicEndpoint: 'https://old.example.com',
+        defaultPriceUsdc: '0',
+      },
+    }, null, 2)}\n`);
+
+    const app = new Hono();
+    addOperatorArtifactsRoutes(app, { store, configPath });
+
+    const res = await app.request('/v1/operator/pricing', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ defaultPriceUsdc: '0.002' }),
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+      network: string;
+      operator: Record<string, unknown>;
+    };
+    expect(persisted.network).toBe('testnet');
+    expect(persisted.operator.verticalMode).toBe('native-v1');
+    expect(persisted.operator.native).toEqual(native);
+    expect(persisted.operator.publicEndpoint).toBe('https://old.example.com');
+    expect(persisted.operator.defaultPriceUsdc).toBe('0.002');
+  });
+
   it('persists donation settings without requiring publicEndpoint', async () => {
     const store = memoryStore();
     const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
@@ -352,6 +404,110 @@ describe('POST /v1/operator/pricing', () => {
     });
   });
 
+  // Issue #2427: the pricing write is genuinely restart-required — every live
+  // consumer snapshots `config.operator` at boot — so it must set the explicit
+  // flag the `restart_required` notification reads, not only claim it in the body.
+  it('marks the daemon restart-required on a successful write', async () => {
+    const store = memoryStore();
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
+    const configPath = join(dir, 'config.json');
+    writeFileSync(configPath, `${JSON.stringify({ network: 'testnet' }, null, 2)}\n`);
+
+    const app = new Hono();
+    addOperatorArtifactsRoutes(app, { store, configPath });
+
+    expect(isRestartRequired()).toBe(false);
+
+    const res = await app.request('/v1/operator/pricing', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        publicEndpoint: 'https://op.example.com',
+        defaultPriceUsdc: '0.001',
+        perArtifactTypePrice: {},
+        donation: { enabled: false },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { restartRequired: boolean };
+    expect(body.restartRequired).toBe(true);
+    expect(isRestartRequired()).toBe(true);
+  });
+
+  it('leaves the daemon un-flagged when the config write fails', async () => {
+    const store = memoryStore();
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
+    const configPath = join(dir, 'config.json');
+    writeFileSync(configPath, `${JSON.stringify({ network: 'testnet' }, null, 2)}\n`);
+
+    const app = new Hono();
+    addOperatorArtifactsRoutes(app, {
+      store,
+      configPath,
+      persistConfigValue: () => {
+        throw new Error('disk full');
+      },
+    });
+
+    const res = await app.request('/v1/operator/pricing', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        defaultPriceUsdc: '0.001',
+        perArtifactTypePrice: {},
+        donation: { enabled: false },
+      }),
+    });
+
+    expect(res.status).toBe(500);
+    expect(isRestartRequired()).toBe(false);
+  });
+
+  // Issue #4242: neither early-return error path may flag a restart.
+  it('returns config_unreadable without flagging a restart when the config is not JSON', async () => {
+    const store = memoryStore();
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
+    const configPath = join(dir, 'config.json');
+    writeFileSync(configPath, 'not json {');
+
+    const app = new Hono();
+    addOperatorArtifactsRoutes(app, { store, configPath });
+
+    const res = await app.request('/v1/operator/pricing', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ defaultPriceUsdc: '0.001' }),
+    });
+
+    expect(res.status).toBe(500);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('config_unreadable');
+    expect(isRestartRequired()).toBe(false);
+    expect(readFileSync(configPath, 'utf-8')).toBe('not json {');
+  });
+
+  it('returns invalid_body without flagging a restart when the body is not JSON', async () => {
+    const store = memoryStore();
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
+    const configPath = join(dir, 'config.json');
+    writeFileSync(configPath, `${JSON.stringify({ network: 'testnet' }, null, 2)}\n`);
+
+    const app = new Hono();
+    addOperatorArtifactsRoutes(app, { store, configPath });
+
+    const res = await app.request('/v1/operator/pricing', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: 'not json {',
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('invalid_body');
+    expect(isRestartRequired()).toBe(false);
+  });
+
   it('rejects malformed price strings', async () => {
     const store = memoryStore();
     const app = new Hono();
@@ -375,5 +531,6 @@ describe('POST /v1/operator/pricing', () => {
     });
 
     expect(res.status).toBe(400);
+    expect(isRestartRequired()).toBe(false);
   });
 });

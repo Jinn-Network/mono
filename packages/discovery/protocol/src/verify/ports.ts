@@ -1,6 +1,6 @@
 import type { AnnouncedItem, SourceCursor, SourceIdentity } from "../item.js";
 
-// Injected ports (design §10.3/§10.4): everything the two named verification
+// Injected ports (design §10.3-§10.5): everything the named verification
 // procedures need from the outside world. I/O, key resolution, clock reads,
 // and substrate lookups all arrive through these -- the protocol package
 // stays I/O-free (plan Global Constraints).

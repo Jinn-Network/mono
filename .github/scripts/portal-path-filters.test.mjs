@@ -22,6 +22,7 @@ import {
   parseShellArray,
   parseWorkflowPaths,
   portalClosure,
+  PUSH_ONLY_EXEMPT,
   readWorkspaceGraph,
 } from './portal-path-filters.mjs';
 
@@ -163,6 +164,26 @@ test('erePrefix accepts an anchored directory prefix and rejects a file pattern'
   assert.equal(erePrefix('^\\.github/workflows/ci\\.yml$'), null);
 });
 
+test('the shell-ERE remediation escapes the dot so the pasted entry is what erePrefix reads back (#3662)', () => {
+  // Use the real discovered lane so this pin cannot drift from the production `required`.
+  const lane = discoverLanes(repoRoot).find(({ dialect }) => dialect === 'shell-ere');
+  assert.ok(lane, 'ci.yml shell-ere lane is discovered');
+  const workspace = '.github/fixtures/native-vertical-roles/a.b';
+  const emitted = lane.required(workspace);
+  // Exact form is the red assertion: a bare round trip passes today because erePrefix's class
+  // admits an unescaped `.`, which is exactly the any-char the hand-written entries escape.
+  assert.equal(emitted, "'^\\.github/fixtures/native-vertical-roles/a\\.b/'");
+  const unquoted = emitted.slice(1, -1);
+  // The defect itself: an unescaped dot would also match a lookalike path.
+  assert.equal(new RegExp(unquoted).test('xgithub/fixtures/native-vertical-roles/a.b/file'), false);
+  assert.equal(new RegExp(unquoted).test('.github/fixtures/native-vertical-roles/a.b/file'), true);
+  assert.equal(erePrefix(unquoted), workspace);
+  // The workflow-paths dialect is a GitHub glob where `.` is literal; nothing to escape there.
+  const glob = discoverLanes(repoRoot).find(({ dialect }) => dialect === 'workflow-paths');
+  assert.equal(glob.required('a.b'), '"a.b/**"');
+  assert.equal(globPrefix('a.b/**'), 'a.b');
+});
+
 test('parsePathsBlocks reads a flow sequence', () => {
   const source = ['on:', '  pull_request:', "    paths: ['contracts/**']", '  push:', '    paths: ["a/**", \'b/**\']'].join('\n');
   assert.deepEqual(
@@ -185,6 +206,43 @@ test('a workflow that selects from the diff must match a dialect or be exempt', 
     assert.throws(() => discoverLanes(root), /does not\s+model|does not model/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a push-only lane with a path filter must be audited or exempt (#3661)', () => {
+  const publish = ['on:', '  push:', '    paths:', "      - 'packages/x/**'", ''].join('\n');
+  const root = mkdtempSync(join(tmpdir(), 'portal-path-filters-'));
+  try {
+    mkdirSync(join(root, '.github/workflows'), { recursive: true });
+    writeFileSync(join(root, '.github/workflows/novel-publish.yml'), publish);
+    assert.throws(() => discoverLanes(root), /PUSH_ONLY_EXEMPT/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+  const listed = mkdtempSync(join(tmpdir(), 'portal-path-filters-'));
+  try {
+    mkdirSync(join(listed, '.github/workflows'), { recursive: true });
+    writeFileSync(join(listed, '.github/workflows/operator-images.yml'), publish);
+    assert.deepEqual(discoverLanes(listed), []);
+  } finally {
+    rmSync(listed, { recursive: true, force: true });
+  }
+});
+
+test('PUSH_ONLY_EXEMPT lists exactly the live push-only lanes', () => {
+  // Independent of discoverLanes' branch order: a workflow in the shell-ERE
+  // dialect carries no `paths:` block, so parsePathsBlocks alone decides this.
+  const directory = join(repoRoot, '.github/workflows');
+  const pushOnly = readdirSync(directory)
+    .filter((file) => file.endsWith('.yml'))
+    .filter((file) => {
+      const blocks = parsePathsBlocks(readFileSync(join(directory, file), 'utf8'));
+      return blocks.length > 0 && !blocks.some(({ trigger }) => trigger === 'pull_request');
+    })
+    .sort();
+  assert.deepEqual(pushOnly, Object.keys(PUSH_ONLY_EXEMPT).sort());
+  for (const [file, reason] of Object.entries(PUSH_ONLY_EXEMPT)) {
+    assert.ok(typeof reason === 'string' && reason.trim().length > 0, `${file} needs a reason`);
   }
 });
 

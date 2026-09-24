@@ -38,6 +38,7 @@ import { TxSubmissionsStore } from './tx-submissions.js';
 import type { TaskRunReadModel } from '../types/task-run-read-model.js';
 import type { VerdictTallyReadModel } from '../types/verdict-tally-read-model.js';
 import type { TxSubmissionKey, TxSubmissionLedgerEntry } from '../tx-retry.js';
+import { sanitizeErrorText, sanitizePersistedText } from '../rpc/transport.js';
 
 export type { ActivityEventInput, ActivityEventRow } from './activity-events.js';
 export type { BalanceCacheEntry } from './balance-cache.js';
@@ -425,6 +426,7 @@ export class Store {
     this.envelopeProjections.runMigrations();
     this.activityEvents.runMigrations();
     this.backfillActivityEvents();
+    this.maskLegacyActivityEventDetails();
     this.recordLegacyRestorationIntentsIgnored();
     this.balanceCache.clearLegacyErrors();
   }
@@ -643,6 +645,72 @@ export class Store {
 
   upsertBalanceCache(entry: Parameters<BalanceCacheStore['upsertBalanceCache']>[0]): void { this.balanceCache.upsertBalanceCache(entry); }
   getBalanceCache() { return this.balanceCache.getBalanceCache(); }
+
+  /**
+   * One-shot scrub of `activity_events.detail` rows written before the #642
+   * persistence choke point existed (issue #2416 AC2).
+   *
+   * Every write path is sealed today — `emitEvent` and
+   * `ActivityEventsStore.recordActivityEvent` both run `sanitizePersistedText`
+   * — and `mapRow` re-masks at read, so no API reader sees a legacy URL. The
+   * residual this closes is the on-disk column itself: a support bundle, a
+   * direct SQLite read, or a future consumer that bypasses `mapRow` would
+   * otherwise still find a paid provider's key-in-path there. Same residual,
+   * same remedy as `BalanceCacheStore.clearLegacyErrors` (#2415) — except the
+   * detail column carries the whole diagnostic, so it is masked in place
+   * rather than nulled.
+   *
+   * Config-keyed rather than an unconditional `LIKE` scan on every open:
+   * `activity_events` grows without bound on a busy operator, and there is no
+   * write path left that can reintroduce a raw URL after the key is set.
+   */
+  private maskLegacyActivityEventDetails(): void {
+    const migrationKey = 'activity_events_detail_masked_v1';
+    try {
+      const tx = this.db.transaction(() => {
+        if (this.operatorConfig.getConfigValue(migrationKey) === 'true') return;
+        // Paged rather than a single `.all()`: this runs synchronously in the
+        // Store constructor, inside a write transaction, and `activity_events`
+        // grows without bound on a busy operator — the whole result set must
+        // not be materialized at boot.
+        const select = this.db.prepare(
+          `SELECT id, detail FROM activity_events
+           WHERE id > @afterId
+             AND detail IS NOT NULL
+             AND (detail LIKE '%http://%' OR detail LIKE '%https://%'
+                  OR detail LIKE '%ws://%' OR detail LIKE '%wss://%')
+           ORDER BY id
+           LIMIT @batch`,
+        );
+        const update = this.db.prepare('UPDATE activity_events SET detail = ? WHERE id = ?');
+        const batch = 500;
+        let afterId = 0;
+        for (;;) {
+          const rows = select.all({ afterId, batch }) as Array<{ id: number; detail: string }>;
+          if (rows.length === 0) break;
+          for (const row of rows) {
+            const masked = sanitizePersistedText(row.detail);
+            if (masked !== row.detail) update.run(masked, row.id);
+            // Advance on every row, not only updated ones. A row can match the
+            // LIKE filter and still mask to itself (`... trailing http://` has
+            // nothing for the URL regex to consume); advancing only on update
+            // would re-select it forever.
+            afterId = row.id;
+          }
+          if (rows.length < batch) break;
+        }
+        this.operatorConfig.setConfigValue(migrationKey, 'true');
+      });
+      tx();
+    } catch (err) {
+      // A legacy schema variant must never block Store startup, and the
+      // read-time mask in `mapRow` still covers every API reader if this
+      // scrub is skipped. Warn rather than swallow: the key stays unset, so a
+      // deterministic failure otherwise re-runs this scan silently on every
+      // boot forever.
+      console.warn('[store] legacy activity_events.detail scrub skipped:', sanitizeErrorText(err));
+    }
+  }
 
   private backfillActivityEvents(): void {
     const migrationKey = 'activity_events_migrated_v1';

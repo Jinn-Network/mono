@@ -106,7 +106,14 @@ interface VerdictDelivery {
   blockNumber: number;
 }
 
-type RouterPublicClient = ReturnType<typeof createPublicClient>;
+// Derived from the factory below, not from `ReturnType<typeof createPublicClient>`. viem's
+// `createPublicClient` is generic in chain/account/transport, and naming its unparameterised
+// return type produces a client whose methods are typed against the widest possible
+// parameters. A concretely-configured client (`chain: baseSepolia`) is not assignable to that
+// widened type, because client methods are contravariant in their parameters -- so the
+// annotation on `createRouterClient` rejected the very value it returns (TS2322). Anchoring the
+// alias to the factory keeps the one true shape in one place.
+type RouterPublicClient = ReturnType<typeof createRouterClient>;
 
 function defaultRunSlug(nowMs = Date.now()): string {
   return String(nowMs);
@@ -546,7 +553,7 @@ async function submitTask(args: {
   throw new Error(`jinn tasks submit JSON has no taskId: ${JSON.stringify(parsed)}`);
 }
 
-function createRouterClient(): RouterPublicClient {
+function createRouterClient() {
   return createPublicClient({
     chain: baseSepolia,
     transport: fallback(

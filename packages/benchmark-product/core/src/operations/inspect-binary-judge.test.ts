@@ -542,6 +542,8 @@ describe("the judge binding as a method-operand file citizen (§8.1)", () => {
     if (!viaFile.ok) return;
 
     expect(viaFile.result.selectionManifestSha256).toBe(direct.result.selectionManifestSha256);
+    expect(viaFile.result.selectionManifestSha256).toBeDefined();
+    if (viaFile.result.selectionManifestSha256 === undefined) return;
     expect(getSealedBytes(contextB.workspaceDir, viaFile.result.selectionManifestSha256))
       .toEqual(getSealedBytes(contextA.workspaceDir, direct.result.selectionManifestSha256));
     // The probe bytes reach the workspace CAS at the declared digest on the file-operand path too.

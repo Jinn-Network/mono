@@ -62,7 +62,7 @@ import {
 } from '../../solver-types/_jinn-repo-pool.js';
 import type { Task } from '../../types/task.js';
 import type { Harness } from '../../harnesses/types.js';
-import { resolveDefaultStateDir } from '../../state-dir.js';
+import { defaultImplStateDirRoot, resolveDefaultStateDir } from '../../state-dir.js';
 
 /**
  * Which evaluation backend a solverType dispatches to. `jinn-repo` grades
@@ -245,7 +245,7 @@ const DEFAULT_CONFIG_PATH = join(resolveDefaultStateDir(), 'config.json');
 
 /** Default impl-state root when config does not set `engine.implStateDirRoot`. */
 function implStateDirRoot(config: ReturnType<typeof loadConfig>): string {
-  return config.engine?.implStateDirRoot ?? join(resolveDefaultStateDir(), 'engine', 'impl-state');
+  return config.engine?.implStateDirRoot ?? defaultImplStateDirRoot(resolveDefaultStateDir());
 }
 
 /**

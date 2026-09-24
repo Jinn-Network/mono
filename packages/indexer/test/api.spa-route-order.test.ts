@@ -61,6 +61,7 @@ describe('JSON API routes are not shadowed by the SPA catch-all (#1363)', () => 
   // Every JSON route must reach its handler: a JSON content-type (the
   // handlers' own success/400/503 shapes) — never the SPA HTML shell.
   const routes = [
+    '/supply?chainId=84532',
     '/capture-meta?q=tdd',
     '/distribution-signal',
     '/plugins', // no params → the handler's own 400 JSON

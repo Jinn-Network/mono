@@ -274,7 +274,6 @@ describe("runReport + claim package — preview disclosure (BP-20, spec §7.2)",
       const verified = await runVerify(contextFor(clock), { draftId: "draft-1" });
       expect(verified.ok, JSON.stringify(verified)).toBe(true);
     },
-    30_000,
   );
 
   test(
@@ -304,6 +303,5 @@ describe("runReport + claim package — preview disclosure (BP-20, spec §7.2)",
       const verified = await runVerify(contextFor(clock), { draftId: "draft-1" });
       expect(verified.ok, JSON.stringify(verified)).toBe(true);
     },
-    30_000,
   );
 });

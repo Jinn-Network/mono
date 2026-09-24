@@ -64,8 +64,8 @@ import {
   requiredBeaconRound,
   runBindingSentence,
   verifyRunBinding,
-} from "@colophon-claims/verify";
-import type { BeaconReference, VerifiedRunBinding } from "@colophon-claims/verify";
+} from "@colophon-claims/check";
+import type { BeaconReference, VerifiedRunBinding } from "@colophon-claims/check";
 import { readRunDeclaredBeaconSource } from "../binding/carriage.js";
 import { refuse } from "../errors.js";
 import { requireRunState, writeRunState } from "../run/state.js";

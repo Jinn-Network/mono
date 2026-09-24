@@ -1,7 +1,7 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../../src/config.js';
 
 function configFile(value: Record<string, unknown>): string {
@@ -17,8 +17,22 @@ const TOUCHED = [
   'JINN_PUBLIC_ARCHIVE_PORT',
 ];
 
+const savedArchiveEnv: Record<string, string | undefined> = {};
+
+// Paired save/clear/restore: the bare afterEach here isolated nothing from an
+// ambient value and destroyed whatever the contributor had exported (#3112).
+beforeEach(() => {
+  for (const key of TOUCHED) {
+    savedArchiveEnv[key] = process.env[key];
+    delete process.env[key];
+  }
+});
+
 afterEach(() => {
-  for (const key of TOUCHED) delete process.env[key];
+  for (const key of TOUCHED) {
+    if (savedArchiveEnv[key] === undefined) delete process.env[key];
+    else process.env[key] = savedArchiveEnv[key];
+  }
 });
 
 describe('publicArchive config', () => {

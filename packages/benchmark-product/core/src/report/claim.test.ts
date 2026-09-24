@@ -17,7 +17,7 @@ import {
 import {
   PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 import {
   BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
   createMethodRegistry,

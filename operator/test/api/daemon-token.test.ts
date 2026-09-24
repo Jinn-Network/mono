@@ -6,13 +6,14 @@
  * stable value.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import {
   daemonApiTokenPath,
   ensureDaemonApiToken,
   readDaemonApiToken,
+  resolveDaemonApiToken,
   resolveEarningDirFromEnv,
 } from '../../src/api/daemon-token.js';
 
@@ -42,6 +43,29 @@ describe('ensureDaemonApiToken', () => {
     const second = ensureDaemonApiToken(path);
     expect(second.source).toBe('file');
     expect(second.token).toBe(first.token);
+  });
+
+  it('tightens a reused token file to 0600 even when the token is already current (#4611)', () => {
+    earningDir = mkdtempSync(join(tmpdir(), 'jinn-daemon-token-'));
+    const path = daemonApiTokenPath(earningDir);
+    writeFileSync(path, 'a'.repeat(64) + '\n', { mode: 0o644 });
+    chmodSync(path, 0o644);
+
+    const result = ensureDaemonApiToken(path);
+    expect(result).toEqual({ token: 'a'.repeat(64), source: 'file' });
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it('tightens a regenerated short token file to 0600 (#4611)', () => {
+    earningDir = mkdtempSync(join(tmpdir(), 'jinn-daemon-token-'));
+    const path = daemonApiTokenPath(earningDir);
+    mkdirSync(earningDir, { recursive: true });
+    writeFileSync(path, 'too-short\n', { mode: 0o644 });
+    chmodSync(path, 0o644);
+
+    const result = ensureDaemonApiToken(path);
+    expect(result.source).toBe('generated');
+    expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
   it('regenerates when the persisted value is too short to trust', () => {
@@ -77,5 +101,143 @@ describe('resolveEarningDirFromEnv', () => {
 
   it('falls back to the ~/.jinn-operator/earning default on a fresh home', () => {
     expect(resolveEarningDirFromEnv({})).toBe(join(homedir(), '.jinn-operator', 'earning'));
+  });
+});
+
+describe('resolveEarningDirFromEnv — JINN_STATE_DIR (issue #2418)', () => {
+  it('derives <stateDir>/earning from JINN_STATE_DIR, matching config.ts', () => {
+    expect(resolveEarningDirFromEnv({ JINN_STATE_DIR: '/srv/jinn-state' }))
+      .toBe(join('/srv/jinn-state', 'earning'));
+  });
+
+  it('lets an explicit JINN_EARNING_DIR win over JINN_STATE_DIR, matching config.ts precedence', () => {
+    expect(resolveEarningDirFromEnv({
+      JINN_STATE_DIR: '/srv/jinn-state',
+      JINN_EARNING_DIR: '/custom/earning',
+    })).toBe('/custom/earning');
+  });
+});
+
+describe('resolveDaemonApiToken', () => {
+  it('persists a trusted env token so an external hook resolves the live value', () => {
+    earningDir = mkdtempSync(join(tmpdir(), 'jinn-daemon-token-'));
+    const path = daemonApiTokenPath(earningDir);
+    const stale = ensureDaemonApiToken(path).token;
+    const envToken = 'e'.repeat(64);
+
+    const resolved = resolveDaemonApiToken({ path, envToken });
+
+    expect(resolved).toEqual({ token: envToken, source: 'env', persisted: 'written' });
+    expect(readDaemonApiToken(path)).toBe(envToken);
+    expect(readDaemonApiToken(path)).not.toBe(stale);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it('replaces a loose-mode token file with a fresh 0600 inode on refresh', () => {
+    earningDir = mkdtempSync(join(tmpdir(), 'jinn-daemon-token-'));
+    const path = daemonApiTokenPath(earningDir);
+    writeFileSync(path, 'c'.repeat(64) + '\n', { mode: 0o644 });
+    const before = statSync(path).ino;
+    const envToken = 'd'.repeat(64);
+
+    expect(resolveDaemonApiToken({ path, envToken }).persisted).toBe('written');
+
+    expect(readDaemonApiToken(path)).toBe(envToken);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    // Written aside and renamed in, so a concurrent reader never sees a truncated file.
+    expect(statSync(path).ino).not.toBe(before);
+    expect(readdirSync(earningDir)).toEqual(['daemon-api-token']);
+  });
+
+  it('creates the token file when an env token boots against a fresh state dir', () => {
+    earningDir = mkdtempSync(join(tmpdir(), 'jinn-daemon-token-'));
+    const path = join(earningDir, 'nested', 'daemon-api-token');
+    const envToken = 'f'.repeat(64);
+
+    expect(resolveDaemonApiToken({ path, envToken }).persisted).toBe('written');
+    expect(readDaemonApiToken(path)).toBe(envToken);
+  });
+
+  it('reports the already-current file as unchanged rather than rewriting it', () => {
+    earningDir = mkdtempSync(join(tmpdir(), 'jinn-daemon-token-'));
+    const path = daemonApiTokenPath(earningDir);
+    const { token } = ensureDaemonApiToken(path);
+
+    expect(resolveDaemonApiToken({ path, envToken: token }))
+      .toEqual({ token, source: 'env', persisted: 'unchanged' });
+  });
+
+  it('tightens an already-current 0644 token file to 0600 without rewriting the token (#4611)', () => {
+    earningDir = mkdtempSync(join(tmpdir(), 'jinn-daemon-token-'));
+    const path = daemonApiTokenPath(earningDir);
+    const token = 'g'.repeat(64);
+    writeFileSync(path, token + '\n', { mode: 0o644 });
+    chmodSync(path, 0o644);
+    const before = statSync(path).ino;
+
+    expect(resolveDaemonApiToken({ path, envToken: token }))
+      .toEqual({ token, source: 'env', persisted: 'unchanged' });
+    expect(readDaemonApiToken(path)).toBe(token);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(statSync(path).ino).toBe(before);
+  });
+
+  it('trims the env token before persisting it', () => {
+    earningDir = mkdtempSync(join(tmpdir(), 'jinn-daemon-token-'));
+    const path = daemonApiTokenPath(earningDir);
+    const envToken = 'a'.repeat(64);
+
+    expect(resolveDaemonApiToken({ path, envToken: `  ${envToken}\n` }).token).toBe(envToken);
+    expect(readDaemonApiToken(path)).toBe(envToken);
+  });
+
+  it('refuses to overwrite the file with an env token below the reader trust floor, and says so', () => {
+    earningDir = mkdtempSync(join(tmpdir(), 'jinn-daemon-token-'));
+    const path = daemonApiTokenPath(earningDir);
+    const existing = ensureDaemonApiToken(path).token;
+    const warnings: string[] = [];
+
+    const resolved = resolveDaemonApiToken({ path, envToken: 'short', warn: (m) => warnings.push(m) });
+
+    expect(resolved).toEqual({ token: 'short', source: 'env', persisted: 'skipped' });
+    expect(readDaemonApiToken(path)).toBe(existing);
+    expect(warnings.join('\n')).toContain('32');
+  });
+
+  it('still boots on the env token when the file cannot be written, and warns loudly', () => {
+    earningDir = mkdtempSync(join(tmpdir(), 'jinn-daemon-token-'));
+    // A file where the parent directory must be — mkdir/write below it must fail.
+    const blocker = join(earningDir, 'blocker');
+    writeFileSync(blocker, 'not-a-directory\n');
+    const envToken = 'b'.repeat(64);
+    const warnings: string[] = [];
+
+    const resolved = resolveDaemonApiToken({
+      path: join(blocker, 'daemon-api-token'),
+      envToken,
+      warn: (m) => warnings.push(m),
+    });
+
+    expect(resolved).toEqual({ token: envToken, source: 'env', persisted: 'failed' });
+    expect(warnings.join('\n')).toContain('daemon-api-token');
+  });
+
+  it('falls back to the persisted file when no env token is set', () => {
+    earningDir = mkdtempSync(join(tmpdir(), 'jinn-daemon-token-'));
+    const path = daemonApiTokenPath(earningDir);
+    const { token } = ensureDaemonApiToken(path);
+
+    expect(resolveDaemonApiToken({ path })).toEqual({ token, source: 'file', persisted: 'unchanged' });
+  });
+
+  it('generates and persists when neither an env token nor a file exists', () => {
+    earningDir = mkdtempSync(join(tmpdir(), 'jinn-daemon-token-'));
+    const path = daemonApiTokenPath(earningDir);
+
+    const resolved = resolveDaemonApiToken({ path, envToken: '   ' });
+
+    expect(resolved.source).toBe('generated');
+    expect(resolved.persisted).toBe('written');
+    expect(readDaemonApiToken(path)).toBe(resolved.token);
   });
 });

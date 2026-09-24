@@ -240,7 +240,6 @@ describe("local venue binary-judgment evaluator dispatch", () => {
         const prepared = await venue.prepareEvaluationCell(cell);
         expect(prepared.taskSha256).toMatch(/^[0-9a-f]{64}$/u);
       },
-      30_000,
     );
   }
 });

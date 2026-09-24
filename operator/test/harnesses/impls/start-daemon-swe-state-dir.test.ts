@@ -3,7 +3,7 @@ import { buildHarnesses } from '../../../src/harnesses/impls/index.js';
 import { SweRebenchV2EvaluatorHarness } from '../../../src/harnesses/impls/swe-rebench-v2-evaluator/harness.js';
 import { sweRebenchV2StateDirFromEnv } from '../../e2e/_daemon-harness-helpers.js';
 
-describe('startDaemon sweRebenchV2StateDir wiring (#2097)', () => {
+describe('sweRebenchV2StateDir resolution and harness forwarding (#2097)', () => {
   it('sweRebenchV2StateDirFromEnv reads JINN_SWE_REBENCH_V2_STATE_DIR', () => {
     expect(sweRebenchV2StateDirFromEnv({})).toBeUndefined();
     expect(sweRebenchV2StateDirFromEnv({ JINN_SWE_REBENCH_V2_STATE_DIR: '' })).toBeUndefined();

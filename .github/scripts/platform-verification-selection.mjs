@@ -14,11 +14,13 @@
 // The default is fail-safe. A changed path that maps to no catalogued package and
 // is not explicitly ignorable selects every lane.
 
+import { existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadCatalogPackages, loadPlatformCatalog, RUNTIME_DEPENDENCY_SECTIONS, stackPublishedReleaseGroupIds } from './platform-catalog.mjs';
 
 export const GATE_DOMAINS = new Map([
-  ['benchmarking-ci', 'benchmarking'],
+  ['contracts-ci', 'contracts'],
   ['environments-ci', 'environments'],
   ['evidence-ci', 'evidence'],
   ['marketplace-ci', 'marketplace'],
@@ -122,12 +124,15 @@ export function selectVerification({ repoRoot, changedFiles }) {
   const root = resolve(repoRoot);
   const laneDomains = requireGateCoverage(root);
 
+  // Normalize before the emptiness check: the CLI reads stdin as
+  // `buffer.split('\n')`, so an empty stream arrives as `['']` and a raw
+  // length check would let it through as a proven-irrelevant change set.
+  const normalized = changedFiles.map((path) => path.trim()).filter((path) => path !== '');
+
   // No changed files reported means we cannot prove the change is irrelevant.
-  if (changedFiles.length === 0) {
+  if (normalized.length === 0) {
     return { run: true, reason: 'no changed files reported', selectedDomains: [...laneDomains].sort(), unmatchedPaths: [] };
   }
-
-  const normalized = changedFiles.map((path) => path.trim()).filter((path) => path !== '');
 
   for (const path of normalized) {
     for (const selector of GLOBAL_SELECTORS) {
@@ -217,7 +222,13 @@ function parseArgs(argv) {
   return parsed;
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
+// Paths, not URLs, and both resolved: Node realpaths the entry module but not
+// `argv[1]`, so a checkout reached through a symlink would otherwise print nothing.
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   const { repoRoot, changedFiles } = parseArgs(process.argv.slice(2));
   // stdin is the normal path: `git diff --name-only base...head | node this-script.mjs`
   const stdinFiles = process.stdin.isTTY

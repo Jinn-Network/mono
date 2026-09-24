@@ -1,7 +1,23 @@
 name: Canonical docs check
 on:
   pull_request:
+    # Default types omit `edited`. Without it, adding a Discussion URL to the
+    # body after the last push never re-runs this gate, and a workflow re-run
+    # replays the stale event payload (#4181).
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
   merge_group:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   check:
     # The subjects of this gate — the PR body and `github.base_ref` — do not exist on a
@@ -15,10 +31,16 @@ jobs:
           fetch-depth: 0
       - name: Verify discussion link for canonical-doc changes
         env:
-          PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
+          set -euo pipefail
+          # Live body via the API: a re-run of a failed check still carries the
+          # original event payload (#4181).
+          PR_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .body)"
           CANON='^(PRINCIPLES|SPEC|THESIS|BRAND|GROWTH|GLOSSARY)\.md$'
-          changed=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          changed=$(git diff --name-only "origin/${BASE_REF}...HEAD")
           if echo "$changed" | grep -E "$CANON" > /dev/null; then
             if ! echo "$PR_BODY" | grep -E 'github\.com/Jinn-Network/mono/discussions/[0-9]+' > /dev/null; then
               echo "Canonical doc changed but no GitHub Discussion linked in PR body."

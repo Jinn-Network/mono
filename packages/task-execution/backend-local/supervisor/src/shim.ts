@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type ChildProcess, execFileSync, spawn, spawnSync } from "node:child_process";
-import { accessSync, chmodSync, constants, existsSync, readFileSync, readdirSync } from "node:fs";
+import { accessSync, chmodSync, constants, type Dirent, existsSync, readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -254,47 +254,90 @@ export function readProcessStartTime(pid: number): number | undefined {
   }
 }
 
-function linuxProcessGroupId(pid: number): number | undefined {
+/** pgid → ascending member pids, from one process-table read. */
+export type ProcessGroupTable = ReadonlyMap<number, readonly number[]>;
+
+/**
+ * The process table could not be read at all (#4395). Distinct from an empty group: a failed
+ * `ps` (fork pressure, missing binary) or an unreadable `/proc` proves nothing about what is
+ * running, so callers deciding liveness must choose their failure direction explicitly rather
+ * than inheriting `[]`.
+ */
+export class ProcessTableProbeError extends Error {
+  constructor(detail: string, options?: ErrorOptions) {
+    super(`process table unavailable (${process.platform}): ${detail}`, options);
+    this.name = "ProcessTableProbeError";
+  }
+}
+
+function linuxProcessGroupId(pid: number, procRoot: string): number | undefined {
   try {
-    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const stat = readFileSync(`${procRoot}/${pid}/stat`, "utf8");
     const afterComm = stat.slice(stat.lastIndexOf(")") + 2).trim();
     const fields = afterComm.split(/\s+/);
     // Fields after `(comm)` begin at stat field 3 (`state`); pgrp is field 5.
     const value = Number(fields[2]);
     return Number.isSafeInteger(value) && value > 0 ? value : undefined;
   } catch {
-    return undefined;
+    return undefined; // a pid that vanished between the directory listing and its stat read is a race, not a probe failure
   }
+}
+
+/**
+ * One read of the whole process table, grouped by pgid. Throws `ProcessTableProbeError` when the
+ * table cannot be read (#4395) — including a snapshot that omits the calling process, which no
+ * honest read of the live table can produce. `procRoot` is a test seam for the Linux `/proc` walk.
+ */
+export function readProcessGroupTable(options?: { readonly procRoot?: string }): ProcessGroupTable {
+  const groups = new Map<number, number[]>();
+  let sawSelf = false;
+  const insert = (pid: number, group: number): void => {
+    if (!Number.isSafeInteger(pid) || pid <= 0) return;
+    const members = groups.get(group);
+    if (members === undefined) groups.set(group, [pid]);
+    else members.push(pid);
+    sawSelf ||= pid === process.pid;
+  };
+  if (process.platform === "linux") {
+    const procRoot = options?.procRoot ?? "/proc";
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(procRoot, { withFileTypes: true });
+    } catch (error) {
+      throw new ProcessTableProbeError(error instanceof Error ? error.message : String(error), { cause: error });
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !/^[0-9]+$/u.test(entry.name)) continue;
+      const pid = Number(entry.name);
+      const group = linuxProcessGroupId(pid, procRoot);
+      if (group !== undefined) insert(pid, group);
+    }
+  } else {
+    let rows: string;
+    try {
+      rows = execFileSync("ps", ["-axo", "pid=,pgid="], { encoding: "utf8" });
+    } catch (error) {
+      throw new ProcessTableProbeError(error instanceof Error ? error.message : String(error), { cause: error });
+    }
+    for (const row of rows.split("\n")) {
+      const [pidText, groupText] = row.trim().split(/\s+/);
+      insert(Number(pidText), Number(groupText));
+    }
+  }
+  if (!sawSelf) throw new ProcessTableProbeError("snapshot omits this process");
+  for (const members of groups.values()) members.sort((left, right) => left - right);
+  return groups;
 }
 
 /**
  * Returns every process-table member whose process-group id is `pgid`. Recovery and terminal
  * cleanup use this instead of treating the group leader's bare PID as proof that the whole
- * subtree is empty.
+ * subtree is empty. Throws `ProcessTableProbeError` when the table cannot be read (#4395); an
+ * invalid pgid returns `[]` without probing.
  */
-export function listProcessGroupPids(pgid: number): number[] {
+export function listProcessGroupPids(pgid: number, options?: { readonly procRoot?: string }): number[] {
   if (!Number.isSafeInteger(pgid) || pgid <= 0) return [];
-  const members: number[] = [];
-  if (process.platform === "linux") {
-    for (const entry of readdirSync("/proc", { withFileTypes: true })) {
-      if (!entry.isDirectory() || !/^[0-9]+$/u.test(entry.name)) continue;
-      const pid = Number(entry.name);
-      if (linuxProcessGroupId(pid) === pgid) members.push(pid);
-    }
-  } else {
-    try {
-      const rows = execFileSync("ps", ["-axo", "pid=,pgid="], { encoding: "utf8" });
-      for (const row of rows.split("\n")) {
-        const [pidText, groupText] = row.trim().split(/\s+/);
-        const pid = Number(pidText);
-        const group = Number(groupText);
-        if (Number.isSafeInteger(pid) && pid > 0 && group === pgid) members.push(pid);
-      }
-    } catch {
-      return [];
-    }
-  }
-  return members.sort((left, right) => left - right);
+  return [...(readProcessGroupTable(options).get(pgid) ?? [])];
 }
 
 /** Probes whether the shim recorded at `metaDir` is genuinely alive right now (fingerprint verified against the live process table, not a bare PID check). */

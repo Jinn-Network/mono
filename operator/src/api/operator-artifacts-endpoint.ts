@@ -13,6 +13,7 @@ import type {
   Store,
 } from '../store/store.js';
 import type { EnvelopeProjection } from '../corpus/types.js';
+import { markRestartRequired } from './restart-required-state.js';
 
 export interface OperatorPricingConfig {
   publicEndpoint: string;
@@ -26,7 +27,6 @@ export interface OperatorArtifactsRoutesConfig {
   configPath?: string;
   operatorConfig?: OperatorPricingConfig;
   persistConfigValue?: typeof persistTopLevelConfigValue;
-  onOperatorConfigUpdated?: (operator: OperatorPricingConfig) => void;
 }
 
 type ArtifactSource = 'served' | 'network';
@@ -84,12 +84,14 @@ function decimalRecord(value: unknown): Record<string, string> {
   return out;
 }
 
+function operatorBlock(file: Record<string, unknown>): Record<string, unknown> {
+  return isRecord(file.operator) ? file.operator : {};
+}
+
 function resolvePricingConfig(
-  configPath: string,
+  rawOperator: Record<string, unknown>,
   fallback?: OperatorPricingConfig,
 ): OperatorPricingConfig {
-  const current = readConfigFile(configPath);
-  const rawOperator = isRecord(current.operator) ? current.operator : {};
   return {
     publicEndpoint:
       typeof rawOperator.publicEndpoint === 'string'
@@ -352,7 +354,7 @@ export function addOperatorArtifactsRoutes(app: Hono, config: OperatorArtifactsR
 
     let pricing: OperatorPricingConfig;
     try {
-      pricing = resolvePricingConfig(configPath, config.operatorConfig);
+      pricing = resolvePricingConfig(operatorBlock(readConfigFile(configPath)), config.operatorConfig);
     } catch (err) {
       return c.json({
         error: 'config_unreadable',
@@ -435,9 +437,11 @@ export function addOperatorArtifactsRoutes(app: Hono, config: OperatorArtifactsR
       return c.json({ error: 'invalid_body', detail: 'expected JSON body' }, 400);
     }
 
+    let existingOperator: Record<string, unknown>;
     let current: OperatorPricingConfig;
     try {
-      current = resolvePricingConfig(configPath, config.operatorConfig);
+      existingOperator = operatorBlock(readConfigFile(configPath));
+      current = resolvePricingConfig(existingOperator, config.operatorConfig);
     } catch (err) {
       return c.json({
         error: 'config_unreadable',
@@ -451,14 +455,24 @@ export function addOperatorArtifactsRoutes(app: Hono, config: OperatorArtifactsR
     }
 
     try {
-      persistConfigValue('operator', normalized.value, configPath);
-      config.onOperatorConfigUpdated?.(normalized.value);
+      // Issue #4241: `operator` also holds non-pricing keys (verticalMode,
+      // native), and the persist helper replaces the whole top-level key, so
+      // merge the pricing fields into the block already on disk.
+      persistConfigValue('operator', { ...existingOperator, ...normalized.value }, configPath);
     } catch (err) {
       return c.json({
         error: 'config_write_failed',
         detail: err instanceof Error ? err.message : String(err),
       }, 500);
     }
+
+    // Issue #2427: this write genuinely needs a restart. Every live pricing
+    // consumer (artifact packaging, live publishing, endpoint stamping) reads a
+    // boot-time snapshot, so the previous in-memory hot-apply reassigned
+    // `config.operator` without reaching any consumer of the pricing values
+    // other than the diagnostic debug-report snapshot. Set the flag the
+    // `restart_required` notification reads, matching the response below.
+    markRestartRequired();
 
     return c.json({
       ok: true,
