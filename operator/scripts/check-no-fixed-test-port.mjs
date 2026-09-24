@@ -54,6 +54,23 @@
  *      reservation no longer adopts an unrelated `Math.random` nearby.
  *      Guessing is the same race as hard-coding, just with a wider blast
  *      radius and a lower reproduction rate.
+ *   2b. No in-band literal RETURNED from that same port-ish block, and no
+ *      concise arrow that is the same return with the `return` keyword
+ *      dropped. The brace-body form is `function pickPort() { return 45000; }`
+ *      (#3580). The shapes that escaped it (#4140) are a concise arrow bound
+ *      to a scalar (`const pickPort = () => 45000`, including the
+ *      parenthesized `() => (45000)`, an optional `(): Type =>`, and a
+ *      function-typed binding `const pickPort: () => number = () => 45000`) and a
+ *      returned array (`function pickPorts() { return [45000]; }`,
+ *      `const pickPorts = () => [45000]`, and the brace-body
+ *      `() => { return [45000]; }`). Same port, one shape away from a form
+ *      two other rules already reject. The scalar `return` still uses rule
+ *      2's bounded enclosing-declaration walk (port-ish name filter, stop at
+ *      a completed statement). The concise-arrow forms filter on the binding
+ *      name the same way rule 1c does. The returned-array form is matched
+ *      against the whole file, like rules 1d/1e, so `return [\n  45000\n]`
+ *      is visible; it still consults the walk at the `return`'s line so a
+ *      non-port-ish `function make()` stays silent.
  *   3. No parallelism pin, and no isolation opt-out, in
  *      `operator/vitest.config.ts`.
  *
@@ -68,16 +85,16 @@
  * `operator/test/**` holds ~1,900 numeric literals that fall inside the band
  * and are not ports at all — timeouts (`50000`, `60000`), Hyperliquid price
  * fixtures (`'50000'`, `'51500'`), and hex-address substrings (`33333`,
- * `55555`, `44444`) — so a value-only rule is pure noise. It also holds 62
- * legitimate fixed port literals in genuine port positions, over the distinct
- * numbers 7331, 7332, 7333, 7340, 7342, 7350, 7351, 7360, 7388, 7389, 7390,
- * 7400, 7450, 7451, 7732, 7733, 7734, 7740, 7742, 7777, 9331, 9332, 17398,
- * 18532 and 18533, plus the
- * `const API_PORT = 27331` that rule 1c sees — every one of them safely BELOW
- * the ephemeral band, so a position-only rule condemns the correct code. Only
- * the intersection names the actual hazard. The below-band fixed ports in
- * current use are registered in the header comment of
- * `operator/test/release/tier-1/T1.2-harness-readiness-contract.ts`.
+ * `55555`, `44444`) — so a value-only rule is pure noise. The scan roots
+ * together hold 77 legitimate fixed port literals in genuine port positions
+ * (snapshot 2026-09-21; the live registry is
+ * `operator/test/release/tier-1/T1.2-harness-readiness-contract.ts` — update
+ * both when adding a reservation), over the distinct numbers 7331, 7332,
+ * 7333, 7340, 7342, 7350, 7351, 7360, 7388, 7389, 7390, 7400, 7450, 7451,
+ * 7732, 7733, 7734, 7735, 7736, 7737, 7740, 7742, 7777, 9331, 9332, 17398,
+ * 18532, 18533 and 27331 — every one of them safely BELOW the ephemeral
+ * band, so a position-only rule condemns the correct code. Only the
+ * intersection names the actual hazard.
  *
  * Numeric separators count. `45_000` is the same port as `45000`, and the
  * repository writes 4- and 5-digit numbers in separated form on well over a
@@ -219,6 +236,23 @@
  *   - A port position inside a template literal's `${…}` interpolation. The
  *     blanking does not parse interpolations back out; the failure is a missed
  *     literal, never a spurious one.
+ *   - A scalar `return` written across lines — `return\n  45000;`. The scalar
+ *     form of rule 2b is a per-line rule, because it has to consult the
+ *     enclosing-declaration walk at a LINE index. A returned ARRAY is matched
+ *     against the whole file (like 1d/1e), so `return [\n  45000\n]` is
+ *     caught; a scalar still is not. Nothing in the tree writes a bare
+ *     returned number that way.
+ *   - A concise arrow with a parameter — `const pickPort = (x) => 45000`.
+ *     Rule 2b's arrow form matches `() =>` (optionally `(): Type =>`) only.
+ *   - An `async` concise arrow — `const pickPort = async () => 45000`. The
+ *     `()` sits after `async`, not adjacent to `=`, so the arrow pattern
+ *     does not see it.
+ *   - A returned in-band literal whose enclosing declaration is not port-ish
+ *     and does not become so within the 10-line lookback — `function make() {
+ *     return 45000; }` handed to a `.listen(` elsewhere. Rule 2b filters on
+ *     the same name test as rules 1 and 2, and a value-only rule over every
+ *     `return` in the tree is the noise the POSITION ∧ VALUE-BAND design
+ *     exists to avoid.
  *   - A bare reassignment — `apiPort = 45000;` with the declaration elsewhere.
  *     Rule 1c requires the `const` / `let` / `var`, which keeps it away from
  *     every `==` / `>=` / `=>` shape a looser pattern would have to exclude.
@@ -263,7 +297,9 @@
  *     declaration whose block has already CLOSED within the 10-line lookback —
  *     `function pickPort() { … }` followed by an unrelated `Math.random()`.
  *     Closing that needs brace tracking, which is more machine than a
- *     heuristic rule warrants.
+ *     heuristic rule warrants. Rule 2b shares the walk and therefore this
+ *     gap: an unrelated in-band `return` under a closed port-ish block reads
+ *     the same way.
  *   - A regex literal read as division. `blankComments` decides from the
  *     preceding significant character, so `if (x) /re/.test(y)` reads as
  *     division and the pattern body is scanned as code. It takes an in-band
@@ -319,10 +355,13 @@ const ARRAY_ELEMENT = new RegExp(NUM_FREE, 'g');
 // `const apiPort = 45000` — a bound-later port that PORT_KEY misses because it
 // is an assignment, not an object key. The first optional group is the TS type
 // annotation (`const apiPort: number = 45000`), which is ordinary in a `.ts`
-// file and otherwise breaks the name-to-`=` adjacency; the second is the
-// defaulted form `const portBase = opts.portBase ?? 45000`, which is how a
-// helper's default port is actually written in this tree.
-const PORT_DECL = `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=;\\n]+)?\\s*=\\s*`;
+// file and otherwise breaks the name-to-`=` adjacency. Function types are
+// included: `=>` is consumed as a unit so the type cannot steal the `=` of
+// `() => number` and miss the initializer. The second optional group (on
+// PORT_DECL_LITERAL) is the defaulted form
+// `const portBase = opts.portBase ?? 45000`, which is how a helper's default
+// port is actually written in this tree.
+const PORT_DECL = `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)(?:\\s*:\\s*(?:=>|[^=;\\n])+)?\\s*=\\s*`;
 const PORT_DECL_LITERAL = new RegExp(
   `${PORT_DECL}(?:[^;\\n]*?(?:\\?\\?|\\|\\|)\\s*)?${NUM}`,
   'g',
@@ -340,6 +379,35 @@ const PORT_DECL_ARRAY = new RegExp(`${PORT_DECL}\\[([^\\]]{0,${PORT_KEY_ARRAY_MA
 // as catching a "randomly guessed" port, and `crypto.randomInt(40000, 60000)`
 // is the same guess with a better RNG.
 const RANDOM_CALL = /Math\.random|\brandomInt\s*\(/;
+// Rule 2b — `return 45000` from inside a port-ish declaration. The same fixed
+// port as `const apiPort = 45000` (rule 1c), one `return` away from it, and
+// the shape rule 2 stops one step short of: it catches `pickPort()` when the
+// number is guessed, not when it is written down. Shares rule 2's bounded
+// enclosing-declaration walk, so `function pickTransport()` is filtered out by
+// name and a completed statement stops the attribution, exactly as there.
+const RETURN_LITERAL = new RegExp(`\\breturn\\s+${NUM}`, 'g');
+// Concise-arrow parameter list: `()` optionally annotated `(): Type`. The type
+// stops before `=>` so `(): number[] => [45000]` does not swallow the arrow.
+const CONCISE_ARROW_PARAMS = '\\(\\s*\\)(?:\\s*:\\s*[^=>;\\n]+)?';
+// `const pickPort = () => 45000` / `() => (45000)` / `(): number => 45000` /
+// `const pickPort: () => number = () => 45000`. The optional parens around the
+// literal are the grouping form, not a call.
+const CONCISE_ARROW_LITERAL = new RegExp(
+  `${PORT_DECL}${CONCISE_ARROW_PARAMS}\\s*=>\\s*\\(?\\s*${NUM}\\s*\\)?`,
+  'g',
+);
+// `const pickPorts = () => [45000]` — the concise-arrow twin of rule 1e.
+const CONCISE_ARROW_ARRAY = new RegExp(
+  `${PORT_DECL}${CONCISE_ARROW_PARAMS}\\s*=>\\s*\\[([^\\]]{0,${PORT_KEY_ARRAY_MAX}})\\]`,
+  'g',
+);
+// `return [45000, 45001]` from a port-ish block. Whole-file, like 1d/1e, so a
+// formatter-broken `return [\n  45000\n]` is visible. The enclosing-name
+// filter still runs at the `return`'s line.
+const RETURN_ARRAY = new RegExp(
+  `\\breturn\\s+\\[([^\\]]{0,${PORT_KEY_ARRAY_MAX}})\\]`,
+  'g',
+);
 const DECLARATION = /\bfunction\s+([A-Za-z_$][\w$]*)|\bconst\s+([A-Za-z_$][\w$]*)\s*=/;
 /**
  * A `port` at a word or camelCase boundary — never a bare substring.
@@ -681,6 +749,12 @@ export function scanText(text) {
       const name = enclosingName(codeLines, idx);
       if (name && PORTISH_NAME.test(name)) flagged = true;
     }
+    // Rule 2b — a written-down port returned from the same port-ish block.
+    for (const m of line.matchAll(RETURN_LITERAL)) {
+      if (!inBand(m[1])) continue;
+      const name = enclosingName(codeLines, idx);
+      if (name && PORTISH_NAME.test(name)) flagged = true;
+    }
 
     if (flagged) violations.push({ line: idx + 1, snippet: raw.trim() });
   });
@@ -693,11 +767,12 @@ export function scanText(text) {
     if (inBand(m[1])) reportAt(m.index + m[0].length - m[1].length);
   }
 
-  // Rules 1d and 1e — an array literal in a port position: EVERY element
-  // counts. Both capture the name in group 1 and the bracket contents in
-  // group 2, so one loop drives them: 1d from a port-ish object key, 1e from a
-  // port-ish `const` / `let` / `var` binding.
-  for (const re of [PORT_KEY_ARRAY, PORT_DECL_ARRAY]) {
+  // Rules 1d, 1e, and 2b's concise-arrow array — an array literal in a port
+  // position: EVERY element counts. All three capture the name in group 1 and
+  // the bracket contents in group 2, so one loop drives them: 1d from a
+  // port-ish object key, 1e from a port-ish `const` / `let` / `var` binding,
+  // 2b from `const pickPorts = () => [45000]`.
+  for (const re of [PORT_KEY_ARRAY, PORT_DECL_ARRAY, CONCISE_ARROW_ARRAY]) {
     for (const m of code.matchAll(re)) {
       if (!PORTISH_NAME.test(m[1])) continue;
       // The match ends `[` + group 2 + `]`, so the contents start there. An
@@ -710,8 +785,30 @@ export function scanText(text) {
     }
   }
 
+  // Rule 2b — concise arrow bound to a scalar: `const pickPort = () => 45000`
+  // / `() => (45000)`. Whole-file so `() =>\n  45000` is visible. Group 1 is
+  // the binding name; group 2 is the literal. The literal may be followed by
+  // a grouping `)`, so it is not always the last byte of the match.
+  for (const m of code.matchAll(CONCISE_ARROW_LITERAL)) {
+    if (!PORTISH_NAME.test(m[1]) || !inBand(m[2])) continue;
+    reportAt(m.index + m[0].lastIndexOf(m[2]));
+  }
+
+  // Rule 2b — `return [45000]` from a port-ish block. Whole-file so a
+  // formatter-broken array is visible; the walk still runs at the `return`'s
+  // line, which is how `function make() { return [45000]; }` stays silent.
+  for (const m of code.matchAll(RETURN_ARRAY)) {
+    const lineNo = lineNumberAt(code, m.index);
+    const name = enclosingName(codeLines, lineNo - 1);
+    if (!name || !PORTISH_NAME.test(name)) continue;
+    const contentStart = m.index + m[0].length - m[1].length - 1;
+    for (const el of m[1].matchAll(ARRAY_ELEMENT)) {
+      if (inBand(el[1])) reportAt(contentStart + el.index);
+    }
+  }
+
   // One report line per line, however many rules fired on it, and in file
-  // order — three of the rules run over the whole file after the per-line
+  // order — 1a, 1d, 1e, and 2b's whole-file forms run after the per-line
   // pass, so insertion order is not reading order.
   const seen = new Set();
   return violations

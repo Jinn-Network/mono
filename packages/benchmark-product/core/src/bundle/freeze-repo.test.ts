@@ -21,7 +21,8 @@ import {
   exportFreezeRepo,
   runVerifierCli,
   verifyFreezeRepo,
-} from "@colophon-claims/verify";
+  verifyPublicBundleSnapshot,
+} from "@colophon-claims/check";
 import { runCli } from "../cli/main.js";
 import { createSyntheticV4BundleFixture } from "./testing/v4-synthetic-fixture.js";
 
@@ -185,6 +186,35 @@ describe("freeze-repository export against a real v4 bundle", () => {
     expect(drifted.stdout).toContain("changed: README.md");
   });
 
+  test("verifies the bundle once, and renders the freeze tree from that same snapshot", async () => {
+    // The freeze check used to call `verifyFreezeRepo(bundleDir, repoDir)`, which re-opened the
+    // bundle and ran a second full verification -- outside the `deps.verify` seam, and so without
+    // the caller's `--tsa-root` / `--ots-headers` material, leaving its anchor outcomes free to
+    // differ from the reported ones with nothing saying so (issue #3352).
+    //
+    // Counting seam calls cannot see that: the second pass bypassed the seam, which is the whole
+    // defect. So the bundle directory the CLI is given does not exist on disk, and the snapshot
+    // comes only from the seam. A second pass has nothing to read and throws; one pass renders the
+    // tree from the snapshot it was handed.
+    const bundleDir = licensedBundle;
+    const repoDir = join(tempDir("single-verify"), "tree");
+    await exportFreezeRepo(bundleDir, repoDir);
+    const verified = await verifyPublicBundleSnapshot(bundleDir);
+
+    let calls = 0;
+    const result = await runVerifierCli([join(tempDir("absent"), "no-such-bundle"), "--freeze-repo", repoDir, "--json"], {
+      verify: async () => {
+        calls += 1;
+        return verified;
+      },
+    });
+
+    expect(calls).toBe(1);
+    expect(result.stderr).toBe("");
+    expect(result.exitCode).toBe(0);
+    expect((JSON.parse(result.stdout) as { freezeRepo: { ok: boolean } }).freezeRepo.ok).toBe(true);
+  });
+
   // Issue #3607: the mode dimension is skipped on a filesystem that does not record an executable
   // bit, and on one no probe site could be written to. The first is unreachable in CI, but a
   // read-only repository directory reaches the second — an exported tree has no `.git`, so the tree
@@ -259,7 +289,10 @@ describe("freeze-repository export against a real v4 bundle", () => {
     expect(payload.identity).toEqual(expect.any(String));
     expect(payload.checks).toEqual(expect.arrayContaining(["manifest"]));
     expect(payload.freezeRepo.ok).toBe(false);
-    expect(payload.freezeRepo.code).toBe("conflict");
+    // `validation`, not `conflict`: a record that declares no licence is missing a required
+    // field and collides with nothing. The code is public on this JSON surface, which is why
+    // core pins it (verify issue #4378).
+    expect(payload.freezeRepo.code).toBe("validation");
     expect(payload.freezeRepo.message).toMatch(/declares no licence/);
 
     const human = await runVerifierCli([unlicensedBundle, "--freeze-repo", repoDir]);
@@ -343,6 +376,71 @@ describe("freeze-repo CLI verbs", () => {
     expect(envelope.ok).toBe(false);
     expect(envelope.error.code).toBe("record-integrity");
     expect(envelope.error.issues).toEqual([{ path: "README.md", message: "changed" }]);
+    // The oid the bundle renders to is reported on the drift path too, not only on the matching
+    // one (issue #3352): a reader deciding whether the tree they hold is the one an announcement
+    // pinned cannot answer that from a difference list alone.
+    const rendered = await verifyFreezeRepo(bundleDir, repoDir);
+    expect(envelope.error.detail).toContain(`commit ${rendered.commitId}`);
+  });
+
+  // Issue #3997: the #3608 signal held on the match path only. A drifted tree read from a mount
+  // that refuses the probe reported WHICH members drifted and nothing about whether the mode
+  // dimension was read at all -- on both surfaces, since the failure envelope carried no `result`.
+  // The standalone verifier reports it on both paths; this surface must too, or a reader cannot
+  // tell whether a second, mode-only drift went unlooked-for. Reached the #3607 way: one drifted
+  // member plus a repository directory that refuses the probe.
+  test.skipIf(process.geteuid?.() === 0)(
+    "the product CLI carries the skipped-mode signal on the drift path, on both surfaces",
+    async () => {
+      const bundleDir = licensedBundle;
+      const repoDir = join(tempDir("cli-drift-unprobed"), "repo");
+      await exportFreezeRepo(bundleDir, repoDir);
+      writeFileSync(join(repoDir, "README.md"), "rewritten by hand\n");
+
+      const originalMode = statSync(repoDir).mode & 0o7777;
+      chmodSync(repoDir, 0o555);
+      try {
+        const human = await runCli(
+          ["freeze-repo", "verify", "--bundle", bundleDir, "--repo", repoDir],
+          { cwd: process.cwd(), clock: () => "2026-08-29T00:00:00.000Z" },
+        );
+        expect(human.exitCode).toBe(1);
+        expect(human.stderr).toContain("README.md: changed");
+        expect(human.stderr).toContain("note: file modes were not checked (the filesystem could not be probed)");
+
+        const machine = await runCli(
+          ["freeze-repo", "verify", "--bundle", bundleDir, "--repo", repoDir, "--json"],
+          { cwd: process.cwd(), clock: () => "2026-08-29T00:00:00.000Z" },
+        );
+        expect(machine.exitCode).toBe(1);
+        const envelope = JSON.parse(machine.stdout) as {
+          ok: boolean;
+          error: { code: string; issues: { path: string; message: string }[] };
+          result?: { ok: boolean; executableBitChecked: boolean; executableBitSkipped?: string };
+        };
+        expect(envelope.ok).toBe(false);
+        // The error half is unchanged; the result is additive, read from the same key as the
+        // match path (the standalone verifier spreads it regardless of `ok`).
+        expect(envelope.error.code).toBe("record-integrity");
+        expect(envelope.error.issues).toEqual([{ path: "README.md", message: "changed" }]);
+        expect(envelope.result?.ok).toBe(false);
+        expect(envelope.result?.executableBitChecked).toBe(false);
+        expect(envelope.result?.executableBitSkipped).toBe("not-probed");
+      } finally {
+        chmodSync(repoDir, originalMode);
+      }
+    },
+  );
+
+  test("the roles an export reports are the frozen catalog order, not an alphabetical one", async () => {
+    // `freeze.json` renders role groups in the frozen order; the export result used to present the
+    // same list alphabetically, so one list appeared in two orders on two surfaces (issue #3352).
+    const repoDir = join(tempDir("cli-roles"), "repo");
+    const exported = await exportFreezeRepo(licensedBundle, repoDir);
+    const manifest = JSON.parse(readFileSync(join(repoDir, "freeze.json"), "utf8")) as {
+      roles: readonly { readonly role: string }[];
+    };
+    expect(exported.roles).toEqual(manifest.roles.map((group) => group.role));
   });
 });
 

@@ -8,11 +8,12 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   BENCHMARKING_METHOD_IDS,
   BENCHMARKING_METHOD_VERSION,
+  compareCodeUnitStrings,
   parseMatrix,
   parseReport,
 } from "@jinn-network/benchmarking-records";
 import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
-import { BINARY_INSTRUMENT_REPORT_LIMITATIONS, verifyPublicBundle } from "@colophon-claims/verify";
+import { BINARY_INSTRUMENT_REPORT_LIMITATIONS, verifyPublicBundle } from "@colophon-claims/check";
 import {
   canonicalJsonBytes,
   dssePreAuthEncoding,
@@ -31,6 +32,7 @@ import { INSPECT_EMBEDDED_EVALUATOR_ID } from "../runtime/inspect/artifacts.js";
 import {
   BUNDLE_V4_EVIDENCE_FORMAT,
   BUNDLE_V4_TRUST_FORMAT,
+  BundleQualificationSchema,
 } from "./schema.js";
 import { buildBundleManifest } from "./manifest.js";
 import { BUNDLE_V4_FORMAT } from "../legacy-closures.js";
@@ -288,7 +290,7 @@ describe("binary public-bundle/4 producer closure", () => {
     // authority-role discriminator (materialize.ts's evidence-role-to-authority-role ternary) and
     // by the input-direction one (materialize.ts:366's or-chain), so `authorities` came out empty
     // and the trust-document schema refused it. This row is the first time any test drives that
-    // round trip through the real production `admitHumanTruth` -> `importBinaryItemBank` ->
+    // round trip through fixture-seeded admission records -> sealed Benchmark ->
     // `runReport` -> `materializePublicBundle` -> `verifyPublicBundle` chain.
     ["screened-operator-sampled", true],
   ] as const)("materializes a complete provider-free %s admission graph", async (truthAdmission, publicationGrade) => {
@@ -697,15 +699,15 @@ describe("binary public-bundle/4 standalone-reader rejection boundaries", () => 
  * The qualification projection's exclusion list, both directions (issues #3246, #3247).
  *
  * Every other qualification-carrying fixture yields zero or one exclusion, where sorting the
- * projection is a no-op and comparing it proves nothing. The `two-exclusions` scenario is the
- * first with two, deliberately emitted in replacement-ledger order that is NOT their sorted
- * order, so the producer's sort and the reader's re-derivation both have something to be wrong
- * about.
+ * projection is a no-op and comparing it proves nothing. The `two-exclusions` scenario name is
+ * historical (#3247); the bank now carries three exclusions, deliberately emitted in
+ * replacement-ledger order that is NOT their sorted order, so the producer's sort and the
+ * reader's re-derivation both have something to be wrong about.
  */
 describe("binary public-bundle/4 qualification exclusions", () => {
   let shared: Promise<SyntheticV4BundleFixture> | undefined;
 
-  /** One real two-human run carrying two exclusions, built once; tamper cases copy its bundle. */
+  /** One real two-human run carrying three exclusions, built once; tamper cases copy its bundle. */
   function twoExclusions(): Promise<SyntheticV4BundleFixture> {
     if (shared === undefined) {
       const root = mkdtempSync(join(tmpdir(), "binary-v4-two-exclusions-"));
@@ -740,7 +742,7 @@ describe("binary public-bundle/4 qualification exclusions", () => {
     const qualification = json(join(bundleDir, "qualification.json"));
     const exclusions = qualification.exclusions as Array<{ itemSha256: string }>;
 
-    expect(exclusions).toHaveLength(2);
+    expect(exclusions).toHaveLength(3);
 
     // The case is only non-vacuous while the two orders disagree. If a payload field ever changes
     // and the fixture's digests reorder, this fails loudly rather than letting the sort go
@@ -750,7 +752,8 @@ describe("binary public-bundle/4 qualification exclusions", () => {
     expect([...ledger].sort()).toEqual([...carried].sort());
     expect(ledger).not.toEqual(carried);
 
-    expect(carried).toEqual([...carried].sort());
+    expect(carried).toEqual([...carried].sort(compareCodeUnitStrings));
+    expect(BundleQualificationSchema.safeParse(qualification).success).toBe(true);
   }, 120_000);
 
   // The three tamper cases below only prove anything if the UNTAMPERED bundle passes: a
@@ -772,8 +775,8 @@ describe("binary public-bundle/4 qualification exclusions", () => {
       candidateClasses: ["synthetic"],
       strata: ["core", "stress"],
       armCount: 4,
-      itemCount: 2,
-      exclusionCount: 2,
+      itemCount: 3,
+      exclusionCount: 3,
     });
   }, 120_000);
 

@@ -46,6 +46,16 @@ const KNOWN_HARNESSES = ['claude-code-learner', 'codex-code-learner', 'hermes-ag
 //                 bound at :246 the same way
 //   7732 / 7733   test/helpers/multi-op-daemon.test.ts -- op-a / op-b dummies
 //   7734          test/helpers/multi-op-daemon.test.ts -- 'teardown is idempotent'
+//   7735 / 7736   test/helpers/multi-op-daemon.test.ts -- the lifetime-log
+//                 describe: 'streams stdout + stderr ...' / 'does not write a
+//                 log file when logDir is omitted'. Case 2: DUMMY_DAEMON_SOURCE
+//                 calls `server.listen`.
+//   7737          test/helpers/multi-op-daemon.test.ts -- 'keeps the fatal
+//                 daemon envelope in the readiness error'. Case 3: nothing
+//                 binds this port. HANDSHAKE_THEN_FATAL_SOURCE never calls
+//                 listen; the helper still polls
+//                 `http://127.0.0.1:7737/v1/bootstrap`, so the assertion is
+//                 that nothing is listening.
 //   7740 / 7741   test/release/tier-2/tier-2-helpers.test.ts -- portBase 7740
 //                 (op-b takes portBase + 1)
 //   7742 / 7743   test/release/tier-2/tier-2-helpers.test.ts -- portBase 7742
@@ -76,15 +86,17 @@ const KNOWN_HARNESSES = ['claude-code-learner', 'codex-code-learner', 'hermes-ag
 //      unique repo-wide), or `allocateAnvilPort()` when a fixed reservation is
 //      impractical -- many ports, or several instances inside one file. The
 //      allocator has a narrow allocate-then-rebind window; the reservation has
-//      none.
+//      none, so a handful of single-port call sites reserve rather than
+//      allocate however short the window would have been (#3582).
 //   3. The assertion IS "nothing is listening here" -> a fixed port below
 //      32768, with a comment saying why.
 //
-// The invariant under all three: never a literal inside 32768-65535 in a
-// port-shaped position -- a `.listen(` argument, a port-shaped object key, or a
-// port-ish `const`. A port buried in a URL string is outside what the lint can
-// see; see the "does NOT catch" list in
-// operator/scripts/check-no-fixed-test-port.mjs.
+// The invariant under all three is the "Never hard-code a port" rule in
+// docs/runbooks/testing.md, which names the positions the lint can see, and
+// the "does NOT catch" list in the header of
+// operator/scripts/check-no-fixed-test-port.mjs, which names the ones it
+// cannot. This header does not restate that position list: a restatement
+// here has drifted twice (#4076, #4158).
 //
 // This scenario is case 2 with a fixed reservation: it spawns one real daemon,
 // one port, for the lifetime of the file. See issue #1627 and

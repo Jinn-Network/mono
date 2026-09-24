@@ -18,7 +18,6 @@ const DISCOVERY_PACKAGES = [
   ['facts/evidence', '@jinn-network/record-discovery-facts-evidence'],
   ['facts/trust', '@jinn-network/record-discovery-facts-trust'],
   ['facts/task-execution', '@jinn-network/record-discovery-facts-task-execution'],
-  ['facts/benchmarking', '@jinn-network/record-discovery-facts-benchmarking'],
   ['facts/environments', '@jinn-network/record-discovery-facts-environments'],
   ['facts/chain-environments', '@jinn-network/record-discovery-facts-chain-environments'],
   ['facts/offers', '@jinn-network/record-discovery-facts-offers'],
@@ -34,7 +33,6 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
   ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
   ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
-  ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
   ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
   ['@jinn-network/chain-environment-record', join(root, 'packages', 'environments', 'chain-record')],
   ['@jinn-network/information-world', join(root, 'packages', 'environments', 'information-world')],
@@ -100,21 +98,13 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   // package anywhere in the graph gets its own resolutions entry"
   // precedent recorded above for testing/serve/client/facts-evidence.
   ['facts/task-execution', { dependencies: ['@jinn-network/record-discovery-protocol', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol'], devDependencies: ['@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
-  // facts/benchmarking's own source imports protocol + benchmarking-records
-  // (plan M6 / program §7.128–§7.130): the sanctioned leaf edge into the
-  // benchmarking record-kind tree. It takes record-discovery-testing as a
-  // devDependency (facts-consistency conformance driver, configured locally)
-  // plus trust-core, used structurally (without signature or trust resolution)
-  // to validate an Accounting delegate-authorization reference before its
-  // digest fact is emitted.
-  ['facts/benchmarking', { dependencies: ['@jinn-network/benchmarking-records', '@jinn-network/record-discovery-protocol', '@jinn-network/trust-core'], devDependencies: ['@jinn-network/record-discovery-testing', '@jinn-network/task-execution-protocol'], optionalDependencies: [], peerDependencies: [] }],
   // facts/environments carries the one sanctioned edge between the discovery tree and the
   // environments record-kind tree (discovery design §12; supply design §3.3): protocol +
   // environment-record. It takes record-discovery-testing as a devDependency (the
   // facts-consistency conformance driver) plus the same shadow trust-core portal resolution
   // every protocol-consuming leaf needs for yarn's per-project resolution of protocol's
   // transitive trust-core dependency. environment-record has no Jinn dependency of its own,
-  // so unlike facts/benchmarking this leaf needs no second shadow entry.
+  // so this leaf needs no second shadow entry.
   ['facts/environments', { dependencies: ['@jinn-network/environment-record', '@jinn-network/record-discovery-protocol'], devDependencies: ['@jinn-network/record-discovery-testing', '@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
   // facts/chain-environments carries the one sanctioned edge between the discovery tree and the
   // chain-environment record-kind tree (discovery design §12; chain design §3): protocol +

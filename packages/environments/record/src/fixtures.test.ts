@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  environmentFixtureUrl,
   loadAdversarialManifest,
   loadEquivalenceExpectedDigest,
   loadEquivalenceInput,
@@ -27,6 +28,27 @@ const INVALID = [
   "bare-extension-key",
   "bare-hex-manifest-digest",
 ] as const;
+
+describe("fixture paths", () => {
+  test("resolve a relative path inside fixtures/", () => {
+    const root = new URL("../fixtures/", import.meta.url).href;
+    expect(environmentFixtureUrl("environment/imported.json").href)
+      .toBe(`${root}environment/imported.json`);
+  });
+
+  test("refuse a path that escapes fixtures/", () => {
+    expect(() => environmentFixtureUrl("/etc/passwd")).toThrow();
+    expect(() => environmentFixtureUrl("../package.json")).toThrow();
+    expect(() => environmentFixtureUrl("environment/../../package.json")).toThrow();
+    // WHATWG URL resolves these as double-dot path segments, so a textual ".." scan misses
+    // them and the guard has to be on the resolved url instead.
+    expect(() => environmentFixtureUrl("environment/%2e%2e/%2e%2e/package.json")).toThrow();
+    expect(() => environmentFixtureUrl("environment/%2E%2E/%2E%2E/package.json")).toThrow();
+    expect(() => environmentFixtureUrl("environment/.%2e/.%2e/package.json")).toThrow();
+    expect(() => environmentFixtureUrl("file:///etc/passwd")).toThrow();
+    expect(() => environmentFixtureUrl("https://example.invalid/x")).toThrow();
+  });
+});
 
 describe("fixtures", () => {
   test.each(GOLDEN)("golden %s parses and re-seals to its pinned digest", async (name) => {

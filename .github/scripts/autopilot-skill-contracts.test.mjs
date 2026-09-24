@@ -47,6 +47,26 @@ function fixChildInvocations() {
 // the autopilot-runtime verb roster.
 const FIX_CHILD_VERBS = new Set(["checkpoint", "child-complete", "human"]);
 
+/**
+ * Every mention of a roster verb anywhere in the skill -- the fenced
+ * invocations and the bare `session <verb>` prose of the Method section alike
+ * -- with the flags written after it. Only roster verbs are scanned, so a
+ * prose reference to another session's verb (`session
+ * implementation-complete`) is not read. The flag capture stops at a backtick
+ * (the end of an inline code span) or a newline. Residual: a flag separated
+ * from its verb by a prose line wrap inside one code span is not seen; nothing
+ * in the skill writes that.
+ */
+function rosterVerbMentions(text) {
+  const mentions = text.matchAll(
+    /\bsession\s+(checkpoint|child-complete|human)(?![\w-])([^\n`]*)/gu,
+  );
+  return [...mentions].map((m) => ({
+    verb: m[1],
+    flags: [...m[2].matchAll(/--[a-z][a-z-]*/gu)].map((f) => f[0]),
+  }));
+}
+
 test("fix-child invokes only its three roster verbs", () => {
   const invoked = new Set(fixChildInvocations().map((i) => i.verb));
   for (const verb of invoked) {
@@ -96,6 +116,27 @@ test("fix-child invents no verb flag", () => {
       assert.ok(
         allowed.has(flag),
         `\`session ${verb}\` takes no ${flag}; do not document one`,
+      );
+    }
+  }
+});
+
+// Issue #3650: the pins above read only `autopilot session <verb>`
+// invocations, but the Method section instructs its verb calls in bare
+// `session <verb>` prose, so a flag documented there was invisible to them.
+test("fix-child documents no flag its roster verbs lack, in prose or in the fence", () => {
+  // Controls: the scanner sees a prose-form flag, and ignores a non-roster verb.
+  assert.deepEqual(
+    rosterVerbMentions("Finish with `session child-complete --summary-file <path>` (x)"),
+    [{ verb: "child-complete", flags: ["--summary-file"] }],
+  );
+  assert.deepEqual(rosterVerbMentions("written by `session implementation-complete --foo`"), []);
+
+  for (const { verb, flags } of rosterVerbMentions(fixChildJoined)) {
+    for (const flag of flags) {
+      assert.ok(
+        FIX_CHILD_VERB_FLAGS.get(verb).has(flag),
+        `fix-child documents \`session ${verb} ${flag}\`, which the verb does not accept`,
       );
     }
   }

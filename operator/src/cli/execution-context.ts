@@ -5,7 +5,7 @@
 
 import type { PublicClient } from 'viem';
 import type { WalletClient } from 'viem';
-import { loadConfig, getConfigPathFromArgs, type JinnConfig } from '../config.js';
+import { loadConfig, requireConfigPathFromArgvSources, type JinnConfig } from '../config.js';
 import { getChainConfig, type ChainConfig } from '../earning/contracts.js';
 import { getJinnRouterAddress } from '../contracts/addresses.js';
 import { FleetStateStore } from '../earning/store.js';
@@ -53,7 +53,7 @@ export interface CliExecutionContext extends CliSignerContext {
 }
 
 function mergeArgvForConfig(argv?: string[]): string | undefined {
-  return getConfigPathFromArgs(argv ?? []) ?? getConfigPathFromArgs(process.argv.slice(2));
+  return requireConfigPathFromArgvSources(argv ?? []);
 }
 
 export function pickPrimaryMechService(services: ServiceState[]): ServiceState | undefined {
@@ -85,7 +85,23 @@ async function buildCliSignerContext(
     };
   }
 
-  const config = loadConfig(mergeArgvForConfig(opts.argv));
+  let configPath: string | undefined;
+  try {
+    configPath = mergeArgvForConfig(opts.argv);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return {
+      ok: false,
+      envelope: {
+        code: 'invalid_invocation',
+        message,
+        hint: 'Pass a config path or omit --config.',
+        exampleCli: 'jinn tasks submit --id x --description "…" --solver-net prediction --yes',
+        details: { field: 'config' },
+      },
+    };
+  }
+  const config = loadConfig(configPath);
 
   // D0a P3 (#525/#562/#897): every context built from this shared function
   // hands the caller live signer key material (`masterWallet`, and

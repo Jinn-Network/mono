@@ -31,14 +31,21 @@ The self-serve source is now split into Colophon-owned Tier 4 packages:
 
 - `@colophon-claims/cli` — the installable `colophon` command;
 - `@colophon-claims/core` — product operations and local composition;
-- `@colophon-claims/verify` — the smaller reader-only verifier;
+- `@colophon-claims/check` — the smaller reader-only checker;
 - `@colophon-claims/web` — private source/build input for the local UI.
 
-They are implemented but not published. Registry publication remains held until
-the `@colophon-claims` organization and publisher custody are established and
-the exact Jinn dependency set is available from npm. There is no hosted service,
-account, telemetry, billing, or remote publication. Product `publish` means
-local immutable bundle emission only.
+`@colophon-claims/check` is published to npm, `latest` `0.2.1`. The reader
+lines below therefore run straight from the registry; nothing has to be checked
+out to verify a received bundle.
+
+`@colophon-claims/cli` and `@colophon-claims/core` are implemented but not
+published. Demand-gated registry publication is recorded in DR-2026-08-22-a
+and `colophon-npm-publish.yml`; this tree does not publish them on push.
+`@colophon-claims/web` is private source/build input by design and is not for
+registry release.
+
+There is no hosted service, account, telemetry, billing, or remote publication.
+Product `publish` means local immutable bundle emission only.
 
 ## Cold public quickstart
 
@@ -50,12 +57,12 @@ npx @colophon-claims/cli@0.1
 
 It runs the bundled zero-credential comparison, retains its copied bundle and
 receipt, verifies the copy, and opens a verified loopback viewer. It is not yet
-a registry command because the packages have not been published.
+a registry command because `@colophon-claims/cli` has not been published.
 
 For a received bundle, the smaller reader surface is:
 
 ```bash
-npx @colophon-claims/verify@0.1 ./bundle
+npx @colophon-claims/check@0.2 ./bundle
 ```
 
 That line reads the bundle formats through public-bundle/6, and only the claims
@@ -67,12 +74,16 @@ per-format table in [`PUBLIC-BUNDLE.md`](PUBLIC-BUNDLE.md) covers the case where
 you have only `bundle.json`; the format string alone is not sufficient, because
 prompted-screening bundles pin a later line without changing their format.
 
+Reports sealed before the rename pin `@colophon-claims/verify`. That name stays
+published permanently as a passthrough alias onto `@colophon-claims/check`, so
+every sealed instruction keeps resolving.
+
 To verify a bundle with tools that are not ours, see
 [`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md).
 
 To import results another harness already produced, see
-[`EXTERNAL-RUN-IMPORT.md`](EXTERNAL-RUN-IMPORT.md). Publication of an
-imported run is refused pending issue #3417.
+[`EXTERNAL-RUN-IMPORT.md`](EXTERNAL-RUN-IMPORT.md). An imported run
+publishes as composed `/10` declaring `external-import`.
 
 The contributor proof remains available from the mono:
 
@@ -96,88 +107,34 @@ does not use the in-memory kit backend.
 
 ## Real Harbor publication rehearsal
 
-Before a release, run the opt-in external rehearsal in addition to the cold
-quickstart. It uses the operator-selected Harbor 0.21 executable and the local
-Docker daemon to run six real trials with Harbor's built-in `oracle` agent. The
-fixture is pinned to an immutable Ubuntu image, container networking is
-disabled, and no model API or model credential is used.
+The service launches Harbor on Colophon's venue.
 
-```bash
-cd packages/benchmark-product/core
-COLOPHON_PUBLICATION_RELEASE_HARBOR="$(command -v harbor)" \
-  yarn publication-release-rehearsal
-yarn public-quickstart
-```
+## Terminal-Bench 2.1
 
-The rehearsal fails unless registration is publicly retrievable before the
-first Submission reaches Harbor. It then requires all six Deliveries, complete
-Harbor Job/Trial evidence, pre-dispatch Accounting and Matrix v2, a signed
-Report v2, exact public `HEAD`/`GET` retrieval, and no Harbor invocation caused
-by publication. The first run may fetch the pinned container image. Set
-`COLOPHON_PUBLICATION_RELEASE_DOCKER` only when `docker` is not on `PATH`.
-Because this is an explicit local release gate, it is skipped by ordinary CI.
+The service launches Terminal-Bench 2.1 on Colophon's venue.
 
-## Terminal-Bench 2.1 `one_task` operator qualify
+## Terminal-Bench 3.0
 
-An operator-only campaign against the official Terminal-Bench 2.1 leaderboard
-pin with real Harbor 0.21, Docker, and two oracle arms. It proves protocol
-identity (`one_task`, conforming, not leaderboard-ready, Hub
-`inspection-upload`). It does not download the 89-task tree in CI and is not
-part of default `yarn test`. Procedure, receipt checklist, and the fail-closed
-`yarn tb21-one-task-qualify` gate:
-[docs/runbooks/tb21-official-one-task.md](../../docs/runbooks/tb21-official-one-task.md).
+The service launches Terminal-Bench 3.0 on Colophon's venue.
 
-## Terminal-Bench 3.0 `one_task` operator qualify
+## APEX-SWE-dev
 
-An operator-only campaign against the official Terminal-Bench 3.0 Hub pin
-with real Harbor 0.21, Docker, and two oracle arms. It proves protocol
-identity (`terminal-bench-3.0`, `one_task`, conforming, not
-leaderboard-ready, Hub `inspection-upload`). It does not download the full
-dataset in CI and is not part of default `yarn test`. Procedure and the
-fail-closed `yarn tb30-one-task-qualify` gate:
-[docs/runbooks/tb30-official-one-task.md](../../docs/runbooks/tb30-official-one-task.md).
+The service launches APEX-SWE-dev on Colophon's venue.
 
-## APEX-SWE-dev `one_task` operator qualify
+## DeepSWE v1.1
 
-An operator-only campaign against the public 50-task `mercor/APEX-SWE`
-HuggingFace pin with Mercor's own dual harness (`apx` for integration,
-`run_e2e.py` for observability), Docker, and one arm. It proves protocol
-identity (`one_task`, conforming, never leaderboard-ready, export
-`inspection-upload`); it never claims a Mercor APEX-SWE leaderboard row, which
-is the held-out 200. Unlike Terminal-Bench 2.1, the harness wrap runs on the
-operator host between lock and export — `run launch` refuses the
-`apex-swe-dev` adapter. It does not download the 2.08 GB dataset in CI and is
-not part of default `yarn test`. Procedure, receipt checklist, and the
-fail-closed `yarn apex-swe-dev-one-task-qualify` gate:
-[docs/runbooks/apex-swe-dev-official-one-task.md](../../docs/runbooks/apex-swe-dev-official-one-task.md).
+The service launches DeepSWE v1.1 on Colophon's venue.
 
-## DeepSWE v1.1 `one_task` operator qualify
+## Inspect eval
 
-An operator-only campaign against the git-pinned DeepSWE v1.1 `tasks/` tree
-with real Pier 0.3.1.x, Docker or Modal, and two `mini-swe-agent` arms. It
-proves protocol identity (`one_task`, conforming, not leaderboard-ready,
-Datacurve email export is inspection-only). It does not download the 113-task
-tree in CI and is not part of default `yarn test`. Procedure and the
-fail-closed `yarn deepswe-v1.1-one-task-qualify` gate:
-[docs/runbooks/deepswe-v1.1-official-one-task.md](../../docs/runbooks/deepswe-v1.1-official-one-task.md).
-
-## Inspect eval `one_task` operator qualify
-
-An operator-only campaign against an in-repo Inspect Task (`hermetic_eval`,
-samples `alpha` / `bravo`) with local Python and `inspect-ai==0.3.255`. It
-proves protocol identity (`one_task` = one sample, conforming, not eval
-complete, View export `inspection-upload`). It does not download GAIA, Cybench,
-or other large eval datasets, and is not part of default `yarn test`.
-Procedure, receipt checklist, and the fail-closed
-`yarn inspect-eval-one-task-qualify` gate:
-[docs/runbooks/inspect-eval-one-task.md](../../docs/runbooks/inspect-eval-one-task.md).
+The service launches Inspect eval on Colophon's venue.
 
 ## Product surfaces
 
 - [Installable CLI](./cli/README.md) — the no-argument sample and local viewer.
 - [Core](./core/README.md) — the operations library, complete agent surface,
   typed errors, authority, and real-venue behavior.
-- [Reader verifier](./verify/README.md) — the independent small install for a
+- [Reader checker](./check/README.md) — the independent small install for a
   person checking a received bundle.
 - [Private web app](./web/README.md) — the server-only human client, local
   configuration, routes, and production browser gate.
@@ -186,8 +143,8 @@ Procedure, receipt checklist, and the fail-closed
   limitations, and portable verification.
 - [External run-record import](./EXTERNAL-RUN-IMPORT.md) — the per-attempt
   record shape, both dump dialects, the closed import vocabulary, the
-  `--template` workflow, and why publication of an imported run is refused
-  pending issue #3417.
+  `--template` workflow, and how an imported run publishes as composed `/10`
+  declaring `external-import`.
 - [Inspect runtime](./INSPECT-RUNTIME.md) — optional real Inspect selection,
   execution, scorer attribution, native logs, and security limitations.
 - [Security and threat model](./SECURITY.md) — protected assets, boundaries,

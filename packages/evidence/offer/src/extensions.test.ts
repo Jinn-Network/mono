@@ -13,7 +13,13 @@ const UNRESERVED = /^[A-Za-z0-9\-._~]$/;
 // per-character spread this replaced allocated an array and ran a regex per octet, and the
 // reachability direction below runs it over every corpus member.
 const PATH_ILLEGAL = /[^A-Za-z0-9\-._~!$&'()*+,;=:@/%]/gu;
-const QUERY_ILLEGAL = /[^A-Za-z0-9\-._~!$&'()*+,;=:@/?%]/gu;
+// The query set drops `'` where the path and fragment sets keep it, because WHATWG's
+// special-query encode set contains U+0027 and its escape is therefore the only spelling the
+// implementation's round-trip check can accept. Not a symmetry to tidy away: `…/x'y` and
+// `…#a'b` both pass raw, so escaping `'` in either would state a normal form the
+// implementation never produces.
+const QUERY_ILLEGAL = /[^A-Za-z0-9\-._~!$&()*+,;=:@/?%]/gu;
+const FRAGMENT_ILLEGAL = /[^A-Za-z0-9\-._~!$&'()*+,;=:@/?%]/gu;
 
 function escapeIllegalRaw(value: string, illegal: RegExp): string {
   return value.replace(illegal, (character) =>
@@ -23,9 +29,17 @@ function escapeIllegalRaw(value: string, illegal: RegExp): string {
 /**
  * The normalized spelling of a WHATWG-stable URI, written independently of the implementation:
  * RFC 3986 §6.2.2 percent-escape normalization, §6.2.1 escaping of a raw octet the component's
- * grammar does not permit, empty-query and empty-fragment elision, and the DNS trailing-dot rule
- * where the host has a real label. WHATWG has already done the scheme and host case-folding, the
- * default port, and the dot segments by the time a string is stable.
+ * grammar does not permit, empty-query and empty-fragment elision, the DNS trailing-dot rule
+ * where the host has a real label, and the escaping of U+0027 in a query. WHATWG has already
+ * done the scheme and host case-folding, the default port, and the dot segments by the time a
+ * string is stable.
+ *
+ * That last rule is a policy the way the two before it are. This has never been a pure RFC
+ * oracle: RFC 3986 folds neither the trailing dot nor the empty delimiter, and both are here
+ * because they are what this package calls one identity. The apostrophe rule joins them, with
+ * the difference that this package did not choose it — WHATWG's special-query encode set did,
+ * and the round-trip check inherits it. Written here independently of the implementation, which
+ * is the only thing that makes the guarantee below testable rather than circular.
  */
 function normalizedSpelling(href: string): string {
   const url = new URL(href);
@@ -61,7 +75,7 @@ function normalizedSpelling(href: string): string {
       : `?${escapeIllegalRaw(normalizePercent(query), QUERY_ILLEGAL)}`)
     + (fragment === null || fragment === ""
       ? ""
-      : `#${escapeIllegalRaw(normalizePercent(fragment), QUERY_ILLEGAL)}`);
+      : `#${escapeIllegalRaw(normalizePercent(fragment), FRAGMENT_ILLEGAL)}`);
 }
 
 const HOSTS = ["r.example", "R.Example", "r.example.", "r.example..", ".", "..", "a.b.c", "a.b.c.", "127.0.0.1", "[::1]", ""];
@@ -126,10 +140,24 @@ function collectStable(
   }
 }
 
+// Spellings WHATWG rewrites, which is exactly why they cannot come from the sweep:
+// `collectStable` keeps a string only when it is its own `new URL(...).href`, so the corpus it
+// builds ranges over WHATWG's image and structurally cannot hold a preimage. Seeded raw here so
+// the reachability direction has something to carry to an accepted spelling. `'` is RFC-legal in
+// a query and `"` is RFC-legal nowhere, and both are seeded on purpose: the point is that the
+// seeding is about preimages generally rather than about the one octet this PR documents.
+const WHATWG_REWRITTEN_PREIMAGES = [
+  "https://r.example/x?a'b",
+  "ws://r.example/x?a'b",
+  "https://r.example/x?a'b#f",
+  "https://r.example/x?a\"b",
+];
+
 function stableUris(): readonly string[] {
   const stable = new Set<string>();
   collectStable(stable, USERINFOS, HOSTS, PORTS, AUTHORITY_SWEEP_PATHS, AUTHORITY_SWEEP_QUERIES, AUTHORITY_SWEEP_FRAGMENTS);
   collectStable(stable, COMPONENT_SWEEP_USERINFOS, COMPONENT_SWEEP_HOSTS, COMPONENT_SWEEP_PORTS, PATHS, QUERIES, FRAGMENTS);
+  for (const preimage of WHATWG_REWRITTEN_PREIMAGES) stable.add(preimage);
   return [...stable];
 }
 
@@ -184,5 +212,19 @@ describe("the normalized-identifier guarantee, under the special schemes", () =>
       if (!isNormalizedAbsoluteUri(normalized)) unspellable.push(`${href} -> ${normalized}`);
     }
     expect(unspellable).toEqual([]);
+  });
+
+  // The apostrophe class the docstring and the README both enumerate, stated as four assertions
+  // because prose is not a test. The sweeps above reach the first two through the seed; the
+  // path and fragment halves — the ones that make this a query-only rule rather than a rule
+  // about `'` — are reachable from nothing else here, so a later tightening of the raw-octet
+  // rule could falsify the enumeration with a green suite.
+  test.each([
+    ["refuses a raw apostrophe in a query", "https://r.example/v1?a'b", false],
+    ["accepts its escape, the accepted spelling of the same identifier", "https://r.example/v1?a%27b", true],
+    ["accepts a raw apostrophe in a path", "https://r.example/v1'x", true],
+    ["accepts a raw apostrophe in a fragment", "https://r.example/v1#a'b", true],
+  ])("%s", (_label, uri, accepted) => {
+    expect(isNormalizedAbsoluteUri(uri)).toBe(accepted);
   });
 });

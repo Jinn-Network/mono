@@ -21,6 +21,7 @@ const TASK_SUPPLY_PACKAGES = [
 // Cross-tree Jinn dependencies live outside packages/task-supply; map name -> absolute dir.
 const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/chain-environment-record', join(root, 'packages', 'environments', 'chain-record')],
+  ['@jinn-network/contract-abis', join(root, 'packages', 'contract-abis')],
   ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
   ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
@@ -120,6 +121,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     optionalDependencies: [], peerDependencies: [],
     // Test-only task-derivation still needs its portal closure in a standalone yarn project.
     portalResolutions: [
+      '@jinn-network/contract-abis',
       '@jinn-network/environment-record',
       '@jinn-network/evidence-protocol',
       '@jinn-network/task-admission',

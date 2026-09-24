@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, posix, resolve } from 'node:path';
 import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -36,7 +37,8 @@ export function listScriptTests(scriptsRoot = scriptsDir) {
 export function collectReferencedScriptTests(workflowsRoot = workflowsDir) {
   const referenced = new Set();
   for (const fileName of readdirSync(workflowsRoot).filter((name) => name.endsWith('.yml'))) {
-    const source = readFileSync(join(workflowsRoot, fileName), 'utf8');
+    // Whole-line comments are dropped first: a suite named only in prose is not wired (#4400).
+    const source = readFileSync(join(workflowsRoot, fileName), 'utf8').split('\n').map(withoutCommentLine).join('\n');
     for (const match of source.matchAll(/\.github\/scripts\/([A-Za-z0-9_.-]+\.test\.mjs)/gu)) {
       referenced.add(match[1]);
     }
@@ -73,12 +75,18 @@ const LIVE_TREE_FIXTURES = {
   'evidence-source-boundaries.test.mjs': ['packages/evidence/repository-ipfs/.jinn-ipfs-production-boundary-'],
   'observation-reader-gate-boundary.test.mjs': ['.github/scripts/.tmp-observation-reader-guard-'],
 };
-// Calls that materialise a path on disk. `writeFileSync` counts: a single in-checkout *file* is
-// just as invisible to `git ls-files --cached --others --exclude-standard` as a directory is.
-// Mapped to the index of the argument naming the path being *created*: `cpSync(from, to)` reads
-// its first argument, so only the second says where anything lands.
+// Calls that materialize a path on disk, mapped to the index of the argument naming the path
+// being *created*. Sync and async spellings create the same path. A single in-checkout *file* is
+// just as invisible to `git ls-files --cached --others --exclude-standard` as a directory is, and
+// so is one that a copy, append, rename, or link lands. The two-path calls (`cpSync(from, to)`,
+// `copyFile`, `rename`, `symlink(target, path)`, `link`) read or point at their first argument, so
+// only the second says where anything lands. A match counts only when that argument references a
+// checkout binding, which bounds the false positives a common name like `link(` could raise.
 const FIXTURE_CREATING_CALLS = new Map([
-  ['mkdtempSync', 0], ['mkdtemp', 0], ['mkdirSync', 0], ['mkdir', 0], ['writeFileSync', 0], ['cpSync', 1],
+  ['mkdtempSync', 0], ['mkdtemp', 0], ['mkdirSync', 0], ['mkdir', 0],
+  ['writeFileSync', 0], ['writeFile', 0], ['appendFileSync', 0], ['appendFile', 0],
+  ['cpSync', 1], ['cp', 1], ['copyFileSync', 1], ['copyFile', 1],
+  ['renameSync', 1], ['rename', 1], ['symlinkSync', 1], ['symlink', 1], ['linkSync', 1], ['link', 1],
 ]);
 
 /** Splits a call's argument text on its top-level commas. */
@@ -200,49 +208,115 @@ function callArgumentText(source, open) {
 const stringLiterals = (text) => [...text.matchAll(/'([^']*)'|"([^"]*)"/gu)]
   .map((literal) => literal[1] ?? literal[2]);
 
+// Every suite this gate scans lives here: `collectLiveTreeFixtures` reads only `scriptsDir`. A
+// binding's offset is therefore resolved from this directory.
+const SCANNED_SUITE_DIR = '.github/scripts';
+
+// The two spellings of "this file's directory" that live in this tree: the modern
+// `import.meta.dirname` and the older `dirname(fileURLToPath(import.meta.url))`, with or without
+// a `path.` namespace.
+const THIS_DIRECTORY = String.raw`(?:import\.meta\.dirname|(?:path\.)?dirname\(\s*fileURLToPath\(\s*import\.meta\.url\s*\)\s*\))`;
+
 /**
- * Identifiers bound at module scope to the repository root. A `root` bound inside a helper is
- * almost always a tmpdir fixture root; only a module-level `resolve(<this file's directory>, ...)`
- * reaches into the live checkout.
- *
- * Both spellings of "this file's directory" that live in this tree are accepted -- the modern
- * `import.meta.dirname` and the older `dirname(fileURLToPath(import.meta.url))`, which 17 suites
- * still use -- with an optional `export`. Recognising only one of them made the gate skip every
- * suite written in the other, silently: `findInCheckoutFixtureCalls` returns [] with no bindings,
- * so the fail-closed null-prefix path is never reached.
+ * A repo-root-relative path as segments; null when it leaves the checkout. Callers pass the
+ * output of `posix.join`, which normalizes: that is what keeps `join(scriptsDir, '..', 'x')`
+ * comparable with the declared `.github/x`.
  */
-export function findRepoRootBindings(source) {
-  const binding = /^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*resolve\(\s*(?:import\.meta\.dirname|dirname\(\s*fileURLToPath\(\s*import\.meta\.url\s*\)\s*\))/gmu;
-  return [...maskLiterals(source).matchAll(binding)].map((match) => match[1]);
+function checkoutSegments(normalized) {
+  if (normalized === '..' || normalized.startsWith('../') || normalized.startsWith('/')) return null;
+  return normalized.split('/').filter((segment) => segment !== '' && segment !== '.');
+}
+
+/**
+ * Identifiers bound at module scope to a directory of this checkout, each mapped to that
+ * directory's repo-root-relative segments, or to null where the binding cannot be resolved
+ * statically. A `root` bound inside a helper is almost always a tmpdir fixture root; only a
+ * module-level binding derived from this file's directory reaches into the live checkout.
+ *
+ * Accepted shapes, each with an optional `export`: `const x = resolve(<here>, ...)` and
+ * `const x = join(<here>, ...)`, with or without `path.`, and a bare `const x = <here>;`, where
+ * `<here>` is either spelling of this file's directory. `<here>` must be the whole first argument,
+ * and the arguments after it must each be one plain string literal; anything else (such as
+ * `<here> + '/sub'`), an absolute literal, or a result that escapes the checkout binds the name to
+ * null, which every call through it reports.
+ *
+ * This used to accept only `resolve(<here>, ...)` climbing to the repository root. That made the
+ * gate skip every suite that binds a checkout directory some other way -- `const scriptsDir =
+ * path.dirname(fileURLToPath(import.meta.url))`, with no root at all -- silently:
+ * `findInCheckoutFixtureCalls` returns [] with no bindings, so the fail-closed null-prefix path
+ * is never reached (#3240). Recognizing only one spelling of `<here>` failed the same way before.
+ */
+export function findCheckoutBindings(source) {
+  const masked = maskLiterals(source);
+  /** @type {Map<string, string[] | null>} */
+  const bindings = new Map();
+  const derived = new RegExp(
+    String.raw`^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:path\.)?(?:resolve|join)\(\s*${THIS_DIRECTORY}`,
+    'gmu',
+  );
+  const wholeDirectory = new RegExp(String.raw`^\s*${THIS_DIRECTORY}\s*$`, 'u');
+  for (const match of masked.matchAll(derived)) {
+    const open = masked.indexOf('(', match.index + match[0].indexOf('='));
+    const maskedArguments = callArgumentText(masked, open);
+    const rawArguments = callArgumentText(source, open);
+    const here = wholeDirectory.test(argumentAt(maskedArguments, rawArguments, 0).masked);
+    const rest = [];
+    for (let index = 1; index <= argumentBoundaries(maskedArguments).length; index += 1) {
+      rest.push(argumentAt(maskedArguments, rawArguments, index).raw.trim());
+    }
+    // Literals are read from the raw text: the masked copy blanks their contents.
+    const literal = /^(['"])([^'"]*)\1$/u;
+    const resolvable = rest.every((argument) => literal.test(argument) && !argument.slice(1).startsWith('/'));
+    bindings.set(
+      match[1],
+      here && resolvable
+        ? checkoutSegments(posix.join(SCANNED_SUITE_DIR, ...rest.map((argument) => argument.slice(1, -1))))
+        : null,
+    );
+  }
+  const bare = new RegExp(String.raw`^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*${THIS_DIRECTORY}\s*(?:;|$)`, 'gmu');
+  for (const match of masked.matchAll(bare)) bindings.set(match[1], checkoutSegments(SCANNED_SUITE_DIR));
+  return bindings;
 }
 
 /**
  * Calls that create a path under the repository root, each with the repo-root-relative prefix it
- * creates. `segments` is null when the path is not statically resolvable to string literals.
+ * creates. `segments` is null when the path is not statically resolvable to string literals, or
+ * when it resolves outside the checkout.
  *
  * Known limits, accepted and matching the style of the tree's other regex-based guards: the
- * scanner resolves one level of `const x = join(root, ...)` indirection but not two, does not
+ * scanner resolves one level of `const x = join(dir, ...)` indirection but not two, does not
  * follow a path through a function parameter or a template literal, reads only the calls in
- * FIXTURE_CREATING_CALLS, and sees only the two repo-root binding shapes findRepoRootBindings
- * accepts -- a suite that binds a checkout directory some other way (`const scriptsDir =
- * dirname(fileURLToPath(import.meta.url))`, with no repo root at all) is skipped. A new
+ * FIXTURE_CREATING_CALLS, and sees only the module-level checkout bindings findCheckoutBindings
+ * accepts. A directory reference used inline in a call rather than bound at module scope, a
+ * `new URL(..., import.meta.url)`, a function-local binding, a root imported from another
+ * module, or a spelling of this file's directory other than the two THIS_DIRECTORY names (such as
+ * `dirname(import.meta.filename)`, `` `${import.meta.dirname}/x` ``, or
+ * `import.meta.dirname ?? ...`) binds nothing, and a suite with none of the accepted bindings is
+ * skipped. A new
  * in-checkout fixture built in a shape outside those bounds is invisible to this gate, which is
  * why the rule is documented at the fixture site as well.
  */
 export function findInCheckoutFixtureCalls(source) {
-  const bindings = findRepoRootBindings(source);
-  if (bindings.length === 0) return [];
+  const bindings = findCheckoutBindings(source);
+  if (bindings.size === 0) return [];
   const masked = maskLiterals(source);
-  const rootReference = new RegExp(`\\b(?:${bindings.join('|')})\\b`, 'u');
+  const rootReference = new RegExp(`\\b(?:${[...bindings.keys()].join('|')})\\b`, 'u');
+  // The first of `names` a masked argument references; undefined when it references none.
+  const referenced = (names, maskedText) => names.find((name) => new RegExp(`\\b${name}\\b`, 'u').test(maskedText));
 
   // One level of indirection: `const dir = join(root, '.github', 'scripts', '.tmp-x-');` is the
   // house style in this directory, and reading only the fixture call's own parens would miss it.
-  /** @type {Map<string, string[]>} */
+  /** @type {Map<string, { offset: string[] | null, literals: string[] }>} */
   const pathBindings = new Map();
-  for (const match of masked.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:join|resolve)\(/gu)) {
+  for (const match of masked.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:path\.)?(?:join|resolve)\(/gu)) {
     const open = match.index + match[0].length - 1;
-    if (!rootReference.test(callArgumentText(masked, open))) continue;
-    pathBindings.set(match[1], stringLiterals(callArgumentText(source, open)));
+    const through = referenced([...bindings.keys()], callArgumentText(masked, open));
+    if (through === undefined) continue;
+    pathBindings.set(match[1], {
+      offset: bindings.get(through),
+      literals: stringLiterals(callArgumentText(source, open)),
+    });
   }
   const pathReference = pathBindings.size === 0
     ? null
@@ -256,12 +330,14 @@ export function findInCheckoutFixtureCalls(source) {
       const maskedTarget = argument.masked;
       const viaRoot = rootReference.test(maskedTarget);
       if (!viaRoot && !(pathReference && pathReference.test(maskedTarget))) continue;
-      const target = argument.raw;
-      const inherited = viaRoot
-        ? []
-        : pathBindings.get([...pathBindings.keys()].find((key) => new RegExp(`\\b${key}\\b`, 'u').test(maskedTarget))) ?? [];
-      const segments = [...inherited, ...stringLiterals(target)];
-      calls.push({ call: name, segments: segments.length > 0 ? segments : null });
+      const base = viaRoot
+        ? { offset: bindings.get(referenced([...bindings.keys()], maskedTarget)), literals: [] }
+        : pathBindings.get(referenced([...pathBindings.keys()], maskedTarget));
+      const literals = [...base.literals, ...stringLiterals(argument.raw)];
+      const segments = base.offset === null || literals.length === 0
+        ? null
+        : checkoutSegments(posix.join(...base.offset, ...literals));
+      calls.push({ call: name, segments: segments !== null && segments.length > 0 ? segments : null });
     }
   }
   return calls;
@@ -279,16 +355,50 @@ export function collectLiveTreeFixtures(scriptsRoot = scriptsDir) {
   return found;
 }
 
+/**
+ * `line`, or the empty string where the whole line is a YAML comment.
+ *
+ * Three reads match over prose otherwise. The two below: the invocation test sees a comment that
+ * merely mentions `node --test`, and the harvest takes every `*.test.mjs` the prose names. Together
+ * they mint an invocation that does not exist, and a phantom naming a LIVE_TREE_MUTATING_TESTS
+ * member reds the co-scheduling guard on nothing (#3149). Measured over the current workflows this
+ * drops exactly one line — a comment in `platform-architecture-control.yml` — and changes no
+ * surviving invocation's file list. The one above, `collectReferencedScriptTests`: a suite
+ * mentioned only in a comment satisfied the orphan gate, which is that gate's own fail-open
+ * direction (#4400). Measured over the current workflows the stripped harvest loses no reference.
+ *
+ * Whole-line comments only, deliberately, rather than a strip from the first whitespace-preceded
+ * `#` to end of line. That wider strip is quoting-unaware in the fail-OPEN direction: a `#` inside
+ * a quoted scalar takes the rest of its line with it, so `- run: echo " #" && node --test
+ * a.test.mjs b.test.mjs` comes back as no invocation at all — a live batch the co-scheduling guard
+ * cannot see, which is precisely what that guard exists to catch.
+ *
+ * The residual this shape keeps runs the other way: a trailing `# ...` comment still reads as code,
+ * so on a real `node --test` line its prose contributes any `*.test.mjs` names it spells, and on a
+ * line carrying no invocation at all it mints a whole phantom one — #3149's shape again, in the
+ * trailing-comment position rather than the whole-line one. Both over-report. Over-reporting can
+ * only red a batch that is co-scheduled on paper and not in fact; under-reporting greens one that
+ * is co-scheduled in fact. This gate takes the false red, which is why the narrower strip is the
+ * right one even though it leaves this behind. For the orphan harvest the same residual runs
+ * fail-open — a suite named only in a trailing comment on a code line still counts as referenced —
+ * and is accepted because nothing in the tree writes that shape and a second, wider strip private
+ * to the harvest would be a second definition of "comment" for it (#4400).
+ */
+function withoutCommentLine(line) {
+  return /^\s*#/u.test(line) ? '' : line;
+}
+
 export function collectTestInvocations(workflowsRoot = workflowsDir) {
   const invocations = [];
   for (const fileName of readdirSync(workflowsRoot).filter((name) => name.endsWith('.yml'))) {
     const lines = readFileSync(join(workflowsRoot, fileName), 'utf8').split('\n');
     for (let index = 0; index < lines.length; index += 1) {
-      if (!/\bnode\s+--test\b/u.test(lines[index])) continue;
+      if (!/\bnode\s+--test\b/u.test(withoutCommentLine(lines[index]))) continue;
       const files = [];
       let last = index;
       for (;;) {
-        for (const match of lines[last].matchAll(/([A-Za-z0-9_.-]+\.test\.mjs)/gu)) files.push(match[1]);
+        const code = withoutCommentLine(lines[last]);
+        for (const match of code.matchAll(/([A-Za-z0-9_.-]+\.test\.mjs)/gu)) files.push(match[1]);
         if (!lines[last].trimEnd().endsWith('\\') || last + 1 >= lines.length) break;
         last += 1;
       }
@@ -297,6 +407,120 @@ export function collectTestInvocations(workflowsRoot = workflowsDir) {
     }
   }
   return invocations;
+}
+
+/**
+ * Every `node --test` invocation hiding inside a folded (`>`) `run:` scalar, as
+ * `{ workflow, line }`.
+ *
+ * `collectTestInvocations` follows a multi-line invocation by its trailing `\`. A folded scalar
+ * has none — YAML joins the lines itself — so the walk stops after the first body line and the
+ * file list comes back missing everything else. That is a real co-scheduling violation the guard
+ * above cannot see: the invocation reads as a one-file batch no matter how many suites it actually
+ * runs.
+ *
+ * This refuses the shape rather than parsing it. Nothing in the tree writes it — the folded scalars
+ * it does carry include none with `node --test` — and a folded-scalar reader inside this guard
+ * would be a second YAML parser to keep honest for a shape that has never appeared (#3149).
+ *
+ * The body is every following line indented past the `run:` key itself, which is where both
+ * `run: >-` and `- run: >-` put it. The key may also be quoted, carry an anchor, or have its
+ * header alone on the following line (#4399); YAML folds every one of those to the same single
+ * command, so every one is refused. The key column is read from the matched prefix rather than
+ * `indexOf('run:')`, because a quoted key contains no `run:` substring.
+ *
+ * Three more shapes fold the same way (#4603): a tag, alone or after an anchor, between the key and
+ * the indicator (`run: !!str >-`); node properties on a next-line indicator (`&cmd >-`); and a plain
+ * or quoted scalar that continues onto a line indented past the key — inline (`run: node --test
+ * a.test.mjs` over an indented `b.test.mjs`) or as the body of a bare `run:`. YAML folds a plain
+ * scalar's lines exactly as it folds `>`, so a multi-line one carrying `node --test` is refused. A
+ * one-line plain scalar is a single command and is not.
+ *
+ * The header match takes an optional indentation indicator either side of the chomping indicator
+ * and an optional trailing comment, because YAML writes all of `>2`, `>2-`, `>-2` and `>- # ...`.
+ * A `>[-+]?`-only match read every one of those as an ordinary scalar and refused nothing, while
+ * `collectTestInvocations` under-read the body regardless — the hole this gate exists to close,
+ * behind a header a CI author may legally write (#3149). It over-matches a few headers YAML would
+ * reject (`>12`, `>-2-`); over-refusal is a false red on a shape nothing writes, and this gate
+ * takes the false red every time. `|` stays outside the match on purpose: a literal scalar keeps
+ * its newlines, so its second line is a separate command rather than a continuation.
+ */
+export function foldedTestInvocations(workflowsRoot = workflowsDir) {
+  const found = [];
+  for (const fileName of readdirSync(workflowsRoot).filter((name) => name.endsWith('.yml'))) {
+    const lines = readFileSync(join(workflowsRoot, fileName), 'utf8').split('\n');
+    for (let index = 0; index < lines.length; index += 1) {
+      const header = lines[index].match(/^(\s*(?:-\s+)?)(?:run|"run"|'run'):(?:\s*[&!]\S+)*\s*(>[-+]?\d*[-+]?)?\s*(?:#.*)?$/u);
+      // A plain or quoted scalar starting on the key line. Its first character is none of `|`, `>`,
+      // `#`, nor a node property, so this never overlaps the header match above (#4603).
+      const inline = header === null
+        ? lines[index].match(/^(\s*(?:-\s+)?)(?:run|"run"|'run'):(?:\s+[&!]\S+)*\s+([^\s|>#&!].*)$/u)
+        : null;
+      if (header === null && inline === null) continue;
+      // The key column comes from the matched prefix, not `indexOf('run:')`: a quoted key has no
+      // `run:` substring, and a column of -1 never ends the body walk (#4399).
+      const keyColumn = (header ?? inline)[1].length;
+      if (inline !== null) {
+        const line = plainScalarTestInvocation(lines, index + 1, keyColumn, [{ code: inline[2], line: index + 1 }]);
+        if (line !== null) found.push({ workflow: fileName, line });
+        continue;
+      }
+      let cursor = index + 1;
+      if (header[2] === undefined) {
+        // A bare `run:` (or `run: &anchor`) is a folded header only if the indicator sits alone on
+        // the next non-blank, non-comment line at or past the key's column — YAML skips a whole-line
+        // comment there exactly as it skips a blank. An indicator at the key's own column is
+        // parser-dependent (YAML 1.2 and js-yaml reject it; the libyaml family folds it), and this
+        // gate takes the false red over the under-read, so it is refused too (#4562). One less
+        // indented than the key is invalid everywhere. `|` there is a literal scalar and a mapping
+        // key there is the `defaults.run:` block; neither is refused (#4399). The indicator may carry
+        // its own node properties (`&cmd >-`, `!!str >-`), and anything else indented past the key
+        // is a plain scalar body, which folds exactly as `>` does (#4603).
+        while (cursor < lines.length && withoutCommentLine(lines[cursor]).trim() === '') cursor += 1;
+        if (cursor >= lines.length) continue;
+        const next = lines[cursor];
+        const nextColumn = next.match(/^\s*/u)[0].length;
+        if (!/^\s*(?:[&!]\S+\s+)*>[-+]?\d*[-+]?\s*(?:#.*)?$/u.test(next)) {
+          const scalarBody = nextColumn > keyColumn
+            && !/^\s*(?:[&!]\S+\s+)*\|/u.test(next)
+            && !/^\s*-(?:\s|$)/u.test(next)
+            && !/^\s*(?:[A-Za-z0-9_-]+|"[^"]*"|'[^']*'):(?:\s|$)/u.test(next);
+          const line = scalarBody ? plainScalarTestInvocation(lines, cursor, keyColumn, []) : null;
+          if (line !== null) found.push({ workflow: fileName, line });
+          continue;
+        }
+        if (nextColumn < keyColumn) continue;
+        cursor += 1;
+      }
+      for (; cursor < lines.length; cursor += 1) {
+        if (lines[cursor].trim() === '') continue;
+        if (lines[cursor].match(/^\s*/u)[0].length <= keyColumn) break;
+        if (/\bnode\s+--test\b/u.test(withoutCommentLine(lines[cursor]))) {
+          found.push({ workflow: fileName, line: cursor + 1 });
+          break;
+        }
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * The 1-based line of the first `node --test` in a plain (or quoted) `run:` scalar that spans more
+ * than one line, or `null`. `content` holds the part already on the key line, if any; the body is
+ * every following non-blank, non-comment line indented past the key, which YAML folds into the same
+ * single command. A one-line scalar is one command and is left to `collectTestInvocations` (#4603).
+ */
+function plainScalarTestInvocation(lines, start, keyColumn, content) {
+  const body = [...content];
+  for (let cursor = start; cursor < lines.length; cursor += 1) {
+    const code = withoutCommentLine(lines[cursor]);
+    if (code.trim() === '') continue;
+    if (code.match(/^\s*/u)[0].length <= keyColumn) break;
+    body.push({ code, line: cursor + 1 });
+  }
+  if (body.length < 2) return null;
+  return body.find(({ code }) => /\bnode\s+--test\b/u.test(code))?.line ?? null;
 }
 
 export function findOrphanedScriptTests(scriptsRoot = scriptsDir, workflowsRoot = workflowsDir) {
@@ -320,7 +544,49 @@ test('every .github/scripts/*.test.mjs is referenced by at least one workflow', 
 });
 
 test('findOrphanedScriptTests detects a planted orphan', () => {
-  assert.deepEqual(findOrphanedScriptTests(scriptsDir, workflowsDir), []);
+  const scriptsRoot = mkdtempSync(join(tmpdir(), 'jinn-planted-orphan-scripts-'));
+  const workflowsRoot = mkdtempSync(join(tmpdir(), 'jinn-planted-orphan-workflows-'));
+  try {
+    writeFileSync(join(scriptsRoot, 'wired.test.mjs'), '');
+    writeFileSync(join(scriptsRoot, 'orphan.test.mjs'), '');
+    writeFileSync(join(workflowsRoot, 'w.yml'), [
+      'jobs:',
+      '  verify:',
+      '    steps:',
+      '      - run: node --test .github/scripts/wired.test.mjs',
+      '',
+    ].join('\n'));
+    assert.deepEqual(findOrphanedScriptTests(scriptsRoot, workflowsRoot), ['orphan.test.mjs']);
+  } finally {
+    rmSync(scriptsRoot, { recursive: true, force: true });
+    rmSync(workflowsRoot, { recursive: true, force: true });
+  }
+});
+
+// The harvest matched `*.test.mjs` over raw workflow source, comments included, so a suite named
+// only in a workflow's prose counted as referenced and the orphan gate greened on it — fail-open in
+// the gate's own direction. Whole-line comments are stripped before the harvest now (#4400); a
+// name in a trailing `# ...` comment on a code line still counts, the accepted residual documented
+// on `withoutCommentLine`.
+test('a suite named only in a workflow comment is still an orphan', () => {
+  const scriptsRoot = mkdtempSync(join(tmpdir(), 'jinn-orphan-scripts-'));
+  const workflowsRoot = mkdtempSync(join(tmpdir(), 'jinn-orphan-workflows-'));
+  try {
+    writeFileSync(join(scriptsRoot, 'planted.test.mjs'), '');
+    writeFileSync(join(scriptsRoot, 'live.test.mjs'), '');
+    writeFileSync(join(workflowsRoot, 'w.yml'), [
+      'jobs:',
+      '  verify:',
+      '    steps:',
+      '      # planted.test.mjs runs elsewhere',
+      '      - run: node --test .github/scripts/live.test.mjs',
+      '',
+    ].join('\n'));
+    assert.deepEqual(findOrphanedScriptTests(scriptsRoot, workflowsRoot), ['planted.test.mjs']);
+  } finally {
+    rmSync(scriptsRoot, { recursive: true, force: true });
+    rmSync(workflowsRoot, { recursive: true, force: true });
+  }
 });
 
 test('a suite that mutates the checked-out tree never shares a node --test invocation', () => {
@@ -346,6 +612,229 @@ test('collectTestInvocations reads the platform-release-surface lists', () => {
     lists.some((files) => files.length === 1 && LIVE_TREE_MUTATING_TESTS.has(files[0])),
     'expected the live-tree-mutating suite to own an invocation',
   );
+});
+
+// A `#` opens a YAML comment, and the harvest matches `*.test.mjs` anywhere on a line — prose
+// included. A comment that merely mentions `node --test` and names some suites therefore minted an
+// invocation that does not exist. That is not cosmetic: if one of the named files is in
+// LIVE_TREE_MUTATING_TESTS, the co-scheduling guard above reds on a phantom (#3149).
+test('collectTestInvocations ignores a node --test named in a YAML comment', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-workflow-comment-'));
+  try {
+    writeFileSync(join(fixture, 'commented.yml'), [
+      'jobs:',
+      '  verify:',
+      '    steps:',
+      '      # A suite co-scheduled by `node --test` reads a.test.mjs and b.test.mjs',
+      '      - run: node --test c.test.mjs',
+      '',
+    ].join('\n'));
+    assert.deepEqual(collectTestInvocations(fixture), [
+      { workflow: 'commented.yml', files: ['c.test.mjs'] },
+    ]);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+// A `#` inside a quoted scalar does not open a YAML comment. Stripping from the first
+// whitespace-preceded `#` took the rest of the line with it, so a real multi-suite invocation came
+// back as no invocation at all — a live batch invisible to the co-scheduling guard above, which is
+// the fail-open direction that guard exists to close (#3149).
+test('collectTestInvocations reads a node --test line whose quoted scalar holds a #', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-workflow-quoted-hash-'));
+  try {
+    writeFileSync(join(fixture, 'quoted.yml'), [
+      'jobs:',
+      '  verify:',
+      '    steps:',
+      '      - run: echo " #" && node --test live-a.test.mjs live-b.test.mjs',
+      '',
+    ].join('\n'));
+    assert.deepEqual(collectTestInvocations(fixture), [
+      { workflow: 'quoted.yml', files: ['live-a.test.mjs', 'live-b.test.mjs'] },
+    ]);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test('no node --test invocation hides in a folded run scalar', () => {
+  const folded = foldedTestInvocations();
+  if (folded.length === 0) return;
+  assert.fail(
+    `Found ${folded.length} node --test invocation(s) inside a folded run scalar:\n`
+    + folded.map(({ workflow, line }) => `- ${workflow}:${line}`).join('\n')
+    + '\nA folded scalar carries no trailing `\\`, so collectTestInvocations stops after the first '
+    + 'body line and the invocation reads as a one-file batch however many suites it runs — which '
+    + 'hides a co-scheduling violation from the guard above. Use `run: |`, or put the invocation '
+    + 'on one line.',
+  );
+});
+
+test('a folded run scalar hiding node --test is detected, and shows why it must be', () => {
+  // Every header shape YAML lets a folded scalar carry: bare, either chomping indicator, an
+  // explicit indentation indicator, both indicators in either order, and a trailing comment. The
+  // narrower `>[-+]?` match this replaces read `>2`, `>2-`, `>-2` and `>- # ...` as ordinary
+  // scalars, so the refusal returned nothing on them while `collectTestInvocations` still under-read
+  // the body as a one-file batch — the exact hole this gate exists to close, behind a header a CI
+  // author may legally write (#3149).
+  for (const header of ['>', '>-', '>+', '>2', '>2-', '>-2', '>- # folded onto one line']) {
+    const fixture = mkdtempSync(join(tmpdir(), 'jinn-workflow-folded-'));
+    try {
+      writeFileSync(join(fixture, 'folded.yml'), [
+        'jobs:',
+        '  verify:',
+        '    steps:',
+        `      - run: ${header}`,
+        '          node --test x.test.mjs',
+        '          y.test.mjs',
+        '',
+      ].join('\n'));
+      assert.deepEqual(foldedTestInvocations(fixture), [{ workflow: 'folded.yml', line: 5 }], header);
+      // The damage the refusal exists for, on the same fixture: the invocation is found, but the
+      // second suite is invisible, so the co-scheduling guard reads a two-suite batch as a one-suite
+      // one and passes it.
+      assert.deepEqual(collectTestInvocations(fixture), [
+        { workflow: 'folded.yml', files: ['x.test.mjs'] },
+      ], header);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  }
+});
+
+// Three more places YAML lets the folded header sit, each of which the `run:`-line-anchored match
+// read as an ordinary scalar while `collectTestInvocations` still under-read the body as a one-file
+// batch: the header on the line after a bare `run:`, an anchor between key and header, and a quoted
+// key (#4399). Each fixture asserts the refusal and the under-read it exists for. The next-line
+// header may also sit behind a whole-line comment, which YAML skips exactly as it skips a blank
+// line, or at the key's own column, which the libyaml parser family folds (#4562). The quoted key
+// is the load-bearing one: it contains no `run:` substring, so a key column taken by `indexOf`
+// came back -1 and the body walk never stopped — a `node --test` anywhere later in the file would
+// have reported as folded. The last negative below pins that: a quoted-key body without
+// `node --test` followed by a dedented step that has one must report nothing.
+test('a folded run scalar is refused with its header on the next line, behind an anchor, or under a quoted key', () => {
+  const shapes = [
+    { name: 'next-line header', header: ['      - run:', '          >-'], line: 6 },
+    { name: 'comment, next-line header', header: ['      - run:', '          # note', '          >-'], line: 7 },
+    { name: 'next-line header at the key column', header: ['      - run:', '        >-'], line: 6 },
+    { name: 'anchor before header', header: ['      - run: &cmd >-'], line: 5 },
+    { name: 'anchor, next-line header', header: ['      - run: &cmd', '          >-'], line: 6 },
+    { name: 'double-quoted key', header: ['      - "run": >-'], line: 5 },
+    { name: 'single-quoted key', header: ["      - 'run': >-"], line: 5 },
+  ];
+  for (const { name, header, line } of shapes) {
+    const fixture = mkdtempSync(join(tmpdir(), 'jinn-workflow-folded-placement-'));
+    try {
+      writeFileSync(join(fixture, 'folded.yml'), [
+        'jobs:',
+        '  verify:',
+        '    steps:',
+        ...header,
+        '          node --test x.test.mjs',
+        '          y.test.mjs',
+        '',
+      ].join('\n'));
+      assert.deepEqual(foldedTestInvocations(fixture), [{ workflow: 'folded.yml', line }], name);
+      assert.deepEqual(collectTestInvocations(fixture), [
+        { workflow: 'folded.yml', files: ['x.test.mjs'] },
+      ], name);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  }
+
+  // A bare `run:` is not a folded header by itself. Followed by a literal indicator it is a
+  // literal scalar, and followed by a mapping it is the `defaults.run:` block the tree writes
+  // thirty times today; neither is refused.
+  for (const { name, lines } of [
+    { name: 'bare run: then literal', lines: ['      - run:', '          |', '          node --test x.test.mjs', '          y.test.mjs'] },
+    { name: 'defaults.run mapping', lines: ['defaults:', '  run:', '    shell: bash', 'jobs:', '  verify:', '    steps:', '      - run: node --test x.test.mjs y.test.mjs'] },
+    { name: 'quoted-key body ends before a dedented step', lines: ['jobs:', '  verify:', '    steps:', '      - "run": >-', '          echo hi', '      - run: node --test a.test.mjs'] },
+  ]) {
+    const fixture = mkdtempSync(join(tmpdir(), 'jinn-workflow-folded-negative-'));
+    try {
+      writeFileSync(join(fixture, 'plain.yml'), [...lines, ''].join('\n'));
+      assert.deepEqual(foldedTestInvocations(fixture), [], name);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  }
+});
+
+// Three more shapes YAML folds into one command that the header match did not refuse (#4603): a
+// tag between key and indicator, node properties on the next-line indicator, and a plain or quoted
+// scalar continued onto a more-indented line — inline or under a bare `run:`. A plain multi-line
+// scalar folds exactly like `>`, so `collectTestInvocations` under-reads it the same way.
+test('a tagged header, a propertied next-line indicator, and a multi-line plain scalar are refused', () => {
+  const shapes = [
+    { name: 'tag before header', lines: ['      - run: !!str >-', '          node --test x.test.mjs', '          y.test.mjs'], line: 5 },
+    { name: 'anchor and tag before header', lines: ['      - run: &cmd !!str >-', '          node --test x.test.mjs', '          y.test.mjs'], line: 5 },
+    { name: 'anchor on the next-line indicator', lines: ['      - run:', '          &cmd >-', '          node --test x.test.mjs', '          y.test.mjs'], line: 6 },
+    { name: 'tag on the next-line indicator', lines: ['      - run:', '          !!str >-', '          node --test x.test.mjs', '          y.test.mjs'], line: 6 },
+    { name: 'inline plain scalar', lines: ['      - run: node --test x.test.mjs', '          y.test.mjs'], line: 4 },
+    { name: 'inline plain scalar, invocation on the continuation', lines: ['      - run: cd operator &&', '          node --test x.test.mjs y.test.mjs'], line: 5 },
+    { name: 'inline double-quoted scalar', lines: ['      - run: "node --test x.test.mjs', '          y.test.mjs"'], line: 4 },
+    { name: 'named step, inline plain scalar', lines: ['      - name: Test', '        run: node --test x.test.mjs', '          y.test.mjs'], line: 5 },
+    { name: 'bare run: then plain lines', lines: ['      - run:', '          node --test x.test.mjs', '          y.test.mjs'], line: 5 },
+  ];
+  for (const { name, lines, line } of shapes) {
+    const fixture = mkdtempSync(join(tmpdir(), 'jinn-workflow-folded-shape-'));
+    try {
+      writeFileSync(join(fixture, 'folded.yml'), ['jobs:', '  verify:', '    steps:', ...lines, ''].join('\n'));
+      assert.deepEqual(foldedTestInvocations(fixture), [{ workflow: 'folded.yml', line }], name);
+      assert.equal(collectTestInvocations(fixture).flatMap(({ files }) => files).includes('y.test.mjs'), name.includes('continuation'), name);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  }
+
+  // A one-line plain scalar is one command, and a bare `run:` over a single plain line folds
+  // nothing; a mapping or a literal under a bare `run:` is not a scalar body at all.
+  for (const { name, lines } of [
+    { name: 'single-line plain run', lines: ['      - run: node --test x.test.mjs y.test.mjs', '        env:', '          A: b', '      - run: node --test z.test.mjs'] },
+    { name: 'named single-line plain run', lines: ['      - name: Test', '        run: node --test x.test.mjs', '        env:', '          A: b'] },
+    { name: 'bare run: over one plain line', lines: ['      - run:', '          node --test x.test.mjs y.test.mjs', '      - run: echo hi'] },
+    { name: 'multi-line plain scalar without node --test', lines: ['      - run: echo one', '          two', '      - run: node --test z.test.mjs'] },
+    { name: 'tagged literal', lines: ['      - run: !!str |', '          node --test x.test.mjs', '          node --test y.test.mjs'] },
+    { name: 'bare run: then tagged literal', lines: ['      - run:', '          !!str |', '          node --test x.test.mjs', '          node --test y.test.mjs'] },
+    { name: 'defaults.run mapping', lines: ['  defaults:', '    run:', '      shell: bash', '      working-directory: operator'] },
+  ]) {
+    const fixture = mkdtempSync(join(tmpdir(), 'jinn-workflow-folded-shape-negative-'));
+    try {
+      writeFileSync(join(fixture, 'plain.yml'), ['jobs:', '  verify:', '    steps:', ...lines, ''].join('\n'));
+      assert.deepEqual(foldedTestInvocations(fixture), [], name);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  }
+});
+
+// A literal (`|`) scalar carries the same body shape and must NOT be refused. YAML keeps its
+// newlines, so `node --test x.test.mjs` and the line under it are two separate commands rather than
+// one folded invocation — which is exactly what the reader above already reports. Refusing it would
+// red a shape that is correct.
+test('a literal run scalar is not refused as folded', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-workflow-literal-'));
+  try {
+    writeFileSync(join(fixture, 'literal.yml'), [
+      'jobs:',
+      '  verify:',
+      '    steps:',
+      '      - run: |',
+      '          node --test x.test.mjs',
+      '          node --test y.test.mjs',
+      '',
+    ].join('\n'));
+    assert.deepEqual(foldedTestInvocations(fixture), []);
+    assert.deepEqual(collectTestInvocations(fixture), [
+      { workflow: 'literal.yml', files: ['x.test.mjs'] },
+      { workflow: 'literal.yml', files: ['y.test.mjs'] },
+    ]);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
 });
 
 test('every in-checkout fixture is declared, dot-prefixed, and gitignored', () => {
@@ -397,7 +886,7 @@ test('the in-checkout fixture detector reads repo-root bindings, not tmpdir ones
     "const root = resolve(import.meta.dirname, '../..');",
     "const dir = mkdtempSync(join(root, '.github', 'scripts', '.tmp-guard-'));",
   ].join('\n');
-  assert.deepEqual(findRepoRootBindings(inCheckout), ['root']);
+  assert.deepEqual([...findCheckoutBindings(inCheckout)], [['root', []]]);
   assert.deepEqual(findInCheckoutFixtureCalls(inCheckout), [
     { call: 'mkdtempSync', segments: ['.github', 'scripts', '.tmp-guard-'] },
   ]);
@@ -432,7 +921,7 @@ test('both repo-root binding spellings are recognized', () => {
     "const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');",
     "mkdtempSync(join(root, 'packages', 'tmp-new-fixture-'));",
   ].join('\n');
-  assert.deepEqual(findRepoRootBindings(viaFileUrl), ['root']);
+  assert.deepEqual([...findCheckoutBindings(viaFileUrl)], [['root', []]]);
   assert.deepEqual(findInCheckoutFixtureCalls(viaFileUrl), [
     { call: 'mkdtempSync', segments: ['packages', 'tmp-new-fixture-'] },
   ]);
@@ -442,14 +931,122 @@ test('both repo-root binding spellings are recognized', () => {
     "export const root = resolve(import.meta.dirname, '../..');",
     "mkdtempSync(join(root, 'packages', '.tmp-exported-'));",
   ].join('\n');
-  assert.deepEqual(findRepoRootBindings(exported), ['root']);
+  assert.deepEqual([...findCheckoutBindings(exported)], [['root', []]]);
   assert.deepEqual(
     findInCheckoutFixtureCalls(exported).map(({ segments }) => segments),
     [['packages', '.tmp-exported-']],
   );
 
   // A tmpdir root written in either spelling still binds nothing.
-  assert.deepEqual(findRepoRootBindings("const dir = resolve(tmpdir(), 'x');"), []);
+  assert.deepEqual([...findCheckoutBindings("const dir = resolve(tmpdir(), 'x');")], []);
+});
+
+test('a checkout-directory binding with no repo root is seen (#3240)', () => {
+  // `npm-publish-workflow.test.mjs` binds only its own directory. A fixture added from that
+  // template used to bind nothing, so the gate skipped the suite without reporting anything.
+  const scriptsOnly = [
+    'const scriptsDir = path.dirname(fileURLToPath(import.meta.url));',
+    "writeFileSync(path.join(scriptsDir, 'tmp-x-'), 'x');",
+  ].join('\n');
+  assert.deepEqual([...findCheckoutBindings(scriptsOnly)], [['scriptsDir', ['.github', 'scripts']]]);
+  assert.deepEqual(findInCheckoutFixtureCalls(scriptsOnly), [
+    { call: 'writeFileSync', segments: ['.github', 'scripts', 'tmp-x-'] },
+  ]);
+
+  // The binding's offset is carried through one level of indirection.
+  const indirect = [
+    'const here = resolve(import.meta.dirname);',
+    "const d = join(here, '.tmp-y-');",
+    'mkdirSync(d);',
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(indirect), [
+    { call: 'mkdirSync', segments: ['.github', 'scripts', '.tmp-y-'] },
+  ]);
+
+  // The reported prefix is normalized, so it stays comparable with a declared one.
+  const climbing = [
+    'const scriptsDir = join(import.meta.dirname);',
+    "mkdtempSync(join(scriptsDir, '..', 'tmp-z-'));",
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(climbing), [
+    { call: 'mkdtempSync', segments: ['.github', 'tmp-z-'] },
+  ]);
+
+  const bare = ['const here = import.meta.dirname;', "mkdirSync(join(here, '.tmp-w-'));"].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(bare), [
+    { call: 'mkdirSync', segments: ['.github', 'scripts', '.tmp-w-'] },
+  ]);
+});
+
+test('a checkout binding that escapes the root or is not literal fails closed', () => {
+  const escaping = [
+    "const up = resolve(import.meta.dirname, '../../..');",
+    "mkdirSync(join(up, 'a'));",
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(escaping), [{ call: 'mkdirSync', segments: null }]);
+
+  const dynamic = [
+    'const dyn = resolve(import.meta.dirname, name);',
+    "mkdirSync(join(dyn, 'a'));",
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(dynamic), [{ call: 'mkdirSync', segments: null }]);
+
+  const absolute = [
+    "const abs = resolve(import.meta.dirname, '/tmp');",
+    "mkdirSync(join(abs, 'a'));",
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(absolute), [{ call: 'mkdirSync', segments: null }]);
+
+  const outside = [
+    "const root = resolve(import.meta.dirname, '../..');",
+    "mkdirSync(join(root, '..', 'outside'));",
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(outside), [{ call: 'mkdirSync', segments: null }]);
+
+  // The directory must be the whole first argument; a concatenated suffix is not dropped.
+  const concatenated = [
+    "const x = resolve(import.meta.dirname + '/sub');",
+    "mkdirSync(join(x, 'tmp-a-'));",
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(concatenated), [{ call: 'mkdirSync', segments: null }]);
+
+  // A directory reference with no literal of its own still names nothing checkable.
+  const unnamed = [
+    'const scriptsDir = dirname(fileURLToPath(import.meta.url));',
+    'const fixture = mkdtempSync(`${scriptsDir}/tmp-interpolated-`);',
+  ].join('\n');
+  assert.deepEqual(findInCheckoutFixtureCalls(unnamed), [{ call: 'mkdtempSync', segments: null }]);
+});
+
+test('the async, append, copy, and link siblings of covered calls are seen (#3278)', () => {
+  const prelude = "const root = resolve(import.meta.dirname, '../..');";
+  const rows = [
+    ["await writeFile(join(root, 'packages', '.tmp-a-'), 'x');", 'writeFile'],
+    ["appendFileSync(join(root, 'packages', '.tmp-a-'), 'x');", 'appendFileSync'],
+    ["await appendFile(join(root, 'packages', '.tmp-a-'), 'x');", 'appendFile'],
+    ["await cp(src, join(root, 'packages', '.tmp-a-'));", 'cp'],
+    ["copyFileSync(src, join(root, 'packages', '.tmp-a-'));", 'copyFileSync'],
+    ["await copyFile(src, join(root, 'packages', '.tmp-a-'));", 'copyFile'],
+    ["renameSync(src, join(root, 'packages', '.tmp-a-'));", 'renameSync'],
+    ["await rename(src, join(root, 'packages', '.tmp-a-'));", 'rename'],
+    ["symlinkSync(src, join(root, 'packages', '.tmp-a-'));", 'symlinkSync'],
+    ["await symlink(src, join(root, 'packages', '.tmp-a-'));", 'symlink'],
+    ["linkSync(src, join(root, 'packages', '.tmp-a-'));", 'linkSync'],
+    ["await fsp.link(src, join(root, 'packages', '.tmp-a-'));", 'link'],
+  ];
+  for (const [callSource, call] of rows) {
+    assert.deepEqual(
+      findInCheckoutFixtureCalls(`${prelude}\n${callSource}`),
+      [{ call, segments: ['packages', '.tmp-a-'] }],
+      callSource,
+    );
+  }
+
+  // The two-path calls read their destination: a copy out of the checkout creates nothing in it.
+  assert.deepEqual(
+    findInCheckoutFixtureCalls(`${prelude}\ncopyFileSync(join(root, 'x'), join(tmpdir(), 'y'));`),
+    [],
+  );
 });
 
 test('the mask survives quotes inside regex literals and comments', () => {

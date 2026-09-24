@@ -8,6 +8,7 @@ const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Cross-tree + sibling portal dependencies (§7.8), packed in dependency order (leaves first) so
 // each archive's own "dependencies" field resolves against an already-packed sibling archive.
 const dependencyChain = [
+  ["@jinn-network/contract-abis", join(packageRoot, "..", "..", "contract-abis")],
   ["@jinn-network/task-execution-protocol", join(packageRoot, "..", "..", "task-execution", "protocol")],
   ["@jinn-network/task-execution-backend", join(packageRoot, "..", "..", "task-execution", "backend")],
   ["@jinn-network/task-execution-profiles", join(packageRoot, "..", "..", "task-execution", "profiles")],

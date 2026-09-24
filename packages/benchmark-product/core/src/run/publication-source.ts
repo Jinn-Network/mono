@@ -153,17 +153,21 @@ function sourceSigner(workspaceDir: string): DurableSourceSigner {
 /**
  * Reads the served well-known document's existing source entries.
  *
- * A document that cannot be read back as one is discarded rather than treated as fatal: it is
- * derived, an unreadable document is indistinguishable from an absent one to a consumer, and
- * every source's own next append rewrites its own entry. Refusing here would instead leave the
- * whole workspace permanently unable to refresh until someone deleted a derived file by hand.
+ * A document that is read but does not decode or parse as one is discarded rather than treated as
+ * fatal: it is derived, an unparseable document is indistinguishable from an absent one to a
+ * consumer, and every source's own next append rewrites its own entry. Refusing here would instead
+ * leave the whole workspace permanently unable to refresh until someone deleted a derived file by
+ * hand. A failure to *read* it is different (issue #3847): the bytes may be a good document listing
+ * other sources, and treating that as empty would overwrite it with this source's entry alone. Read
+ * errors propagate; the append path's refresh already swallows them and leaves the document
+ * untouched, and the serve path reports them as a failed refresh.
  */
 async function readWellKnownSources(
   blobs: { get(path: string): Promise<{ bytes: Uint8Array } | undefined> },
 ): Promise<readonly WellKnownSourceEntry[]> {
+  const stored = await blobs.get(WELL_KNOWN_PATH);
+  if (stored === undefined) return [];
   try {
-    const stored = await blobs.get(WELL_KNOWN_PATH);
-    if (stored === undefined) return [];
     return parseWellKnownDocument(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(stored.bytes))).sources;
   } catch {
     return [];

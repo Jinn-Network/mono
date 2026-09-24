@@ -2,7 +2,7 @@
 
 - **Version:** 0.6
 - **Date:** 2026-08-13
-- **Updated:** 2026-08-19 — §5.5 catalog list, `--n`, verb help, GUI catalog bind ([DR-2026-08-19](../log/decisions/2026-08-19-colophon-method-cli-discover.md)); 2026-08-18 — §5.5 one method operand ([DR-2026-08-18-f](../log/decisions/2026-08-18-colophon-method-cli.md)); §5.5 Inspect eval named protocol ([DR-2026-08-18-e](../log/decisions/2026-08-18-inspect-as-specified.md)); §5.5 DeepSWE v1.1 named protocol ([DR-2026-08-18-d](../log/decisions/2026-08-18-deep-swe-v1.1-official-suite.md)); §5.5 APEX-SWE-dev named protocol ([DR-2026-08-18-c](../log/decisions/2026-08-18-apex-swe-dev-official-suite.md)); §5.5 official APEX-Agents protocol ([DR-2026-08-18](../log/decisions/2026-08-18-apex-agents-official-suite.md)); §5.5 official TB 3.0 protocol ([DR-2026-08-18-b](../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md)); 2026-08-17 — first public npm cut may pin one exact stack-canary receipt ([DR-2026-08-17-c](../log/decisions/2026-08-17-colophon-first-cut-canary-pin.md)); §5.5 official SWE-bench Verified protocol ([DR-2026-08-17-e](../log/decisions/2026-08-17-swe-bench-verified-official-suite.md)); official TB 2.1 protocol vs “select a supported task” ([DR-2026-08-17-b](../log/decisions/2026-08-17-official-suite-protocol.md)); engine-wrap vs Harbor campaign ([DR-2026-08-17](../log/decisions/2026-08-17-runtime-engine-direct-mode.md)); 2026-08-14 qualification notes retained
+- **Updated:** 2026-09-19 — #4188: the reader package publishes as `@colophon-claims/check` (`colophon-check`); `@colophon-claims/verify` stays as a permanent passthrough alias. Historical `verify` names in this document are the name it shipped under. 2026-08-19 — §5.5 catalog list, `--n`, verb help, GUI catalog bind ([DR-2026-08-19](../log/decisions/2026-08-19-colophon-method-cli-discover.md)); 2026-08-18 — §5.5 one method operand ([DR-2026-08-18-f](../log/decisions/2026-08-18-colophon-method-cli.md)); §5.5 Inspect eval named protocol ([DR-2026-08-18-e](../log/decisions/2026-08-18-inspect-as-specified.md)); §5.5 DeepSWE v1.1 named protocol ([DR-2026-08-18-d](../log/decisions/2026-08-18-deep-swe-v1.1-official-suite.md)); §5.5 APEX-SWE-dev named protocol ([DR-2026-08-18-c](../log/decisions/2026-08-18-apex-swe-dev-official-suite.md)); §5.5 official APEX-Agents protocol ([DR-2026-08-18](../log/decisions/2026-08-18-apex-agents-official-suite.md)); §5.5 official TB 3.0 protocol ([DR-2026-08-18-b](../log/decisions/2026-08-18-terminal-bench-3-0-official-suite.md)); 2026-08-17 — first public npm cut may pin one exact stack-canary receipt ([DR-2026-08-17-c](../log/decisions/2026-08-17-colophon-first-cut-canary-pin.md)); §5.5 official SWE-bench Verified protocol ([DR-2026-08-17-e](../log/decisions/2026-08-17-swe-bench-verified-official-suite.md)); official TB 2.1 protocol vs “select a supported task” ([DR-2026-08-17-b](../log/decisions/2026-08-17-official-suite-protocol.md)); engine-wrap vs Harbor campaign ([DR-2026-08-17](../log/decisions/2026-08-17-runtime-engine-direct-mode.md)); 2026-08-14 qualification notes retained
 - **Status:** Accepted; implementation authorized 2026-08-13
 - **Decision owner:** Operator
 - **Design scope:** From a cold product-site visitor to a locally published, independently verified benchmark bundle
@@ -176,21 +176,31 @@ Do not add `--yes` to the human quickstart. npm's first-download confirmation is
 Success output starts with the answer:
 
 ```text
-Verified: 6 of 6 checks passed
+Recomputed: 6 of 6 checks passed
 Bundle: sha256:<bundle-id>
 Format: benchmark-product-public-bundle/2
 
-manifest                passed
-evidence-closure        passed
-trust                   passed
-matrix-rederivation     passed
-report-verification     passed
-claim-consistency       passed
+Not checked by this tool: whether the machine that produced this bundle was
+honest, and whether the compared identities are independent parties. What is
+recomputed is the bundle's integrity, evidence closure, signing trust,
+calculations, the report, and claim consistency — against the bytes the
+bundle carries, nothing else.
 
-This checks the bundle's integrity, evidence closure, calculations, report,
-and claim consistency. It does not prove that the machine that produced the
-bundle was honest or that the compared identities are independent parties.
+manifest                  passed       every listed file is here, unaltered
+evidence-closure          passed       every run's evidence is carried here
+trust                     passed       the signing keys match the identities
+matrix-rederivation       passed       the run tally follows from the evidence
+report-verification       passed       the result follows from the runs
+claim-consistency         passed       the claim agrees with the records here
+
+Signed by
+  publisher · 1 key
+    key sha256:<publisher-key-fingerprint> — no domain bound
+  automated grader — same operator · 1 key
+
 No files were uploaded.
+Protocol identifiers are names, not addresses — this verifier fetches nothing
+from them. Checks run against the exact platform bytes installed from npm.
 ```
 
 `--json` remains stable for automation and returns the six canonical checks plus verifier version, accepted format, bundle identity, and failure details. Human output uses plain language; machine output does not mix with progress messages.
@@ -265,14 +275,10 @@ The last lines state what happened and what did not:
 ```text
 Published locally; nothing was uploaded.
 Bundle: <absolute-path>/bundle
+Receipt: <absolute-path>/quickstart-receipt.json
 Identity: sha256:<bundle-id>
-Verified: 6 of 6 checks passed
-
-Check it again:
-  npx @colophon-claims/verify@0.1 <absolute-path>/bundle
-
-Use your own work:
-  colophon open
+Recomputed: 6 of 6 checks passed
+Complete comparison; no comparative winner stated.
 ```
 
 Progress goes to stderr and is concise: preflight, sample preparation, two arms, report, local publication, copied-bundle verification. There is no spinner-only state; long steps show the current arm/cell and elapsed time without inventing an ETA.

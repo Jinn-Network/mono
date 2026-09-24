@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, realpathSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -204,7 +204,11 @@ export function loadAndValidateTransitionManifest(path, options) {
   return manifest;
 }
 
-if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   const repoRoot = resolve(import.meta.dirname, '../..');
   const paths = process.argv.slice(2);
   if (paths.length === 0) throw new Error('usage: node transition-manifest.mjs <manifest.json> [...]');

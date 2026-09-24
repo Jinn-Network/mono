@@ -26,7 +26,7 @@ its own manifest and by the digests quoted below, so it is never retro-edited,
 and the current schema is not loosened to admit it. For a bundle in the
 current format that the shipped verifier accepts, use the conformance kit's
 golden fixture at
-`packages/benchmark-product/verify/fixtures/public-bundle-conformance-v1/golden/`.
+`packages/benchmark-product/check/fixtures/public-bundle-conformance-v1/golden/`.
 
 A separate opt-in external-provider check is recorded in [luna-smoke.md](luna-smoke.md). That smoke used Luna through Inspect directly and deliberately does not claim that the Benchmark Product forwards provider credentials.
 

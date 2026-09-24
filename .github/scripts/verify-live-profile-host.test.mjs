@@ -312,6 +312,18 @@ test('happy path: the host serves the attested manifest, every document and a ve
   assert.equal(canonicalJsonBytes(result.receipt), canonicalJsonBytes(result.receipt));
 });
 
+test('lane-free hosted bytes pass the stable live-host gate at the same SHA', async () => {
+  const fixture = realFixture();
+  assert.equal('lane' in fixture.manifest, false);
+  const result = await verifyLiveProfileHost(runArgs(fixture, {
+    lane: 'stable',
+    receipt: { ...fixture.receipt, lane: 'stable' },
+  }));
+  assert.equal(result.ok, true, result.reason);
+  assert.equal(result.receipt.lane, 'stable');
+  assert.equal(result.receipt.profileManifestSha256, sha256(fixture.manifestBytes));
+});
+
 test('a charset parameter on an otherwise exact media type is conformant', async () => {
   const fixture = realFixture();
   const routes = clonedRoutes(fixture);

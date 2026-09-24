@@ -18,7 +18,7 @@ import {
 import { isRecoverableTransactionError } from '../../tx-retry.js';
 import type { Task } from '../../types/task.js';
 import { parseTaskV1, type TaskV1 } from '../../types/task-document.js';
-import { SOLVER_TYPES, unknownSolverTypeMessage } from '../../solver-types/index.js';
+import { SOLVER_TYPES, knownSolverTypes, unknownSolverTypeMessage } from '../../solver-types/index.js';
 import { signTaskV1 } from '../../tasks/signing.js';
 import { TaskPostingService } from '../../tasks/posting-service.js';
 import { readChainlinkLatest, scaleToDecimal } from '../../venues/chainlink/client.js';
@@ -672,6 +672,33 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
         },
       ],
     });
+    return;
+  }
+
+  // Issue #4202: a spec-file window that has already closed would post a task
+  // no one can claim. Refuse it before confirmation. A dry-run still previews
+  // (the shipped fixtures carry placeholder timestamps), and an open window
+  // that has already started stays claimable until endTs. SolverTypes emit
+  // windows in epoch seconds or epoch ms (session-derived.v1 uses seconds), so
+  // normalize to ms before comparing. The machine request path has its own
+  // freshness check.
+  const specWindow = specOverlay?.window as { startTs?: unknown; endTs?: unknown } | undefined;
+  const nowMs = Date.now();
+  const endTs = specWindow?.endTs;
+  const endMs = typeof endTs === 'number' ? (endTs > 10_000_000_000 ? endTs : endTs * 1000) : undefined;
+  if (!machineRequest && endMs !== undefined && endMs <= nowMs) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message:
+          `Task window has already ended: window.startTs=${String(specWindow?.startTs)}, ` +
+          `window.endTs=${String(endTs)} (resolves to ${endMs} ms), now=${nowMs} ms. ` +
+          'Set window.endTs in the spec file to a future time.',
+        exampleCli: 'jinn tasks submit --id my-1 --description "..." --spec-file <spec.json> --dry-run',
+        details: { field: 'window.endTs', expected: `a time later than ${nowMs} ms` },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
     return;
   }
 
@@ -1384,20 +1411,20 @@ Options:
                       the per-evaluator cap is 1, so no claimer can take them
                       all. Use on shared/adversarial networks.
   --spec-file <path>  Path to a JSON file containing typed task fields (window, spec, eligibility).
-                      Supports registered SolverTypes: portfolio.v0, prediction.v1, prediction.apy.v0.
+                      Supports registered SolverTypes: ${knownSolverTypes().join(', ')}.
 
-                      Sentinels resolved at post time:
+                      Sentinel resolved at post time, for prediction.apy.v0 only:
                         window.startTs: 0              → Date.now(); endTs + resolveTs follow
-                        spec.question.threshold:       → the current Chainlink feed price
-                          "current"                      (exactly)
-                          "current+0.5%" / "current-2%"  (percentage offset)
-                          "current+100"  / "current-50"  (absolute offset)
-                      For price-aware thresholds the CLI reads the feed named in
-                      spec.oracle before posting; use BASE_SEPOLIA_RPC_URL to
-                      override the default public RPC.
+                      prediction.v1 resolves no sentinels: its spec file carries
+                      the literal Polymarket binary-question fields (question /
+                      source / resolution / consensusSnapshot / eligibilitySnapshot),
+                      an explicit claimPolicy, and absolute epoch-millisecond
+                      window timestamps — see fixtures/prediction-v1-task.example.json.
+                      The schema requires claimPolicy, but the posted claim slots
+                      come from --max-claims / --required-verdicts, not from the file.
 
 Examples:
-  jinn tasks submit --id eth-up --description "ETH direction" --solver-net prediction --spec-file fixtures/prediction-v1-task.example.json --yes
+  jinn tasks submit --id pm-1 --description "Polymarket forecast" --solver-net prediction --spec-file fixtures/prediction-v1-task.example.json --yes
   jinn tasks submit --id usdc-apy --description "Aave APY" --solver-type prediction.apy.v0 --spec-file fixtures/prediction-apy-v0-intent.example.json --yes
   jinn tasks watch 42 --timeout 600 --json
 `,

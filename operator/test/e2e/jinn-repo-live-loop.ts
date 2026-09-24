@@ -19,7 +19,7 @@
  *
  * Flow (mirrors jinn-repo-loop.ts / daemon-harness-cycle.ts):
  *   Anvil fork → mock IPFS → bootstrapStakedOperator → fund creator
- *   → deployMinimalV3Stack → startDaemon(extraHarnesses: [synthetic solver])
+ *   → deployMinimalV3Stack → startDaemon (extraHarnesses is #3866-inert; live path is enableComposition / extraLaunchers)
  *   → postJinnRepoLiveTask → waitForDaemonClaim → waitForDelivery
  *   → readActivityCount (before) → waitForVerdict → readActivityCount (after)
  *   → assert PASS + activity counter incremented (attempt finalized).
@@ -201,7 +201,7 @@ async function main(): Promise<void> {
     const running = await startDaemon(
       fixture,
       operator,
-      'prediction-v1-baseline', // no LLM harness selected — the synthetic solver handles jinn-repo.v1 restoration
+      'prediction-v1-baseline', // extraHarnesses / extraSolverTypeHarnesses are #3866-inert; they do not install this synthetic solver
       mockIpfs.baseUrl,
       v3Env,
       mockIpfs.baseUrl,

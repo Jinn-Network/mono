@@ -15,7 +15,6 @@ const SKILL_PATHS = [
   ".claude/skills/review-pr/SKILL.md",
   ".claude/skills/fix-child/SKILL.md",
   ".claude/skills/reconcile/SKILL.md",
-  ".claude/skills/eng-day/SKILL.md",
   ".claude/skills/merge-batch/SKILL.md",
   ".claude/skills/autopilot-runtime/SKILL.md",
   ".claude/skills/autopilot-runtime/references/claude.md",

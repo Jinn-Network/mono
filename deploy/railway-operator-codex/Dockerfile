@@ -5,7 +5,11 @@
 # gosu-drop entrypoint, JINN_STATE_DIR=/data (the daemon derives earning/db/
 # impl-state/swe-rebench under it), env-auth, and no VOLUME.
 
-ARG BASE_TAG=latest
+# `next` — the canary lane republishes it on every push to `next`, so the
+# default keeps resolving between named cuts. `latest` moves only on a release,
+# so it 404s whenever the stable lane has not published since a rename (#2811).
+# CI overrides this with BASE_IMAGE=…@sha256:… and Railway pins BASE_TAG.
+ARG BASE_TAG=next
 # BASE_IMAGE lets CI weld this overlay to an exact base digest built from the
 # SAME commit (--build-arg BASE_IMAGE=ghcr.io/jinn-network/operator@sha256:…), so
 # base+overlay can never be mismatched (#1066). It defaults to the BASE_TAG-
@@ -13,8 +17,8 @@ ARG BASE_TAG=latest
 ARG BASE_IMAGE=ghcr.io/jinn-network/operator:${BASE_TAG}
 FROM ${BASE_IMAGE}
 # NOTE: BASE_TAG/BASE_IMAGE must point to a published base that includes the
-# container-native changes (#988); flip the ghcr.io/jinn-network/operator package
-# PUBLIC first (see README).
+# container-native changes (#988). The ghcr.io/jinn-network/operator package is
+# public — an unauthenticated pull works (see README).
 
 # Codex CLI for the codex harness. Pinned to the version verified locally.
 RUN npm install -g @openai/codex@0.133.0

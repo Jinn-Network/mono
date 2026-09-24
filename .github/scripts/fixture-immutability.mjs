@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { loadStackPublishedCatalogPackages } from './platform-catalog.mjs';
 import { FIXTURE_MANIFEST_NAME, readFixtureManifest } from './fixture-manifest.mjs';
@@ -143,7 +144,11 @@ export function runRegistryBaseline(root, candidateVersion) {
   console.log(`fixture immutability holds against the published registry set across ${checked} packages`);
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   try {
     const args = process.argv.slice(2);
     const root = args.includes('--root') ? args[args.indexOf('--root') + 1] : process.cwd();

@@ -148,7 +148,7 @@ test("a worker probe that never returns expires as a typed timeout naming the co
 
   expect(failure).toBeInstanceOf(InspectOciCommandTimeoutError);
   expect((failure as Error).message).toContain("timed out after 300 ms: docker run");
-}, 30_000);
+});
 
 /**
  * The short-lived `docker` calls carry their own, separate bound. A `docker version` that never
@@ -169,4 +169,4 @@ test("a docker engine that never answers refuses as unavailable rather than hang
     datasetCacheDir,
     taskReference: "hermetic_eval.py@fixture",
   })).rejects.toBeInstanceOf(InspectOciUnavailableError);
-}, 30_000);
+});

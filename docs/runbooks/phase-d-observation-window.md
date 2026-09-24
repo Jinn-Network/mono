@@ -126,6 +126,12 @@ lucky collector run against a freshly-added instance is not evidence for a multi
 receipt has to show the collector actually watched the whole span. Close the window (set `endedAt`
 in the fleet manifest) only once collection has run daily across the whole approved period.
 
+An approved window must be strictly longer than twice the configured coverage tolerance for one
+collection to be mathematically incapable of satisfying both endpoint checks. With the default
+two-day tolerance, that means a window longer than four days. Exactly four days is insufficient:
+the coverage gate rejects only gaps **greater than** two days, so one collection at the midpoint
+can satisfy both endpoint checks.
+
 The coverage gate also refuses a degenerate window outright — `startedAt`/`endedAt`/a snapshot's
 collection timestamp that fails to parse, a zero-length window (`startedAt === endedAt`), an
 inverted one (`endedAt` before `startedAt`), or one shorter than one day (the collector's cadence)
