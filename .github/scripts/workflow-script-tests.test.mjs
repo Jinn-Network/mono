@@ -577,9 +577,6 @@ export function listDeclaredGuardScripts(repoRoot = root) {
 /** @type {Record<string, string>} */
 export const NOT_CI_RUNNABLE = {
   'operator::substrate:verify': 'live RPC',
-  'packages/benchmark-product/core::p5:fixture:check': 'network re-mint',
-  'packages/benchmark-product/core::demo1:task-evidence:check': 'home-directory snapshots + network',
-  'operator::drill:native-restart:verify': 'Anvil/role-host restart-drill e2e; not a static checkout guard',
 };
 
 export function assertNotCiRunnableJustifications(map = NOT_CI_RUNNABLE) {
@@ -840,7 +837,6 @@ export function collectYarnGuardInvocations(repoRoot = root, workflowsRoot = wor
 const SUGGESTED_OWNER_BY_GUARD = {
   'operator::skill:check': 'ci.yml (check job)',
   'operator::generate:openapi:check': 'ci.yml (check job)',
-  'packages/benchmark-product/core::demo1:verify': 'benchmark-product-ci.yml (product job)',
   'packages/task-supply/admission::fixtures:check': 'task-supply-ci.yml (packages job)',
   'packages/environments/chain-extraction::check:fixtures': 'environments-ci.yml (packages job)',
 };
@@ -1507,14 +1503,28 @@ test('NOT_CI_RUNNABLE required members carry non-empty justifications', () => {
   assertNotCiRunnableJustifications();
   const required = {
     'operator::substrate:verify': /live RPC/i,
-    'packages/benchmark-product/core::p5:fixture:check': /network re-mint/i,
-    'packages/benchmark-product/core::demo1:task-evidence:check': /home-directory snapshots/i,
-    'operator::drill:native-restart:verify': /Anvil|restart-drill/i,
   };
   for (const [key, substance] of Object.entries(required)) {
     assert.equal(typeof NOT_CI_RUNNABLE[key], 'string', key);
     assert.ok(NOT_CI_RUNNABLE[key].trim().length > 0, key);
     assert.match(NOT_CI_RUNNABLE[key], substance, key);
+  }
+});
+
+test('NOT_CI_RUNNABLE declares nothing stale', () => {
+  const declaredKeys = new Set(
+    listDeclaredGuardScripts().map(({ workspace, script }) => guardKey(workspace, script)),
+  );
+  const credited = collectYarnGuardInvocations();
+  for (const key of Object.keys(NOT_CI_RUNNABLE)) {
+    assert.ok(
+      declaredKeys.has(key),
+      `NOT_CI_RUNNABLE exempts ${key}, which names no guard-shaped script in a tracked package.json.`,
+    );
+    assert.ok(
+      !credited.has(key),
+      `NOT_CI_RUNNABLE exempts ${key} as not CI-runnable, but a workflow now runs it; drop the exemption instead.`,
+    );
   }
 });
 

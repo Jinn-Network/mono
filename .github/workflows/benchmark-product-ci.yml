@@ -325,7 +325,6 @@ jobs:
           yarn vitest run src/conformance/publication-profile.test.ts src/runtime/harbor/harbor.test.ts
           yarn build
           yarn check:parity
-          yarn demo1:verify
           yarn pack:smoke
       - name: Prepare private Colophon web build input
         working-directory: packages/benchmark-product/web
