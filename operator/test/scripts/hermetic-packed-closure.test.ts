@@ -6,6 +6,7 @@ import semver from 'semver';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   COMPILER_DEV_DEPENDENCY_NAMES,
+  STALE_LOCKFILE_MESSAGE,
   buildConsumerThirdPartyDependencies,
   consumerManifest,
   discoverPackageRoots,
@@ -94,6 +95,28 @@ describe('packed-closure third-party pin', () => {
     // loaded tree and skips node_modules, so a leftover file makes the offline
     // overlay re-resolve every dependency from the registry.
     expect(existsSync(consumerLockfile)).toBe(false);
+  });
+
+  it('names the refresh command when npm ci rejects the committed lockfile', () => {
+    const root = tmpDir();
+    const lockfileSource = join(root, 'package-lock.json');
+    const consumerRoot = join(root, 'consumer');
+    mkdirSync(consumerRoot);
+    writeFileSync(lockfileSource, '{"lockfileVersion":3}\n');
+    const npmOutput =
+      'install pinned packed-closure graph failed\nnpm error `npm ci` can only install packages when your package.json and package-lock.json or npm-shrinkwrap.json are in sync.';
+    expect(() =>
+      installPinnedGraph({
+        run: () => {
+          throw new Error(npmOutput);
+        },
+        consumerRoot,
+        lockfileSource,
+      }),
+    ).toThrow(`${npmOutput}\n${STALE_LOCKFILE_MESSAGE}`);
+    expect(STALE_LOCKFILE_MESSAGE).toBe(
+      'packed-closure lockfile is out of sync; from operator/ run `node scripts/refresh-hermetic-packed-closure-lockfile.mjs`',
+    );
   });
 
   it('records each packed first-party archive as a sorted relative file: dependency', () => {
@@ -307,7 +330,16 @@ describe('packed-closure third-party pin', () => {
     expect(existsSync(lockPath)).toBe(true);
     const lock = JSON.parse(readFileSync(lockPath, 'utf8')) as {
       lockfileVersion?: number;
-      packages?: Record<string, { version?: string; resolved?: string; integrity?: string }>;
+      packages?: Record<
+        string,
+        {
+          version?: string;
+          resolved?: string;
+          integrity?: string;
+          dependencies?: Record<string, string>;
+          devDependencies?: Record<string, string>;
+        }
+      >;
     };
     expect(lock.lockfileVersion).toBeGreaterThanOrEqual(2);
     const packages = lock.packages ?? {};
@@ -347,11 +379,28 @@ describe('packed-closure third-party pin', () => {
     };
     const operatorManifest = readPackageJson(operatorRoot);
     const packageRoots = discoverPackageRoots(packagesRoot);
-    for (const name of packedClosurePackageNames(operatorManifest, packageRoots)) {
+    const names = packedClosurePackageNames(operatorManifest, packageRoots);
+    // npm ci compares the consumer root with this entry; the smoke builds the
+    // third-party half of that root from these same manifests.
+    const thirdParty = buildConsumerThirdPartyDependencies({
+      operatorManifest,
+      closureManifests: names.map((name) => readPackageJson(requirePackageRoot(packageRoots, name))),
+    });
+    const lockRoot = packages[''];
+    expect(lockRoot?.devDependencies ?? {}, STALE_LOCKFILE_MESSAGE).toEqual(thirdParty.devDependencies);
+    expect(
+      Object.fromEntries(
+        Object.entries(lockRoot?.dependencies ?? {}).filter(
+          ([name]) => !name.startsWith('@jinn-network/'),
+        ),
+      ),
+      STALE_LOCKFILE_MESSAGE,
+    ).toEqual(thirdParty.dependencies);
+    for (const name of names) {
       const manifest = readPackageJson(requirePackageRoot(packageRoots, name));
       const location = `node_modules/${name}`;
       const entry = packages[location];
-      expect(entry?.version, location).toBe(manifest.version);
+      expect(entry?.version, `${location}: ${STALE_LOCKFILE_MESSAGE}`).toBe(manifest.version);
       expect(entry?.resolved, location).toMatch(/^file:\.\.\/archives\/[^/]+\.tgz$/);
       expect(entry?.integrity, location).toBeUndefined();
       check(location, manifest);
@@ -361,7 +410,7 @@ describe('packed-closure third-party pin', () => {
       dependencies: operatorManifest.dependencies,
       optionalDependencies: operatorManifest.optionalDependencies,
     });
-    expect(unsatisfied).toEqual([]);
+    expect(unsatisfied, STALE_LOCKFILE_MESSAGE).toEqual([]);
   });
 
   it('documents the lockfile refresh command', () => {

@@ -97,6 +97,7 @@ This copies the 4 deployment JSON files from `contracts/` into `operator/deploym
 | `yarn e2e` | End-to-end validation on Anvil fork |
 | `yarn staking` | Earning bootstrap validation on Anvil fork |
 | `yarn pack:smoke` | Pack tarball and run smoke tests |
+| `node scripts/refresh-hermetic-packed-closure-lockfile.mjs` | Refresh the hermetic gate's packed-closure lockfile after changing a dependency or version of the operator or of any `@jinn-network/*` package it depends on ([details](scripts/fixtures/hermetic-packed-closure/README.md)) |
 | `yarn release:operator-gate` | Run the stable-release operator gate (`staking` then `e2e`) |
 | `yarn release:olas-rails-smoke` | Dry-run by default: writes a prediction.v1 smoke spec and evidence plan; pass `--execute` for live Base Sepolia OLAS rails proof |
 | `cd ../contracts && yarn test && forge install foundry-rs/forge-std --no-git && forge test --match-contract Invariant` | Run the contracts release gate |

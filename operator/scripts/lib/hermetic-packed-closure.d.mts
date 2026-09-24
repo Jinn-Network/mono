@@ -1,3 +1,5 @@
+export const STALE_LOCKFILE_MESSAGE: string;
+
 export const COMPILER_DEV_DEPENDENCY_NAMES: readonly [
   'typescript',
   '@types/node',

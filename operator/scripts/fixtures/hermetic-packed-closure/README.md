@@ -29,6 +29,12 @@ From `operator/`:
 node scripts/refresh-hermetic-packed-closure-lockfile.mjs
 ```
 
+Run it with npm 11.19.0 (`npm --version`), the version that wrote the
+committed lockfile. CI's npm 10.9.8 installs that lockfile unchanged, but a
+refresh under 10.9.8 rewrites 33 entries that have nothing to do with the
+change (it drops 32 `libc` fields and changes the flags on
+`@coinbase/cdp-sdk/node_modules/typescript`).
+
 The script builds the consumer `package.json` (sorted union of operator
 non-`@jinn-network` `dependencies`+`optionalDependencies`, the compiler
 devDependencies `typescript` / `@types/node` / `@types/semver` / `@types/ws`,
@@ -40,9 +46,10 @@ temp directory, drops `integrity` from the `file:` entries, and writes
 `package-lock.json` here.
 
 Refresh when the closure's membership, a member's version, or a dependency
-specifier of the operator or a member changes. Do not edit the lockfile by
-hand. Do not run `npm install --package-lock=false` in the smoke. Do not
-commit packed archives.
+specifier of the operator or a member changes. A stale lockfile fails the
+smoke's `npm ci` and the unit test with `packed-closure lockfile is out of
+sync`. Do not edit the lockfile by hand. Do not run `npm install
+--package-lock=false` in the smoke. Do not commit packed archives.
 
 `yarn test:hermetic:packed-closure` is unchanged; it still runs the smoke
 script after the SDK/stack/plugin/core builds.

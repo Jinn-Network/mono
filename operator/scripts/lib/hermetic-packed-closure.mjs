@@ -1,6 +1,9 @@
 import { cpSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
+export const STALE_LOCKFILE_MESSAGE =
+  'packed-closure lockfile is out of sync; from operator/ run `node scripts/refresh-hermetic-packed-closure-lockfile.mjs`';
+
 export const COMPILER_DEV_DEPENDENCY_NAMES = Object.freeze([
   'typescript',
   '@types/node',
@@ -242,9 +245,15 @@ export function assertFixtureLockfilePresent(scriptsRoot) {
 export function installPinnedGraph({ run, consumerRoot, lockfileSource }) {
   const lockfile = join(consumerRoot, 'package-lock.json');
   cpSync(lockfileSource, lockfile);
-  run('npm', pinnedInstallArgs(), 'install pinned packed-closure graph', {
-    cwd: consumerRoot,
-  });
+  try {
+    run('npm', pinnedInstallArgs(), 'install pinned packed-closure graph', {
+      cwd: consumerRoot,
+    });
+  } catch (error) {
+    // npm's own advice is to run `npm install`, which is the wrong fix here.
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`${detail}\n${STALE_LOCKFILE_MESSAGE}`, { cause: error });
+  }
   // With `--package-lock=false`, npm still counts a package-lock.json on disk
   // as a loaded tree, so it neither reads that file nor loads node_modules: the
   // overlay starts from an empty tree and re-resolves every dependency from the
