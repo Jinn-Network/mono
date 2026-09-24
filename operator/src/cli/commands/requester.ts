@@ -63,7 +63,7 @@ export interface RequesterCommandDeps {
   }): Promise<FleetBootstrapResult>;
 }
 
-const PRODUCTION_DEPS: RequesterCommandDeps = {
+export const PRODUCTION_DEPS: RequesterCommandDeps = {
   loadConfig: defaultLoadConfig,
   getConfigPathFromArgs: defaultGetConfigPathFromArgs,
   resolveCliPassword: defaultResolveCliPassword,

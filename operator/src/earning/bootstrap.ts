@@ -652,7 +652,12 @@ export class FleetBootstrapper {
    * shape the native requester's `creatorSafe` wants. Sharing the two step
    * functions rather than reimplementing them means the requester's Safe is
    * the operator's Safe, so an operator who later runs the full bootstrap
-   * finds Stage 1's first two steps already satisfied.
+   * finds Stage 1's first two steps already satisfied on-chain — but not the
+   * funding step 3 depends on: this path funds the deploying agent EOA with
+   * `REQUESTER_SAFE_DEPLOY_ETH` (0.001 ETH), not Stage 1's own
+   * `STAGE1_AGENT_ETH` (0.01 ETH), so that EOA is left thin for the
+   * ERC-8004 register + `setAgentWallet` bind Stage 1's step 3 still has to
+   * pay for.
    *
    * The funding gate is `requesterMinMasterEth()` (0.0015 ETH), not the
    * operator's `stage1MinMasterEth` (0.020 ETH). See `requester-init.ts`.
@@ -764,10 +769,12 @@ export class FleetBootstrapper {
    * Bounded CDP drip loop toward one address and one target.
    *
    * A narrow sibling of the operator bootstrap's inline loop, not an
-   * extraction of it: the requester target is ~15 drips where the operator's
-   * is ~200, and the operator loop additionally sums self-bond agent/Safe
-   * balances into its "system ETH". Both exit on target, rate-limit, drip cap,
-   * or wall clock, whichever comes first.
+   * extraction of it: the requester's raw target needs ~15 drips at the
+   * measured CDP rate (~0.0001 ETH/drip), which `computeFaucetDripCap`'s
+   * 2x-plus-20 safety margin turns into a ~50-drip cap for this loop, against
+   * the operator's ~200; the operator loop additionally sums self-bond
+   * agent/Safe balances into its "system ETH". Both exit on target,
+   * rate-limit, drip cap, or wall clock, whichever comes first.
    */
   private async dripFaucetToward(
     address: string,
@@ -776,9 +783,11 @@ export class FleetBootstrapper {
   ): Promise<bigint> {
     let balance = startingBalance;
     // `floor: 0` — the shared helper's default 60-drip floor exists for callers
-    // that have no target at all. This loop has one, and it is small (~15
-    // drips): inheriting a floor four times the need would spend the
-    // requester's 4:30 budget on drips it does not want.
+    // that have no target at all. This loop has one, and `computeFaucetDripCap`
+    // already sizes its own cap at ~50 drips for it (the raw target needs ~15
+    // at the measured CDP rate; the helper pads that with its own 2x-plus-20
+    // safety margin): inheriting the default floor on top of that computed cap
+    // would spend the requester's 4:30 budget on drips it does not want.
     const maxIters = computeFaucetDripCap({ targetWei, balanceWei: balance, floor: 0 });
     const deadline = this.now() + this.faucetLoopTimeoutMs;
     let rateLimitRetries = 0;

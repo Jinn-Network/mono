@@ -5,9 +5,10 @@
  * verb sends them to the operator daemon or the operator bootstrap.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { createRequesterCommand, type RequesterCommandDeps } from '../../../src/cli/commands/requester.js';
+import { createRequesterCommand, PRODUCTION_DEPS, type RequesterCommandDeps } from '../../../src/cli/commands/requester.js';
 import requesterCommand from '../../../src/cli/commands/requester.js';
 import { CLI_COMMANDS } from '../../../src/cli/index.js';
+import { FleetBootstrapper } from '../../../src/earning/bootstrap.js';
 import { createDefaultFleetState } from '../../../src/earning/types.js';
 import type { FleetBootstrapResult } from '../../../src/earning/types.js';
 import type { RpcNetworkPreflightResult } from '../../../src/preflight/rpc-network.js';
@@ -191,6 +192,42 @@ describe('jinn requester init', () => {
     for (const surface of surfaces) {
       expect(surface).not.toContain('jinn run');
       expect(surface).not.toContain('jinn bootstrap');
+    }
+  });
+
+  // Round-3 finding (#4271, non-blocking note): every test above injects
+  // `ensureRequesterSafe` through `RequesterCommandDeps`, so nothing exercises
+  // `PRODUCTION_DEPS` itself. Swapping the production wiring for
+  // `FleetBootstrapper.ensureStage1` (the operator's full Stage 1 walk --
+  // service registration, staking, mech) would leave all other tests in this
+  // file green, because they never touch `PRODUCTION_DEPS`. Pin it directly:
+  // the requester's own bootstrapper method must be the one that runs.
+  it('production wiring calls FleetBootstrapper.ensureRequesterSafe, not ensureStage1', async () => {
+    const fleet = createDefaultFleetState('base-sepolia');
+    const ensureRequesterSafeSpy = vi
+      .spyOn(FleetBootstrapper.prototype, 'ensureRequesterSafe')
+      .mockResolvedValue({
+        ok: true,
+        message: 'Creator Safe ready at 0xSAFE.',
+        fleet_state: { ...fleet, master_address: '0xMASTER', fleet_safe_address: '0xSAFE' },
+      });
+    const ensureStage1Spy = vi.spyOn(FleetBootstrapper.prototype, 'ensureStage1');
+
+    try {
+      const result = await PRODUCTION_DEPS.ensureRequesterSafe({
+        earningDir: '/tmp/jinn-requester-production-wiring',
+        chain: 'base-sepolia',
+        rpcUrl: 'http://127.0.0.1:8545',
+        password: 'test',
+      });
+
+      expect(result.ok).toBe(true);
+      expect(ensureRequesterSafeSpy).toHaveBeenCalledTimes(1);
+      expect(ensureRequesterSafeSpy).toHaveBeenCalledWith('test');
+      expect(ensureStage1Spy).not.toHaveBeenCalled();
+    } finally {
+      ensureRequesterSafeSpy.mockRestore();
+      ensureStage1Spy.mockRestore();
     }
   });
 });

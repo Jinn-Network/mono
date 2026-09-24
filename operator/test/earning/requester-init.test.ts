@@ -67,6 +67,26 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
     expect(result.fleet_state.services).toEqual([]);
   });
 
+  it('refuses one wei below the gate, and clears it at the gate itself', async () => {
+    // Boundary test for the funding comparison itself (`masterBalance < required`):
+    // one wei short must still refuse, proving the comparison is strict `<` and
+    // not an off-by-one `<=`/rounding artifact that would let a requester through
+    // a hair short of what Safe deployment actually costs.
+    const short = await mkdtemp(path.join(os.tmpdir(), 'jinn-b0a-'));
+    dirs.push(short);
+    const shortBootstrapper = buildBootstrapper(short);
+    vi.spyOn((shortBootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
+      requesterMinMasterEth() - 1n,
+    );
+
+    const shortResult = await shortBootstrapper.ensureRequesterSafe('test-password');
+
+    expect(shortResult.ok).toBe(false);
+    expect(shortResult.funding).toBeDefined();
+    expect(shortResult.funding?.eth_required).toBe('1');
+    expect(shortResult.funding?.eth_balance).toBe((requesterMinMasterEth() - 1n).toString());
+  });
+
   it('never routes the requester to the operator daemon or bootstrap', async () => {
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-b0a-'));
     dirs.push(earningDir);

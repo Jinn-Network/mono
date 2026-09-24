@@ -129,4 +129,24 @@ describe('planFleetFunding — requester persona', () => {
     });
     expect(plan.persona).toBe('operator');
   });
+
+  // `--operator` (fund-requirements.test.ts's "overrides the inferred requester
+  // persona" case) only proves the flag is forwarded to an injected `planSpy`
+  // mock — it never exercises the real persona decision in `planFleetFunding`.
+  // This proves the actual override: a requester marker on disk, still
+  // pre-Stage-1 and service-free (the round-3 finding-2 dual-role window), with
+  // `requester: false` explicit, must still answer as the operator and with the
+  // operator's own target — not a mock's canned value.
+  it('--operator forces the operator gate even with a requester marker on disk', async () => {
+    const { earningDir } = await seed({ requester_stage: 'safe_deployed', fleet_stage: 'none', services: [] });
+    const plan = await planFleetFunding({
+      earningDir,
+      chain: 'base-sepolia',
+      requester: false,
+      chainConfigResolver: fakeChainConfig,
+      publicClientFactory: zeroBalanceClient,
+    });
+    expect(plan.persona).toBe('operator');
+    expect(BigInt(plan.master!.eth_required)).toBe(20_000_000_000_000_000n);
+  });
 });
