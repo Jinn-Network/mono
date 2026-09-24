@@ -192,7 +192,7 @@ describe("driver-backed chain verification", () => {
       agent: source.agent,
       name: source.name,
       operation: "verify",
-      message: expect.stringContaining("transport failed"),
+      reason: expect.stringContaining("transport failed"),
     });
   });
 
@@ -215,7 +215,7 @@ describe("driver-backed chain verification", () => {
       agent: source.agent,
       name: source.name,
       operation: "revalidate-head",
-      message: expect.stringContaining("head transport failed"),
+      reason: expect.stringContaining("head transport failed"),
     });
   });
 

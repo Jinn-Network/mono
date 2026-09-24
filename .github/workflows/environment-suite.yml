@@ -16,7 +16,8 @@
 # suite subsumes the other (they overlap only on the two pure-unit hermetic
 # files, abi-selector-conformance and rpc-fallback).
 # `yarn e2e:daemon-harness` and its native mode are
-# operator-run, non-CI live-fork cutover evidence. The scheduled/manual
+# operator-run, non-gating live-fork cutover evidence (the #2472 "Option B"
+# decision — not the §9 Option B above, which means runs-in-CI). The scheduled/manual
 # native-e2e-rig.yml run is supplemental advisory evidence only.
 #
 # Cadence (§8): the AUTHORITATIVE run is a workflow_dispatch on the EXACT
@@ -170,6 +171,7 @@ jobs:
       # so the Thursday skip-if-unchanged short-circuit (§8) cleanly no-ops the
       # whole run when next HEAD already has an environment-suite verdict.
       - name: Enable Corepack before the Yarn cache lookup
+        if: steps.resolve.outputs.skip != 'true'
         # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
         # Without Corepack that is the runner image's global Yarn 1, which
         # refuses every project pinned to `packageManager: yarn@4.13.0`.
@@ -273,10 +275,11 @@ jobs:
           fi
 
       # ── Bridge the restored homes into the substrate gold paths ─────────────
-      # The tier scenarios (run-tier-2 copyWorkspace + run-tier-3
-      # resolveGoldDaemonHome) read operators from ~/jinn-dev/operators/<name>,
-      # NOT from ~/.jinn-client. Without this bridge, T2.1/T3.1 fail to find their
-      # operators (the gate would be structurally red regardless of the product).
+      # The tier-3 scenario (run-tier-3 resolveGoldDaemonHome) reads operators
+      # from ~/jinn-dev/operators/<name>, NOT from ~/.jinn-client. Without this
+      # bridge, T3.1 fails to find its operators (the gate would be structurally
+      # red regardless of the product). The run-tier-2 scenarios (T2.2 + T2.4)
+      # boot their own operators on Anvil forks and do not read these homes.
       #
       # Mapping (canonical tier names, see tier-3-helpers.tierOpNames defaults):
       #   ~/.jinn-client   (primary  = solver op)            -> gold op-b
@@ -470,7 +473,7 @@ jobs:
       # Sepolia + real Ponder, on the warm pre-staked operator — never an Anvil
       # fork. Deterministic blocking CI is `yarn test:hermetic` (hermetic-gate.yml)
       # plus `yarn test` (ci.yml / `operator-ci-gate`); the daemon-harness live-fork
-      # modes are operator-run, non-CI cutover evidence, with the scheduled/manual
+      # modes are operator-run, non-gating cutover evidence, with the scheduled/manual
       # native-e2e-rig.yml run providing supplemental advisory evidence. This suite
       # consolidates two existing run-tier entries into one verdict:
       #   - run-tier-2 — producer/evaluator loops (T2.2 + T2.4; T2.1

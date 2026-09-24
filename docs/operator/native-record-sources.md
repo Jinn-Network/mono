@@ -82,7 +82,7 @@ Both refusal classes name themselves on `console.warn`, prefixed `[native-record
 A refused destination, emitted per refusal at each of the five peer-supplied fetch paths:
 
 ```
-[native-records] peer-announced record location: refused destination https://records.b.example/records/ab12: it is not contained by any configured record origin (publicBaseUrl / recordSources[].baseUrl)
+[native-records] peer-announced record location: refused destination "https://records.b.example/records/ab12": it is not contained by any configured record origin (publicBaseUrl / recordSources[].baseUrl)
 ```
 
 The context before the colon says which path refused it — `peer-announced record location`,

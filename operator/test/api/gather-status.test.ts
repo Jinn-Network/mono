@@ -1064,6 +1064,43 @@ describe('gather-status RPC error masking (spec §14.2 item 2, issue #2402)', ()
       expect(cacheEntry?.error).not.toContain('SECRETKEY123');
     });
   });
+
+  it('masks a nested-cause RPC URL that never appears on the top-level message', async () => {
+    vi.doMock('viem', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('viem')>();
+      const throwNested = () => {
+        const outer = new Error('The request failed.');
+        (outer as { cause?: unknown }).cause = new Error(`HTTP request failed. URL: ${LEAKY_URL}`);
+        throw outer;
+      };
+      return {
+        ...actual,
+        createPublicClient: () => ({
+          getBlockNumber: async () => throwNested(),
+          getChainId: async () => throwNested(),
+          getBalance: async () => throwNested(),
+          readContract: async () => throwNested(),
+        }),
+        http: () => ({}),
+      };
+    });
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      const earningDir = mkdtempSync(join(tmpdir(), 'jinn-mask-nested-'));
+      const status = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: LEAKY_URL,
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+
+      expect(JSON.stringify(status)).not.toContain('SECRETKEY123');
+      expect(status.rpc.error).not.toContain('SECRETKEY123');
+      expect(status.rpc.error).toContain('base-mainnet.g.alchemy.com');
+    });
+  });
 });
 
 describe('gather-status autoRestake gating (#651)', () => {

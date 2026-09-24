@@ -168,7 +168,7 @@ export function createDriverChainVerification(
       agent: source.agent,
       name: source.name,
       operation,
-      message: describeError(error),
+      reason: describeError(error),
     });
   }
 

@@ -9,6 +9,7 @@ import {
   type RoleRunResult,
 } from '../../src/native-drill/driver.js';
 import {
+  checkExpectedFinalState,
   checkRequiredEffects,
   compareRuns,
   type RunObservation,
@@ -21,7 +22,7 @@ function observationFor(spec: RoleRunSpec, overrides: Partial<RunObservation> = 
     checkpoint: spec.checkpoint,
     seed: spec.seed,
     mode: spec.mode === 'uninterrupted' ? 'uninterrupted' : 'recovered',
-    finalState: 'settled',
+    finalState: drillSpec(spec.checkpoint).expectedFinalState,
     graphDigest: `sha256:${spec.seed.padStart(64, '0').replace(/[^0-9a-f]/gu, '0')}`,
     operationIds: [`op:${spec.checkpoint}`],
     transactionHashes: [],
@@ -96,7 +97,15 @@ describe('restart-drill driver', () => {
       : undefined));
     const error = await drillCheckpoint(environment(host), drillSpec('claim')).catch((cause) => cause);
     expect(error).toBeInstanceOf(DrillFailure);
-    expect(String(error)).toMatch(/finalState: uninterrupted=settled recovered=failed/u);
+    expect(String(error)).toMatch(/finalState: uninterrupted=claim-finalized recovered=failed/u);
+  });
+
+  it('fails when both lanes agree on a non-terminal finalState, rather than sealing a matching failure', async () => {
+    const host = launcher((spec) => (spec.mode === 'crash'
+      ? undefined
+      : { kind: 'observed', observation: observationFor(spec, { finalState: 'failed' }) }));
+    await expect(drillCheckpoint(environment(host), drillSpec('claim')))
+      .rejects.toThrow(/finalState=failed, expected claim-finalized/u);
   });
 
   it('fails when a required no-duplicate effect is missing on both runs, rather than passing silently', async () => {
@@ -181,5 +190,11 @@ describe('run comparison', () => {
       { ...base, effects: { claims: 1, claimOperations: 1, duplicateClaims: 1 } },
       drillSpec('claim').requiredEffects,
     )).toEqual(['effects.duplicateClaims=1, expected 0']);
+  });
+
+  it('names a finalState that is not the checkpoint expected terminal', () => {
+    expect(checkExpectedFinalState(base, 'claim-finalized')).toEqual([]);
+    expect(checkExpectedFinalState({ ...base, finalState: 'failed' }, 'claim-finalized'))
+      .toEqual(['finalState=failed, expected claim-finalized']);
   });
 });

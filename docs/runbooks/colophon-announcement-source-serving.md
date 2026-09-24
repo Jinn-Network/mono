@@ -206,8 +206,9 @@ Once head anchoring is live, each substantive entry's digest is anchored through
 third-party provider, and the resulting `AnchorEvidence` record is announced by a
 later entry on this same chain. That makes coverage a property of the archive
 rather than an operator claim about it: anybody holding the archive — the operator,
-or a stranger who cold-synced it — enumerates exactly which sequences are anchored
-and which are not, from the archive alone. That last phrase is the whole value of
+or a stranger who cold-synced it — enumerates exactly which sequences are anchored,
+which are not, and which the archive cannot currently say either way about, from the
+archive alone. That last phrase is the whole value of
 the walk, and it is only earned if each step reads the records themselves rather
 than the publisher's description of them, which is why step 3 is written the way it
 is.
@@ -251,8 +252,14 @@ already yields every entry oldest-first. Then:
    `facts` of the shape `{subject: {kind, digest}, provider, upgrades?}`, and that card
    is an aid to reading the result rather than an index into it: `facts` is advisory
    metadata about an announced record while the record's own bytes stay authoritative
-   (design §5.2), it is schema-optional on the announcement, and nothing in the walk
-   this section builds on ever compares it to the record it describes. An announcement
+   (design §5.2), it is schema-optional on the announcement, and the archive walk this
+   section builds on — `source-chain-verification` over the entries, as "Verify it from
+   another machine" runs it — never compares it to the record it describes. Facts are
+   compared to record bytes on a different path: `facts-consistency.ts`
+   (`packages/discovery/protocol/src/verify/`) recomputes and compares them under
+   `verifyItem`, and design §7 item 2 provisions the anchor-announcement facts profile
+   that would bring anchor cards under it. This walk does not take that path, so
+   "advisory" here means unchecked *by this walk*, not never checked. An announcement
    with no facts card is a record to fetch, not an absent anchor. For each anchor
    announcement, fetch the `AnchorEvidence` record from `<base>/records/<sha256>` — the
    announcement's `record.digest` with the `sha256:` prefix stripped — confirm the
@@ -261,33 +268,63 @@ already yields every entry oldest-first. Then:
    them. An announcement whose record cannot be fetched, fails that check, or does not
    parse contributes no subject, so nothing it might have anchored is counted as
    anchored. That record is also the evidence that would have said which side of step
-   2's partition its announcing entry belongs on, so the entry cannot be resolved on it.
-   Default that entry into the denominator as substantive, because a sequence dropped
-   from the denominator is one a reader cannot see at all, and carry its sequence as
-   *unreadable* rather than as an ordinary gap, so a reader is not left to read a
-   hosting fault as a missing anchor. A missing record or a digest mismatch is a serving
-   fault, which "Verify it from another machine" step 4 diagnoses; bytes that hash
-   correctly and still do not parse as an `AnchorEvidence` record are a producer fault,
-   which it does not. Keep only subjects whose `subject.kind` is
+   2's partition its announcing entry belongs on. When nothing else in the entry settles
+   that side (no ordinary announcement, and no readable anchor announcement over an
+   announcement-entry subject), the entry cannot be resolved. Default that entry into
+   the denominator as substantive, because a sequence dropped from the denominator is
+   one a reader cannot see at all, and carry its sequence as *unreadable* rather than
+   as an ordinary gap, so a reader is not left to read a hosting fault as a missing
+   anchor. An entry step 2 already settled on another announcement keeps that
+   classification and takes no unreadable marking: an ordinary announcement made it
+   substantive with no record needed, and a readable anchor announcement over an
+   announcement-entry subject settles it on the anchor-announcing side, which the
+   unreadable one cannot change. Neither shape arises here — this producer's writer
+   writes exactly one announcement per entry — so for the one shape it emits the
+   condition always holds. What the unreadable record withheld is its *subject*, the
+   earlier sequence that anchor covered, and the archive cannot recover it: in §5.2's
+   ordinary case that is the announcing entry's predecessor, but a late anchor or an
+   upgrade (§4.4) can name any earlier sequence, and only the record says which. That
+   sequence is therefore reported exactly as it would be without this announcement —
+   as a gap, byte-identical to any other, unless another readable anchor covers it —
+   and the unreadable marking on the announcing entry is the one place the archive can
+   record that an earlier gap may be a hosting fault rather than a missing anchor. A
+   missing record or a digest mismatch is a serving fault, which "Verify it from
+   another machine" step 4 diagnoses; bytes that hash correctly and still do not parse
+   as an `AnchorEvidence` record are a producer fault, which it does not. Keep only
+   subjects whose `subject.kind` is
    `https://spec.jinn.network/records/announcement-entry/v1`: §4.2 minted that URI to
    make `subject.kind` normative, and a record covering anything else anchors no
    sequence on this chain — an entry announcing only such non-entry anchors is
-   substantive after all and rejoins the denominator. That rejoin refines §4.3, which
-   states its stopping rule over announcement kind alone and so would read such an entry
-   out of the denominator; neither of §4.3's own two reasons reaches it, because
-   anchoring it terminates one step later exactly as the ordinary case does, and an
-   anchor over a record of some other kind is content a reader loses to truncation — the
-   test §4.3 names. The rejoin is per-entry while this sweep is per-announcement, so
-   carry each fetched subject's announcing entry along with it. Sweeping announcements
-   rather than anchor-announcing entries is deliberate: an anchor riding on a mixed
-   entry is still collected. No design section rules mixed entries out — §4.3 rules
-   which entries are anchored and §5.2 where an anchor is announced, and §7's sketch has
-   a pending anchor ride on the next substantive append — so what keeps them off this
-   chain is only this producer's one-announcement-per-entry writer. Step 3 therefore
-   revises step 2's provisional partition, and steps 4 through 6 read the revised one.
-   Deduplicate by `subject.digest`, because several announcements can cover one subject
-   two ways: an OpenTimestamps upgrade is announced as a second *announcement* naming
-   the pending record through `upgrades` in its facts, and the anchor ledger is keyed
+   substantive after all and rejoins the denominator. That rejoin departs from §4.3,
+   which states its stopping rule over announcement kind alone and so would read such an
+   entry out of the denominator; neither ground of that stopping rule reaches it — not
+   "would not terminate", because anchoring it terminates one step later exactly as the
+   ordinary case does, and not "drops nothing a reader loses", because an anchor over a
+   record of some other kind is content a reader loses to truncation, the test §4.3
+   names. (§4.3's "two consequences" are a different pair: the stopping rule is the
+   first of them, and these are the two grounds inside it.) The departure has a
+   consequence the design does not describe: a producer conformant to §4.3 classifies
+   by announcement kind and so never anchors such an entry, while this walk holds it in
+   the denominator, so the report shows that sequence as a gap permanently — not an
+   outage and not a declined anchor, but the two documents applying different tests.
+   The direction is conservative, under-claiming coverage rather than over-claiming
+   it, and the shape does not arise on this chain: once #4127 lands, this producer's
+   anchor announcements all carry announcement-entry subjects. Which test governs is a
+   §4.3 question and is not settled here. The rejoin is per-entry while this sweep is
+   per-announcement, so carry each fetched subject's announcing entry along with it.
+   Sweeping announcements rather than anchor-announcing entries is deliberate: an anchor
+   riding on a mixed entry is still collected. No design section rules mixed entries
+   out — §4.3 rules which entries are anchored and §5.2 where an anchor is announced,
+   and §7's sketch has an anchor obtained but not yet announced ride on the next
+   substantive append — so what keeps them off this chain is only this producer's
+   one-announcement-per-entry writer. Step 3 therefore revises step 2's provisional
+   partition, and steps 4 through 6 read the revised one.
+   Deduplicate by the subject digest in the normalized form step 4 requires — not by
+   `subject.digest` as read, which is a digest set rather than a string, so comparing
+   the values as read compares objects and deduplicates nothing — because several
+   announcements can cover one subject two ways: an OpenTimestamps upgrade is announced
+   as a second *announcement* naming, through `upgrades` in its facts, the earlier
+   record whose still-incomplete proof it completes, and the anchor ledger is keyed
    `(entryDigest, provider)` (§4.4), so two different providers may each anchor the same
    entry with no upgrade relationship between them. Count subjects rather than
    announcements.
@@ -299,21 +336,26 @@ already yields every entry oldest-first. Then:
    same value in two spellings — comparing them unnormalized yields zero matches, which
    reads exactly like total coverage failure.
 5. **Separate the gap from the tail.** The unanchored substantive sequences are the
-   gap — with one caveat at the tip. An entry's anchor is announced by a *later* entry,
-   so a substantive append whose anchor-announcing append has not landed yet reads as
-   unanchored until it does. If the newest entry on the chain is substantive rather
-   than anchor-announcing, treat its sequence as pending rather than as a gap. Pending
-   is a reading, not a verdict: at the tip an anchor that has not landed yet and one
-   that never will are byte-identical, the same way a mid-chain outage and a declined
-   anchor are. Nor is *unanchored* settled anywhere on the chain — §4.4 rules no
-   window at all, and rules an anchor obtained late a weaker anchor rather than an
-   invalid one, so a sequence that is a gap today can be anchored tomorrow. Excusing
-   only the tip is accordingly conservative: it is the one sequence the ruled cadence
-   guarantees is in flight, but §4.3 (acquisition never blocks an append) and §4.4
-   together let an anchor land arbitrarily later, so a mid-chain sequence can be in
-   flight too and still reads as a gap.
-6. **Name what is left exactly.** Because the denominator is exact, report the
-   remaining unanchored sequences by sequence rather than as a count or a proportion.
+   gap — with two carve-outs. The first is already made: a sequence step 3 marked
+   *unreadable* is substantive and reads as unanchored by construction, and it stays
+   held out of the gap here, because its true side of the partition is unknown rather
+   than known to be missing. The second is at the tip. An entry's anchor is announced
+   by a *later* entry, so a substantive append whose anchor-announcing append has not
+   landed yet reads as unanchored until it does. If the newest entry on the chain is
+   substantive rather than anchor-announcing, treat its sequence as *pending* rather
+   than as a gap. Pending is a reading, not a verdict: at the tip an anchor that has not
+   landed yet and one that never will are byte-identical, the same way a mid-chain
+   outage and a declined anchor are. Nor is *unanchored* settled anywhere on the chain
+   — §4.4 rules no window at all, and rules an anchor obtained late a weaker anchor
+   rather than an invalid one, so a sequence that is a gap today can be anchored
+   tomorrow. Excusing only the tip as pending is accordingly conservative: it is the one
+   sequence the ruled cadence guarantees is in flight, but §4.3 (acquisition never
+   blocks an append) and §4.4 together let an anchor land arbitrarily later, so a
+   mid-chain sequence can be in flight too and still reads as a gap.
+6. **Name what is left exactly.** Because the denominator is exact — up to the
+   unreadable sequences, which step 3 placed in it by default rather than by evidence —
+   report the remaining unanchored sequences by sequence rather than as a count or a
+   proportion.
    List the tip's pending sequence, and any sequence step 3 marked unreadable,
    separately from the gap: a sequence held out of the gap and named nowhere reads as
    anchored.

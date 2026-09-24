@@ -144,6 +144,38 @@ describe('run command', () => {
     expect(existsSync(join(fakeHome, '.jinn-operator', 'keystore-password'))).toBe(false);
   });
 
+  it('rejects --config= with invalid_invocation and does not start the daemon (#4545)', async () => {
+    const run = createRunCommand(fakeDeps);
+    const { ctx, writes, exits } = makeCommandCtx({
+      env: { JINN_PASSWORD: 'test', HOME: fakeHome },
+      argv: ['--config='],
+    });
+    await run.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(parsed.message).toContain('--config');
+    expect(parsed.message).toMatch(/empty/i);
+    expect(exits).toEqual([11]);
+    expect(fakeDeps.mainFn).not.toHaveBeenCalled();
+    expect(fakeDeps.loadConfig).not.toHaveBeenCalled();
+  });
+
+  it('rejects --config with an empty value with invalid_invocation and does not start the daemon (#4545)', async () => {
+    const run = createRunCommand(fakeDeps);
+    const { ctx, writes, exits } = makeCommandCtx({
+      env: { JINN_PASSWORD: 'test', HOME: fakeHome },
+      argv: ['--config', ''],
+    });
+    await run.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(parsed.message).toContain('--config');
+    expect(parsed.message).toMatch(/empty/i);
+    expect(exits).toEqual([11]);
+    expect(fakeDeps.mainFn).not.toHaveBeenCalled();
+    expect(fakeDeps.loadConfig).not.toHaveBeenCalled();
+  });
+
   it('treats leftover --native-config as invalid_invocation', async () => {
     const run = createRunCommand(fakeDeps);
     const { ctx, writes, exits } = makeCommandCtx({

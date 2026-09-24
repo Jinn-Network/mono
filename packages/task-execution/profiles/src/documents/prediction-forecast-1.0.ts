@@ -5,6 +5,21 @@ import type { TaskProfileDocument } from "../task-profile/schema.js";
 /**
  * The bounded, public prediction-market task contract. The request records the exact
  * posted-time consensus snapshot; the solver delivers precisely one prediction document.
+ *
+ * **Where task provenance lives for this profile.** `payloadSchema` below is closed
+ * (`additionalProperties: false`, `payload` is exactly `{forecast}`), so a prediction-forecast
+ * Task cannot carry a `payload.provenance` block the way `repository-work/1.0` does. Its
+ * provenance instead rides the namespaced top-level extension key
+ * `https://spec.jinn.network/task-provenance/v1` on the sealed Task — the profile-agnostic
+ * location, exported as `TASK_PROVENANCE_EXTENSION_KEY_V1` from
+ * `@jinn-network/benchmarking-records`. `resolveBenchmarkTaskProvenance` accepts either location
+ * and refuses `invalid-provenance` when both are present; there is no precedence rule. This is
+ * what makes prediction-forecast tasks reachable by the five clustered paired scoring methods.
+ * See DR-2026-09-05 and
+ * `docs/superpowers/specs/2026-09-02-prediction-forecast-paired-scoreability.md`.
+ *
+ * This is a statement about where readers find provenance, not a change to the sealed document:
+ * the profile document body and its digest are deliberately untouched.
  */
 export function buildPredictionForecastProfile(): TaskProfileDocument {
   return {

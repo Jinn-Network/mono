@@ -6,7 +6,8 @@
  * for existing single-operator installs. New auto-generation never writes the
  * legacy file. Rotation may mutate legacy only for the default operator.
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { resolveDefaultStateDir } from '../state-dir.js';
@@ -48,14 +49,12 @@ export function readKeystorePasswordFile(
 }
 
 /**
- * Persist a keystore password at `path`. `writeFileSync`'s `mode` applies only
- * on create, so an existing file is chmod'd to 0600 *before* it receives the
- * live secret.
+ * Persist a keystore password at `path` via `replacePasswordFileAtomically`
+ * (sibling tmp + rename): a failed write never truncates a live file, and a
+ * symlink at `path` is replaced rather than written through (#4610).
  */
 export function writeKeystorePasswordFile(path: string, password: string): void {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  if (existsSync(path)) chmodSync(path, 0o600);
-  writeFileSync(path, password + '\n', { mode: 0o600 });
+  replacePasswordFileAtomically(path, password + '\n');
 }
 
 export function writePrimaryKeystorePassword(earningDir: string, password: string): string {
@@ -117,5 +116,23 @@ export function isDefaultOperatorKeystore(
         `(${err instanceof Error ? err.message : String(err)}); not writing a password file.`,
     );
     return false;
+  }
+}
+
+/**
+ * Replace `path` with `contents` at mode 0600 via a sibling temp file and
+ * rename. A failed write never truncates the live file. `rename` replaces a
+ * symlink at `path` rather than writing through it, so the former target
+ * stays protected (#4610).
+ */
+export function replacePasswordFileAtomically(path: string, contents: string): void {
+  const tmp = `${path}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  try {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    writeFileSync(tmp, contents, { mode: 0o600, flag: 'wx' });
+    renameSync(tmp, path);
+  } catch (err) {
+    try { rmSync(tmp, { force: true }); } catch { /* tmp may never have been created */ }
+    throw err;
   }
 }

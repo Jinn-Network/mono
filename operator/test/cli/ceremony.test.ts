@@ -335,8 +335,9 @@ describe('ceremony password identity guard', () => {
       env: { HOME: home, JINN_PASSWORD: PASSWORD } as NodeJS.ProcessEnv,
     });
     expect(resolution).toMatchObject({ password: PASSWORD, source: 'env' });
-    expect((resolution as { warnings: string[] }).warnings.join(' ')).not.toContain('does not follow --dir');
-    expect((resolution as { warnings: string[] }).warnings.join(' ')).not.toContain('every daemon start');
+    const warnings = (resolution as { warnings: string[] }).warnings.join(' ');
+    expect(warnings).not.toContain('does not follow --dir');
+    expect(warnings).not.toContain('every daemon start');
   });
 
   it('uses the keystore-password file for the default dir — the value the daemon itself resolves', () => {

@@ -14,7 +14,7 @@ import Database from 'better-sqlite3';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Store } from '../../src/store/store.js';
 
 const RPC_HOST = 'base-mainnet.paid-provider.example';
@@ -89,6 +89,72 @@ describe('legacy activity_events.detail masking (#2416)', () => {
     expect(details).toHaveLength(600);
     expect(details.every((d) => d !== null && !d.includes(RPC_SECRET))).toBe(true);
     expect(details.every((d) => d !== null && d.includes(RPC_HOST))).toBe(true);
+  });
+
+  /**
+   * A LIKE-matching detail can mask to itself (`http://` with nothing for
+   * the URL regex to consume). `store.ts`'s paging cursor must advance on
+   * every selected row, not only on ones that actually change — advancing
+   * only on update would re-select a self-masking row forever.
+   *
+   * A single seeded row cannot pin that: with one matching row, `store.ts`'s
+   * `if (rows.length < batch) break` ends the loop on page size alone,
+   * whether or not the cursor advanced. Seeding a full page (`batch`, 500 —
+   * see the constant in `maskLegacyActivityEventDetails`) of self-masking
+   * rows makes the first page return exactly `batch` rows, so only the
+   * cursor decides whether a second page is fetched.
+   *
+   * There is no `timeout` option here because it would not help: `new
+   * Store(...)` runs the scrub synchronously inside the constructor, and
+   * Vitest's per-test timeout is a `setTimeout` race that never gets a turn
+   * on a blocked event loop — it cannot interrupt a synchronous hang. The
+   * real bound is the `Database.prototype.prepare` spy below, which caps the
+   * number of pages the scrub may fetch; exceeding it throws, and the
+   * scrub's own catch turns that into a skipped migration (the key stays
+   * unset) rather than a hang, so a regression fails the assertion instead
+   * of wedging the suite.
+   */
+  it('does not loop forever when a full page of rows mask to themselves', () => {
+    const path = dbFile();
+    new Store(path).close();
+
+    const batch = 500;
+    for (let i = 0; i < batch; i += 1) seedLegacyRow(path, 'claim reverted: see http://');
+
+    let selectCalls = 0;
+    const originalPrepare = Database.prototype.prepare;
+    const prepareSpy = vi
+      .spyOn(Database.prototype, 'prepare')
+      .mockImplementation(function (this: Database.Database, sql: string) {
+        const stmt = originalPrepare.call(this, sql) as Database.Statement<unknown[]>;
+        if (!sql.includes('WHERE id > @afterId')) return stmt;
+        const originalAll = stmt.all;
+        stmt.all = ((...args: unknown[]) => {
+          selectCalls += 1;
+          // A correctly-advancing cursor needs exactly two pages here (one
+          // full page, then one empty page). A stalled cursor re-fetches
+          // the same full page forever; capping well above 2 bounds that
+          // without constraining the passing case.
+          if (selectCalls > 4) {
+            throw new Error('select-all page cap exceeded: cursor is not advancing');
+          }
+          return originalAll.apply(stmt, args);
+        }) as typeof stmt.all;
+        return stmt;
+      });
+
+    let store: Store;
+    try {
+      store = new Store(path);
+    } finally {
+      prepareSpy.mockRestore();
+    }
+    expect(selectCalls).toBeLessThanOrEqual(2);
+    expect(store).toBeInstanceOf(Store);
+    expect(store.getConfigValue(MIGRATION_KEY)).toBe('true');
+    store.close();
+
+    expect(readRawDetails(path)[0]).toBe('claim reverted: see http://');
   });
 
   /**

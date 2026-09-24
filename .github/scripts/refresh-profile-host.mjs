@@ -49,7 +49,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { HOST_CONFIG_FILE_NAME, MANIFEST_FILE_NAME } from './build-profile-host-bundle.mjs';
 import { hasGitControlSegment } from './public-surface-assets.mjs';
@@ -183,7 +183,7 @@ function assertExpectedGroups(groups, expectedGroups) {
  * publication, where the bytes being published are the ones being read.
  * @param {string} bundleDir
  * @param {{ sourceSha: string, expectedGroups: string[] }} expected
- * @returns {{ groups: string[], lane: string, sourceCommit: string }}
+ * @returns {{ groups: string[], sourceCommit: string }}
  */
 export function validateBundleDir(bundleDir, { sourceSha, expectedGroups }) {
   if (!existsSync(bundleDir) || !statSync(bundleDir).isDirectory()) {
@@ -221,7 +221,6 @@ export function validateBundleDir(bundleDir, { sourceSha, expectedGroups }) {
   // `releaseGroup` field happens to say.
   assertExpectedGroups(groups, expectedGroups);
 
-  let lane;
   let sourceCommit;
   for (const group of groups) {
     const manifest = readGroupManifest(bundleDir, group);
@@ -231,22 +230,14 @@ export function validateBundleDir(bundleDir, { sourceSha, expectedGroups }) {
     if (manifest.releaseGroup !== group) {
       throw new Error(`deploy bundle directory ${group} holds a manifest claiming release group ${manifest.releaseGroup}`);
     }
-    // Presence before agreement. `undefined` is the "no group seen yet" sentinel below, so
-    // a manifest that simply omits the field would be adopted from a later group instead of
-    // refused: the bundle would validate clean while publishing a group whose bytes carry no
-    // lane and no commit binding, and the same-run check below would be reading a different
-    // group's commit. Requiring both here also makes `groups[0]` in the messages below the
-    // group the retained value actually came from.
-    if (manifest.lane !== 'canary' && manifest.lane !== 'stable') {
-      throw new Error(`deploy bundle ${group}/${MANIFEST_FILE_NAME} declares no lane: ${manifest.lane ?? '<missing>'}`);
+    // Served group manifests must not embed `lane` (#4469). Presence is a
+    // generator regression: those bytes are what the stable live-host gate compares.
+    if ('lane' in manifest) {
+      throw new Error(`deploy bundle ${group}/${MANIFEST_FILE_NAME} must not embed lane`);
     }
     const commit = manifest.generatedFrom?.commit;
     if (typeof commit !== 'string' || !COMMIT_SHA_PATTERN.test(commit)) {
       throw new Error(`deploy bundle ${group}/${MANIFEST_FILE_NAME} names no source commit: ${commit ?? '<missing>'}`);
-    }
-    if (lane === undefined) lane = manifest.lane;
-    else if (manifest.lane !== lane) {
-      throw new Error(`deploy bundle mixes lanes: ${groups[0]} is ${lane} and ${group} is ${manifest.lane}`);
     }
     if (sourceCommit === undefined) sourceCommit = commit;
     else if (commit !== sourceCommit) {
@@ -260,7 +251,7 @@ export function validateBundleDir(bundleDir, { sourceSha, expectedGroups }) {
     throw new Error(`deploy bundle was generated from commit ${sourceCommit}, but this run publishes ${sourceSha}`);
   }
 
-  return { groups, lane, sourceCommit };
+  return { groups, sourceCommit };
 }
 
 /**
@@ -325,10 +316,9 @@ export function mirrorContent(bundleDir, hostDir, { keep = DEFAULT_KEEP } = {}) 
 
 /**
  * Write the single provenance marker at the host ROOT. Deterministic for one source SHA
- * (no timestamps), so a same-content refresh does not churn it. `lane` is recorded
- * alongside the SHA because the automatic refresh runs on the canary lane while the
- * stable live-host gate compares stable bytes: without it, that mismatch is diagnosed by
- * reasoning about which job last ran rather than by reading the host.
+ * (no timestamps), so a same-content refresh does not churn it. `lane` is a job
+ * diagnostic (#4469): served manifests no longer embed it, so this marker is how an
+ * operator reads which refresh job last wrote.
  * @param {string} hostDir
  * @param {{ sourceSha: string, lane: string, groups: string[], workflowPath: string }} fields
  */
@@ -429,12 +419,15 @@ export function buildCommitMessage({ sourceSha, lane, groups }) {
  * local checkout needs no token, so it folds in here; only `git push` (in the YAML) is
  * privileged. Pure of GitHub-specific side effects -- no `::error::`, no `process.exit`,
  * no `$GITHUB_OUTPUT`.
- * @param {{ bundleDir: string, hostDir: string, sourceSha: string, workflowPath: string, expectedGroups: string[] }} args
+ * @param {{ bundleDir: string, hostDir: string, sourceSha: string, workflowPath: string, expectedGroups: string[], lane: string }} args
  * @returns {{ changed: boolean, message: string, groups: string[], lane: string }}
  */
-export function run({ bundleDir, hostDir, sourceSha, workflowPath, expectedGroups }) {
+export function run({ bundleDir, hostDir, sourceSha, workflowPath, expectedGroups, lane }) {
   validateSourceSha(sourceSha);
-  const { groups, lane } = validateBundleDir(bundleDir, { sourceSha, expectedGroups });
+  if (lane !== 'canary' && lane !== 'stable') {
+    throw new Error(`LANE must be canary or stable, got ${lane ?? '<missing>'}`);
+  }
+  const { groups } = validateBundleDir(bundleDir, { sourceSha, expectedGroups });
   validateHostCheckout(bundleDir, hostDir);
   mirrorContent(bundleDir, hostDir);
   // `--force` is what makes the staged tree cover every mirrored path, and so what makes
@@ -473,7 +466,11 @@ export function run({ bundleDir, hostDir, sourceSha, workflowPath, expectedGroup
 // ($GITHUB_OUTPUT + ::notice::/::error::). The privileged `git push` stays in the YAML,
 // gated on the emitted `changed`.
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   const bundleDir = process.env.BUNDLE_DIR ?? '';
   const hostDir = process.env.HOST_DIR ?? 'host';
   const sourceSha = process.env.SOURCE_SHA ?? '';
@@ -489,7 +486,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
   let result;
   try {
-    result = run({ bundleDir, hostDir, sourceSha, workflowPath, expectedGroups });
+    result = run({
+      bundleDir,
+      hostDir,
+      sourceSha,
+      workflowPath,
+      expectedGroups,
+      lane: process.env.LANE,
+    });
   } catch (error) {
     console.log(`::error::${error?.message ?? error}`);
     process.exit(1);

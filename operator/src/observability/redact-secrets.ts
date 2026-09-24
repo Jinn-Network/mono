@@ -44,10 +44,14 @@ import { walkStructured } from '../util/structured-walk.js';
  * (`util/embedded-url-pattern.ts`), the same pattern `rpc/transport.ts`
  * masks with. A URL with a bracketed-IPv6 host and a URL with an uppercase
  * scheme are now redacted on the free-text path; under v4 the first was
- * truncated at `[` (unparseable, credentials kept) and the second never
+ * truncated at `]` (unparseable, credentials kept) and the second never
  * matched.
+ *
+ * v6 (#4547): a URL that defeats `new URL` now also has its `/v<n>/<key>`
+ * and long-opaque path segments stripped, by the same rule as a parseable
+ * URL. Under v5 those segments survived on the unparseable path.
  */
-export const REDACTION_VERSION = '5';
+export const REDACTION_VERSION = '6';
 
 /** The marker substituted for a redacted value. */
 function marker(label: string): string {
@@ -143,10 +147,11 @@ export function redactRpcUrl(url: string): string {
   try {
     parsed = new URL(url);
   } catch {
-    // Not a parseable URL. Fail closed: strip userinfo and any query/fragment
-    // textually, so a URL that defeats `new URL` (e.g. `[https://u:pw@host]`,
-    // where EMBEDDED_URL_RE swallows the `]` into the host) still cannot carry
-    // a credential out. Then apply only the non-URL string redactors —
+    // Not a parseable URL. Fail closed: strip userinfo, query/fragment and
+    // key-shaped path segments textually, so a URL that defeats `new URL`
+    // (e.g. `[https://u:pw@host]/v2/<key>`, where EMBEDDED_URL_RE swallows the
+    // `]` into the host) loses the same credential surfaces as a parseable
+    // one. Then apply only the non-URL string redactors —
     // calling redactStringValue would re-run EMBEDDED_URL_RE on the same
     // unparseable string and recurse straight back into redactRpcUrl,
     // overflowing the stack on a malformed URL (e.g. `http://[bad`) in an
@@ -154,6 +159,9 @@ export function redactRpcUrl(url: string): string {
     return url
       .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#]*@/i, '$1')
       .replace(/[?#][\s\S]*$/, '')
+      .replace(/^([a-z][a-z0-9+.-]*:\/\/[^/]*)(\/.*)$/is, (_, origin: string, path: string) =>
+        origin + redactPathSegments(path),
+      )
       .replace(HEX64_RE, marker('hex64'))
       .replace(JWT_RE, marker('jwt'));
   }
@@ -170,22 +178,29 @@ export function redactRpcUrl(url: string): string {
   // `#key=...` credential there.
   parsed.hash = '';
 
-  // Strip opaque path segments that look like API keys: a long alphanumeric
-  // run, or a segment following a version-style prefix (v2/v3/...).
-  const segments = parsed.pathname.split('/');
-  const cleaned = segments.map((seg, idx) => {
-    if (!seg) return seg;
-    const prev = segments[idx - 1]?.toLowerCase();
-    if (prev && /^v\d+$/.test(prev)) return marker('rpc-key');
-    // A long opaque token (>= 20 chars, mixed case or digits) is treated as a key.
-    if (seg.length >= 20 && /[A-Za-z]/.test(seg) && /[0-9A-Z]/.test(seg)) {
-      return marker('rpc-key');
-    }
-    return seg;
-  });
-  parsed.pathname = cleaned.join('/');
+  parsed.pathname = redactPathSegments(parsed.pathname);
 
   return parsed.toString();
+}
+
+/**
+ * Strip opaque path segments that look like API keys: a long alphanumeric
+ * run, or a segment following a version-style prefix (v2/v3/...).
+ */
+function redactPathSegments(pathname: string): string {
+  const segments = pathname.split('/');
+  return segments
+    .map((seg, idx) => {
+      if (!seg) return seg;
+      const prev = segments[idx - 1]?.toLowerCase();
+      if (prev && /^v\d+$/.test(prev)) return marker('rpc-key');
+      // A long opaque token (>= 20 chars, mixed case or digits) is treated as a key.
+      if (seg.length >= 20 && /[A-Za-z]/.test(seg) && /[0-9A-Z]/.test(seg)) {
+        return marker('rpc-key');
+      }
+      return seg;
+    })
+    .join('/');
 }
 
 /** True for keys whose values hold an RPC URL (singular or plural array). */
@@ -226,8 +241,9 @@ function redactLeaf(value: unknown): unknown {
   // exactly what JSON.stringify would have produced in the bundle, and it
   // cannot carry a secret.
   if (value instanceof Date) return value.toISOString();
-  // Functions, symbols, Maps, Sets, class instances — nothing JSON-shaped to
-  // walk. Say so rather than emitting a misleading `{}`.
+  // Functions, symbols, bigints, Maps, Sets, class instances — nothing
+  // JSON-shaped to walk. Say so rather than emitting a misleading `{}`.
+  // Counterpart: `sanitizeStructuredLeaf` in `src/rpc/transport.ts`.
   return marker('unserializable');
 }
 

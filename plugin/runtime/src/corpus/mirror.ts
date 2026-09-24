@@ -339,7 +339,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
             counters.rejected += 1;
             log.warn("corpus.mirror.index-failed", {
               announcementId: announcement.announcementId,
-              message: describeError(error),
+              reason: describeError(error),
             });
           }
         }
@@ -371,7 +371,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
       try {
         lock = await tryAcquireSyncLock({ path: options.lockPath, fs: options.fs });
       } catch (error) {
-        log.warn("corpus.mirror.lock-failed", { message: describeError(error) });
+        log.warn("corpus.mirror.lock-failed", { reason: describeError(error) });
         return { status: "failed", sources: [] };
       }
       if (lock === undefined) return { status: "skipped-locked", sources: [] };
@@ -398,7 +398,7 @@ export function createCorpusMirror(options: CreateCorpusMirrorOptions): CorpusMi
           return { status, sources: reports };
         });
       } catch (error) {
-        log.error("corpus.mirror.sync-failed", { message: describeError(error) });
+        log.error("corpus.mirror.sync-failed", { reason: describeError(error) });
         return { status: "failed", sources: [] };
       } finally {
         await lock.close();

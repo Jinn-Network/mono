@@ -14,31 +14,16 @@
  * callers that truly want no watchdog (e.g. a test irrelevant to watchdog
  * behavior that wants no extra background timer).
  */
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { Daemon, type DaemonConfig } from '../../src/daemon/daemon.js';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
 import { SimpleRunner } from '../../src/runner/simple.js';
-import { HarnessRegistry } from '../../src/harnesses/engine/registry.js';
 import { Store } from '../../src/store/store.js';
 import { getLoopTick } from '../../src/daemon/loop-heartbeat.js';
 import { getEventBuffer } from '../../src/events/emitter.js';
 
-function minimalEngineConfig(root: string): DaemonConfig['restorationEngine'] {
-  const implRegistry = new HarnessRegistry({ default: 'legacy-claude' });
-  return {
-    implRegistry,
-    paths: {
-      workingDirRoot: join(root, 'work'),
-      implStateDirRoot: join(root, 'impl-state'),
-    },
-  };
-}
-
-function makeDaemon(store: Store, tmp: string, watchdog?: DaemonConfig['watchdog']): Daemon {
+function makeDaemon(store: Store, watchdog?: DaemonConfig['watchdog']): Daemon {
   return new Daemon({
     adapter: new LocalAdapter(),
     runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
@@ -46,8 +31,6 @@ function makeDaemon(store: Store, tmp: string, watchdog?: DaemonConfig['watchdog
     dbPath: ':memory:',
     apiPort: 0,
     pollIntervalMs: 60_000,
-    taskSources: [],
-    restorationEngine: minimalEngineConfig(tmp),
     shutdownTimeoutMs: 100,
     // Wave-4 D3 retired `creator`, which had been this test's anchor as the
     // last loop a bare legacy boot always started. With it gone a minimal boot
@@ -80,12 +63,10 @@ function makeDaemon(store: Store, tmp: string, watchdog?: DaemonConfig['watchdog
 }
 
 describe('#1043 Daemon watchdog wiring', () => {
-  let tmp: string;
   let store: Store;
   let daemon: Daemon | undefined;
 
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), 'jinn-1043-watchdog-'));
     store = new Store(':memory:');
   });
 
@@ -95,7 +76,7 @@ describe('#1043 Daemon watchdog wiring', () => {
   });
 
   it('seeds heartbeats for started loops and runs while running (autoRestart off)', async () => {
-    daemon = makeDaemon(store, tmp, { autoRestart: false });
+    daemon = makeDaemon(store, { autoRestart: false });
     await daemon.start();
 
     // `checkpoint` is the always-admission loop this fixture starts (Wave-4 D3
@@ -110,7 +91,7 @@ describe('#1043 Daemon watchdog wiring', () => {
   });
 
   it('seeds heartbeats and arms the watchdog by default when watchdog config is omitted', async () => {
-    daemon = makeDaemon(store, tmp, undefined);
+    daemon = makeDaemon(store, undefined);
     await daemon.start();
 
     // Omitted watchdog config now defaults to armed — same boot-seed
@@ -125,7 +106,7 @@ describe('#1043 Daemon watchdog wiring', () => {
 
   it('emits loop_watchdog_stale for a genuinely stale loop when watchdog config is omitted', async () => {
     getEventBuffer().clear();
-    daemon = makeDaemon(store, tmp, undefined);
+    daemon = makeDaemon(store, undefined);
     await daemon.start();
 
     // Force 'checkpoint' far enough back that it exceeds the default staleness
@@ -150,7 +131,7 @@ describe('#1043 Daemon watchdog wiring', () => {
   });
 
   it('watchdog: false fully disables the watchdog (explicit opt-out)', async () => {
-    daemon = makeDaemon(store, tmp, false);
+    daemon = makeDaemon(store, false);
     await daemon.start();
 
     // No watchdog → no boot-seed of heartbeats by the watchdog wiring.

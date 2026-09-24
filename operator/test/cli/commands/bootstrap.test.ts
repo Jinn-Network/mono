@@ -75,7 +75,7 @@ function makeFakeDeps(
     },
     resolveCliPassword: () =>
       passwordOk
-        ? { ok: true as const, password: 'test' }
+        ? { ok: true as const, password: 'test', source: 'env' as const }
         : { ok: false as const, message: 'Set JINN_PASSWORD or pass --password-fd N with a readable file descriptor.' },
     checkDaemonGuard: () => ({ blocked: false, pid: null, pidfilePath: '', reason: 'not-running' as const }),
   };

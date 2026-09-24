@@ -335,6 +335,44 @@ describe('POST /v1/operator/pricing', () => {
     });
   });
 
+  // Issue #4241: `operator` also carries non-pricing keys (verticalMode,
+  // native). A pricing save must merge into the block, not replace it.
+  it('preserves non-pricing keys in the operator block', async () => {
+    const store = memoryStore();
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
+    const configPath = join(dir, 'config.json');
+    const native = { fleet: { workers: 2 }, sources: ['a', 'b'] };
+    writeFileSync(configPath, `${JSON.stringify({
+      network: 'testnet',
+      operator: {
+        verticalMode: 'native-v1',
+        native,
+        publicEndpoint: 'https://old.example.com',
+        defaultPriceUsdc: '0',
+      },
+    }, null, 2)}\n`);
+
+    const app = new Hono();
+    addOperatorArtifactsRoutes(app, { store, configPath });
+
+    const res = await app.request('/v1/operator/pricing', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ defaultPriceUsdc: '0.002' }),
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+      network: string;
+      operator: Record<string, unknown>;
+    };
+    expect(persisted.network).toBe('testnet');
+    expect(persisted.operator.verticalMode).toBe('native-v1');
+    expect(persisted.operator.native).toEqual(native);
+    expect(persisted.operator.publicEndpoint).toBe('https://old.example.com');
+    expect(persisted.operator.defaultPriceUsdc).toBe('0.002');
+  });
+
   it('persists donation settings without requiring publicEndpoint', async () => {
     const store = memoryStore();
     const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
@@ -423,6 +461,50 @@ describe('POST /v1/operator/pricing', () => {
     });
 
     expect(res.status).toBe(500);
+    expect(isRestartRequired()).toBe(false);
+  });
+
+  // Issue #4242: neither early-return error path may flag a restart.
+  it('returns config_unreadable without flagging a restart when the config is not JSON', async () => {
+    const store = memoryStore();
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
+    const configPath = join(dir, 'config.json');
+    writeFileSync(configPath, 'not json {');
+
+    const app = new Hono();
+    addOperatorArtifactsRoutes(app, { store, configPath });
+
+    const res = await app.request('/v1/operator/pricing', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ defaultPriceUsdc: '0.001' }),
+    });
+
+    expect(res.status).toBe(500);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('config_unreadable');
+    expect(isRestartRequired()).toBe(false);
+    expect(readFileSync(configPath, 'utf-8')).toBe('not json {');
+  });
+
+  it('returns invalid_body without flagging a restart when the body is not JSON', async () => {
+    const store = memoryStore();
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-pricing-'));
+    const configPath = join(dir, 'config.json');
+    writeFileSync(configPath, `${JSON.stringify({ network: 'testnet' }, null, 2)}\n`);
+
+    const app = new Hono();
+    addOperatorArtifactsRoutes(app, { store, configPath });
+
+    const res = await app.request('/v1/operator/pricing', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: 'not json {',
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('invalid_body');
     expect(isRestartRequired()).toBe(false);
   });
 

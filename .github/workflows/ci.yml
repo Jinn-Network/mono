@@ -141,8 +141,10 @@ jobs:
           # The image lanes and the operator-facing deploy documents are what
           # `operator/test/scripts/ghcr-image-references.test.ts` guards. A change
           # confined to them — the exact shape of `af8bd65de`, which caused #2811
-          # — selected no lane before those four entries. Every line inside the
-          # array is a quoted pattern: `pack-workflows.test.ts` parses it and
+          # — selected no lane before those four entries. `test-support/dockerfile-portals`
+          # is the shared walk those guards import (#4645); it is not a Yarn portal
+          # workspace, so the derived closure below cannot name it. Every line inside
+          # the array is a quoted pattern: `pack-workflows.test.ts` parses it and
           # rejects anything else.
           patterns=(
             '^operator/'
@@ -161,6 +163,7 @@ jobs:
             '^\.github/scripts/npm-publish-workflow\.test\.mjs$'
             '^\.github/scripts/docker-workflow\.test\.mjs$'
             '^\.github/scripts/operator-[^/]*\.test\.mjs$'
+            '^test-support/dockerfile-portals/'
             '^packages/contract-abis/'
             '^packages/discovery/client/'
             '^packages/discovery/facts/offers/'
@@ -377,6 +380,8 @@ jobs:
     # it. Re-running here is duplicate load against the 20-concurrent-job ceiling
     # DR-2026-08-18-b names as the binding constraint, so `head_ref != 'next'`
     # excludes it. No other head is excluded, so hotfixes keep the full battery.
+    # A fork may name its branch `next` too; that residual is an accepted risk,
+    # recorded at `main-base-guard.yml`.
     if: needs.changes.outputs.run == 'true' && (github.event_name != 'pull_request' || (github.base_ref == 'main' && github.head_ref != 'next'))
     runs-on: ubuntu-latest
     steps:

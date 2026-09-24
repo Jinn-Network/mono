@@ -7,7 +7,7 @@
  * cells; an importer with an exclude flag would let them do it in one step. Neither exists here.
  */
 
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -16,6 +16,11 @@ import { BenchmarkProductError } from "../errors.js";
 import type { ExternalRunRecord } from "../intake/external-run-records.js";
 import {
   assertExternalRunImportSource,
+  dumpIdentityFromPath,
+  dumpIdentityFromRecords,
+  EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES,
+  EXTERNAL_IMPORT_MAX_EVIDENCE_FILE_BYTES,
+  EXTERNAL_IMPORT_MAX_ROWS,
   EXTERNAL_RUN_IMPORT_SOURCE_MAX_LENGTH,
   preflightExternalRunImport,
   validateExternalRunRecords,
@@ -397,6 +402,92 @@ describe("preflightExternalRunImport — evidence reads never follow a symlink",
       expect(() => preflightWith("log.txt")).toThrow(/symbolic link/u);
     } finally {
       rmSync(outside, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("dump identity and hostile-dump caps (issue #3417)", () => {
+  it("hashes canonical JSON of in-memory records", () => {
+    const rows = completeRows();
+    const identity = dumpIdentityFromRecords(rows);
+    expect(identity.sha256).toMatch(/^[a-f0-9]{64}$/u);
+    expect(identity.byteLength).toBeGreaterThan(0);
+    expect(dumpIdentityFromRecords(rows)).toEqual(identity);
+  });
+
+  it("hashes file bytes when the path is a regular file, not the canonical records", () => {
+    const dir = mkdtempSync(join(tmpdir(), "bp-import-dump-"));
+    try {
+      const path = join(dir, "dump.jsonl");
+      writeFileSync(path, "not-the-canonical-records\n");
+      const identity = dumpIdentityFromPath(path, completeRows());
+      expect(identity).not.toEqual(dumpIdentityFromRecords(completeRows()));
+      expect(identity.byteLength).toBe("not-the-canonical-records\n".length);
+      expect(dumpIdentityFromPath(dir, completeRows())).toEqual(dumpIdentityFromRecords(completeRows()));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a dump above the row cap before walking the slate", () => {
+    const rows = Array.from({ length: EXTERNAL_IMPORT_MAX_ROWS + 1 }, (_, index) => ({
+      row: index + 1,
+      cellKey: `alpha/${"aa".repeat(32)}/r1`,
+      outcome: "unrun" as const,
+      reason: "not attempted",
+    }));
+    const error = refusal(rows);
+    expect(error.issues.map((issue) => issue.path)).toEqual(["too-many-rows"]);
+    expect(error.message).toContain(String(EXTERNAL_IMPORT_MAX_ROWS));
+  });
+
+  it("refuses an evidence file above the per-file byte cap without reading it whole", () => {
+    const evidenceRoot = mkdtempSync(join(tmpdir(), "bp-import-cap-"));
+    try {
+      const path = join(evidenceRoot, "huge.bin");
+      writeFileSync(path, "");
+      truncateSync(path, EXTERNAL_IMPORT_MAX_EVIDENCE_FILE_BYTES + 1);
+      const rows = completeRows();
+      rows[0] = row(0, {
+        outcome: "ungradeable",
+        reason: "grader crashed",
+        evidence: [{ name: "log", path: "huge.bin" }],
+      });
+      expect(() => preflightExternalRunImport({
+        workspaceDir: evidenceRoot,
+        plan: validate(rows),
+        runRecord: RUN,
+        evidenceRoot,
+      })).toThrow(/per-file cap/u);
+    } finally {
+      rmSync(evidenceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses evidence that would exceed the aggregate byte cap", () => {
+    const evidenceRoot = mkdtempSync(join(tmpdir(), "bp-import-agg-"));
+    try {
+      const files = Array.from({ length: 9 }, (_, index) => `part-${index}.bin`);
+      for (const name of files) {
+        const path = join(evidenceRoot, name);
+        writeFileSync(path, "");
+        truncateSync(path, EXTERNAL_IMPORT_MAX_EVIDENCE_FILE_BYTES);
+      }
+      const rows = completeRows();
+      rows[0] = row(0, {
+        outcome: "ungradeable",
+        reason: "grader crashed",
+        evidence: files.map((name) => ({ name, path: name })),
+      });
+      expect(9 * EXTERNAL_IMPORT_MAX_EVIDENCE_FILE_BYTES).toBeGreaterThan(EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES);
+      expect(() => preflightExternalRunImport({
+        workspaceDir: evidenceRoot,
+        plan: validate(rows),
+        runRecord: RUN,
+        evidenceRoot,
+      })).toThrow(/aggregate/u);
+    } finally {
+      rmSync(evidenceRoot, { recursive: true, force: true });
     }
   });
 });

@@ -46,7 +46,7 @@ establish, why you can believe it, everything sealed.
 
 ### 1.1 Element inventory
 
-`packages/benchmark-product/verify/src/assets.ts` `buildIndex()` renders twenty-two
+`packages/benchmark-product/check/src/assets.ts` `buildIndex()` renders twenty-two
 top-level elements, one of which is never visible on the page. This is the complete list;
 §6 rules on every row of it.
 
@@ -193,8 +193,11 @@ of the counting rule. The replicate *count* still appears above the fold, inside
 visual, as the per-arm `n`. Only its *name* moves down, onto the closed-state label of
 Band 5's accounting fold, where the reader who cares about it is already standing.
 
-Neither ceiling is a target to hit; both are ceilings. A method whose honest claim needs
-four concepts should spend four.
+Neither ceiling is a target to hit; both are ceilings. A method whose honest claim needs four
+concepts should spend four. That is also what absorbs the one dependency this derivation
+carries: §9 assigns the wording of Band 5's fold labels to #3016, so a rewording of fold 2
+that drops the word `replicate` would spend eleven rather than twelve. Eleven is inside the
+ceiling and nothing breaks; only the worked example above stops being worked.
 
 ### 3.4 What the budget does not constrain
 
@@ -305,7 +308,7 @@ how machinery folds without weakening disclosure.
 page renders today. A fold that rewrote its content would be a disclosure change wearing an
 information-architecture costume.
 
-**A fold is labeled with its conclusion, not its contents.** "Every attempt is accounted
+**A fold is labeled with its conclusion, not its contents.** "Every replicate is accounted
 for", not "Sealed Matrix accounting". A reader must be able to learn what the block
 establishes without opening it, because the reader who never opens it still has to leave
 with the right belief.
@@ -313,7 +316,7 @@ with the right belief.
 **A fold's label must be false-negative safe.** Where the underlying facts do not support
 the conclusion, the label states the exception instead and the fold opens by default. A run
 with unjudged cells is labeled "Three attempts were never judged", open, in Band 4 — not
-"Every attempt is accounted for", closed, in Band 5. The label is derived from the facts,
+"Every replicate is accounted for", closed, in Band 5. The label is derived from the facts,
 in the manner `neutralClaimHtml` and `report-face.ts` already derive their sentences: the
 words key on facts, never on configuration, so the text is identical for every reader.
 
@@ -374,7 +377,7 @@ removed. No fact, figure, caveat, limitation, digest, or command is removed by t
 A budget nobody counts is a preference. Three checks, all cheap, because the page is
 already byte-pinned and therefore already deterministic.
 
-**Budget check.** A test in `packages/benchmark-product/verify/src/` renders `index.html`
+**Budget check.** A test in `packages/benchmark-product/check/src/` renders `index.html`
 from a fixture, strips the content of every closed disclosure control, and counts distinct
 controlled-vocabulary terms in the two counted regions of §3.2. It fails over either
 ceiling. It reports the terms it counted, so a failure is actionable rather than a number.

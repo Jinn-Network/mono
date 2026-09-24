@@ -681,7 +681,7 @@ describe('fetchOpenOrders timeout', () => {
 
     // The result will be a toolErr since we restored fetch (next attempt would fail)
     // We only needed to verify the signal is wired correctly
-  }, 5_000);
+  });
 
   it('rejects with timeout error when AbortController fires', async () => {
     origFetch = global.fetch;

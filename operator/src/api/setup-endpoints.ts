@@ -788,9 +788,22 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       const reencrypted = await encryptMnemonic(mnemonic, parsed.data.next);
       await store.saveMnemonicKeystore(reencrypted);
 
-      // Always write this daemon's primary password file. Mutate the host-wide
-      // legacy file only when this is the default operator and that file still
-      // holds the authenticated old password.
+      // Always write this daemon's primary password file (via
+      // `writePrimaryKeystorePassword` -> `replacePasswordFileAtomically`: a
+      // failed write never truncates a live file, and a symlink at the path
+      // is replaced rather than written through, #4610). `passwordFileUpdated`
+      // reports the primary write only -- it is what `jinn run` resolves
+      // first, so it is the write that matters to the caller.
+      //
+      // Best-effort mirror into the host-wide legacy file, for existing
+      // single-operator installs that still read it: keystore identity
+      // proves this is the default operator's file whatever it currently
+      // holds, so an existing but drifted legacy file is repaired the same
+      // way as the CLI's rotation (#4116) -- but new auto-generation never
+      // creates that file (module doc, #4087), so an absent one stays
+      // absent here too. A legacy-write failure only warns; it never flips
+      // `passwordFileUpdated` back to false when the primary write already
+      // succeeded.
       const home = process.env['HOME'] ?? homedir();
       const stateDir = resolveDefaultStateDir({ home });
       const defaultEarningDir = join(stateDir, 'earning');
@@ -802,15 +815,15 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       try {
         writePrimaryKeystorePassword(earningDir, parsed.data.next);
         passwordFileUpdated = true;
-        if (
-          isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn)
-          && existsSync(legacyPath)
-          && readFileSync(legacyPath, 'utf-8').trim() === parsed.data.current
-        ) {
-          writeKeystorePasswordFile(legacyPath, parsed.data.next);
-        }
       } catch (err) {
         warn(`[warn] Could not update a keystore-password file (${errorMessage(err)}); leaving it in place.`);
+      }
+      if (isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn) && existsSync(legacyPath)) {
+        try {
+          writeKeystorePasswordFile(legacyPath, parsed.data.next);
+        } catch (err) {
+          warn(`[warn] Could not update a keystore-password file (${errorMessage(err)}); leaving it in place.`);
+        }
       }
 
       // Mirror into env so the running daemon's in-memory PASSWORD stays valid

@@ -11,7 +11,7 @@ import type {
   SubmissionUri,
 } from "@jinn-network/task-execution-backend";
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
-import { computeBeaconOrder, requiredBeaconRound } from "@colophon-claims/verify";
+import { computeBeaconOrder, requiredBeaconRound } from "@colophon-claims/check";
 import { itemTaskDigest, parseBenchmark } from "@jinn-network/benchmarking-records";
 import { readAuditEntries } from "../audit/journal.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
@@ -1211,9 +1211,6 @@ describe("runResume — evaluation catch-up", () => {
  * length, would leave every other test green while the run dispatched in `cellKey` order and still
  * recorded, reported and published a binding claiming beacon-derived order — the one failure mode
  * where the binding record says something the run did not do.
- *
- * They also cover the launch half of issue #3334: the order dispatched is the one committed when
- * `launchedAt` became durable, read after that write rather than before it.
  */
 describe("runLaunch / runResume — a bound run dispatches in its beacon-derived order", () => {
   /** The tasks of the sealed Benchmark, `sha256:`-prefixed and unique — `runBind`'s own identity set. */
@@ -1350,4 +1347,40 @@ describe("runLaunch / runResume — a bound run dispatches in its beacon-derived
     // fake venue and then drives most of it again on resume, so its real cost is two runs' worth
     // of dispatch and it is the one case here the shared bound does not fit.
   }, 120_000);
+
+  /**
+   * Issue #4132 / launch half of #3334. `setUpBoundDraft` binds before `runLaunch`, so
+   * `loaded.dispatchTaskOrder` and `dispatchTaskOrderAtLaunch` are the same value and substituting
+   * one for the other stays green. Binding from `onBeforeLaunchStampForTesting` lands after the
+   * locked load and before the draft leaves `locked`: the re-read is then the only source of the
+   * derived order.
+   */
+  test("a bind that lands after the locked load is the order the first launch dispatches", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const runState = readRunState(workspaceDir, "draft-1")!;
+    const sealDigest = `sha256:${runState.runSha256!}`;
+    const itemSha256s = sealedTaskSha256s("draft-1");
+    const value = beaconValueThatReorders(sealDigest, itemSha256s);
+    const round = requiredBeaconRound("drand/quicknet", runState.lockedAt!)!.round;
+    const { backend, submits } = makeStatefulFakeBackend();
+    let derived: readonly string[] = [];
+
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(backend),
+      onBeforeLaunchStampForTesting: () => {
+        const bound = runBind(contextFor(clock), {
+          draftId: "draft-1",
+          beacon: { source: "drand/quicknet", round, value },
+        });
+        expect(bound.ok, JSON.stringify(bound)).toBe(true);
+        if (!bound.ok) throw new Error("late bind failed");
+        derived = bound.result.binding.order.map((item) => item.slice("sha256:".length));
+      },
+    });
+    expect(launched.ok, JSON.stringify(launched)).toBe(true);
+    expect(derived.length).toBeGreaterThan(0);
+    expect(isCellKeyOrder(derived)).toBe(false);
+    expect(solveTaskDispatchOrder(submits, new Set(derived))).toEqual(derived);
+  });
 });

@@ -180,7 +180,13 @@ export async function runVerdictScenario(context: ScenarioContext): Promise<RunO
   const evaluationId = seedPublishedVerdict(path);
   const deliveryKey = `${context.runId}:verdict-delivery`;
   const settlementKey = `${context.runId}:verdict-settlement`;
-  const invocations = { marketplaceDeliver: 0, verdictClaim: 0, canonicalRead: 0 };
+  const invocations = {
+    marketplaceDeliver: 0,
+    marketplaceDeliverSent: 0,
+    verdictClaim: 0,
+    verdictClaimSent: 0,
+    canonicalRead: 0,
+  };
 
   const store = new Store(path);
   try {
@@ -201,7 +207,8 @@ export async function runVerdictScenario(context: ScenarioContext): Promise<RunO
       readCanonicalVerdictAttempt: unreachableMember('readCanonicalVerdictAttempt'),
       deliverVerdictToMarketplace: async ({ operationId }) => {
         const sent = await broadcastOnce(context, deliveryKey);
-        if (sent.broadcast) invocations.marketplaceDeliver += 1;
+        invocations.marketplaceDeliver += 1;
+        if (sent.broadcast) invocations.marketplaceDeliverSent += 1;
         return { operationId, transaction: await context.chain.awaitFinalized(sent.txHash) };
       },
       readCanonicalVerdictDelivery: async () => {
@@ -216,7 +223,8 @@ export async function runVerdictScenario(context: ScenarioContext): Promise<RunO
         // The settlement transaction is on the node once the boundary fires; reconciling it into
         // the operation is what the injected boundary interrupts.
         const sent = await broadcastOnce(context, settlementKey, () => context.boundary());
-        if (sent.broadcast) invocations.verdictClaim += 1;
+        invocations.verdictClaim += 1;
+        if (sent.broadcast) invocations.verdictClaimSent += 1;
         return {
           operationId,
           status: 'settled' as const,
@@ -261,9 +269,19 @@ export async function runVerdictScenario(context: ScenarioContext): Promise<RunO
       retry: { now: () => DRILL_CLOCK, delayMs: 0, maxAttempts: 5 },
     });
 
+    let complete = false;
     for (let pass = 0; pass < 8; pass += 1) {
       const result = await coordinator.reconcileEvaluation(evaluationId);
-      if (result.kind === 'complete' || result.kind === 'failed') break;
+      if (result.kind === 'failed') {
+        throw new Error('restart drill verdict-settlement: reconcile ended in failed');
+      }
+      if (result.kind === 'complete') {
+        complete = true;
+        break;
+      }
+    }
+    if (!complete) {
+      throw new Error('restart drill verdict-settlement: reconcile loop exhausted without a terminal state');
     }
 
     const evaluation = state.getEvaluation(evaluationId)!;

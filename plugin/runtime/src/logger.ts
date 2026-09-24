@@ -33,6 +33,14 @@ type EmittedLevel = Exclude<LogLevel, "silent">;
 
 const RESERVED_FIELD_KEYS = new Set(["toJSON"]);
 
+// DEL and C1 (U+007F-U+009F) pass through JSON.stringify raw; C0 is escaped by it.
+// Values only: keys are program-authored, values are peer-influenced (describeError).
+const TERMINAL_CONTROL_CHARACTERS = /[\u007f-\u009f]/g;
+
+function stripTerminalControls(value: string): string {
+  return value.replace(TERMINAL_CONTROL_CHARACTERS, "");
+}
+
 function logInvalid(message: string): never {
   throw new PluginRuntimeError(RUNTIME_ERROR_CODES.logInvalid, message);
 }
@@ -111,7 +119,8 @@ function normalizeLogValue(
   }
   if (value === null) return null;
   const valueType = typeof value;
-  if (valueType === "string" || valueType === "boolean") return value;
+  if (valueType === "string") return stripTerminalControls(value as string);
+  if (valueType === "boolean") return value;
   if (valueType === "number") {
     if (!Number.isFinite(value as number)) {
       logInvalid("log fields must use finite numbers");
@@ -221,7 +230,7 @@ export function createLineLogger(
     if (SEVERITY[entryLevel] > threshold) return;
     const record: Record<string, unknown> = { ...normalized };
     record.level = entryLevel;
-    record.message = message;
+    record.message = stripTerminalControls(message);
     write(JSON.stringify(record));
   };
 

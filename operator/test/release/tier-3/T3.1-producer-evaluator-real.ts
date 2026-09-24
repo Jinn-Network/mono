@@ -184,10 +184,10 @@ export function buildT31DaemonEnv(args: {
     [T31_EXPECTED_HERMES_MODEL_ENV]: args.hermesModel,
     [T31_EXPECTED_HERMES_PROVIDER_ENV]: provider,
   };
-  if (args.approvedHermesOverride?.model) {
+  if (args.approvedHermesOverride?.model?.trim()) {
     env[T31_APPROVED_HERMES_MODEL_ENV] = args.approvedHermesOverride.model;
   }
-  if (args.approvedHermesOverride?.provider) {
+  if (args.approvedHermesOverride?.provider?.trim()) {
     env[T31_APPROVED_HERMES_PROVIDER_ENV] = args.approvedHermesOverride.provider;
   }
   return env;

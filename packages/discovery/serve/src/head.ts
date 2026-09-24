@@ -36,9 +36,9 @@ export interface DsseEnvelope {
 }
 
 // The §5.2 ceiling itself lives in `protocol` (`verify/refresh-bound.ts`), so
-// the two named verification procedures and this writing side compare against
-// one definition rather than two. Re-exported here because it is part of
-// `serve`'s published surface.
+// both procedures that verify a head (§10.3, §10.5) and this writing side
+// compare against one definition rather than two. Re-exported here because it
+// is part of `serve`'s published surface.
 export { MAX_REFRESH_BY_AHEAD_MS };
 
 function encodeBase64(bytes: Uint8Array): string {

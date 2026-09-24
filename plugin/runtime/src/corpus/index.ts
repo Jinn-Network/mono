@@ -21,6 +21,8 @@ export {
   type ExclusionReason,
 } from "./announcements.js";
 export {
+  SYNC_ABORTED_REASON,
+  SYNC_TRUNCATED_REASON,
   UNVERIFIED_CHAIN_ACKNOWLEDGEMENT,
   createDriverChainVerification,
   createRejectingChainVerification,
@@ -29,6 +31,7 @@ export {
   type ChainVerificationInput,
   type ChainVerificationOutcome,
   type UnverifiedChainAcknowledgement,
+  type WalkTruncation,
 } from "./chain-verification.js";
 export {
   createCorpusCapability,

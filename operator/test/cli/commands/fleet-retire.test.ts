@@ -50,7 +50,7 @@ function makeFakeDeps(raw: GatheredStatusRaw = mockRawTwo): FleetScaleDeps {
     loadConfig: () => ({} as any),
     getConfigPathFromArgs: () => undefined,
     gatherIntrospectionRaw: async () => raw,
-    resolveCliPassword: () => ({ ok: true as const, password: 'test' }),
+    resolveCliPassword: () => ({ ok: true as const, password: 'test', source: 'env' as const }),
     signerContextFactory: async () => ({ ok: false, envelope: { code: 'fatal', message: 'not used in dry-run tests' } } as any),
     bootstrapperFactory: () => ({ bootstrap: async () => ({ ok: true, message: 'ok', fleet_state: { master_address: '0xM', services: [] } }) } as any),
     retireFleetServiceOnChain: async () => ({ ok: true, message: 'retired', txHash: '0xabc' } as any),

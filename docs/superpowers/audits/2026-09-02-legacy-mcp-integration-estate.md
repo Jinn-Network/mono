@@ -9,8 +9,13 @@
   §7 — *"an audit of the legacy operator MCP server's tools against the role-gating principle …
   it belongs to whoever owns the legacy client's sunset."*
 
-> **Scope note.** This document is the audit and the removal plan. It deletes nothing.
-> Per #2930's constraints, implementation follows only after the boundary below is agreed.
+> **Scope note.** This document is the audit and the removal plan, and **Wave 0 of that plan
+> has been executed**: `hook-installers/{codex,cursor,gemini-cli}.ts`, their blocks in
+> `operator/test/scripts/install-hooks.test.ts`, and the four `common.ts` helpers that existed
+> solely for them are gone from the tree, removed across two commits under #2930 — the one
+> that added this audit, and a follow-up that finished the cleanup. **Waves 1 and 2 are
+> planned, not executed**, and follow only after the gates §4 states; per #2930's constraints,
+> the boundary below is the recorded decision for that remaining work.
 > Everything under `legacy/jinn-cli-agents-reference/` is out of scope (read-only reference
 > subtree). SolverPlugin-side MCP (`plugin/runtime`, `packages/layer`, `operator/plugins/*/mcp/*.mjs`,
 > the `claude-mcp-*` venue harnesses) is a different surface and is out of scope.
@@ -39,6 +44,12 @@ D), and sequence execution.
 
 ### 2.1 Surface A — unwired hook installers
 
+The *Lines* and *Tests* columns for the three unwired patchers are pre-Wave-0 and historical;
+Wave 0 removed those files and their test blocks. The rows are retained as the record of what
+was removed. The `integrations.ts` quotation below is historical for the same reason: Wave 0
+rewrote that comment block, which now records the removal rather than the deferral; the range
+cited below is that rewritten block exactly.
+
 | File | Lines | Production callers | Tests |
 |---|---|---|---|
 | `operator/src/cli/hook-installers/common.ts` | 48 (24 after Wave 0) | `commands/integrations.ts:10` | indirect |
@@ -47,7 +58,7 @@ D), and sequence execution.
 | `operator/src/cli/hook-installers/cursor.ts` | 25 | **none** | `test/scripts/install-hooks.test.ts:5` |
 | `operator/src/cli/hook-installers/gemini-cli.ts` | 33 | **none** | `test/scripts/install-hooks.test.ts:4` |
 
-`integrations.ts:12-18` states why the three are unwired: their hook file formats *"are not
+`integrations.ts:12-17` states why the three are unwired: their hook file formats *"are not
 independently verified against those tools' real hook schemas (claude-code's WAS wrong before
 verification caught it)"*. #2417 proposed to verify and wire them; #2930 supersedes it. With that
 reversal, 91 lines of patcher plus their test blocks have no forward path — they encode guesses at

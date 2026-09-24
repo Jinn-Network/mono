@@ -12,8 +12,9 @@ name: Post-merge lane monitor
 # indexer-monitor.yml, and main-next-ancestor-check.yml. No new surface.
 #
 # The lanes it covers, the failure-vs-blip rule, and the issue body all live in
-# .github/scripts/post-merge-lane-health.mjs; this workflow only fetches Actions
-# metadata and applies the result. Adding a lane means editing that registry and
+# .github/scripts/post-merge-lane-health.mjs, down to each open/update/close
+# decision; this workflow only fetches Actions metadata and issues and performs the
+# API calls the module returns. Adding a lane means editing that registry and
 # the `workflows:` list below together — post-merge-lane-health.test.mjs pins the
 # two to each other.
 on:
@@ -28,9 +29,9 @@ on:
   workflow_dispatch:
 
 # This trusted monitor never checks out or executes code from a monitored revision:
-# `workflow_run` and `schedule` both run this workflow from the default branch. That is
-# also why it stays inert until the Monday cut promotes `main` past this commit; validate
-# it with one `workflow_dispatch` run after that, per
+# `workflow_run` and `schedule` both run this workflow from the default branch, `next`.
+# A change here or in its module is therefore live on the next run after it merges to
+# `next`; validate one on demand with a `workflow_dispatch` run, per
 # docs/runbooks/post-merge-lane-monitor.md.
 permissions:
   actions: read
@@ -67,9 +68,7 @@ jobs:
             const {
               MONITORED_LANES,
               classifyLane,
-              renderAlert,
-              renderRecovery,
-              titlePrefixFor,
+              planLaneReconcile,
             } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/post-merge-lane-health.mjs`);
 
             const repo = context.repo;
@@ -85,91 +84,89 @@ jobs:
               if (error.status !== 422) throw error;
             }
 
-            const openAlertsFor = async (lane) => {
-              const prefix = titlePrefixFor(lane);
-              return (await github.paginate(
-                github.rest.issues.listForRepo,
-                { ...repo, state: 'open', labels: label, per_page: 100 },
-              ))
-                .filter((issue) => issue.title.startsWith(prefix))
-                .sort((a, b) => a.number - b.number);
-            };
-
+            // This script only performs API calls. Which alerts belong to a lane, and
+            // whether to open, update, defer, or close one, is decided by
+            // planLaneReconcile in the module, where it is unit-tested (#4260).
             const reconcileLane = async (lane) => {
               // A window, not the full history: the classification needs only the leading
-              // run streak and the newest success behind it.
+              // run streak and the newest success behind it. 100 is the most one request
+              // returns; the body says when the window did not reach a success.
               const { data } = await github.rest.actions.listWorkflowRuns({
                 ...repo,
                 workflow_id: lane.file,
                 branch: lane.branch,
                 event: 'push',
-                per_page: 50,
+                per_page: 100,
               });
-              const verdict = classifyLane({ lane, runs: data.workflow_runs, now: Date.now() });
-              const openAlerts = await openAlertsFor(lane);
-
-              if (verdict.state !== 'alert') {
-                if (openAlerts.length === 0) {
-                  core.info(`${lane.workflow}: ${verdict.state}.`);
-                  return;
+              // Job lists are I/O for lanes that name a publishingJob (#4257).
+              // Fetching is gated to completed successes because failures stay
+              // decisive without jobs; job names and conclusions are classified
+              // only in classifyLane.
+              const jobsByRunId = {};
+              if (lane.publishingJob) {
+                for (const run of data.workflow_runs) {
+                  if (run.status === 'completed' && run.conclusion === 'success') {
+                    jobsByRunId[run.id] = await github.paginate(
+                      github.rest.actions.listJobsForWorkflowRun,
+                      { ...repo, run_id: run.id, per_page: 100 },
+                    );
+                  }
                 }
-                // Only a proven recovery closes an alert. A `wait` verdict is a lane that is
-                // still red and merely not yet re-confirmed, which is not evidence of health.
-                if (verdict.state === 'wait') {
-                  core.info(`${lane.workflow}: still failing; leaving ${openAlerts.length} alert(s) open.`);
-                  return;
-                }
-                for (const alert of openAlerts) {
-                  await github.rest.issues.createComment({
-                    ...repo,
-                    issue_number: alert.number,
-                    body: renderRecovery({ lane, verdict }),
-                  });
-                  await github.rest.issues.update({
-                    ...repo,
-                    issue_number: alert.number,
-                    state: 'closed',
-                    state_reason: 'completed',
-                  });
-                  core.notice(`Closed ${lane.workflow} alert #${alert.number}.`);
-                }
-                return;
               }
+              const verdict = classifyLane({
+                lane,
+                runs: data.workflow_runs,
+                now: Date.now(),
+                jobsByRunId,
+              });
+              const openAlerts = await github.paginate(
+                github.rest.issues.listForRepo,
+                { ...repo, state: 'open', labels: label, per_page: 100 },
+              );
+              // The 100 most recently updated closed alerts, read on every tick whether or
+              // not the plan consults them: one extra read per lane buys a driver that makes
+              // no decisions. The module states what a page this size can miss.
+              const { data: closedAlerts } = await github.rest.issues.listForRepo({
+                ...repo,
+                state: 'closed',
+                labels: label,
+                sort: 'updated',
+                direction: 'desc',
+                per_page: 100,
+              });
 
-              const { title, body } = renderAlert({ lane, verdict });
-              const [canonical, ...duplicates] = openAlerts;
-              if (!canonical) {
-                const created = await github.rest.issues.create({ ...repo, title, body, labels: [label] });
-                core.warning(`Opened ${lane.workflow} alert #${created.data.number}.`);
-                return;
-              }
-
-              // The body is derived from run data alone, so an unchanged lane re-renders
-              // byte-identically. This comments on genuinely new failures only, never once
-              // per scheduled tick.
-              if (canonical.body !== body || canonical.title !== title) {
-                if (canonical.body !== body) {
-                  await github.rest.issues.createComment({ ...repo, issue_number: canonical.number, body });
+              for (const action of planLaneReconcile({ lane, verdict, openAlerts, closedAlerts })) {
+                switch (action.kind) {
+                  case 'log':
+                    core[action.level](action.message);
+                    break;
+                  case 'comment':
+                    await github.rest.issues.createComment({ ...repo, issue_number: action.issue, body: action.body });
+                    break;
+                  case 'close':
+                    await github.rest.issues.update({
+                      ...repo,
+                      issue_number: action.issue,
+                      state: 'closed',
+                      state_reason: action.reason,
+                    });
+                    break;
+                  case 'update':
+                    await github.rest.issues.update({ ...repo, issue_number: action.issue, ...action.fields });
+                    break;
+                  case 'create': {
+                    const created = await github.rest.issues.create({
+                      ...repo,
+                      title: action.title,
+                      body: action.body,
+                      labels: [label],
+                    });
+                    core.warning(`Opened ${lane.workflow} alert #${created.data.number}.`);
+                    break;
+                  }
+                  default:
+                    throw new Error(`Unknown reconcile action: ${action.kind}`);
                 }
-                await github.rest.issues.update({ ...repo, issue_number: canonical.number, title, body });
-                core.warning(`Updated ${lane.workflow} alert #${canonical.number}.`);
-              } else {
-                core.info(`${lane.workflow} alert #${canonical.number} is current.`);
-              }
-
-              for (const duplicate of duplicates) {
-                await github.rest.issues.createComment({
-                  ...repo,
-                  issue_number: duplicate.number,
-                  body: `Duplicate ${lane.workflow} alert; consolidated into #${canonical.number}.`,
-                });
-                await github.rest.issues.update({
-                  ...repo,
-                  issue_number: duplicate.number,
-                  state: 'closed',
-                  state_reason: 'not_planned',
-                });
-                core.notice(`Closed duplicate ${lane.workflow} alert #${duplicate.number}.`);
               }
             };
 

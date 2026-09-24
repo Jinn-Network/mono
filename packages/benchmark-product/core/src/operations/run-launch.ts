@@ -67,7 +67,7 @@ import {
 } from "../run/journal.js";
 import { requireRunState, writeRunState, type PublicationState } from "../run/state.js";
 import { readRunBindingCarriage } from "../binding/carriage.js";
-import type { VerifiedRunBinding } from "@colophon-claims/verify";
+import type { VerifiedRunBinding } from "@colophon-claims/check";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
@@ -95,6 +95,13 @@ export interface RunLaunchDeps {
   readonly driverGenerationForTesting?: () => string;
   /** TEST-ONLY §7.4 host classifier. Production launch never supplies host facts. */
   readonly hostTerminalFacts?: LaunchOptions["hostTerminalFacts"];
+  /**
+   * TEST-ONLY (issue #4132). Fired after the locked load and before the draft becomes `running`
+   * or `launchedAt` is stamped, so a test can `runBind` in the window the launch-side re-read
+   * exists to cover. `createVenue` is too late: it runs after both of those, when bind already
+   * refuses.
+   */
+  readonly onBeforeLaunchStampForTesting?: () => void;
 }
 
 export interface RunLaunchInput {
@@ -195,9 +202,7 @@ function loadLockedOrRunningRun(workspaceDir: string, draftId: string, expectedS
 
 const APEX_SWE_DEV_OPERATOR_HOST_REFUSAL =
   "APEX-SWE-dev executes on the operator host, not through the Colophon venue: the protocol wraps"
-  + " Mercor's own `apx` and `run_e2e.py` directly. `run launch` does not drive this protocol."
-  + " Grade the locked selection with `yarn apex-swe-dev-one-task-qualify` (see"
-  + " docs/runbooks/apex-swe-dev-official-one-task.md), then `apex-swe export`.";
+  + " Mercor's own `apx` and `run_e2e.py` directly. `run launch` does not drive this protocol.";
 
 /** APEX-SWE-dev seals arms against a harness id the local venue registers no launcher for, by
  * design (DR-2026-08-18-c: their harnesses run, unmodified, on the operator host). Refuse the
@@ -526,6 +531,7 @@ export function runLaunch(
       const createVenue: typeof createLocalVenue = deps.createVenue
         ?? ((options) => createRuntimeVenue(loaded.document.spec.evaluationRuntime, options, context.runtimeHost));
 
+      deps.onBeforeLaunchStampForTesting?.();
       const transitioned = transition("locked", "launch");
       if (!transitioned.ok) {
         refuse("illegal-transition", `drafts.${input.draftId}.state`, transitioned.error.detail);

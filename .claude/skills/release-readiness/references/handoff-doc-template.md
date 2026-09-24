@@ -36,12 +36,18 @@ Run-id: <run-id>
 - ...
 
 ## Environment-suite evidence
+- Verdict: pass (verdictCode=1)
+- Wall-clock: 4m 38s
 - Scenario: op-a solves ..., op-b evaluates
 - Hermes model: ...
-- Verdict: pass (verdictCode=1)
 - Tx: deliver 0x..., verdict 0x...
 - Cost: $0.07
+
+When a verdict is present but no evidence record was supplied:
+
+- Verdict: pass
 - Wall-clock: 4m 38s
+- Evidence record: none supplied (scenario, model, tx hashes, cost unavailable)
 
 ## Walk-through script for human pass
 - [ ] check 1

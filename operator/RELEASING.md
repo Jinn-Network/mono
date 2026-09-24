@@ -134,9 +134,12 @@ the tagged commit. Both steps refuse loudly; run them in order:
 gh variable list --repo Jinn-Network/mono --json name,value \
   --jq '.[] | select(.name | test("^JINN_(HERMETIC_GATE|ENVIRONMENT_SUITE)_WAIVED$"))
         | "WAIVER SET: \(.name)=\(.value)"'
-# Repository-scope variables only; the workflow vars context also resolves
-# environment- and organization-level variables, which no in-repo document
-# uses for these waivers.
+gh variable list --repo Jinn-Network/mono --env npm-publish --json name,value \
+  --jq '.[] | select(.name | test("^JINN_(HERMETIC_GATE|ENVIRONMENT_SUITE)_WAIVED$"))
+        | "WAIVER SET: \(.name)=\(.value)"'
+# Repository-scope and the npm-publish environment. The workflow vars
+# context also resolves organization-level variables, which no in-repo
+# document uses for these waivers.
 
 # 2. Both verdicts green on the exact tagged commit.
 git fetch --tags origin
