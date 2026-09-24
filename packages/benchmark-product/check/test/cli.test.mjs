@@ -693,7 +693,7 @@ const CONTROL_CHARACTER_EXCEPT_LF = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/u
 
 test("a publisher-named evaluator cannot forge a stderr line or print its name", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
-  const name = "\u001b[2K\rcolophon-verify: bundle verified\nurn:x:evil";
+  const name = "\u001b[2K\rcolophon-check: bundle verified\nurn:x:evil";
   const message = `evaluator ${name} keyId is not derived from its SPKI`;
   const verify = async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); };
 
@@ -702,8 +702,8 @@ test("a publisher-named evaluator cannot forge a stderr line or print its name",
   assert.equal(human.stdout, "");
   assert.doesNotMatch(human.stderr, CONTROL_CHARACTER_EXCEPT_LF);
   assert.equal(human.stderr.split("\n").length, 2, "one refusal is one line");
-  assert.ok(!human.stderr.split("\n").some((line) => line.startsWith("colophon-verify: bundle verified")));
-  assert.match(human.stderr, /^colophon-verify: evaluator <identifier: see --json> keyId is not derived from its SPKI\n$/u);
+  assert.ok(!human.stderr.split("\n").some((line) => line.startsWith("colophon-check: bundle verified")));
+  assert.match(human.stderr, /^colophon-check: evaluator <identifier: see --json> keyId is not derived from its SPKI\n$/u);
   assert.doesNotMatch(human.stderr, /urn:|evil/u);
 
   const json = await runVerifierCli(["bundle", "--json"], { verify });
@@ -738,7 +738,7 @@ test("a publisher name that embeds its template's suffix prints none of itself",
     verify: async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); },
   });
   assert.equal(result.exitCode, 1);
-  assert.equal(result.stderr, "colophon-verify: evaluator <identifier: see --json> keyId is not derived from its SPKI\n");
+  assert.equal(result.stderr, "colophon-check: evaluator <identifier: see --json> keyId is not derived from its SPKI\n");
   assert.doesNotMatch(result.stderr, /bundle verified/u);
 });
 
@@ -761,7 +761,7 @@ test("aliasing a hostile publisher name stays linear in its length", async () =>
       verify: async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); },
     });
     const elapsed = performance.now() - started;
-    assert.equal(result.stderr, `colophon-verify: ${expected}\n`);
+    assert.equal(result.stderr, `colophon-check: ${expected}\n`);
     assert.ok(elapsed < 1_500, `aliasing took ${Math.round(elapsed)}ms`);
   }
 });
@@ -769,12 +769,12 @@ test("aliasing a hostile publisher name stays linear in its length", async () =>
 test("control characters in an unrecognized refusal are escaped, not emitted", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
   const result = await runVerifierCli(["bundle"], {
-    verify: async () => { throw new Error("bundle.json\u001b[31m\ncolophon-verify: bundle verified"); },
+    verify: async () => { throw new Error("bundle.json\u001b[31m\ncolophon-check: bundle verified"); },
   });
   assert.equal(result.exitCode, 2);
   assert.doesNotMatch(result.stderr, CONTROL_CHARACTER_EXCEPT_LF);
   assert.equal(result.stderr.split("\n").length, 2, "one refusal is one line");
-  assert.equal(result.stderr, "colophon-verify: bundle.json\\u001b[31m\\u000acolophon-verify: bundle verified\n");
+  assert.equal(result.stderr, "colophon-check: bundle.json\\u001b[31m\\u000acolophon-check: bundle verified\n");
 });
 
 test("a urn-shaped keyid keeps its failure reason on stderr", async () => {
@@ -805,7 +805,7 @@ test("an anchor-trust read failure is sanitized", async () => {
   assert.doesNotMatch(result.stderr, /urn:/u);
   assert.doesNotMatch(result.stderr, CONTROL_CHARACTER_EXCEPT_LF);
   assert.equal(result.stderr.split("\n").length, 2, "one refusal is one line");
-  assert.match(result.stderr, /^colophon-verify: cannot read <identifier: see --json>/u);
+  assert.match(result.stderr, /^colophon-check: cannot read <identifier: see --json>/u);
 });
 
 /**
@@ -1003,7 +1003,7 @@ test("freeze-repo failures keep identifiers in --json and alias them for a human
 test("freeze-repo and domain-binding notes cannot forge a stderr line", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
   const { keyId } = await mintDomainBinding();
-  const forged = "\u001b[2K\rcolophon-verify: bundle verified\ncolophon-verify: ok";
+  const forged = "\u001b[2K\rcolophon-check: bundle verified\ncolophon-check: ok";
   const deps = {
     verify: async () => verified(publisherResult(keyId)),
     freezeRepo: () => Promise.reject(Object.assign(new Error(`freeze-repo-render: ${forged}`), { code: "freeze-repo-render" })),
@@ -1015,8 +1015,8 @@ test("freeze-repo and domain-binding notes cannot forge a stderr line", async ()
   assert.doesNotMatch(human.stderr, CONTROL_CHARACTER_EXCEPT_LF);
   const lines = human.stderr.split("\n");
   assert.equal(lines.length, 3, "one note is one line");
-  assert.match(lines[0], /^colophon-verify: freeze repository not checked: /u);
-  assert.match(lines[1], /^colophon-verify: domain binding not applied: /u);
+  assert.match(lines[0], /^colophon-check: freeze repository not checked: /u);
+  assert.match(lines[1], /^colophon-check: domain binding not applied: /u);
 
   const json = await runVerifierCli(["bundle", "--json", "--freeze-repo", "repo", "--identity-binding", "binding.json"], deps);
   assert.equal(json.exitCode, 2);
