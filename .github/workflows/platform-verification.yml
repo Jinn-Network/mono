@@ -46,14 +46,6 @@ jobs:
           test "${#digest}" -eq 64
           echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
 
-  benchmarking:
-    needs: catalog
-    permissions:
-      contents: read
-    uses: ./.github/workflows/benchmarking-ci.yml
-    with:
-      source_sha: ${{ inputs.source_sha }}
-
   contracts:
     needs: catalog
     permissions:
@@ -286,7 +278,6 @@ jobs:
   verification_receipt:
     needs:
       - catalog
-      - benchmarking
       - contracts
       - discovery
       - evidence
@@ -322,7 +313,6 @@ jobs:
           CATALOG_DIGEST: ${{ needs.catalog.outputs.catalog_digest }}
           LANE: ${{ inputs.lane }}
           CATALOG_RESULT: ${{ needs.catalog.result }}
-          BENCHMARKING_RESULT: ${{ needs.benchmarking.result }}
           CONTRACTS_RESULT: ${{ needs.contracts.result }}
           DISCOVERY_RESULT: ${{ needs.discovery.result }}
           EVIDENCE_RESULT: ${{ needs.evidence.result }}
@@ -353,7 +343,6 @@ jobs:
               --public-manifest ".platform-verification/${group}/public-surface-manifest.json" \
               --profile-manifest ".platform-verification/${group}/profile-root/manifest.json" \
               --gate "catalog=${CATALOG_RESULT}" \
-              --gate "benchmarking=${BENCHMARKING_RESULT}" \
               --gate "contracts=${CONTRACTS_RESULT}" \
               --gate "record-discovery=${DISCOVERY_RESULT}" \
               --gate "evidence=${EVIDENCE_RESULT}" \

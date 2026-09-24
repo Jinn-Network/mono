@@ -10,6 +10,7 @@ import {
   EXCLUDED_LANES,
   GRACE_MS,
   MONITORED_LANES,
+  RUN_WINDOW,
   classifyLane,
   isAlertFor,
   parseMarker,
@@ -216,21 +217,36 @@ test('the alert body states the verdict basis so a blip is distinguishable from 
   assert.ok(/unconfirmed/i.test(unconfirmed));
 });
 
-test('a streak the window cannot bound is reported as a floor, not a count', () => {
+test('a never-succeeded lane shorter than the window reports an exact count', () => {
   const verdict = classify([
     run({ conclusion: 'cancelled', hoursAgo: 0.05 }),
     run({ conclusion: 'failure', hoursAgo: 0.1 }),
     run({ conclusion: 'failure', hoursAgo: 1 }),
     run({ conclusion: 'failure', hoursAgo: 2 }),
   ]);
-  assert.equal(verdict.windowBounded, false);
+  assert.equal(verdict.windowBounded, true);
   assert.equal(verdict.observedRuns, 4);
   const { body } = renderAlert({ lane: LANE, verdict });
-  assert.ok(body.includes('at least 3 consecutive'), 'the count is a floor');
+  assert.ok(body.includes('3 consecutive'), 'the short page is the whole history');
+  assert.ok(!body.includes('at least'), 'a complete history is a count, not a floor');
+  assert.ok(body.includes('First failure of this streak'));
+  assert.ok(body.includes('the observed history has no success'));
+  assert.ok(!body.includes('Not in the observed window'));
+});
+
+test('a streak the window cannot bound is reported as a floor, not a count', () => {
+  const runs = Array.from({ length: RUN_WINDOW }, (_, i) =>
+    run({ conclusion: 'failure', hoursAgo: i * 0.01 }),
+  );
+  const verdict = classify(runs);
+  assert.equal(verdict.windowBounded, false);
+  assert.equal(verdict.observedRuns, RUN_WINDOW);
+  const { body } = renderAlert({ lane: LANE, verdict });
+  assert.ok(body.includes(`at least ${RUN_WINDOW} consecutive`), 'the count is a floor');
   assert.ok(body.includes('Oldest failure in the observed window'), 'the first failure is not asserted');
   assert.ok(!body.includes('First failure of this streak'));
   assert.ok(body.includes('Not in the observed window'), 'the last-success row is marked as window-limited');
-  assert.ok(body.includes('newest 4 runs'), 'the body says how far the window reached');
+  assert.ok(body.includes(`newest ${RUN_WINDOW} runs`), 'the body says how far the window reached');
   assert.ok(!body.includes('No successful run in the observed window'), 'it never reads as "never succeeded"');
 });
 
@@ -544,10 +560,11 @@ test('the monitor runs on a schedule and holds only read-plus-issues authority',
 test('the monitor selects alerts by marker, reads a full page, and closes only on health', () => {
   assert.ok(monitor.includes('isAlertFor('), 'alerts are selected through the marker helper');
   assert.ok(!monitor.includes('startsWith('), 'no title-prefix selection remains');
-  assert.ok(monitor.includes('parseMarker('), 'a hand-closed alert is recognised by its marker');
+  assert.ok(monitor.includes('parseMarker('), 'a hand-closed alert is recognized by its marker');
   assert.ok(monitor.includes('planAlertUpdate('), 'an open alert is updated through the plan helper');
   assert.ok(!monitor.includes('canonical.title !== title'), 'a title difference alone never reaches the comment path');
   assert.ok(/per_page: 100,\s*\n\s*\}\);\s*\n\s*const verdict = classifyLane/u.test(monitor), 'the run window is the full page one request allows');
+  assert.equal(RUN_WINDOW, 100, 'classifyLane and the monitor share the same page size');
   assert.ok(monitor.includes("verdict.state !== 'healthy'"), 'only a healthy verdict reaches the close loop');
 });
 

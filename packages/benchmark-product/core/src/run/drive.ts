@@ -606,16 +606,18 @@ async function dispatchEvaluation(
     // The seam is HERE, not beside that solve loop in `runResume`: `recover` can re-enter
     // `completeAttempt` -> the evaluation provisioner's `harvest()` (it does so for every
     // completion-capable row carrying no journaled `harvested` event -- `harvesting-resume`,
-    // `matching-late`, `corrected`; `recording-resume` is classified only WITH a durable delivery
-    // checkpoint, and that returns earlier and never reaches harvest). That harvest binds its
-    // evaluator and its evaluation-cell materials from the venue registry, which recovery
-    // cannot populate: `reconstructRecoveryContext` hands `createLocalProvisioner` a FRESH
-    // contract and never re-runs its `setup`. In a fresh process the registry stays empty until
-    // `venue.prepareEvaluationCell()` fills it, and `prepareAndDispatchEvaluation` calls that once
-    // per cell before dispatching its legs -- so called any earlier, recovery of one of those rows
-    // refuses with "no registered evaluation-cell materials" (`../venue/provisioner.ts`). A
-    // never-submitted leg has no attempt to reconcile, so the launch path stays byte-identically
-    // untouched.
+    // `matching-late`, `corrected`, and a live-shim `matching` row, which reaches it through
+    // `waitForOutcome(...).then(...)` on the same fresh contract; `recording-resume` is classified
+    // only WITH a durable delivery checkpoint, and that returns earlier and never reaches
+    // harvest). That harvest resolves its evaluator from the Submission's evaluator requirement
+    // against the configured evaluators, and binds its evaluation-cell materials from the venue
+    // registry, which recovery cannot populate: `reconstructRecoveryContext` hands
+    // `createLocalProvisioner` a FRESH contract and never re-runs its `setup`. In a fresh process
+    // the registry stays empty until `venue.prepareEvaluationCell()` fills it, and
+    // `prepareAndDispatchEvaluation` calls that once per cell before dispatching its legs -- so
+    // called any earlier, recovery of one of those rows refuses with "no registered
+    // evaluation-cell materials" (`../venue/provisioner.ts`). A never-submitted leg has no attempt
+    // to reconcile, so the launch path stays byte-identically untouched.
     //
     // Both refusals below are contained PER LEG, not run-fatal like the solve leg's:
     // `prepareAndDispatchEvaluation`'s catch encloses them, and a `BenchmarkProductError` is no

@@ -84,7 +84,8 @@ When the streak fills the window — no success among the 100 runs read — the 
 count becomes "at least N", the first-failure row becomes "oldest failure in the observed
 window", and the last-success row says the window did not reach one rather than that the lane
 never succeeded. Find the last successful run in the Actions tab in that case; the monitor does
-not page further back.
+not page further back. A lane with fewer than 100 runs and no success is the whole history, so
+the count is exact, not "at least N".
 
 The body is derived from run data only, never from the current time. The marker line at the
 bottom names the latest failing run, its attempt, and the alert's confidence, and the monitor
@@ -92,10 +93,16 @@ rewrites the body (and posts the new body as a comment) only when that marker ch
 scheduled re-evaluation never comments and **a new comment means a new failing run** (or a
 failing re-run of one) **or a change in the alert's confidence**. Confidence can change with no
 new failing run: if a successful re-run leaves only the latest run failing, a confirmed alert
-is left as it is until that run's grace window elapses, and only then becomes unconfirmed. A retitled alert gets its
-title restored with no comment and its body left alone. Put notes in comments, not the body: the
-body is rewritten when a new failing run arrives or the confidence changes, and an alert whose
-marker line is edited away is no longer recognised as the lane's alert.
+is left as it is until that run's grace window elapses, and only then becomes unconfirmed. A
+retitled alert gets its title restored with no comment and its body left alone. Put notes in
+comments, not the body: the body is rewritten when a new failing run arrives or the confidence
+changes, and an alert whose marker line is edited away is no longer recognized as the lane's
+alert.
+
+The rewrite key is the marker, not every fact in the body. An older run in a confirmed streak
+that is later re-run to success can leave the count, first-failure row, and last-success row
+stale until the latest failing run or the confidence changes. Treat those rows as the facts at
+the last marker rewrite, not as a live census.
 
 Fix or re-run the lane. Only a later successful **`push` run on `next`** closes the alert — a
 new push, or a re-run of the failed push run. `workflow_dispatch` runs are not counted: on these

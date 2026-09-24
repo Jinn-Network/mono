@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Version** | 0.3 |
-| **Date** | 2026-09-06 (v0.1 same day; v0.2 2026-09-07 applies the §13 ruling; v0.3 2026-09-09 applies review findings) |
+| **Version** | 0.4 |
+| **Date** | 2026-09-06 (v0.1 same day; v0.2 2026-09-07 applies the §13 ruling; v0.3 2026-09-09 applies review findings; v0.4 2026-09-16 applies the PR #4109 review follow-ups) |
 | **Author** | Autopilot design session (Codex); source citations read against attempt base `9b08b1b05`. v0.2 landing pass re-derived §2 against `b5bff3e21` |
 | **Shape** | `design`; implementation is separate |
 | **Status** | ruled — operator 2026-09-07; §13's four contract items are closed ([#4109 comment 5570964693](https://github.com/Jinn-Network/mono/pull/4109#issuecomment-5570964693)) |
@@ -13,6 +13,7 @@
 | **Does not do** | establish a trusted dispatch clock, prove backend receipt or execution timing, carry the raw run journal, or raise any execution/evaluation evidence to `attested` |
 | **v0.2 changes** | Records the operator ruling. Contract items 1, 3, and 4 were adopted as written, so §1, §2, §3, §5.1, §7.2, and §9.1–§9.7 are unchanged — in particular the exact permitted copy and its allowlist and denylist are untouched. Item 2 was amended: the bundle-side home moves from a standalone `benchmark-product-public-bundle/9` closure to a registered `dispatch-boundaries` capability entry in the composed generation `benchmark-product-public-bundle/10`, and `benchmark-product.claim-package/7` becomes that generation's shared claim package rather than this feature's own. §0, §4.1, §4.2, §5.2, §6, §7.1, §8, §9.8, §10, §11, and §12 follow. New §13 records the ruling. The pass that readied this document for merge re-derived every external citation against `next` at `6cad987b6` — the §2 source citations, the `/9` allocation, the `/10` allocation ruling, the `claim-package/7` coordination, and the composition-design sections §6.1 leans on all hold as written — and repaired one defect it found: §1's deep link into the anchor-evidence design named a section title that does not exist. The section, its number, and the refusal quoted from it are unchanged. |
 | **v0.3 changes** | Applies the review findings on PR #4109. The one blocking defect is closed: §6.1's registry entry could not carry an unmatched capture, because `evidence-closure` derives `expectedRoles` from graph edges only and an unmatched capture has no edge, so §4.1(3)'s required record tripped the closed-world size compare at a base check before any capability check ran. §6.1 now states the entry's `evidence-closure` role-derivation contribution explicitly, classifies it as additive (following `disclosure-specification`'s precedent rather than declaring a second `refines` target), restates the `binary-qualification` non-collision claim on the grammar-versus-derivation distinction that makes it true, and records the dependency's own `refines` arity ambiguity as a question this entry does not inherit. §4.1(4), §6.1's `memberPatterns` row, §10 packet 3, and a new §11 acceptance row follow. Five non-blocking repairs land alongside: §0 carries §5.2's "into the assembly" qualifier; §3.3 drops v0.1 closure-era wording for the entry's activation predicate; §4.2 and §5.2 name the `/3` grammar as where `at` strictness is enforced, closing the comparator's `undefined` gap; §6.1's `anchors` precedent is reworded and repointed at the real code (anchor verification runs early and deliberately; only the check *result* is reported late); and §8 splits the scope-ambiguous invalid-timestamp row and gains rows for §6.1's two biconditional refusals. No contract, allowlist, denylist, or ruled item moves: §7.2's exact permitted copy and §13's four rulings are untouched. |
+| **v0.4 changes** | Applies the non-blocking follow-ups from the review of PR #4109; new citations are read against the same `6cad987b6` base as v0.2's. §3.2 now states the calendar-strict `at` condition that §4.2 and §5.2 rely on, and §3.3 states what the producer does with a source entry that cannot satisfy the narrowed `/3` grammar, such as a non-positive `replicate`: it withholds the declaration, following §5.2. §11's generated-lattice row now names the refusal that actually fires. `dispatchBoundaries` is a header key, not a member path, so the refusal is §6.1's biconditional, not the file closure. §11 also gains the mirror-negative row proving the role derivation is gated per declaration. Editorial: §5.2's comparator citation names the lines that carry the behavior, §8's honesty column uses one phrase for rows with the same disposition, and §6.1's check-ordering argument cites the `disclosure-specification` precedent. §10 records the tracking issues for its five packets. No contract, allowlist, denylist, or §13-ruled item moves. |
 
 ## 0. Decision in plain language
 
@@ -96,11 +97,11 @@ The required producer boundary already exists.
   ([`demo1-preregistration.ts`](../../../packages/benchmark-product/core/src/method/demo1-preregistration.ts)).
 - The public assembly is frozen as `benchmark-product-assembly/2`; its graph
   contains accepted Submission edges but no pre-submit capture edges
-  ([`schema.ts`](../../../packages/benchmark-product/verify/src/schema.ts)).
+  ([`schema.ts`](../../../packages/benchmark-product/check/src/schema.ts)).
 - Public bundle `/8` and claim package `/6` are already allocated to the
   disclosed anchored binary-qualification closure
-  ([`manifest.ts`](../../../packages/benchmark-product/verify/src/manifest.ts),
-  [`claim.ts`](../../../packages/benchmark-product/verify/src/profile/claim.ts)).
+  ([`manifest.ts`](../../../packages/benchmark-product/check/src/manifest.ts),
+  [`claim.ts`](../../../packages/benchmark-product/check/src/profile/claim.ts)).
 
 Accepted Submission edges and `cell-event:dispatch` are not substitutes. They
 are observed after, or independently of, the prospective capture boundary and
@@ -176,7 +177,11 @@ Every event has:
   either derived identity field;
 - `kind`: `submission-captured` or
   `evaluation-submission-captured`;
-- `at`: the exact, unnormalized string from the source entry;
+- `at`: the exact, unnormalized string from the source entry, which must be
+  calendar-strict RFC 3339 (§5.2's rules) as a grammar condition of the union
+  member — the schema refines the string with `isCalendarStrictRfc3339`, as
+  [`derivation.ts:116`](../../../packages/evidence/trace/src/derivation.ts)
+  already does, rather than reusing the run journal's weaker syntactic check;
 - `cellKey`, positive `dispatch`, and `submissionSha256`.
 
 A solve event additionally carries `armId`, positive `replicate`, and the
@@ -205,6 +210,17 @@ Projection must not:
 - synthesize captures from `submission-accepted`, `cell-event:dispatch`, a
   Matrix cell, a Delivery, or a Verdict; or
 - sort by time or dispatch coordinate.
+
+The `/3` grammar is narrower than its source. The run journal admits any
+integer `replicate`
+([`journal.ts:122`](../../../packages/benchmark-product/core/src/run/journal.ts))
+and only a syntactic `at`, and makes each publication receipt field
+independently optional. §3.2 requires a positive `replicate`, a
+calendar-strict `at`, and the two receipt fields together or not at all. A producer that meets a capture entry unable to satisfy
+the narrowed grammar withholds the `dispatch-boundaries` declaration, as §5.2
+already requires for a legacy timestamp. It never drops, repairs, or
+normalizes the entry, because a projection that silently omitted it would no
+longer be exact.
 
 Assembly `/3` is available only when at least one prospective capture exists.
 A run with none does not activate the capability (§6.1): the producer does not
@@ -293,7 +309,7 @@ The following values are derived and never serialized into the assembly:
 - `earliestRecordedDispatch`: event with the minimum exact RFC 3339 instant,
   with lowest `journalIndex` as the deterministic tie-break — the comparator
   returns `undefined` on an unparseable instant
-  ([`rfc3339.ts:151`](../../../packages/benchmarking/records/src/rfc3339.ts)),
+  ([`rfc3339.ts:146-157`](../../../packages/benchmarking/records/src/rfc3339.ts)),
   and no derivation ever observes that result because the `/3` grammar rejects
   such a string before any derived fact is computed; and
 - `dispatchBoundaryCount`: the array length.
@@ -331,6 +347,7 @@ The registry entry (capability composition §4) is:
 | `refines` | the grammar of the `verification/assembly.jsonl` member: `benchmark-product-assembly/2` is replaced by `/3` |
 | `mandatoryFiles` | none beyond the assembly member it refines |
 | `memberPatterns` | none new — every referenced Submission lives at the existing `records/<sha256>.bin` shape, under the existing `solve-submission` or `evaluation-submission` role name. The role is *not* conferrable on an unmatched capture's record under the existing derivation, which is edge-driven; this entry contributes the missing derivation, additively (see below) |
+| `roleDerivations` | a published `/3` capture event derives `solve-submission` or `evaluation-submission` for the record it references (see below) |
 | `claimSection` | `dispatchBoundary` |
 | `checks` | `dispatch-boundaries` |
 | `minimumReaderRelease` | the first `@colophon-claims/verify` release implementing the token |
@@ -356,12 +373,11 @@ evidence-catalog and trust *grammars* — schemas, not the closed-world role
 derivation the next consequence extends. That distinction is load-bearing and is
 made there rather than assumed here.
 
-The dependency's own `refines` arity is ambiguous — composition §4 declares the
-field as "zero or one refinement target" while its §4.1 gives
-`binary-qualification` two — but this entry does not inherit the ambiguity: it
-declares exactly one target, so it is well-formed under either reading. The
-ambiguity is recorded here as a question for the composition work, not resolved
-by this design.
+The dependency's `refines` arity was ambiguous when v0.3 was written.
+Composition §4 declared the field as "zero or one refinement target", while its
+§4.1 gave `binary-qualification` two. Composition v0.2 settles it: `refines` is
+a set, and §5.2's invariant is keyed per target. This entry declares exactly one
+target, so it is well-formed under either reading.
 
 **It contributes an evidence-catalog role derivation, additively.** The central
 disclosure of this design is the capture with no accepted edge (§2, §9.2, §9.4,
@@ -371,7 +387,7 @@ say what it contributes to fix that.
 
 `evidence-closure` is closed-world. `declaredRoles` is built from the evidence
 catalog's own records
-([`verify.ts:569-574`](../../../packages/benchmark-product/verify/src/verify.ts)),
+([`verify.ts:569-574`](../../../packages/benchmark-product/check/src/verify.ts)),
 while `expectedRoles` is derived exclusively from graph edges plus
 header/coordinate-derived roles (`verify.ts:1235` for `solve-submission`,
 `verify.ts:1555` and `verify.ts:1629` for the evaluation equivalents). Those
@@ -384,7 +400,8 @@ with `record-integrity` / `evidence-closure`. Composition §6 orders base checks
 before capability checks, so that refusal is unconditional and no
 `dispatch-boundaries` code ever runs.
 
-The entry therefore **extends the `evidence-closure` role derivation**: a
+The entry therefore **extends the `evidence-closure` role derivation**, declared
+in its `roleDerivations` field (composition v0.2 §4): a
 published `/3` capture event confers `solve-submission` or
 `evaluation-submission` on the record it references, exactly as the accepted
 edge does for a matched capture, so both compares stay green. The role name and
@@ -425,11 +442,16 @@ section already works: `claim-consistency` byte-compares the section, and the
 `integrity-anchors` *check result* is reported afterward. The anchor token
 verification itself runs much earlier — deliberately, so that an invalid anchor
 surfaces as an anchor refusal rather than as a downstream claim mismatch
-([`verify.ts:667-706`, `:1923-1943`](../../../packages/benchmark-product/verify/src/verify.ts);
-[`claim-consistency.ts:57`](../../../packages/benchmark-product/verify/src/profile/claim-consistency.ts)).
-The real code is a stronger precedent than a check-order reading would suggest:
-a capability's substantive work may run wherever correctness demands, and only
-its reported position is fixed by the registry's `order`.
+([`verify.ts:667-706`, `:1923-1943`](../../../packages/benchmark-product/check/src/verify.ts);
+[`claim-consistency.ts:57`](../../../packages/benchmark-product/check/src/profile/claim-consistency.ts)).
+`disclosure-specification` is the stronger precedent, because it carries both
+halves of exactly this shape. Its role derivation runs inside the
+`evidence-closure` base check (`verify.ts:786-794`, discussed above), while its
+own named check is pushed after `claim-consistency`
+([`verify.ts:1979`](../../../packages/benchmark-product/check/src/verify.ts)).
+Both precedents show the same thing: a capability's substantive work may run
+wherever correctness demands, and only its reported position is fixed by the
+registry's `order`.
 The `dispatch-boundaries` check's own work — record authentication, coordinate
 bindings, and role bindings (§4.2) — has no reason to precede a byte comparison
 over bytes those base checks already authenticated.
@@ -590,8 +612,8 @@ visible. Dispatch timestamps replace none of them.
 | No capture event | withhold the declaration | a declared capability with no event is invalid | no dispatch-ordering copy |
 | Invalid calendar timestamp on an assembly event `at` | withhold the declaration | `record-integrity` (rejected at the `/3` grammar) | no upgrade |
 | Anchor `genTime` is not calendar-strict RFC 3339 (§7.1(4)) | publish the boundaries | valid | no upgrade; the anchor does not qualify |
-| Token declared over assembly `/2` | withhold the declaration | `record-integrity` (§6.1's biconditional) | no publication |
-| `dispatchBoundaries` present with the token undeclared | never emitted | `record-integrity` (§6.1's biconditional) | no publication |
+| Token declared over assembly `/2` | withhold the declaration | `record-integrity` (§6.1's biconditional) | no upgrade |
+| `dispatchBoundaries` present with the token undeclared | never emitted | `record-integrity` (§6.1's biconditional) | no upgrade |
 | Accepted edge lacks matching capture | withhold the declaration | `record-integrity` | no upgrade |
 | Capture record bytes missing or digest/coordinate mismatched | withhold the declaration | `record-integrity` | no upgrade |
 | Repeated coordinate with different capture digests | preserve both events | valid if both records and bindings validate | both affect the minimum |
@@ -693,6 +715,10 @@ Implementation should land as stacked, independently verifiable packets:
 Packets 1 and 2 touch only the assembly contract and the producer's projection;
 they do not wait on the composed generation. Packets 3 through 5 do.
 
+Tracking issues: packet 1 is #4614, packet 2 is #4615, packet 3 is #4616,
+packet 4 is #4617, and packet 5 is #4618. The last three are filed as blocked on
+the capability registry.
+
 No packet may synthesize missing capture evidence or weaken an earlier format
 to keep its slice green.
 
@@ -727,10 +753,29 @@ The implementation bar is:
   grammar, an additive role-derivation contribution that declares no second
   `refines` target, and a `minimumReaderRelease` naming a real published
   release;
-- the generated-lattice conformance covers this token — for every satisfiable
-  vector that omits `dispatch-boundaries`, planting a `dispatchBoundaries` array
-  is refused as non-allowlisted, and declaring the token without one is refused
-  as a missing member;
+- the generated-lattice conformance covers this token under §6.1's
+  biconditional. For every satisfiable vector that omits `dispatch-boundaries`,
+  an assembly header carrying a `dispatchBoundaries` array is refused as
+  `record-integrity`. For every satisfiable vector that declares it, an
+  assembly `/2` header, or a `/3` header without a non-empty array, is refused
+  the same way. `dispatchBoundaries` is a key inside the
+  `verification/assembly.jsonl` header, at `graph.dispatchBoundaries` (§3.1),
+  not a member path, so neither refusal
+  comes from the two-way file closure at `verify.ts:565-566`, and a test must
+  not assert a non-allowlisted or missing-member refusal for either. The
+  undeclared case is refused by the assembly grammar. The `/2` header parse
+  drops the unknown key (`graph` is also a non-strict object), and `requireCanonical` then rejects the header bytes
+  as not the canonical encoding
+  ([`verify.ts:299-300`](../../../packages/benchmark-product/check/src/verify.ts)).
+  The declared case is refused because the vector selects the `/3` grammar,
+  which requires `format` `/3` and a non-empty array;
+- the role derivation is gated per declaration. For every satisfiable vector
+  that omits `dispatch-boundaries`, a bundle cataloging a Submission record as
+  `solve-submission` or `evaluation-submission` with no accepted graph edge
+  is still refused as unreachable by
+  `evidence-closure`'s size compare. The contribution must derive nothing unless
+  the token is declared, following the `disclosure-specification` precedent
+  ([`schema.ts:70-73`](../../../packages/benchmark-product/check/src/schema.ts));
 - the docs-consistency suite has a total row for `/10` and the reader release
   its vector derives; and
 - core and verifier typecheck, test, build, parity, and package-smoke commands

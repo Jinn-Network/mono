@@ -574,11 +574,15 @@ function validateReleaseGroups(catalog) {
       && members.every(({ publishPolicy }) => CANARY_PUBLISH_POLICIES.has(publishPolicy));
     const stableEligible = members.length > 0
       && members.every(({ publishPolicy }) => STABLE_PUBLISH_POLICIES.has(publishPolicy));
-    if (definition.stackPublished !== canaryEligible
-      || definition.canary !== canaryEligible
+    if (definition.canary !== canaryEligible
       || definition.stable !== stableEligible) {
       throw new Error(
         `releaseGroups.${groupId} publication flags must agree with every member publish policy`,
+      );
+    }
+    if (definition.stackPublished && !canaryEligible) {
+      throw new Error(
+        `releaseGroups.${groupId} cannot be stack-published unless every member publish policy is canary-eligible`,
       );
     }
   }

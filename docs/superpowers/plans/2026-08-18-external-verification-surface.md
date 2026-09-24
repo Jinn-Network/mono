@@ -14,7 +14,7 @@
 - **Tier separation** (self-serve spec `spec/2026-08-13-colophon-self-serve.md` §6.2): platform packages never name Colophon; the tier-4 bundle format/vectors are visibly separate, non-normative for the platform, and may name Colophon. Platform-neutral schemas stay owned by stack packages.
 - **Origin disclosure** (DR-2026-08-17-c, `log/decisions/2026-08-17-colophon-first-cut-canary-pin.md`): every new public document that names a `https://spec.jinn.network/...` identifier states that the origin is not hosted yet and a fetch will not retrieve it. No GitHub Pages / preview stand-in.
 - **Vendor-free copy:** no neighbour names, no "receipts" / "self-verifying" / "verification level" / "assurance level" as field names; audience is "any external verifier" / "third-party implementers".
-- **Honesty text preserved:** external verifiability never upgrades a claim tier. The self-run venue limits (`LOCAL_VENUE_LIMITS`, `packages/benchmark-product/verify/src/profile/run-results.ts`) appear in the profile unmodified; the what-it-proves table sits at the TOP of the profile.
+- **Honesty text preserved:** external verifiability never upgrades a claim tier. The self-run venue limits (`LOCAL_VENUE_LIMITS`, `packages/benchmark-product/check/src/profile/run-results.ts`) appear in the profile unmodified; the what-it-proves table sits at the TOP of the profile.
 - **No emoji; American English; no em dashes in PR/issue bodies; frontends untouched** (no UI in scope).
 - **Design-is-law divergence, recorded:** the kickoff asked for claim-package schemas under `spec.jinn.network/v1`. The accepted self-serve spec separates tier-4 product formats from the platform origin. Disposition (this plan): platform record schemas get spec-origin `$id`s (Task 1); tier-4 bundle schemas ship inside `@colophon-claims/verify` (`schemas/` in the npm tarball) with identity = the existing format literals (`benchmark-product.claim-package/2` etc.) + file digests, and no invented URL origin. The profile documents where each lives and why.
 - **PR shaping:** PR-A = Task 1 (independent, platform). PR-B = Tasks 2–4 (product kit). PR-C = Tasks 5–7, stacked on PR-B. All target `next`. PR-C body carries `Closes #2796` and the fresh-environment verification evidence (Task 8).
@@ -111,8 +111,8 @@ git commit -m "feat(benchmarking-records): declare canonical spec-origin \$ids o
 ### Task 2: Conformance-kit golden bundle generator (PR-B)
 
 **Files:**
-- Create: `packages/benchmark-product/verify/scripts/generate-conformance-kit.mjs`
-- Create (generated, checked in): `packages/benchmark-product/verify/fixtures/public-bundle-conformance-v1/golden/` (a complete bundle directory), `.../keys/report-signing-key.pem`, `.../keys/verdict-signing-key.pem`, `.../keys/README.md`
+- Create: `packages/benchmark-product/check/scripts/generate-conformance-kit.mjs`
+- Create (generated, checked in): `packages/benchmark-product/check/fixtures/public-bundle-conformance-v1/golden/` (a complete bundle directory), `.../keys/report-signing-key.pem`, `.../keys/verdict-signing-key.pem`, `.../keys/README.md`
 
 **Interfaces:**
 - Consumes: the built product CLI `packages/benchmark-product/core/dist/cli/bin.js` with the verb sequence proven by `core/quickstart/sample-lifecycle.mjs:180-262`: `init`, `draft create`, `sample init`, `arm add` (×2: `prediction-v1-baseline`, `sample-uniform`), `quote`, `lock`, `launch`, `resume`, `collect`, `results`, `report`, `verify`, `publish` — all with `--workspace <dir> --principal sponsor-1` and `--draft conformance-golden`, each with `--json`.
@@ -195,7 +195,7 @@ Expected: exit 0, `"ok": true`, six checks.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add packages/benchmark-product/verify/scripts/generate-conformance-kit.mjs packages/benchmark-product/verify/fixtures
+git add packages/benchmark-product/check/scripts/generate-conformance-kit.mjs packages/benchmark-product/check/fixtures
 git commit -m "feat(benchmark-product): conformance-kit golden bundle + test-only keys (#2796)"
 ```
 
@@ -204,8 +204,8 @@ git commit -m "feat(benchmark-product): conformance-kit golden bundle + test-onl
 ### Task 3: Tamper-variant generator + kit manifest (PR-B)
 
 **Files:**
-- Create: `packages/benchmark-product/verify/scripts/generate-tamper-variants.mjs`
-- Create (generated, checked in): `packages/benchmark-product/verify/fixtures/public-bundle-conformance-v1/tampered/<case-id>/` (one full bundle directory per case) and `packages/benchmark-product/verify/fixtures/public-bundle-conformance-v1/manifest.json`
+- Create: `packages/benchmark-product/check/scripts/generate-tamper-variants.mjs`
+- Create (generated, checked in): `packages/benchmark-product/check/fixtures/public-bundle-conformance-v1/tampered/<case-id>/` (one full bundle directory per case) and `packages/benchmark-product/check/fixtures/public-bundle-conformance-v1/manifest.json`
 
 **Interfaces:**
 - Consumes: `golden/` and `keys/` from Task 2.
@@ -273,7 +273,7 @@ Run the same for `results-miscomputed-resigned`. Expected: exit 1.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add packages/benchmark-product/verify/scripts/generate-tamper-variants.mjs packages/benchmark-product/verify/fixtures
+git add packages/benchmark-product/check/scripts/generate-tamper-variants.mjs packages/benchmark-product/check/fixtures
 git commit -m "feat(benchmark-product): tamper-matrix variants + machine-readable kit manifest (#2796)"
 ```
 
@@ -282,8 +282,8 @@ git commit -m "feat(benchmark-product): tamper-matrix variants + machine-readabl
 ### Task 4: Kit conformance test + fixture digest manifest (PR-B)
 
 **Files:**
-- Create: `packages/benchmark-product/verify/test/conformance-kit.test.mjs`
-- Create (generated): `packages/benchmark-product/verify/fixtures/manifest.sha256.json`
+- Create: `packages/benchmark-product/check/test/conformance-kit.test.mjs`
+- Create (generated): `packages/benchmark-product/check/fixtures/manifest.sha256.json`
 - Modify: `packages/benchmark-product/verify/package.json` (test script already runs `node --test test/`; confirm and leave if so)
 
 **Interfaces:**
@@ -364,8 +364,8 @@ git commit -m "test(benchmark-product): conformance-kit regression suite + fixtu
 ### Task 5: Tier-4 JSON Schemas for the bundle document formats (PR-C)
 
 **Files:**
-- Create: `packages/benchmark-product/verify/schemas/bundle-manifest.schema.json`, `evidence-catalog.schema.json`, `verdict-catalog.schema.json`, `public-trust.schema.json`, `claim-package.schema.json`, `assembly-row.schema.json`, `dsse-envelope.schema.json`
-- Create: `packages/benchmark-product/verify/test/schema-conformance.test.mjs`
+- Create: `packages/benchmark-product/check/schemas/bundle-manifest.schema.json`, `evidence-catalog.schema.json`, `verdict-catalog.schema.json`, `public-trust.schema.json`, `claim-package.schema.json`, `assembly-row.schema.json`, `dsse-envelope.schema.json`
+- Create: `packages/benchmark-product/check/test/schema-conformance.test.mjs`
 - Modify: `packages/benchmark-product/verify/package.json` — add `"schemas/"` to `files`; add dev-dependency `ajv` (same version as `packages/environments/record` uses; check its `package.json` and mirror)
 
 **Interfaces:**
@@ -450,7 +450,7 @@ git commit -m "feat(benchmark-product): tier-4 JSON Schemas for the public-bundl
 
 **Files:**
 - Create: `packages/benchmark-product/EXTERNAL-VERIFICATION.md`
-- Create: `packages/benchmark-product/verify/scripts/external-verify.py`
+- Create: `packages/benchmark-product/check/scripts/external-verify.py`
 - Modify: `packages/benchmark-product/verify/package.json` — add `"scripts/external-verify.py"` and `"schemas/"` to `files` (schemas done in Task 5; confirm both)
 
 **Interfaces:**
@@ -481,7 +481,7 @@ and no tool can prove the producing venue was honest.
 
 - [ ] **Step 2: Prove it against the kit by hand**
 
-Run: `python3 packages/benchmark-product/verify/scripts/external-verify.py packages/benchmark-product/verify/fixtures/public-bundle-conformance-v1/golden; echo exit=$?`
+Run: `python3 packages/benchmark-product/check/scripts/external-verify.py packages/benchmark-product/check/fixtures/public-bundle-conformance-v1/golden; echo exit=$?`
 Expected: all `CHECK ...: ok`, exit 0.
 Run against `tampered/report-signature-grafted`. Expected: `CHECK report-signature: FAIL ...`, exit 1.
 Run against `tampered/results-miscomputed-resigned`. Expected: exit 0 (this is the boundary case; the script's closing block explains why).
@@ -512,7 +512,7 @@ git commit -m "docs(benchmark-product): external verification profile + dependen
 ### Task 7: Executable walkthrough test + surface wiring (PR-C)
 
 **Files:**
-- Create: `packages/benchmark-product/verify/test/external-walkthrough.test.mjs`
+- Create: `packages/benchmark-product/check/test/external-walkthrough.test.mjs`
 - Modify: `packages/benchmark-product/README.md` (add EXTERNAL-VERIFICATION.md to the index), `packages/benchmark-product/verify/README.md` (one paragraph: verify with your own tools, link profile + kit), `packages/benchmark-product/PUBLIC-BUNDLE.md` (§Portable verification: add the external path beside the reference CLI)
 
 **Interfaces:**
@@ -589,8 +589,8 @@ git commit -m "test(benchmark-product): executable external walkthrough + doc wi
 
 ```bash
 FRESH=$(mktemp -d)
-cp -R packages/benchmark-product/verify/fixtures/public-bundle-conformance-v1 "$FRESH/kit"
-cp packages/benchmark-product/verify/scripts/external-verify.py "$FRESH/"
+cp -R packages/benchmark-product/check/fixtures/public-bundle-conformance-v1 "$FRESH/kit"
+cp packages/benchmark-product/check/scripts/external-verify.py "$FRESH/"
 cp packages/benchmark-product/EXTERNAL-VERIFICATION.md "$FRESH/"
 cd "$FRESH" && python3 external-verify.py kit/golden; echo "golden exit=$?"
 for d in kit/tampered/*/; do python3 external-verify.py "$d" >/dev/null 2>&1; echo "$(basename "$d") exit=$?"; done

@@ -14,7 +14,6 @@ import type {
   InspectSelectionManifest,
 } from "./inspect/manifest.js";
 import type { EvaluationRuntimeBinding } from "../domain/draft.js";
-import type { Demo1ClaudeRuntimeBinding } from "../venue/demo1-claude.js";
 import { INSPECT_BINARY_JUDGE_ADAPTER_ID } from "./inspect/binary-judge-manifest.js";
 import { configuredAgentRuntimes, profileMatchesArmPinning } from "../agent/index.js";
 import {
@@ -73,8 +72,6 @@ export interface OpenAIHostConnection {
 export interface BenchmarkRuntimeHostOptions {
   readonly openAI?: OpenAIHostConnection;
   readonly repositoryRoot?: string;
-  /** Explicit real Claude Code deployment used by Demo-1 repository-work arms. */
-  readonly demo1ClaudeRuntime?: Demo1ClaudeRuntimeBinding;
   /** Colophon OS user-data root; profiles and grants stay outside workspaces and repositories. */
   readonly agentDataDir?: string;
 }
@@ -205,9 +202,6 @@ export function createDefaultBenchmarkRuntimeHost(hostOptions: BenchmarkRuntimeH
       try {
         const venue = createLocalVenue({
           ...venueOptions,
-          ...(hostOptions.demo1ClaudeRuntime === undefined
-            ? {}
-            : { demo1ClaudeRuntime: hostOptions.demo1ClaudeRuntime }),
           ...(binding === undefined ? {} : { evaluationRuntime: binding }),
           ...(descriptor.path === undefined ? {} : { inspectHostConnectionDescriptor: descriptor.path }),
           ...(hostOptions.agentDataDir === undefined || venueOptions.agentProfileRequirements === undefined

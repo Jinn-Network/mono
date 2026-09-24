@@ -46,7 +46,7 @@ establish, why you can believe it, everything sealed.
 
 ### 1.1 Element inventory
 
-`packages/benchmark-product/verify/src/assets.ts` `buildIndex()` renders twenty-two
+`packages/benchmark-product/check/src/assets.ts` `buildIndex()` renders twenty-two
 top-level elements, one of which is never visible on the page. This is the complete list;
 §6 rules on every row of it.
 
@@ -374,7 +374,7 @@ removed. No fact, figure, caveat, limitation, digest, or command is removed by t
 A budget nobody counts is a preference. Three checks, all cheap, because the page is
 already byte-pinned and therefore already deterministic.
 
-**Budget check.** A test in `packages/benchmark-product/verify/src/` renders `index.html`
+**Budget check.** A test in `packages/benchmark-product/check/src/` renders `index.html`
 from a fixture, strips the content of every closed disclosure control, and counts distinct
 controlled-vocabulary terms in the two counted regions of §3.2. It fails over either
 ceiling. It reports the terms it counted, so a failure is actionable rather than a number.

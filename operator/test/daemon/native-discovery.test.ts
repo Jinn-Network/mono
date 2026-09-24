@@ -18,6 +18,13 @@ import {
 } from '../../src/daemon/native-discovery.js';
 import type { AnnouncedSubmissionCard } from '../../src/daemon/native-submission-facts.js';
 import {
+  NativeRecordDestinationError,
+  createBaseSepoliaRecordTransport,
+} from '../../src/daemon/native-base-sepolia-infrastructure.js';
+import { buildNativeRequesterAnnouncementDecode } from '../../src/daemon/native-requester-decode.js';
+import { LOCATION_PROFILE_HTTPS } from '../../src/daemon/native-signed-source.js';
+import { NATIVE_REQUESTER_ASSOCIATION_FACT } from '../../src/native-requester/requester.js';
+import {
   NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD,
   isPoisonQuarantined,
 } from '../../src/daemon/native-discovery-quarantine.js';
@@ -1408,6 +1415,84 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
     warn.mockRestore();
   });
 
+  // #3854: the degraded line is the operator's only view of WHY a source stalled, so it must carry
+  // the refused destination and the refusal detail, not just `(undecodable)`.
+  describe('the undecodable degrade line names the decode refusal (#3854)', () => {
+    const LOCATOR = 'records/abc';
+
+    function requesterEntry(): AnnouncementEntry {
+      const base = entry('0000000000000001', null, DIGEST_A);
+      const [announcement] = base.announcements;
+      if (announcement?.action !== 'available') throw new Error('fixture entry is not an announcement');
+      return {
+        ...base,
+        announcements: [{
+          ...announcement,
+          facts: {
+            taskDigest: DIGEST_A,
+            taskProfileUri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0',
+            [NATIVE_REQUESTER_ASSOCIATION_FACT]: {
+              authorityTime: {
+                chainId: 84532,
+                blockNumber: '100',
+                blockHash: `0x${'d'.repeat(64)}`,
+                timestamp: '2026-08-02T00:00:00.000Z',
+                finalized: true,
+              },
+            },
+          },
+          locations: [{ profile: LOCATION_PROFILE_HTTPS, locator: LOCATOR }],
+        }],
+      };
+    }
+
+    const rows = [
+      {
+        caller: 'requester',
+        // The real decode the solver and fleet install, over the real record transport, so the
+        // refusal is the one a peer's scheme-less locator actually produces (#3853).
+        decode: () => buildNativeRequesterAnnouncementDecode({
+          assertTrustFresh: async () => undefined,
+          verifyAuthorityTime: async () => true,
+          recordByLocation: createBaseSepoliaRecordTransport({
+            ipfsApiUrl: 'https://ipfs.example.invalid',
+            recordOrigins: [ROOT],
+            fetchImpl: async () => { throw new Error('the refusal must precede any fetch'); },
+          }).byLocation,
+          canonicalTaskCreated: async () => { throw new Error('unused'); },
+        }),
+      },
+      {
+        caller: 'evaluator',
+        // A stand-in: the evaluator's decode is inline in `native-evaluator-opportunity-source.ts`
+        // and runs only inside `syncSignedSources()`, which needs a live HTTP transport and a
+        // verified signed source that no test drives. It throws what its `records.byLocation`
+        // call would. The wrap, classify and report chain under test belongs to
+        // `createNativeDiscoveryConsumer` alone and is the same for both callers.
+        decode: () => async (): Promise<AnnouncedSubmissionCard> => {
+          throw new NativeRecordDestinationError(LOCATOR, 'it is not a resolvable URL');
+        },
+      },
+    ];
+
+    it.each(rows)('through the $caller decode', async ({ decode }) => {
+      const routes = routesFor([requesterEntry()]);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const synced = consumer({ store: new Store(':memory:'), routes, verify: okVerify, decode: decode() });
+        await expect(synced.sync()).resolves.toMatchObject({ degraded: [{ reason: 'undecodable' }] });
+        const lines = warn.mock.calls.map((call) => String(call[0]));
+        expect(lines).toContainEqual(expect.stringContaining('(undecodable)'));
+        const line = lines.find((candidate) => candidate.includes('(undecodable)'));
+        expect(line).toContain(LOCATOR);
+        expect(line).toContain('not a resolvable URL');
+        expect(line).toContain('announcement-0000000000000001');
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  });
+
   /**
    * ## The undecodable degrade above used to be permanent (#2473)
    *
@@ -1644,6 +1729,94 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
         degraded: [{ source: identity, reason: 'undecodable' }],
         quarantined: 0,
       });
+      warn.mockRestore();
+    });
+
+    /** `entry` and `routesFor` above hardcode one identity and `peerSource` hardcodes `ROOT`; these take both. */
+    function entryFor(identity: SourceIdentity, sequence: string, digest: `sha256:${string}`): AnnouncementEntry {
+      return { ...entry(sequence, null, digest), source: identity };
+    }
+
+    function routesForSource(identity: SourceIdentity, root: string, entries: readonly AnnouncementEntry[]) {
+      const routes = new Map<string, unknown>();
+      for (let index = 0; index < entries.length; index += 1) {
+        const current = String(index + 1).padStart(16, '0');
+        const previous = index === 0 ? null : String(index).padStart(16, '0');
+        routes.set(
+          `${root}${archivePagePath(identity.name, current)}`,
+          { ...page(current, previous, [signed(entries[index]!)]), source: identity.name },
+        );
+      }
+      const last = entries.at(-1)!;
+      routes.set(
+        `${root}${headPath(identity.name)}`,
+        wireHead({ ...head(last), origin: `${identity.agent}/${identity.name}` }),
+      );
+      return routes;
+    }
+
+    function sourceAt(identity: SourceIdentity, root: string): NativeDiscoverySource {
+      return peerSource(identity, {
+        resolveEndpoint: async () => ({
+          agent: identity.agent,
+          name: identity.name,
+          servingRoot: root,
+          archiveRootUrl: `${root}${archivePagePath(identity.name, '0000000000000001')}`,
+        }),
+      });
+    }
+
+    it('counts one crossing per source when two sources cross in the same pass (#4480)', async () => {
+      // Two sources — distinct agents, distinct serving roots, one permanently undecodable
+      // announcement each — cross the threshold on the same poll. The count is per PASS, not
+      // per source: a counter that set rather than added would report 1 here.
+      const first: SourceIdentity = { agent: 'did:key:zFirstRequester', name: 'requester' };
+      const second: SourceIdentity = { agent: 'did:key:zSecondRequester', name: 'requester' };
+      const firstEntry = entryFor(first, '0000000000000001', DIGEST_A);
+      const secondEntry = entryFor(second, '0000000000000001', DIGEST_B);
+      const routes = new Map<string, unknown>([
+        ...routesForSource(first, 'https://first.example', [firstEntry]),
+        ...routesForSource(second, 'https://second.example', [secondEntry]),
+      ]);
+      const store = new Store(':memory:');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const synced = createNativeDiscoveryConsumer({
+        store,
+        sources: [sourceAt(first, 'https://first.example'), sourceAt(second, 'https://second.example')],
+        transport: silentTransport(routes),
+        decode: async () => { throw new Error('chainId is not a canonical unsigned integer'); },
+        now: () => FRESH_FIXTURE_TIME,
+      });
+
+      for (let poll = 1; poll < NATIVE_DISCOVERY_POISON_QUARANTINE_THRESHOLD; poll += 1) {
+        await expect(synced.sync()).resolves.toMatchObject({
+          accepted: 0,
+          verifiedSources: 0,
+          degraded: [
+            { source: first, reason: 'undecodable' },
+            { source: second, reason: 'undecodable' },
+          ],
+          quarantined: 0,
+        });
+      }
+
+      // The threshold poll: both cross, both sources resume, and the pass reports both.
+      await expect(synced.sync()).resolves.toEqual({
+        accepted: 0,
+        verifiedSources: 2,
+        degraded: [],
+        quarantined: 2,
+      });
+      // Two distinct ledger rows, not one counted twice.
+      for (const [identity, entryValue] of [[first, firstEntry], [second, secondEntry]] as const) {
+        expect(isPoisonQuarantined({
+          store,
+          scope: 'announcement',
+          source: identity,
+          entryDigest: sealJson(entryValue).digest,
+          announcementId: 'announcement-0000000000000001',
+        })).toBe(true);
+      }
       warn.mockRestore();
     });
 

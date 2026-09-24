@@ -128,6 +128,10 @@ export type RawTaskRow = AuthoritativeTaskRow;
 export type RawAttemptRow = Omit<AuthoritativeAttemptRow, 'verdicts' | 'attemptEnvelopeCandidates'>;
 export type RawVerdictRow = Omit<AuthoritativeVerdictRow, 'verdictEnvelopeCandidates'>;
 
+// The chainId part of `attemptKey` and `verdictKey` mirrors the indexer primary
+// key but never tells two keys apart: an attempt whose chainId differs from its
+// task's is withdrawn before it is keyed, so each taskId carries one chainId.
+// `reqKey`'s chainId part does matter, because a requestId is not task-scoped.
 function attemptKey(taskId: string, attemptIndex: number, chainId: number): string {
   return `${taskId}|${attemptIndex}|${chainId}`;
 }
@@ -165,6 +169,8 @@ export function assembleTaskLifecycleEvidence(input: {
   /**
    * Called with the leg and identity of the first authoritative row that has
    * no place on the spine, immediately before the whole result is withdrawn.
+   * The identity ends in `reason=unplaceable` or `reason=duplicate-key`, so the
+   * two causes print differently.
    * Kept as a callback so this module stays `console`-free; the reader wires
    * it to the same warning its own row rejections emit.
    */
@@ -198,7 +204,10 @@ export function assembleTaskLifecycleEvidence(input: {
   const out = new Map<string, TaskLifecycleEvidence>();
   for (const task of input.tasks) {
     if (out.has(task.taskId)) {
-      return withdraw('tasks', `taskId=${task.taskId} chainId=${task.chainId}`);
+      return withdraw(
+        'tasks',
+        `taskId=${task.taskId} chainId=${task.chainId} reason=duplicate-key`,
+      );
     }
     out.set(task.taskId, {
       taskId: task.taskId,
@@ -216,12 +225,12 @@ export function assembleTaskLifecycleEvidence(input: {
   for (const a of input.attempts) {
     const evidence = out.get(a.taskId);
     const key = attemptKey(a.taskId, a.attemptIndex, a.chainId);
-    if (!evidence || evidence.authoritative.task.chainId !== a.chainId
-      || seenAttempts.has(key)) {
-      return withdraw(
-        'attempts',
-        `taskId=${a.taskId} attemptIndex=${a.attemptIndex} chainId=${a.chainId}`,
-      );
+    const identity = `taskId=${a.taskId} attemptIndex=${a.attemptIndex} chainId=${a.chainId}`;
+    if (!evidence || evidence.authoritative.task.chainId !== a.chainId) {
+      return withdraw('attempts', `${identity} reason=unplaceable`);
+    }
+    if (seenAttempts.has(key)) {
+      return withdraw('attempts', `${identity} reason=duplicate-key`);
     }
     seenAttempts.add(key);
     evidence.authoritative.attempts.push({
@@ -256,12 +265,13 @@ export function assembleTaskLifecycleEvidence(input: {
   for (const v of input.verdicts) {
     const key = attemptKey(v.taskId, v.attemptIndex, v.chainId);
     const pk = verdictKey(v.taskId, v.attemptIndex, v.verdictIndex, v.chainId);
-    if (!attemptIndex.has(key) || seenVerdicts.has(pk)) {
-      return withdraw(
-        'verdicts',
-        `taskId=${v.taskId} attemptIndex=${v.attemptIndex} `
-          + `verdictIndex=${v.verdictIndex} chainId=${v.chainId}`,
-      );
+    const identity = `taskId=${v.taskId} attemptIndex=${v.attemptIndex} `
+      + `verdictIndex=${v.verdictIndex} chainId=${v.chainId}`;
+    if (!attemptIndex.has(key)) {
+      return withdraw('verdicts', `${identity} reason=unplaceable`);
+    }
+    if (seenVerdicts.has(pk)) {
+      return withdraw('verdicts', `${identity} reason=duplicate-key`);
     }
     seenVerdicts.add(pk);
     pushInto(verdictsByAttempt, key, {

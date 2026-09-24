@@ -14,6 +14,7 @@ import {
   getConfigPathFromArgs as defaultGetConfigPathFromArgs,
   loadConfig as defaultLoadConfig,
 } from '../../config.js';
+import { requireConfigPathFromArgs } from '../../config/path-args.js';
 import {
   checkRpcNetwork as defaultCheckRpcNetwork,
   rpcNetworkFailureHint as defaultRpcNetworkFailureHint,
@@ -200,7 +201,24 @@ Failure example (funding gate):
         return;
       }
 
-      const config = deps.loadConfig(parsed.values.config as string | undefined);
+      let configPath: string | undefined;
+      try {
+        configPath = requireConfigPathFromArgs(ctx.argv);
+      } catch (err) {
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: err instanceof Error ? err.message : String(err),
+            hint: 'Pass a config path or omit --config.',
+            exampleCli: 'jinn run --config ~/.jinn-operator/config.json',
+            details: { field: 'config' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+
+      const config = deps.loadConfig(configPath);
       const rpcPreflightConfig: Pick<JinnConfig, 'network' | 'rpcUrl'> = config;
       // Resolve password: --password-fd > env > file > auto-generate (matches what
       // `jinn quickstart` used to do). A brand-new operator can run

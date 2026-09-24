@@ -1,7 +1,7 @@
-// Leaf facts-conformance at the public verifyItem / facts-consistency boundary, mirroring
-// `packages/discovery/facts/benchmarking/src/facts-conformance.test.ts`: kit `digestOf` +
-// `makeInMemoryPorts` supply the AnnouncementEntry chain and the unused keys/sigs stubs,
-// while this leaf's own recompute and a byte-exact RecordFetcher are injected at verifyItem.
+// Leaf facts-conformance at the public verifyItem / facts-consistency boundary:
+// kit `digestOf` + `makeInMemoryPorts` supply the AnnouncementEntry chain and
+// the unused keys/sigs stubs, while this leaf's own recompute and a byte-exact
+// RecordFetcher are injected at verifyItem.
 import { ENVIRONMENT_RECORD_KIND, sealEnvironmentRecord } from "@jinn-network/environment-record";
 import {
   GENESIS_SEQUENCE,

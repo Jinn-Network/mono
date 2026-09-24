@@ -8,7 +8,7 @@ import {
   InspectBinaryJudgeSelectionManifestSchema,
   type InspectBinaryJudgeArm,
   type InspectBinaryJudgeSelectionManifest,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 import { BinaryJudgmentSnapshotProbeSchema } from "@jinn-network/task-execution-profiles";
 import {
   SUPPORTED_OCI_PLATFORM,

@@ -8,7 +8,7 @@
  *
  * Flow (mirrors daemon-harness-cycle.ts):
  *   Anvil fork → mock IPFS → bootstrapStakedOperator → fund creator
- *   → deployMinimalV3Stack → startDaemon('claude-code', extra jinn-repo.v1 map)
+ *   → deployMinimalV3Stack → startDaemon('claude-code'; extraSolverTypeHarnesses is #3866-inert)
  *   → for each of the first N pool items:
  *       postJinnRepoTask → waitForDaemonClaim → waitForDelivery → waitForVerdict
  *
@@ -131,9 +131,9 @@ async function main(): Promise<void> {
       }],
     });
 
-    // Force jinn-repo.v1 restoration onto the claude-code learner. The
-    // evaluation leg first-matches JinnRepoEvaluatorHarness (claude-code does
-    // not support evaluation), so a single entry is safe for both legs.
+    // extraSolverTypeHarnesses and solverNetRegistry are #3866-inert
+    // (signature compatibility only). Live routing is opts.enableComposition
+    // plus executionWiring / extraLaunchers, not these leftover arguments.
     const claudeName = selectorToHarnessName('claude-code');
     const running = await startDaemon(
       fixture,
@@ -143,7 +143,7 @@ async function main(): Promise<void> {
       v3Env,
       mockIpfs.baseUrl, // ipfsRegistryUrl — envelope upload
       undefined, // opts
-      { 'jinn-repo.v1': claudeName }, // extraSolverTypeHarnesses
+      { 'jinn-repo.v1': claudeName }, // inert extraSolverTypeHarnesses (#3866)
       solverNetRegistry,
     );
     console.log(`daemon started — jinn-repo.v1 → ${claudeName}`);
