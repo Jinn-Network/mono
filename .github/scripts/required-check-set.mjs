@@ -110,6 +110,10 @@ export const REQUIRED_CHECK_SET = Object.freeze([
 //   - `environment-suite` — permanently excluded, not deferred. It is a release
 //     gate, and its global ref-independent concurrency group would serialize the
 //     queue.
+//   - `native-restart-drill` — permanently excluded. It is a nightly /
+//     workflow_dispatch advisory lane for `yarn drill:native-restart:verify`
+//     (#4194). Twelve Anvil nodes and eighteen role-host processes are a flake
+//     on the merge path; a red is an Actions failure, not a required context.
 //
 // ACCEPTED v1 COVERAGE GAPS (same ruling). Advisory on the PR lane and on push
 // to `next` only, so breakage in them is landable through the queue. Named as

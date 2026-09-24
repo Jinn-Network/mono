@@ -93,6 +93,8 @@ jobs:
         run: node --test .github/scripts/published-artifacts-smoke-workflow.test.mjs
       - name: Canonical-docs-check re-runs on PR body edits
         run: node --test .github/scripts/canonical-docs-check-workflow.test.mjs
+      - name: Native restart-drill CI lane is scheduled and non-gating
+        run: node --test .github/scripts/native-restart-drill-workflow.test.mjs
       - name: Vitest temp-directory sweep seam is wired everywhere
         run: node --test .github/scripts/vitest-tmp-isolation.test.mjs
       # The spawn-site half of the same containment: a child handed an env

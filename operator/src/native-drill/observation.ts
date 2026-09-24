@@ -27,7 +27,12 @@ export const RunObservationSchema = z.object({
   sourceHeads: z.array(z.string().regex(/^sha256:[0-9a-f]{64}$/u)),
   /** Durable side-effect counters (posts, claims, publications, settlements, duplicates). */
   effects: z.record(z.number().int().min(0)),
-  /** Port invocation counters — a restart may legitimately raise these where effects do not. */
+  /**
+   * Port invocation counters — a restart may legitimately raise these where effects do not.
+   * Chain-broadcast ports report the call (`broadcast`, or the port-specific attempt key) and
+   * the send that passed `broadcastOnce` (`broadcastSent` / `*Sent`). Duplicate effect counters
+   * are chain history and stay zero when the fence absorbs a re-drive.
+   */
   invocations: z.record(z.number().int().min(0)),
   /** Sanitized one-line state summaries either side of the injected boundary. */
   stateBefore: z.string().min(1),
@@ -102,4 +107,17 @@ export function checkRequiredEffects(
     }
   }
   return failures;
+}
+
+/**
+ * A completed run must reach the checkpoint's expected terminal state. Matching failures
+ * (`failed`/`failed`) and loop-exhausted hangs would otherwise seal, because `compareRuns`
+ * only asks whether the two lanes agree (#4196).
+ */
+export function checkExpectedFinalState(
+  observation: RunObservation,
+  expected: string,
+): readonly string[] {
+  if (observation.finalState === expected) return [];
+  return [`finalState=${observation.finalState}, expected ${expected}`];
 }
