@@ -335,7 +335,7 @@ export type {
 } from "./runtime/native-ports.js";
 
 // Workspace metadata and the sealed-bytes store (spec §4.5): exact bytes, digest-addressed.
-export { WORKSPACE_STORAGE_VERSION, WorkspaceAnchoringEntrySchema, WorkspaceMetadataSchema } from "./workspace/workspace.js";
+export { WORKSPACE_STORAGE_VERSION, WorkspaceAnchoringEntrySchema, WorkspaceMetadataSchema, DEFAULT_ENTRY_ANCHOR_SKEW_ALLOWANCE_MS, entryAnchorSkewAllowanceMs } from "./workspace/workspace.js";
 export type { WorkspaceAnchoringEntry, WorkspaceMetadata } from "./workspace/workspace.js";
 export { getSealedBytes, hasSealedBytes, putSealedBytes, sha256Hex } from "./workspace/sealed-store.js";
 

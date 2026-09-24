@@ -527,7 +527,11 @@ below 30s (`src/suite-timeouts.test.ts` holds that floor).
 three files that do real capture, archive, or mirror I/O and are individually
 justified (`src/capture/capture.integration.test.ts` ×12 at 60s/120s,
 `src/mcp/concurrency.test.ts` at 60s, `src/corpus/mirror-service.integration.test.ts`
-at 20s). Its one documented incident, `fc2308ffa`, was a **cost race** — a 5s
+at 20s: an apparent flake here (#4263 reconcile) traced to `blackHole`'s mock
+fetch not rejecting synchronously on an already-aborted signal, the way a
+real `fetch` does, so it hung to the test's own timeout instead of the
+deadline under test; fixing the mock left the bound untouched). Its one
+documented incident, `fc2308ffa`, was a **cost race** — a 5s
 bound against the archive busy budget's 10s default, fixed by shrinking the
 budget and bounding that one test — not scheduler starvation of a
 millisecond-cost test, so it supports the "cost-driven, not flake-driven"

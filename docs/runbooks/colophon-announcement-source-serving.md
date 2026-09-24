@@ -180,38 +180,40 @@ and the reader who kept the record is the one who can see it. That protection
 rests entirely on the reader's own note; it carries no third-party evidence, and
 the publisher cannot know which readers hold which notes.
 
-Head anchoring would raise that ceiling by one step, and only one.
+Head anchoring raises that ceiling by one step, and only one.
 [The 2026-09-01 head-anchoring design](../superpowers/specs/2026-09-01-publication-head-anchoring-design.md)
-specifies obtaining third-party time evidence over an announcement entry's
-digest and announcing that evidence on the chain, so a reader who recorded an
-anchored entry could refuse a later chain that does not contain it — truncation
-below an anchored point becomes detectable to a reader who recorded it, and
-nothing more. It would still not prove publication-by-time, would still not make
-the stream provably complete, and would still do nothing for a reader who never
-looked. **It is designed, not implemented** (tracked as #4127), so nothing this
-runbook serves is anchored today. Until it ships, the ceiling to state is the
-one above. §3 and §6 of that design are the authority for both.
+obtains third-party time evidence over an announcement entry's digest and
+announces that evidence on the chain, so a reader who recorded an anchored
+entry can refuse a later chain that does not contain it — truncation below an
+anchored point becomes detectable to a reader who recorded it, and nothing
+more. It still does not prove publication-by-time, still does not make the
+stream provably complete, and still does nothing for a reader who never
+looked. The producer path is the never-blocks `acquireEntryAnchorAfterAppend`
+hook (#4127); the consumer refusal is the named `anchored-entry-hold`
+procedure (#4129). §3 and §6 of that design are the authority for the
+ceiling.
 
 ## Coverage: which sequences are anchored
 
-> **Designed, not implemented** (tracked as #4127). Nothing this runbook serves
-> carries an anchor announcement today, so the walk below currently reports every
-> substantive sequence as unanchored, with the newest reported as pending. It is
-> recorded here because the mechanism is ruled and its shape is fixed
-> ([`docs/superpowers/specs/2026-09-01-publication-head-anchoring-design.md`](../superpowers/specs/2026-09-01-publication-head-anchoring-design.md)),
-> and because the walk itself does not change when the mechanism lands. Landing
-> #4127 must clear this marker.
-
-Once head anchoring is live, each substantive entry's digest is anchored through a
-third-party provider, and the resulting `AnchorEvidence` record is announced by a
-later entry on this same chain. That makes coverage a property of the archive
-rather than an operator claim about it: anybody holding the archive — the operator,
-or a stranger who cold-synced it — enumerates exactly which sequences are anchored,
-which are not, and which the archive cannot currently say either way about, from the
-archive alone. That last phrase is the whole value of
-the walk, and it is only earned if each step reads the records themselves rather
-than the publisher's description of them, which is why step 3 is written the way it
+Coverage is a property of the archive rather than an operator claim about it.
+`enumerateEntryAnchorCoverage` in `@jinn-network/record-discovery-protocol`
+covers steps 2 and 4 to 6 of the walk below (classification, read-off, the
+pending tail, and naming what is left) over anchor subjects the caller has
+already fetched and verified per step 3; it does not fetch those records
+itself. Anybody holding the archive, the operator, or a stranger who
+cold-synced it, enumerates exactly which sequences are anchored, which are
+not, and which the archive cannot currently say either way about, from the
+archive alone. That last phrase is the whole value of the walk, and it is
+only earned if each step reads the records themselves rather than the
+publisher's description of them, which is why step 3 is written the way it
 is.
+
+Once the workspace configures an anchor provider, each substantive append
+acquires an `AnchorEvidence` record over that entry's digest and announces it
+on a later dedicated entry. An all-anchor entry is not itself anchored
+(the stopping rule). Acquisition failure never blocks the append: the gap is
+visible. Until a provider is configured, the walk reports every substantive
+sequence as unanchored, with the newest reported as pending.
 
 ### The walk
 

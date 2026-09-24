@@ -328,4 +328,294 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
     expect(filterOutcome.status).toBe("verified");
     if (filterOutcome.status === "verified") expect(filterOutcome.derivation).toBeUndefined();
   });
+
+  it("verifySource refuses a later chain that dropped a recorded anchored-entry hold", async () => {
+    const entry: AnnouncementEntry = parseAnnouncementEntry({
+      protocol: "https://spec.jinn.network/record-discovery/v1",
+      source: { agent: "did:key:zProjector", name: "marketplace" },
+      sequence: "0000000000000001",
+      previous: null,
+      timestamp: "2026-07-28T12:00:00.000Z",
+      announcements: [
+        {
+          announcementId: "ann-1",
+          action: "available",
+          record: { kind: "https://spec.jinn.network/records/delivery/v1", digest: sealJson({ kind: "delivery" }).digest },
+        },
+      ],
+    });
+    const entryDigest = sealJson(entry).digest as `sha256:${string}`;
+    const now = new Date("2026-07-28T12:00:00.000Z");
+    const holds = new Map();
+    const trust = createTrustAdapter({
+      bindingResolver: {
+        async resolveBinding(query): Promise<ResolvedBinding | null> {
+          return {
+            binding: { agent: query.agent, scope: [DISCOVERY_SIGNING_SCOPE], key: { keyid: "key-1", publicKey: "pubkey-key-1", algorithm: "ed25519" } } as never,
+            envelopeBytes: new Uint8Array(),
+            bindingDigest: `sha256:${"0".repeat(64)}`,
+            effectiveStart: "2026-01-01T00:00:00.000Z",
+            isGenesis: true,
+            revocations: [],
+          };
+        },
+      },
+      keyCatalog: { async candidateKeys() { return [{ keyid: "key-1", probeAt: "2026-01-01T00:00:00.000Z" }]; } },
+      verifier: acceptAllVerifier,
+    });
+    const holdStore = {
+      async get(origin: string) { return holds.get(origin); },
+      async put(hold: { origin: string } & Record<string, unknown>) { holds.set(hold.origin, hold); },
+    };
+    const driverFor = (hwm = createInMemoryHighWaterMarkStore()) => ({
+      hwm,
+      driver: createVerifyDriver({
+        trust,
+        hwm,
+        factsProfiles: { get: () => undefined },
+        factsRecompute: { get: () => undefined },
+        records: { "fetch": async () => sealJson({ kind: "delivery" }).bytes },
+        entries: { "fetch": async () => sealJson(entry).bytes },
+        holds: holdStore as never,
+        now: () => now,
+      }),
+    });
+    const { driver, hwm } = driverFor();
+    const source = { agent: "did:key:zProjector", name: "marketplace" };
+    const head: SourceHead = {
+      protocol: "https://spec.jinn.network/record-discovery/v1",
+      origin: "did:key:zProjector/marketplace",
+      sequence: "0000000000000001",
+      entry: entryDigest,
+      issuedAt: "2026-07-28T12:00:00.000Z",
+      refreshBy: "2026-07-29T12:00:00.000Z",
+    };
+    const fakeEnvelope = (payloadType: string, bytes: Uint8Array) => ({
+      payloadType,
+      payload: Buffer.from(bytes).toString("base64"),
+      signatures: [{ keyid: "key-1", sig: Buffer.from("any").toString("base64") }],
+    });
+    const sourceOpts = {
+      source,
+      head,
+      headSignature: fakeEnvelope("application/vnd.jinn.record-discovery.head.v1+json", sealJson(head).bytes) as never,
+      entries: toAsyncIterable([
+        { entry, signature: fakeEnvelope("application/vnd.jinn.record-discovery.entry.v1+json", sealJson(entry).bytes) as never },
+      ]),
+      firstAdoption: true,
+      observedAnchoredEntry: {
+        sequence: "0000000000000001",
+        entryDigest,
+        anchorRecordDigest: `sha256:${"b".repeat(64)}` as const,
+        anchoredTime: "2026-07-28T12:00:00.000Z",
+      },
+    };
+    expect((await driver.verifySource(sourceOpts)).status).toBe("ok");
+    expect(await hwm.get(source)).toMatchObject({ sequence: "0000000000000001", entry: entryDigest });
+
+    const next = parseAnnouncementEntry({
+      protocol: "https://spec.jinn.network/record-discovery/v1",
+      source,
+      sequence: "0000000000000002",
+      previous: entryDigest,
+      timestamp: "2026-07-28T12:01:00.000Z",
+      announcements: [
+        {
+          announcementId: "ann-2",
+          action: "available",
+          record: { kind: "https://spec.jinn.network/records/delivery/v1", digest: sealJson({ kind: "later" }).digest },
+        },
+      ],
+    });
+    const nextDigest = sealJson(next).digest;
+    const nextHead: SourceHead = {
+      ...head,
+      sequence: "0000000000000002",
+      entry: nextDigest,
+      issuedAt: "2026-07-28T12:01:00.000Z",
+    };
+    const resumed = await driver.verifySource({
+      source,
+      head: nextHead,
+      headSignature: fakeEnvelope("application/vnd.jinn.record-discovery.head.v1+json", sealJson(nextHead).bytes) as never,
+      entries: toAsyncIterable([
+        { entry: next, signature: fakeEnvelope("application/vnd.jinn.record-discovery.entry.v1+json", sealJson(next).bytes) as never },
+      ]),
+      firstAdoption: false,
+    });
+    expect(resumed.status).toBe("ok");
+    expect(await hwm.get(source)).toMatchObject({ sequence: "0000000000000002", entry: nextDigest });
+
+    const rewritten = parseAnnouncementEntry({
+      ...entry,
+      announcements: [{
+        announcementId: "ann-1",
+        action: "available",
+        record: { kind: "https://spec.jinn.network/records/delivery/v1", digest: sealJson({ kind: "other" }).digest },
+      }],
+    });
+    const rewrittenDigest = sealJson(rewritten).digest;
+    const rewrittenHead: SourceHead = {
+      ...head,
+      entry: rewrittenDigest,
+      issuedAt: "2026-07-28T12:02:00.000Z",
+    };
+    const rewriteStore = driverFor();
+    const truncated = await rewriteStore.driver.verifySource({
+      source,
+      head: rewrittenHead,
+      headSignature: fakeEnvelope("application/vnd.jinn.record-discovery.head.v1+json", sealJson(rewrittenHead).bytes) as never,
+      entries: toAsyncIterable([
+        { entry: rewritten, signature: fakeEnvelope("application/vnd.jinn.record-discovery.entry.v1+json", sealJson(rewritten).bytes) as never },
+      ]),
+      firstAdoption: true,
+    });
+    expect(truncated.status).toBe("missing-held-entry");
+    expect(await rewriteStore.hwm.get(source)).toBeUndefined();
+  });
+
+  it("verifySource refuses a first adoption that drops a held entry even when a stale high-water mark is still on file", async () => {
+    // The other half of the same finding: `firstAdoption: true` means
+    // `verifySourceChain` walked from genesis over exactly the fed entries
+    // (`stopAt` is unset) and never linked to whatever mark the durable HWM
+    // store happens to hold -- e.g. left over from a process that adopted
+    // this source before a restart. A hold recorded past that walk's tail
+    // must not be treated as "covered by the prefix": there IS no prefix,
+    // the fed entries are the whole chain this visit saw, and they do not
+    // contain the held digest.
+    const entry: AnnouncementEntry = parseAnnouncementEntry({
+      protocol: "https://spec.jinn.network/record-discovery/v1",
+      source: { agent: "did:key:zProjector", name: "marketplace" },
+      sequence: "0000000000000001",
+      previous: null,
+      timestamp: "2026-07-28T12:00:00.000Z",
+      announcements: [
+        {
+          announcementId: "ann-1",
+          action: "available",
+          record: { kind: "https://spec.jinn.network/records/delivery/v1", digest: sealJson({ kind: "delivery" }).digest },
+        },
+      ],
+    });
+    const entryDigest = sealJson(entry).digest as `sha256:${string}`;
+    const now = new Date("2026-07-28T12:00:00.000Z");
+    const holds = new Map();
+    const trust = createTrustAdapter({
+      bindingResolver: {
+        async resolveBinding(query): Promise<ResolvedBinding | null> {
+          return {
+            binding: { agent: query.agent, scope: [DISCOVERY_SIGNING_SCOPE], key: { keyid: "key-1", publicKey: "pubkey-key-1", algorithm: "ed25519" } } as never,
+            envelopeBytes: new Uint8Array(),
+            bindingDigest: `sha256:${"0".repeat(64)}`,
+            effectiveStart: "2026-01-01T00:00:00.000Z",
+            isGenesis: true,
+            revocations: [],
+          };
+        },
+      },
+      keyCatalog: { async candidateKeys() { return [{ keyid: "key-1", probeAt: "2026-01-01T00:00:00.000Z" }]; } },
+      verifier: acceptAllVerifier,
+    });
+    const holdStore = {
+      async get(origin: string) { return holds.get(origin); },
+      async put(hold: { origin: string } & Record<string, unknown>) { holds.set(hold.origin, hold); },
+    };
+    // One durable HWM store, reused across three separately-constructed
+    // drivers -- the same store a real mirror would keep across restarts,
+    // in contrast to each driver's own in-memory verified-entry set, which
+    // would not survive a restart and is deliberately not shared here.
+    const hwm = createInMemoryHighWaterMarkStore();
+    const driverFor = () => createVerifyDriver({
+      trust,
+      hwm,
+      factsProfiles: { get: () => undefined },
+      factsRecompute: { get: () => undefined },
+      records: { "fetch": async () => sealJson({ kind: "delivery" }).bytes },
+      entries: { "fetch": async () => sealJson(entry).bytes },
+      holds: holdStore as never,
+      now: () => now,
+    });
+    const source = { agent: "did:key:zProjector", name: "marketplace" };
+    const head: SourceHead = {
+      protocol: "https://spec.jinn.network/record-discovery/v1",
+      origin: "did:key:zProjector/marketplace",
+      sequence: "0000000000000001",
+      entry: entryDigest,
+      issuedAt: "2026-07-28T12:00:00.000Z",
+      refreshBy: "2026-07-29T12:00:00.000Z",
+    };
+    const fakeEnvelope = (payloadType: string, bytes: Uint8Array) => ({
+      payloadType,
+      payload: Buffer.from(bytes).toString("base64"),
+      signatures: [{ keyid: "key-1", sig: Buffer.from("any").toString("base64") }],
+    });
+
+    // Adopt the chain at seq 1. No hold yet.
+    expect((await driverFor().verifySource({
+      source,
+      head,
+      headSignature: fakeEnvelope("application/vnd.jinn.record-discovery.head.v1+json", sealJson(head).bytes) as never,
+      entries: toAsyncIterable([
+        { entry, signature: fakeEnvelope("application/vnd.jinn.record-discovery.entry.v1+json", sealJson(entry).bytes) as never },
+      ]),
+      firstAdoption: true,
+    })).status).toBe("ok");
+
+    // A returning sync to seq 2 records the hold there; the HWM lands on seq 2.
+    const next = parseAnnouncementEntry({
+      protocol: "https://spec.jinn.network/record-discovery/v1",
+      source,
+      sequence: "0000000000000002",
+      previous: entryDigest,
+      timestamp: "2026-07-28T12:01:00.000Z",
+      announcements: [
+        {
+          announcementId: "ann-2",
+          action: "available",
+          record: { kind: "https://spec.jinn.network/records/delivery/v1", digest: sealJson({ kind: "later" }).digest },
+        },
+      ],
+    });
+    const nextDigest = sealJson(next).digest as `sha256:${string}`;
+    const nextHead: SourceHead = {
+      ...head,
+      sequence: "0000000000000002",
+      entry: nextDigest,
+      issuedAt: "2026-07-28T12:01:00.000Z",
+    };
+    expect((await driverFor().verifySource({
+      source,
+      head: nextHead,
+      headSignature: fakeEnvelope("application/vnd.jinn.record-discovery.head.v1+json", sealJson(nextHead).bytes) as never,
+      entries: toAsyncIterable([
+        { entry: next, signature: fakeEnvelope("application/vnd.jinn.record-discovery.entry.v1+json", sealJson(next).bytes) as never },
+      ]),
+      firstAdoption: false,
+      observedAnchoredEntry: {
+        sequence: "0000000000000002",
+        entryDigest: nextDigest,
+        anchorRecordDigest: `sha256:${"b".repeat(64)}` as const,
+        anchoredTime: "2026-07-28T12:01:00.000Z",
+      },
+    })).status).toBe("ok");
+    expect(await hwm.get(source)).toMatchObject({ sequence: "0000000000000002", entry: nextDigest });
+
+    // A THIRD, independently constructed driver over the SAME durable store --
+    // modeling a restart -- first-adopts a chain re-signed later but whose
+    // walk (over exactly what is fed) stops at seq 1: the held seq-2 entry is
+    // gone. `firstAdoption: true` is the load-bearing fact the bug ignored.
+    const rewrittenHead: SourceHead = { ...head, issuedAt: "2026-07-28T12:02:00.000Z" };
+    const truncated = await driverFor().verifySource({
+      source,
+      head: rewrittenHead,
+      headSignature: fakeEnvelope("application/vnd.jinn.record-discovery.head.v1+json", sealJson(rewrittenHead).bytes) as never,
+      entries: toAsyncIterable([
+        { entry, signature: fakeEnvelope("application/vnd.jinn.record-discovery.entry.v1+json", sealJson(entry).bytes) as never },
+      ]),
+      firstAdoption: true,
+    });
+    expect(truncated.status).toBe("missing-held-entry");
+    // The refused visit must not clobber the last honest (seq 2) mark.
+    expect(await hwm.get(source)).toMatchObject({ sequence: "0000000000000002", entry: nextDigest });
+  });
 });

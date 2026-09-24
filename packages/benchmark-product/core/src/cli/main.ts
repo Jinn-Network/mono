@@ -78,6 +78,7 @@ import {
 } from "../operations/index.js";
 import { renderWorkspaceVerifyHuman } from "./verify-human.js";
 import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../operations/run-anchor.js";
+import { formatEntryAnchorLines } from "../operations/source-entry-anchor.js";
 import { dirname } from "node:path";
 import { expectedCellSet, parseBenchmark, parseRun } from "@jinn-network/benchmarking-records";
 import { parseEvaluationSpec } from "@jinn-network/task-execution-profiles";
@@ -957,6 +958,20 @@ function anchorNote(outcome: AnchorAfterLockOutcome, draftId: string): string {
     + `"${PRODUCT_BRANDING.commandName} anchor --draft ${draftId} --subject lock"\n`;
 }
 
+function withEntryAnchorNote(
+  rendered: CliResult,
+  jsonMode: boolean,
+  workspaceDir: string,
+  result: OperationResult<{ readonly source: { readonly agent: string; readonly name: string } }>,
+): CliResult {
+  if (!result.ok) return rendered;
+  const note = formatEntryAnchorLines(workspaceDir, result.result.source.agent, result.result.source.name);
+  if (note.length === 0) return rendered;
+  return jsonMode
+    ? { ...rendered, stderr: `${rendered.stderr}${note}` }
+    : { ...rendered, stdout: `${rendered.stdout}${note}` };
+}
+
 /**
  * `lock`, then the §7.2 anchor hook.
  *
@@ -1173,9 +1188,14 @@ async function handlePublicationRegister(args: ParsedArgs, context: CliContext, 
     draftId: required(args, "draft"),
     ...(optional(args, "public-base-url") === undefined ? {} : { publicBaseUrl: optional(args, "public-base-url")! }),
   });
-  return renderResult(result, jsonMode, (value) => value.postHoc
-    ? `registered run ${value.recordSha256} at ${value.source.agent}/${value.source.name}#${value.sourceSequence} post-hoc; this does not rerun completed work\n`
-    : `registered run ${value.recordSha256} at ${value.source.agent}/${value.source.name}#${value.sourceSequence} before dispatch\n`);
+  return withEntryAnchorNote(
+    renderResult(result, jsonMode, (value) => value.postHoc
+      ? `registered run ${value.recordSha256} at ${value.source.agent}/${value.source.name}#${value.sourceSequence} post-hoc; this does not rerun completed work\n`
+      : `registered run ${value.recordSha256} at ${value.source.agent}/${value.source.name}#${value.sourceSequence} before dispatch\n`),
+    jsonMode,
+    opContext.workspaceDir,
+    result,
+  );
 }
 
 function handlePublicationStatus(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
@@ -1189,16 +1209,27 @@ function handlePublicationStatus(args: ParsedArgs, context: CliContext, jsonMode
 
 async function handlePublicationAccounting(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, PUBLICATION_ACCOUNTING_FLAGS);
-  const result = await publicationAccounting(buildOperationContext(args, context), { draftId: required(args, "draft") });
-  return renderResult(result, jsonMode, (value) => `published accounting ${value.accountingSha256} and Matrix v2 ${value.matrixV2Sha256}; accounting does not require a Report and does not rerun work\n`);
+  const opContext = buildOperationContext(args, context);
+  const result = await publicationAccounting(opContext, { draftId: required(args, "draft") });
+  return withEntryAnchorNote(
+    renderResult(result, jsonMode, (value) => `published accounting ${value.accountingSha256} and Matrix v2 ${value.matrixV2Sha256}; accounting does not require a Report and does not rerun work\n`),
+    jsonMode,
+    opContext.workspaceDir,
+    result,
+  );
 }
 
 async function handlePublicationReport(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, PUBLICATION_REPORT_FLAGS);
   const opContext = buildOperationContext(args, context);
   const result = await publicationReport(opContext, { draftId: required(args, "draft") });
-  return renderResult(result, jsonMode, (value) =>
-    `published signed Report v2 ${value.reportRecordSha256} (payload ${value.reportPayloadSha256}) at ${value.source.agent}/${value.source.name}#${value.receipt.sourceSequence}\n`);
+  return withEntryAnchorNote(
+    renderResult(result, jsonMode, (value) =>
+      `published signed Report v2 ${value.reportRecordSha256} (payload ${value.reportPayloadSha256}) at ${value.source.agent}/${value.source.name}#${value.receipt.sourceSequence}\n`),
+    jsonMode,
+    opContext.workspaceDir,
+    result,
+  );
 }
 
 /** How each start-time well-known outcome reads while the server is coming up. */

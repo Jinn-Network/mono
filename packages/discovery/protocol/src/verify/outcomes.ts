@@ -107,6 +107,23 @@ export function sourceChainRefusalReason(
   }
 }
 
+/**
+ * Named verification: `anchored-entry-hold` (publication-head anchoring
+ * design §5.4 step 5). A later chain that dropped a previously recorded
+ * anchored entry is refused; absence of a hold is not a failure.
+ */
+export type AnchoredEntryHold = {
+  origin: string;
+  sequence: string;
+  entryDigest: `sha256:${string}`;
+  anchorRecordDigest: `sha256:${string}`;
+  anchoredTime: string;
+};
+
+export type AnchoredEntryOutcome =
+  | { status: "ok"; hold: AnchoredEntryHold | undefined }
+  | { status: "missing-held-entry"; hold: AnchoredEntryHold };
+
 export type FactsConsistency = "consistent" | "inconsistent" | "indeterminate";
 
 export type ItemOutcome =
