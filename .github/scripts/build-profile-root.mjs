@@ -252,12 +252,16 @@ export function buildProfileRoot({
     documents,
     new Set(packages.map(({ name }) => name)),
   );
+  // `lane` is a verification/receipt identity, not a hosted byte. Embedding it
+  // made a canary-refreshed host unable to byte-match a same-SHA stable
+  // artifact (#4469). The CLI still accepts --lane so the caller names the
+  // verification lane; it does not appear in the served inventory.
+  void lane;
   const manifest = {
     version: 1,
     generatedFrom: { repository: 'Jinn-Network/mono', commit },
     catalog: { path: PLATFORM_CATALOG_PATH, sha256: boundCatalogDigest },
     releaseGroup,
-    lane,
     packages: packages.map(({ name }) => name),
     documents,
   };

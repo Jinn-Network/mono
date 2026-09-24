@@ -152,6 +152,7 @@ jobs:
       SOURCE_SHA: ${{ github.sha }}
       HOST_REPOSITORY: ${{ vars.JINN_PROFILE_HOST_REPOSITORY }}
       WORKFLOW_PATH: .github/workflows/stack-npm-publish.yml
+      LANE: canary
     steps:
       - name: Checkout mono at the published SHA
         uses: actions/checkout@v7
@@ -447,17 +448,16 @@ jobs:
       # upstream job is a refusal. So the cause is named here rather than sequenced.
       # Scoped to the gate step: a bare `if: failure()` would report host drift after a
       # failed checkout, when the job never reached the network.
-      - name: Explain a stale or lane-mismatched host
+      - name: Explain a stale host
         if: failure() && steps.gate.outcome == 'failure'
         run: >-
           echo "::error::The live profile host does not match this run's attested
           artifact. Before reading this as host drift:
-          the host refresh may not have run yet for this source SHA,
-          and a host last refreshed by the push-to-next canary-host-refresh job serves
-          lane \"canary\" bytes, which never byte-match a stable manifest. The host's own
-          .jinn-profile-host-source names the source SHA and lane of its last
-          content-changing refresh (a refresh that found identical content writes
-          nothing). See docs/runbooks/jinn-network-profile-hosting.md,
+          the host refresh may not have run yet for this source SHA.
+          Served group manifests do not embed lane; .jinn-profile-host-source
+          still names the source SHA and the refresh job that last wrote
+          (a refresh that found identical content writes nothing). See
+          docs/runbooks/jinn-network-profile-hosting.md,
           'Automatic host refresh'."
       - name: Upload live host receipt
         uses: actions/upload-artifact@v4

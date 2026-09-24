@@ -246,7 +246,10 @@ function validateProfileManifest(profileManifest, profileManifestPath, context) 
   if (profileManifest.releaseGroup !== context.releaseGroup) {
     throw new Error('profile manifest release group does not match the receipt input');
   }
-  if (profileManifest.lane !== context.lane) throw new Error('profile manifest lane does not match the receipt input');
+  // Served inventory is lane-independent (#4469). Lane lives on the receipt.
+  if ('lane' in profileManifest) {
+    throw new Error('profile manifest must not embed lane');
+  }
   if (!sameSet(profileManifest.packages, context.catalogNames)) {
     throw new Error(`profile package set does not match ${context.releaseGroup}`);
   }
