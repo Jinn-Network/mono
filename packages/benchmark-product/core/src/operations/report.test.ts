@@ -17,6 +17,7 @@ import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import type { ProxiedBackend } from "../run/drive.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
+import { acquirePublicationLock } from "../run/publication-lock.js";
 import { readRunState, writeRunState } from "../run/state.js";
 import { additionalClaimPackagePath } from "../report/claim.js";
 import { createWorkspacePublicationHttpHandler, createWorkspacePublicationSource, recordPath } from "../run/publication-source.js";
@@ -965,6 +966,12 @@ describe("runReport — analysis method selection (P4b Task 3)", () => {
 });
 
 describe("portable public bundle", () => {
+  /** Digest-named bundle directories for a draft; none when the parent was never created. */
+  function digestNamedBundleDirs(draftId = "draft-1"): string[] {
+    const dir = publicBundlesDir(workspaceDir, draftId);
+    return existsSync(dir) ? readdirSync(dir).filter((name) => /^[a-f0-9]{64}$/u.test(name)) : [];
+  }
+
   test("publishes only from reported, writes bundle identity before transitioning, and is idempotently readable", async () => {
     const clock = makeClock();
     await setUpClosedRun(clock);
@@ -1029,17 +1036,46 @@ describe("portable public bundle", () => {
     // digest-addressed directory in place. The caller never sees the return value, so before issue
     // #3195 its cleanup list was empty and the directory survived a publication that never
     // advanced — the same visible outcome issue #3074 removed, reached through an I/O failure.
+    // `onRenamed` fires before `afterRename` (`bundle/materialize.ts`), and the throw lands before
+    // `runPublish` takes the publication lock, so this drives `removeRefusedBundles`' unlocked
+    // (`heldLock === undefined`) branch: acquire the lock for the cleanup alone, then remove.
     const refused = await runPublish(contextFor(clock), { draftId: "draft-1" }, {
       afterRename: () => { throw new Error("fault between rename and return"); },
     });
     expect(refused.ok).toBe(false);
-    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
-      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
-      : []).toHaveLength(0);
+    expect(digestNamedBundleDirs()).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
     expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
     const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
     expect(retry.ok, JSON.stringify(retry)).toBe(true);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
+  });
+
+  test("a refusal that cannot take the publication lock for cleanup leaves the staged directory in place", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    expect((await runReport(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+    // A lock held elsewhere makes the unlocked branch's bounded acquire time out. Removing the
+    // directory unserialized could delete a bundle a peer is naming, so it must be left in place,
+    // and the caller still sees its own refusal rather than the lock timeout.
+    const held = await acquirePublicationLock(workspaceDir, "draft-1");
+    try {
+      const refused = await runPublish(contextFor(clock), { draftId: "draft-1" }, {
+        afterRename: () => { throw new Error("fault between rename and return"); },
+      });
+      expect(refused.ok).toBe(false);
+      if (refused.ok) return;
+      expect(refused.error.detail).toContain("fault between rename and return");
+      expect(refused.error.detail).not.toContain("publication lock");
+      expect(digestNamedBundleDirs()).toHaveLength(1);
+      expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
+    } finally {
+      held.release();
+    }
+    // The surviving directory is byte-identical, so a clean retry adopts it.
+    const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
+    expect(retry.ok, JSON.stringify(retry)).toBe(true);
+    expect(digestNamedBundleDirs()).toHaveLength(1);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
   });
 
@@ -1051,9 +1087,7 @@ describe("portable public bundle", () => {
       beforeRename: () => { throw new Error("fault before rename"); },
     });
     expect(failed.ok).toBe(false);
-    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
-      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
-      : []).toHaveLength(0);
+    expect(digestNamedBundleDirs()).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
     expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
   });
@@ -1069,9 +1103,7 @@ describe("portable public bundle", () => {
       beforeRunState: () => { throw new Error("refused after materialization"); },
     });
     expect(refused.ok).toBe(false);
-    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
-      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
-      : []).toHaveLength(0);
+    expect(digestNamedBundleDirs()).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
     expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
     const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
@@ -1110,16 +1142,18 @@ describe("portable public bundle", () => {
       beforeRunState: () => { throw new Error("refused after materialization"); },
     });
     expect(refused.ok).toBe(false);
-    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
-      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
-      : []).toHaveLength(0);
+    expect(digestNamedBundleDirs()).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
     expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
+    expect(readRunState(workspaceDir, "draft-1")?.additionalBundles).toBeUndefined();
 
     const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
     expect(retry.ok, JSON.stringify(retry)).toBe(true);
     if (!retry.ok) return;
     expect(retry.result.additionalBundles).toHaveLength(1);
+    const identities = [retry.result.bundleIdentity, ...retry.result.additionalBundles!.map((entry) => entry.bundleIdentity)];
+    // Two distinct directories, or the "removes both" assertion above could pass on one.
+    expect(new Set(identities).size).toBe(2);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
   }, 60_000);
 
@@ -1165,9 +1199,7 @@ describe("portable public bundle", () => {
     const refused = await runPublish(contextFor(clock), { draftId: "draft-1" });
     expect(refused.ok).toBe(false);
     if (!refused.ok) expect(refused.error.issues?.[0]?.path).toBe("claim-consistency");
-    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
-      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
-      : []).toHaveLength(0);
+    expect(digestNamedBundleDirs()).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
   });
 

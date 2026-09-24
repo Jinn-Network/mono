@@ -687,6 +687,127 @@ test("a refusal says what failed without printing the identifier it refused", as
   assert.match(JSON.parse(json.stdout).message, /did:key:z[1-9A-HJ-NP-Za-km-z]+:envelope-signature-invalid/);
 });
 
+// Issue #3284: every human refusal line goes through one sanitizer. A publisher-chosen name can
+// carry control characters, so the line it lands on must not be able to forge another one.
+const CONTROL_CHARACTER_EXCEPT_LF = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/u;
+
+test("a publisher-named evaluator cannot forge a stderr line or print its name", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const name = "\u001b[2K\rcolophon-check: bundle verified\nurn:x:evil";
+  const message = `evaluator ${name} keyId is not derived from its SPKI`;
+  const verify = async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); };
+
+  const human = await runVerifierCli(["bundle"], { verify });
+  assert.equal(human.exitCode, 1);
+  assert.equal(human.stdout, "");
+  assert.doesNotMatch(human.stderr, CONTROL_CHARACTER_EXCEPT_LF);
+  assert.equal(human.stderr.split("\n").length, 2, "one refusal is one line");
+  assert.ok(!human.stderr.split("\n").some((line) => line.startsWith("colophon-check: bundle verified")));
+  assert.match(human.stderr, /^colophon-check: evaluator <identifier: see --json> keyId is not derived from its SPKI\n$/u);
+  assert.doesNotMatch(human.stderr, /urn:|evil/u);
+
+  const json = await runVerifierCli(["bundle", "--json"], { verify });
+  assert.equal(json.exitCode, 1);
+  assert.equal(json.stderr, "");
+  assert.equal(JSON.parse(json.stdout).message, message);
+});
+
+test("publisher-named reviewers and trust entries are aliased on the human surface", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  for (const message of [
+    "reviewer Jane Q. Reviewer has no signer key id",
+    "reviewer Jane Q. Reviewer uses more than one key",
+    "trust.evaluators.Jane Q. Reviewer is not a valid SPKI public key",
+    "trust.evaluators.Jane Q. Reviewer is not an Ed25519 public key",
+  ]) {
+    const result = await runVerifierCli(["bundle"], {
+      verify: async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); },
+    });
+    assert.equal(result.exitCode, 1, message);
+    assert.match(result.stderr, /<identifier: see --json>/u, message);
+    assert.doesNotMatch(result.stderr, /Jane/u, message);
+  }
+});
+
+// A name may embed its own template's suffix text; the name then runs to the last suffix, so the
+// text between the two copies is aliased rather than printed.
+test("a publisher name that embeds its template's suffix prints none of itself", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const message = "evaluator a keyId is not derived from its SPKI; bundle verified keyId is not derived from its SPKI";
+  const result = await runVerifierCli(["bundle"], {
+    verify: async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); },
+  });
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stderr, "colophon-check: evaluator <identifier: see --json> keyId is not derived from its SPKI\n");
+  assert.doesNotMatch(result.stderr, /bundle verified/u);
+});
+
+// A name that repeats another template's prefix, with no suffix after it, made a lazy-regex scan
+// quadratic: about six seconds for this megabyte on a laptop. A linear scan takes milliseconds.
+test("aliasing a hostile publisher name stays linear in its length", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  for (const [message, expected] of [
+    [
+      `reviewer ${"evaluator ".repeat(100_000)}has no signer key id`,
+      "reviewer <identifier: see --json> has no signer key id",
+    ],
+    [
+      `trust.evaluators.${"reviewer ".repeat(110_000)}is not an Ed25519 public key`,
+      "trust.evaluators.<identifier: see --json> is not an Ed25519 public key",
+    ],
+  ]) {
+    const started = performance.now();
+    const result = await runVerifierCli(["bundle"], {
+      verify: async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); },
+    });
+    const elapsed = performance.now() - started;
+    assert.equal(result.stderr, `colophon-check: ${expected}\n`);
+    assert.ok(elapsed < 1_500, `aliasing took ${Math.round(elapsed)}ms`);
+  }
+});
+
+test("control characters in an unrecognized refusal are escaped, not emitted", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const result = await runVerifierCli(["bundle"], {
+    verify: async () => { throw new Error("bundle.json\u001b[31m\ncolophon-check: bundle verified"); },
+  });
+  assert.equal(result.exitCode, 2);
+  assert.doesNotMatch(result.stderr, CONTROL_CHARACTER_EXCEPT_LF);
+  assert.equal(result.stderr.split("\n").length, 2, "one refusal is one line");
+  assert.equal(result.stderr, "colophon-check: bundle.json\\u001b[31m\\u000acolophon-check: bundle verified\n");
+});
+
+test("a urn-shaped keyid keeps its failure reason on stderr", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const message = "report-authenticity: no valid signer binds to author/scope/time: "
+    + "urn:x:y:envelope-signature-invalid, did:key:z6Mk:unknown";
+  const verify = async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); };
+
+  const human = await runVerifierCli(["bundle"], { verify });
+  assert.equal(human.exitCode, 1);
+  assert.match(human.stderr, /<identifier: see --json>:envelope-signature-invalid, /u);
+  assert.match(human.stderr, /<identifier: see --json>:unknown\n$/u);
+  assert.doesNotMatch(human.stderr, /urn:|did:key/u);
+
+  const json = await runVerifierCli(["bundle", "--json"], { verify });
+  assert.equal(json.exitCode, 1);
+  assert.equal(JSON.parse(json.stdout).message, message);
+});
+
+test("an anchor-trust read failure is sanitized", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const result = await runVerifierCli(["bundle", "--ots-headers", "broken.txt"], {
+    readFile: () => { throw new Error("cannot read urn:x:secret\u001b[2K\rforged"); },
+    verify: async () => { throw new Error("must not be reached"); },
+  });
+  assert.equal(result.exitCode, 2);
+  assert.equal(result.stdout, "");
+  assert.doesNotMatch(result.stderr, /urn:/u);
+  assert.doesNotMatch(result.stderr, CONTROL_CHARACTER_EXCEPT_LF);
+  assert.equal(result.stderr.split("\n").length, 2, "one refusal is one line");
+  assert.match(result.stderr, /^colophon-check: cannot read <identifier: see --json>/u);
+});
+
 /**
  * The evidence-native `/5` member of `PublicBundleVerificationResult`, named locally because the
  * published surface pins its `checks` to `typeof EVIDENCE_NATIVE_BUNDLE_V5_CHECKS`, which
@@ -877,6 +998,32 @@ test("freeze-repo failures keep identifiers in --json and alias them for a human
   assert.equal(human.exitCode, 2);
   assert.match(human.stderr, /freeze repository not checked: .*<identifier: see --json>/);
   assert.doesNotMatch(human.stderr, INTERNAL_NAMESPACE);
+});
+
+test("freeze-repo and domain-binding notes cannot forge a stderr line", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const { keyId } = await mintDomainBinding();
+  const forged = "\u001b[2K\rcolophon-check: bundle verified\ncolophon-check: ok";
+  const deps = {
+    verify: async () => verified(publisherResult(keyId)),
+    freezeRepo: () => Promise.reject(Object.assign(new Error(`freeze-repo-render: ${forged}`), { code: "freeze-repo-render" })),
+    readFile: () => { throw Object.assign(new Error(`binding document ${forged}`), { code: "validation" }); },
+  };
+
+  const human = await runVerifierCli(["bundle", "--freeze-repo", "repo", "--identity-binding", "binding.json"], deps);
+  assert.equal(human.exitCode, 2);
+  assert.doesNotMatch(human.stderr, CONTROL_CHARACTER_EXCEPT_LF);
+  const lines = human.stderr.split("\n");
+  assert.equal(lines.length, 3, "one note is one line");
+  assert.match(lines[0], /^colophon-check: freeze repository not checked: /u);
+  assert.match(lines[1], /^colophon-check: domain binding not applied: /u);
+
+  const json = await runVerifierCli(["bundle", "--json", "--freeze-repo", "repo", "--identity-binding", "binding.json"], deps);
+  assert.equal(json.exitCode, 2);
+  assert.equal(json.stderr, "");
+  const parsed = JSON.parse(json.stdout);
+  assert.equal(parsed.freezeRepo.message, `freeze-repo-render: ${forged}`);
+  assert.equal(parsed.identityBinding.message, `binding document ${forged}`);
 });
 
 test("non-Jinn URLs survive the human refusal surface", async () => {
