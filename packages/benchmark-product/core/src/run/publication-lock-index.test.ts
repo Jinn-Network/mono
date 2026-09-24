@@ -8,7 +8,7 @@
  */
 
 import { createServer, type Server } from "node:http";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -79,19 +79,25 @@ async function serveWorkspace(): Promise<string> {
   return `http://127.0.0.1:${address.port}`;
 }
 
-/** Two drafts, each locked and registered on the one workspace source, in that order. */
-async function twoRegisteredLocks(): Promise<readonly [string, string]> {
+/**
+ * Two drafts, each locked and registered on the one workspace source, in that order. Also returns
+ * the digest of the index each registration left behind, so the intermediate one is checkable too.
+ */
+async function twoRegisteredLocks(): Promise<readonly [string, string, readonly string[]]> {
   const now = clock();
   expect(initWorkspace(context(now)).ok).toBe(true);
   const first = await lockDraft(now, "draft-1");
   const second = await lockDraft(now, "draft-2");
   const base = await serveWorkspace();
+  const indexDigests: string[] = [];
   for (const draftId of ["draft-1", "draft-2"]) {
     expect((await publicationConfigure(context(now), { draftId, publicBaseUrl: base })).ok).toBe(true);
     const registered = await publicationRegister(context(now), { draftId });
     expect(registered.ok, JSON.stringify(registered)).toBe(true);
+    if (registered.ok) expect(registered.result.lockIndexRefreshFailure).toBeUndefined();
+    indexDigests.push(sha256Hex(servedIndexBytes()));
   }
-  return [first, second];
+  return [first, second, indexDigests];
 }
 
 function servedIndexBytes(): Uint8Array {
@@ -189,26 +195,48 @@ describe("archive lock index", () => {
   });
 
   test("the index enters no sealed, announced, or registration digest set", async () => {
-    const [first, second] = await twoRegisteredLocks();
-    const indexSha256 = sha256Hex(servedIndexBytes());
-
-    // Not sealed: nothing a bundle or claim package is assembled from can reach it.
-    expect(() => getSealedBytes(workspaceDir, indexSha256)).toThrow();
-    // Not announced: the source chain names no record with its digest.
+    const [first, second, indexDigests] = await twoRegisteredLocks();
+    // The index after the first registration (one lock) and after the second (both). The second
+    // registration's closure is frozen after the first index exists, so the intermediate one is
+    // the one that could have leaked into it.
+    expect(new Set(indexDigests).size).toBe(2);
+    expect(indexDigests[1]).toBe(sha256Hex(servedIndexBytes()));
     const state = await createWorkspacePublicationSource(workspaceDir, SOURCE_NAME).writer.readState();
     const announced = Object.values(state?.announcements ?? {}).map((entry) => entry.receipt.record?.digest);
     expect(announced.length).toBeGreaterThan(0);
-    expect(announced).not.toContain(`sha256:${indexSha256}`);
-    // Not in any registration closure, recorded or rebuilt.
-    for (const [draftId, runSha256] of [["draft-1", first], ["draft-2", second]] as const) {
-      const digests = Object.values(readRunState(workspaceDir, draftId)!.publication!.registration.digests ?? {});
-      expect(digests.length).toBeGreaterThan(0);
-      expect(digests).not.toContain(indexSha256);
-      const members = buildRegistrationClosure(workspaceDir, getSealedBytes(workspaceDir, runSha256), runSha256, "2026-08-13T12:00:00Z");
-      expect(members.map((member) => member.digest)).not.toContain(`sha256:${indexSha256}`);
+
+    for (const indexSha256 of indexDigests) {
+      // Not sealed: nothing a bundle or claim package is assembled from can reach it.
+      expect(() => getSealedBytes(workspaceDir, indexSha256)).toThrow();
+      // Not announced: the source chain names no record with its digest.
+      expect(announced).not.toContain(`sha256:${indexSha256}`);
+      // Not in any registration closure, recorded or rebuilt.
+      for (const [draftId, runSha256] of [["draft-1", first], ["draft-2", second]] as const) {
+        const digests = Object.values(readRunState(workspaceDir, draftId)!.publication!.registration.digests ?? {});
+        expect(digests.length).toBeGreaterThan(0);
+        expect(digests).not.toContain(indexSha256);
+        const members = buildRegistrationClosure(workspaceDir, getSealedBytes(workspaceDir, runSha256), runSha256, "2026-08-13T12:00:00Z");
+        expect(members.map((member) => member.digest)).not.toContain(`sha256:${indexSha256}`);
+      }
     }
     // Not in the Record Discovery grammar: no discovery consumer is ever routed to it.
     expect(parseArchivePath(PUBLICATION_LOCK_INDEX_PATH)).toBeUndefined();
+  });
+
+  test("a failed lock-index rebuild never fails registration and is returned on its result", async () => {
+    const now = clock();
+    expect(initWorkspace(context(now)).ok).toBe(true);
+    await lockDraft(now, "draft-1");
+    const base = await serveWorkspace();
+    // A directory where the index belongs: reading the current index back fails, so the rebuild
+    // throws after the registration is already durable.
+    mkdirSync(join(publicationServeRoot(workspaceDir), PUBLICATION_LOCK_INDEX_PATH), { recursive: true });
+    expect((await publicationConfigure(context(now), { draftId: "draft-1", publicBaseUrl: base })).ok).toBe(true);
+    const registered = await publicationRegister(context(now), { draftId: "draft-1" });
+    expect(registered.ok, JSON.stringify(registered)).toBe(true);
+    if (!registered.ok) return;
+    expect(registered.result.lockIndexRefreshFailure).toMatch(/EISDIR/);
+    expect(readRunState(workspaceDir, "draft-1")!.publication!.registration.state).toBe("complete");
   });
 
   test("writes nothing for a workspace that has announced no lock", async () => {

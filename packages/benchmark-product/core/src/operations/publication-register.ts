@@ -66,6 +66,11 @@ export interface PublicationRegistrationResult {
   readonly postHoc: boolean;
   readonly sourceSequence: string;
   readonly recordSha256: string;
+  /**
+   * Present only when the archive lock index could not be rebuilt after this registration. The
+   * registration itself is complete; the served index may be missing this lock until it is rebuilt.
+   */
+  readonly lockIndexRefreshFailure?: string;
 }
 
 export interface PublicationRegisterDeps {
@@ -448,10 +453,18 @@ export function publicationRegister(
           },
         },
       });
-      // Derived presentation over what was just announced; it cannot fail a durable registration,
-      // and `publication serve` rebuilds it on every start.
-      try { await refreshWorkspacePublicationLockIndex(context.workspaceDir); } catch { /* healed at serve time */ }
-      return { source: source.source, postHoc, sourceSequence: receipt.sequence, recordSha256: lockedRunSha256 };
+      // Derived presentation over what was just announced, so it cannot fail a durable
+      // registration. A failure is returned rather than swallowed: the index is rebuilt only by the
+      // next registration or the next `publication serve` start (a server already running never
+      // rebuilds it), so until then a stale index would otherwise carry no signal at all.
+      let lockIndexRefreshFailure: string | undefined;
+      try { await refreshWorkspacePublicationLockIndex(context.workspaceDir); } catch (cause) {
+        lockIndexRefreshFailure = cause instanceof Error ? cause.message : String(cause);
+      }
+      return {
+        source: source.source, postHoc, sourceSequence: receipt.sequence, recordSha256: lockedRunSha256,
+        ...(lockIndexRefreshFailure === undefined ? {} : { lockIndexRefreshFailure }),
+      };
       } finally {
         operationLock.release();
       }

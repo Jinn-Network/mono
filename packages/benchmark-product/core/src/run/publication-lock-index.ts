@@ -18,14 +18,17 @@
  *   with a location nothing answers.
  * - **Append-only in spirit.** This file is the one object here that is rewritten; everything it
  *   points at is digest-addressed or signed and never changes. Regeneration is a pure function of
- *   the committed source chain and the workspace's run records: stable ordering, no clock, and no
- *   write at all when the bytes would not change.
+ *   three inputs: the committed source chain, the workspace's run records, and which exact bytes
+ *   the served tree holds (a path is written only for bytes present there). Stable ordering, no
+ *   clock, and no write at all when the bytes would not change.
  * - **Never sealed.** It is written to the serving root only, never to the sealed store, never
  *   announced, and outside the Record Discovery path grammar, so no bundle, claim package,
  *   registration closure, or reader-pinned byte comparison can include it.
  *
  * It is regenerated after every registration and when `publication serve` starts, so an anchor
- * or bundle recorded after a lock's registration appears at the next of either.
+ * or bundle recorded after a lock's registration appears at the next of either; a server that is
+ * already running does not rebuild it. A registration whose rebuild fails says so on its result
+ * (`lockIndexRefreshFailure`) rather than failing.
  */
 
 import { constants, readdirSync } from "node:fs";
