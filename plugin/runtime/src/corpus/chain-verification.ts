@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { SyncedEntry, VerifyDriver } from "@jinn-network/record-discovery-client";
+import type { SyncedEntry, VerifyDriver, VerifySourceResult } from "@jinn-network/record-discovery-client";
 import type {
   SourceChainRefusalStatus,
   SourceHead,
@@ -92,10 +92,15 @@ export const SYNC_ABORTED_REASON = "sync-aborted";
  * driver fault still surfaces verbatim rather than crashing the mirror. Only the canonical
  * statuses `verifySourceChain` actually returns share the sync-path vocabulary; anything else
  * passes through unchanged, exactly as it did before #3494.
+ *
+ * The parameter type is `VerifySourceResult`'s own non-`ok` status rather than the narrower
+ * `SourceChainRefusalStatus`, because `verifySource` (with a hold store injected) can also
+ * return `missing-held-entry` (#4129) -- a refusal this function already passes through
+ * unchanged via the catch below, same as any other status outside the chain vocabulary.
  */
-function chainRefusalReason(status: SourceChainRefusalStatus): string {
+function chainRefusalReason(status: Exclude<VerifySourceResult["status"], "ok">): string {
   try {
-    return sourceChainRefusalReason(status);
+    return sourceChainRefusalReason(status as SourceChainRefusalStatus);
   } catch {
     return status;
   }

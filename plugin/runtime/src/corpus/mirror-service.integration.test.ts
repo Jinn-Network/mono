@@ -484,7 +484,14 @@ describe("the mirror as a standing service", () => {
     } finally {
       await service.runtime.stop();
     }
-  }, 20_000);
+    // `waitFor` resolves on the loop's own recorded cycles rather than a fixed
+    // sleep, so this bound is headroom for the two REAL setTimeout-bound
+    // cycles (syncTimeoutMs + syncIntervalMs each, ~2s nominal), not a mask
+    // over the wait itself. A CI runner sharing CPU across many parallel
+    // vitest workers can stall the event loop past a 20s ceiling even though
+    // nothing here is slow; 60s matches the bound the repo already uses for
+    // other real-timer integration tests (e.g. operator/test/hermetic/*).
+  }, 60_000);
 
   test("the service follows the archives the home's configuration file declares", async () => {
     // The last link in the chain. Everything above resolves its configuration

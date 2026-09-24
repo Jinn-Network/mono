@@ -527,7 +527,9 @@ below 30s (`src/suite-timeouts.test.ts` holds that floor).
 three files that do real capture, archive, or mirror I/O and are individually
 justified (`src/capture/capture.integration.test.ts` ×12 at 60s/120s,
 `src/mcp/concurrency.test.ts` at 60s, `src/corpus/mirror-service.integration.test.ts`
-at 20s). Its one documented incident, `fc2308ffa`, was a **cost race** — a 5s
+at 60s, raised from 20s (#4263 reconcile) once a loaded runner tripped its two
+real setTimeout-bound cycles — still event-driven, not a fixed sleep, so the
+fix is the bound, not the wait). Its one documented incident, `fc2308ffa`, was a **cost race** — a 5s
 bound against the archive busy budget's 10s default, fixed by shrinking the
 budget and bounding that one test — not scheduler starvation of a
 millisecond-cost test, so it supports the "cost-driven, not flake-driven"
