@@ -92,11 +92,6 @@ Routing is governed by three Project (v2) single-select fields set at Friday tri
 ## Repository Structure
 
 ```
-(historical Jinn agent repo, formerly legacy/jinn-cli-agents-reference/, now a
-                 read-only archive at
-                 https://github.com/Jinn-Network/jinn-cli-agents-reference, no
-                 longer vendored here; see below)
-
 operator/          TypeScript daemon — the main runnable component
   src/
     main.ts              Production entry point (`jinn run` from the published package)
@@ -160,29 +155,9 @@ spec/            Dated specification proposals
 docs/            Design specs and implementation plans
 ```
 
-## jinn-cli-agents-reference
+## Pre-pivot agent reference
 
-`legacy/jinn-cli-agents-reference/` was the jinn-gemini agent orchestration repo
-(from github.com/oaksprout/jinn-gemini), vendored into this mono as a
-consulted-but-never-built reference: it carried no root workspace membership and
-nothing in the repository imported from it. It has been archived to
-[`Jinn-Network/jinn-cli-agents-reference`](https://github.com/Jinn-Network/jinn-cli-agents-reference)
-(read-only, archived on GitHub) and removed from this mono. The archived
-repository is an exact copy of the tree as of mono commit `81cbb1b806`.
-
-**Always check the archived repository when working on OLAS integration,
-staking, tokenomics, or Phase 1 contracts.** Paths below are relative to the
-root of that repository (unchanged from their former location under
-`legacy/jinn-cli-agents-reference/`):
-
-- `contracts/staking/` — JinnRouter.sol (the deployed router), DeliveryActivityChecker, WhitelistedRequesterActivityChecker, deployment JSONs with all on-chain addresses
-- `docs/context/olas-protocol.md` — Full OLAS architecture: governance (veOLAS, Governor, Timelock), registries, tokenomics (Treasury, Dispenser, Depository, Tokenomics epochs)
-- `docs/context/olas-integration.md` — Wallet/key storage, service lifecycle, operating modes
-- `docs/reference/jinn-staking.md` — All deployed staking contracts (V1-V3), parameters, reward economics, veOLAS lock strategy, nominee mechanics
-- `docs/reference/olas-contracts.md` — Base mainnet contract addresses, MechMarketplace ABI
-- `docs/reference/blood-written-rules.md` — Hard-won operational lessons (RPC limits, IPFS, polling, etc.)
-- `docs/runbooks/` — Setup, deployment, recovery, troubleshooting guides
-- `CLAUDE.md` — System architecture overview for the agent orchestration layer
+The pre-pivot Jinn agent repository, vendored here until 2026-09-24 as `legacy/jinn-cli-agents-reference/`, is preserved read-only at [mono@81cbb1b806](https://github.com/Jinn-Network/mono/tree/81cbb1b806f7405b65e879277bf25c5f397ef1ae/legacy/jinn-cli-agents-reference); it predates the tokenless pivot (DR-2026-06-30), and its lasting value is the deployed V1 JinnRouter source (`contracts/staking/`) and the operational lessons in `docs/reference/blood-written-rules.md`.
 
 ## Running the Client
 
