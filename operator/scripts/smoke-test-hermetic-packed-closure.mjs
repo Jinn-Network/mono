@@ -23,11 +23,14 @@ import {
   assertFixtureLockfilePresent,
   buildConsumerThirdPartyDependencies,
   discoverPackageRoots,
-  installThirdPartyGraph,
+  firstPartyArchiveDependencies,
+  installPinnedGraph,
+  noLocalSpec,
   packedClosurePackageNames,
   packedOverlayInstallArgs,
   readPackageJson,
   requirePackageRoot,
+  sanitizedManifest,
   writeConsumerPackageJson,
 } from './lib/hermetic-packed-closure.mjs';
 
@@ -40,6 +43,11 @@ const archivesRoot = join(closureRoot, 'archives');
 const consumerRoot = join(closureRoot, 'consumer');
 const stagingRoot = join(closureRoot, 'staging');
 const productRoot = join(consumerRoot, 'product');
+// Every npm child uses a cache that starts empty for this run, so `--offline`
+// reaches only the tarballs `npm ci` fetched by lockfile integrity. A warm user
+// cache would otherwise let an offline install resolve a range from whatever
+// registry metadata it happens to hold.
+process.env.npm_config_cache = join(closureRoot, 'npm-cache');
 
 function run(command, args, context, options = {}) {
   const result = spawnSync(command, args, {
@@ -57,12 +65,6 @@ function run(command, args, context, options = {}) {
   return result;
 }
 
-function noLocalSpec(value, context) {
-  if (typeof value === 'string' && /^(?:file|portal|workspace):/iu.test(value)) {
-    throw new Error(`${context} contains a forbidden local dependency specifier: ${value}`);
-  }
-}
-
 function assertNoForbiddenLocalSpecs(value, context) {
   if (typeof value === 'string') {
     noLocalSpec(value, context);
@@ -75,19 +77,6 @@ function assertNoForbiddenLocalSpecs(value, context) {
   if (value !== null && typeof value === 'object') {
     for (const item of Object.values(value)) assertNoForbiddenLocalSpecs(item, context);
   }
-}
-
-function sanitizedManifest(manifest, context, stripDevelopment = true) {
-  const sanitized = { ...manifest };
-  if (stripDevelopment) delete sanitized.devDependencies;
-  delete sanitized.resolutions;
-  delete sanitized.workspaces;
-  for (const [field, value] of Object.entries(sanitized)) {
-    if (/dependencies$/iu.test(field) && value !== null && typeof value === 'object') {
-      for (const specifier of Object.values(value)) noLocalSpec(specifier, context);
-    }
-  }
-  return sanitized;
 }
 
 function copyPackage(sourceRoot, targetRoot, context) {
@@ -175,13 +164,18 @@ try {
     operatorManifest: clientManifest,
     closureManifests,
   });
-  writeConsumerPackageJson(consumerRoot, thirdParty);
-  installThirdPartyGraph({
+  writeConsumerPackageJson(consumerRoot, {
+    dependencies: {
+      ...thirdParty.dependencies,
+      ...firstPartyArchiveDependencies(consumerRoot, archives),
+    },
+    devDependencies: thirdParty.devDependencies,
+  });
+  installPinnedGraph({
     run,
     consumerRoot,
     lockfileSource: assertFixtureLockfilePresent(scriptsRoot),
   });
-  installPackedArchives([...archives.values()], 'overlay packed first-party closure');
   const closureDependencies = Object.fromEntries(
     names.map((name, index) => [name, closureManifests[index].version]),
   );
@@ -212,14 +206,9 @@ try {
     'packed client',
   );
   rmSync(productRoot, { recursive: true, force: true });
-  // Keep package.json third-party-only until overlays finish. Re-pass the
-  // first-party tarballs with the packed client so `--offline` can satisfy
-  // `@jinn-network/*` from the local set instead of pruning them or looking
-  // up unpublished registry versions.
-  installPackedArchives(
-    [...archives.values(), clientArchive],
-    'install packed client into clean closure',
-  );
+  // package.json still names the first-party archives, so the pinned closure
+  // satisfies the client's `@jinn-network/*` and third-party ranges offline.
+  installPackedArchives([clientArchive], 'install packed client into clean closure');
   assertInstalledUnderConsumer('@jinn-network/operator');
   writeConsumerPackageJson(consumerRoot, {
     dependencies: {

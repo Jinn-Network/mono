@@ -2,21 +2,28 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import semver from 'semver';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   COMPILER_DEV_DEPENDENCY_NAMES,
   buildConsumerThirdPartyDependencies,
   consumerManifest,
+  discoverPackageRoots,
+  firstPartyArchiveDependencies,
   fixtureLockfilePath,
-  installThirdPartyGraph,
+  installPinnedGraph,
   packedClosurePackageNames,
   packedOverlayInstallArgs,
+  pinnedInstallArgs,
+  readPackageJson,
   refreshLockfileArgs,
   requirePackageRoot,
-  thirdPartyInstallArgs,
+  withoutLocalArchiveIntegrity,
 } from '../../scripts/lib/hermetic-packed-closure.mjs';
 
 const scriptsRoot = join(dirname(fileURLToPath(import.meta.url)), '../../scripts');
+const operatorRoot = join(scriptsRoot, '..');
+const packagesRoot = join(operatorRoot, '..', 'packages');
 const smokePath = join(scriptsRoot, 'smoke-test-hermetic-packed-closure.mjs');
 const refreshPath = join(scriptsRoot, 'refresh-hermetic-packed-closure-lockfile.mjs');
 const readmePath = join(scriptsRoot, 'fixtures/hermetic-packed-closure/README.md');
@@ -33,8 +40,8 @@ function tmpDir(): string {
 }
 
 describe('packed-closure third-party pin', () => {
-  it('installs the third-party graph with npm ci, not an unpinned install', () => {
-    const args = thirdPartyInstallArgs();
+  it('installs the pinned graph with npm ci, not an unpinned install', () => {
+    const args = pinnedInstallArgs();
     expect(args).toEqual(['ci', '--ignore-scripts', '--no-audit', '--no-fund']);
     expect(args).not.toContain('--package-lock=false');
     expect(args).not.toContain('--offline');
@@ -55,30 +62,89 @@ describe('packed-closure third-party pin', () => {
     ]);
   });
 
-  it('copies the committed lockfile and runs npm ci against the consumer', () => {
+  it('runs npm ci against the copied lockfile, then removes it before any overlay', () => {
     const root = tmpDir();
     const lockfileSource = join(root, 'package-lock.json');
     const consumerRoot = join(root, 'consumer');
+    const consumerLockfile = join(consumerRoot, 'package-lock.json');
     mkdirSync(consumerRoot);
     writeFileSync(lockfileSource, '{"lockfileVersion":3}\n');
-    const calls: { cmd: string; args: string[]; cwd?: string }[] = [];
-    installThirdPartyGraph({
+    const calls: { cmd: string; args: string[]; cwd?: string; lockfile: string | null }[] = [];
+    installPinnedGraph({
       run: (cmd, args, _context, options = {}) => {
-        calls.push({ cmd, args, cwd: options.cwd });
+        calls.push({
+          cmd,
+          args,
+          cwd: options.cwd,
+          lockfile: existsSync(consumerLockfile) ? readFileSync(consumerLockfile, 'utf8') : null,
+        });
       },
       consumerRoot,
       lockfileSource,
     });
-    expect(readFileSync(join(consumerRoot, 'package-lock.json'), 'utf8')).toBe(
-      '{"lockfileVersion":3}\n',
-    );
     expect(calls).toEqual([
       {
         cmd: 'npm',
         args: ['ci', '--ignore-scripts', '--no-audit', '--no-fund'],
         cwd: consumerRoot,
+        lockfile: '{"lockfileVersion":3}\n',
       },
     ]);
+    // `npm install --package-lock=false` counts a package-lock.json on disk as a
+    // loaded tree and skips node_modules, so a leftover file makes the offline
+    // overlay re-resolve every dependency from the registry.
+    expect(existsSync(consumerLockfile)).toBe(false);
+  });
+
+  it('records each packed first-party archive as a sorted relative file: dependency', () => {
+    const consumerRoot = join('/closure', 'consumer');
+    expect(
+      firstPartyArchiveDependencies(
+        consumerRoot,
+        new Map([
+          ['@jinn-network/sdk', join('/closure', 'archives', 'jinn-network-sdk-0.2.0.tgz')],
+          ['@jinn-network/core', join('/closure', 'archives', 'jinn-network-core-0.1.2.tgz')],
+        ]),
+      ),
+    ).toEqual({
+      '@jinn-network/core': 'file:../archives/jinn-network-core-0.1.2.tgz',
+      '@jinn-network/sdk': 'file:../archives/jinn-network-sdk-0.2.0.tgz',
+    });
+  });
+
+  it('drops integrity only from entries resolved from a local archive', () => {
+    const lock = {
+      lockfileVersion: 3,
+      packages: {
+        '': { name: 'jinn-hermetic-packed-closure' },
+        'node_modules/@jinn-network/sdk': {
+          version: '0.2.0',
+          resolved: 'file:../archives/jinn-network-sdk-0.2.0.tgz',
+          integrity: 'sha512-local',
+        },
+        'node_modules/zod': {
+          version: '4.4.3',
+          resolved: 'https://registry.npmjs.org/zod/-/zod-4.4.3.tgz',
+          integrity: 'sha512-registry',
+        },
+      },
+    };
+    expect(withoutLocalArchiveIntegrity(lock)).toEqual({
+      lockfileVersion: 3,
+      packages: {
+        '': { name: 'jinn-hermetic-packed-closure' },
+        'node_modules/@jinn-network/sdk': {
+          version: '0.2.0',
+          resolved: 'file:../archives/jinn-network-sdk-0.2.0.tgz',
+        },
+        'node_modules/zod': {
+          version: '4.4.3',
+          resolved: 'https://registry.npmjs.org/zod/-/zod-4.4.3.tgz',
+          integrity: 'sha512-registry',
+        },
+      },
+    });
+    expect(lock.packages['node_modules/@jinn-network/sdk'].integrity).toBe('sha512-local');
   });
 
   it('walks first-party packed-closure names from local package roots', () => {
@@ -190,27 +256,28 @@ describe('packed-closure third-party pin', () => {
   it('smoke consults the shared lib instead of an unpinned npm install', () => {
     const smoke = readFileSync(smokePath, 'utf8');
     expect(smoke).toContain("from './lib/hermetic-packed-closure.mjs'");
-    expect(smoke).toMatch(/\binstallThirdPartyGraph\s*\(/);
+    expect(smoke).toMatch(/\binstallPinnedGraph\s*\(/);
     expect(smoke).toMatch(/\bpackedOverlayInstallArgs\s*\(/);
     expect(smoke).toMatch(/\bbuildConsumerThirdPartyDependencies\s*\(/);
+    expect(smoke).toMatch(/\bfirstPartyArchiveDependencies\s*\(/);
     expect(smoke).toMatch(/\bpackedClosurePackageNames\s*\(/);
-    expect(smoke).not.toMatch(/\bthirdPartyInstallArgs\b/);
+    expect(smoke).not.toMatch(/\bpinnedInstallArgs\b/);
+    expect(smoke).toMatch(/process\.env\.npm_config_cache\s*=\s*join\(\s*closureRoot\s*,/);
     expect(smoke).toMatch(/\brequirePackageRoot\s*\(/);
     expect(smoke).not.toMatch(/packageRoots\.get\s*\(/);
     expect(smoke).not.toMatch(/run\(\s*['"]npm['"]\s*,\s*\[\s*['"]install['"]/);
   });
 
-  it('persists first-party registry versions only after both packed overlays', () => {
+  it('installs the closure from the lockfile and persists registry versions only after the client overlay', () => {
     const smoke = readFileSync(smokePath, 'utf8');
-    const firstOverlay = smoke.indexOf('overlay packed first-party closure');
+    const pinnedInstall = smoke.search(/\binstallPinnedGraph\s*\(/);
     const clientOverlay = smoke.indexOf('install packed client into clean closure');
     const persistOperator = smoke.indexOf("'@jinn-network/operator': clientManifest.version");
-    expect(firstOverlay).toBeGreaterThan(-1);
-    expect(clientOverlay).toBeGreaterThan(firstOverlay);
+    expect(pinnedInstall).toBeGreaterThan(-1);
+    expect(clientOverlay).toBeGreaterThan(pinnedInstall);
     expect(persistOperator).toBeGreaterThan(clientOverlay);
-    expect(smoke).toMatch(
-      /installPackedArchives\(\s*\[\s*\.\.\.archives\.values\(\)\s*,\s*clientArchive\s*\]/,
-    );
+    expect(smoke).not.toContain('overlay packed first-party closure');
+    expect(smoke).toMatch(/installPackedArchives\(\s*\[\s*clientArchive\s*\]/);
   });
 
   it('refresh is the only live range-resolution path', () => {
@@ -225,6 +292,9 @@ describe('packed-closure third-party pin', () => {
     expect(refresh).toContain("from './lib/hermetic-packed-closure.mjs'");
     expect(refresh).toMatch(/\brefreshLockfileArgs\s*\(/);
     expect(refresh).toMatch(/\bpackedClosurePackageNames\s*\(/);
+    expect(refresh).toMatch(/\bfirstPartyArchiveDependencies\s*\(/);
+    expect(refresh).toMatch(/\bsanitizedManifest\s*\(/);
+    expect(refresh).toMatch(/\bwithoutLocalArchiveIntegrity\s*\(/);
     expect(refresh).toMatch(/\brequirePackageRoot\s*\(/);
     expect(refresh).not.toMatch(/packageRoots\.get\s*\(/);
     expect(refresh).toContain('--package-lock-only');
@@ -232,18 +302,66 @@ describe('packed-closure third-party pin', () => {
     expect(refresh).not.toMatch(/run\(\s*['"]npm['"]\s*,\s*\[\s*['"]install['"]/);
   });
 
-  it('commits a third-party-only package-lock.json for the packed-closure consumer', () => {
+  it('commits a lockfile that satisfies every packed-closure specifier without the registry', () => {
     const lockPath = fixtureLockfilePath(scriptsRoot);
     expect(existsSync(lockPath)).toBe(true);
     const lock = JSON.parse(readFileSync(lockPath, 'utf8')) as {
       lockfileVersion?: number;
-      packages?: Record<string, unknown>;
+      packages?: Record<string, { version?: string; resolved?: string; integrity?: string }>;
     };
     expect(lock.lockfileVersion).toBeGreaterThanOrEqual(2);
-    expect(lock.packages).toBeTypeOf('object');
-    const packagePaths = Object.keys(lock.packages ?? {});
-    expect(packagePaths.some((entry) => entry.includes('node_modules/zod'))).toBe(true);
-    expect(packagePaths.filter((entry) => entry.includes('@jinn-network/'))).toEqual([]);
+    const packages = lock.packages ?? {};
+    // npm's lookup: the requiring package's own node_modules, then each
+    // enclosing node_modules up to the consumer root.
+    const resolveFrom = (location: string, name: string) => {
+      let base = location;
+      for (;;) {
+        const candidate = `${base ? `${base}/` : ''}node_modules/${name}`;
+        if (packages[candidate] !== undefined) return packages[candidate];
+        if (base === '') return undefined;
+        const parent = base.lastIndexOf('/node_modules/');
+        base = parent === -1 ? '' : base.slice(0, parent);
+      }
+    };
+    const unsatisfied: string[] = [];
+    const check = (location: string, manifest: Record<string, unknown>) => {
+      const optionalPeers = (manifest.peerDependenciesMeta ?? {}) as Record<
+        string,
+        { optional?: boolean }
+      >;
+      const specs = {
+        ...(manifest.dependencies as Record<string, string> | undefined),
+        ...(manifest.optionalDependencies as Record<string, string> | undefined),
+        ...Object.fromEntries(
+          Object.entries((manifest.peerDependencies ?? {}) as Record<string, string>).filter(
+            ([name]) => optionalPeers[name]?.optional !== true,
+          ),
+        ),
+      };
+      for (const [name, spec] of Object.entries(specs)) {
+        const version = resolveFrom(location, name)?.version;
+        if (version === undefined || !semver.satisfies(version, spec)) {
+          unsatisfied.push(`${location} needs ${name}@${spec}, lockfile has ${version ?? 'none'}`);
+        }
+      }
+    };
+    const operatorManifest = readPackageJson(operatorRoot);
+    const packageRoots = discoverPackageRoots(packagesRoot);
+    for (const name of packedClosurePackageNames(operatorManifest, packageRoots)) {
+      const manifest = readPackageJson(requirePackageRoot(packageRoots, name));
+      const location = `node_modules/${name}`;
+      const entry = packages[location];
+      expect(entry?.version, location).toBe(manifest.version);
+      expect(entry?.resolved, location).toMatch(/^file:\.\.\/archives\/[^/]+\.tgz$/);
+      expect(entry?.integrity, location).toBeUndefined();
+      check(location, manifest);
+    }
+    // The packed client lands at the consumer root with no nested packages.
+    check('node_modules/@jinn-network/operator', {
+      dependencies: operatorManifest.dependencies,
+      optionalDependencies: operatorManifest.optionalDependencies,
+    });
+    expect(unsatisfied).toEqual([]);
   });
 
   it('documents the lockfile refresh command', () => {

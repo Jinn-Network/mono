@@ -5,6 +5,14 @@ export const COMPILER_DEV_DEPENDENCY_NAMES: readonly [
   '@types/ws',
 ];
 
+export function noLocalSpec(value: unknown, context: string): void;
+
+export function sanitizedManifest(
+  manifest: Record<string, unknown>,
+  context: string,
+  stripDevelopment?: boolean,
+): Record<string, unknown>;
+
 export function readPackageJson(root: string): Record<string, unknown>;
 
 export function requirePackageRoot(
@@ -27,7 +35,7 @@ export function packedClosurePackageNames(
   packageRoots: Map<string, string>,
 ): string[];
 
-export function thirdPartyInstallArgs(): string[];
+export function pinnedInstallArgs(): string[];
 
 export function packedOverlayInstallArgs(archives: readonly string[]): string[];
 
@@ -40,6 +48,15 @@ export function buildConsumerThirdPartyDependencies(input: {
   dependencies: Record<string, string>;
   devDependencies: Record<string, string>;
 };
+
+export function firstPartyArchiveDependencies(
+  consumerRoot: string,
+  archives: Iterable<readonly [string, string]>,
+): Record<string, string>;
+
+export function withoutLocalArchiveIntegrity<
+  T extends { packages?: Record<string, Record<string, unknown>> },
+>(lock: T): T & { packages: Record<string, Record<string, unknown>> };
 
 export function consumerManifest(input: {
   dependencies?: Record<string, string>;
@@ -66,7 +83,7 @@ export function fixtureLockfilePath(scriptsRoot: string): string;
 
 export function assertFixtureLockfilePresent(scriptsRoot: string): string;
 
-export function installThirdPartyGraph(input: {
+export function installPinnedGraph(input: {
   run: (
     command: string,
     args: string[],
