@@ -42,12 +42,12 @@ Both halves of the issue's own suggested remedy are unavailable today:
   taste: `/6`'s mandatory member list is `PUBLIC_BUNDLE_FILES`, which includes
   `run.json` (`packages/benchmark-product/check/src/legacy-closures.ts`), so
   such a bundle would refuse at `mandatory public bundle file "…" is missing`
-  (`verify/src/verify.ts`) — on the *first* absent member of that list, whose
-  index 0 is `static-bundle.json`; `run.json` is named here because it is the
-  member no evidence-native report can fill, there being no Run record. `/7`
-  and `/8` are dead for the same reason: both take `PUBLIC_BUNDLE_V4_FILES`,
-  which is that same list plus `qualification.json`. There is no re-emission of
-  this report onto `/6`.
+  (`packages/benchmark-product/check/src/verify.ts`) — on the *first* absent
+  member of that list, whose index 0 is `static-bundle.json`; `run.json` is
+  named here because it is the member no evidence-native report can fill,
+  there being no Run record. `/7` and `/8` are dead for the same reason: both
+  take `PUBLIC_BUNDLE_V4_FILES`, which is that same list plus
+  `qualification.json`. There is no re-emission of this report onto `/6`.
 
 This is not an oversight. The approved design records it twice as deferred
 work: §7.4 ("the evidence-native claim-package/3 and public-bundle/5 adopt the
@@ -99,11 +99,12 @@ bundle format `benchmark-product-public-bundle/9`, a claim package
 removes all four. Under the capability rule the surface mints **no public
 identifier of its own**: it registers as a capability entry inside the composed
 generation `benchmark-product-public-bundle/10`, exactly as `external-import`
-is to register inside `/8` (#3417). That precedent is a ratified allocation
-decision rather than shipped code:
-`packages/benchmark-product/EXTERNAL-RUN-IMPORT.md` still reads "Until it
-lands:" and, in the bullet beneath it, "`colophon publish` refuses", and
-`core/src/operations/publish.ts` still refuses. The rule it establishes is what
+is to register inside `/8` (#3417). At adoption that precedent was a ratified
+allocation decision rather than shipped code: at the attempt base
+`2112f8468`, `packages/benchmark-product/EXTERNAL-RUN-IMPORT.md` read "Until
+it lands:" and, in the bullet beneath it, "`colophon publish` refuses", and
+`core/src/operations/publish.ts` refused; #3417 has since shipped (#4698) as
+a capability inside composed `/10`. The rule it establishes is what
 this ruling leans on, not its implementation. `/10`'s own allocation — its
 format IRI, its claim package, its profile IRIs, and the mechanism by which a
 capability entry becomes bundle-visible — belongs to the #3403 → #3406 chain
@@ -279,9 +280,10 @@ no session re-litigates them.
 
 ## 5. What lands, and in what order
 
-This note is the whole of #2974's `design` output. The implementation is
-sequenced behind a prerequisite that does not exist yet, so it is deliberately
-not attempted here.
+This note is the whole of #2974's `design` output. Row 1 below has since
+landed in the tree (`BUNDLE_V10_FORMAT`,
+`packages/benchmark-product/check/src/manifest.ts`); rows 2-4 remain
+unattempted here, tracked by #4243 (draft PR #4728).
 
 | # | Work | Blocked on |
 |---|---|---|
