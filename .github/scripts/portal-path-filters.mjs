@@ -38,8 +38,6 @@ const SKIPPED_DIRECTORIES = Object.freeze([
   '.git',
   '.yarn',
   'dist',
-  // Read-only reference subtree; in no workspace and imported by nothing.
-  'legacy',
 ]);
 
 /** Manifest fields whose values may carry a `portal:` protocol reference. */
