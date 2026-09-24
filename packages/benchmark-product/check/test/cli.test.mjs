@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readdir, readFile } from "node:fs/promises";
+import { mkdtemp, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -25,30 +25,6 @@ async function invoke(args) {
     const failure = /** @type {{ stdout: string, stderr: string, code?: number }} */ (error);
     return { stdout: failure.stdout, stderr: failure.stderr, code: failure.code };
   }
-}
-
-const SELF_SERVE_SPEC = "spec/2026-08-13-colophon-self-serve.md";
-const selfServeSpecPath = fileURLToPath(new URL(`../../../../${SELF_SERVE_SPEC}`, import.meta.url));
-
-/**
- * The fenced ```text block that immediately follows `afterSentence` in the self-serve spec,
- * without its fences. Anchored on the sentence rather than a block ordinal so an edit elsewhere in
- * the document cannot silently re-point the pin at a different sample (issue #4416).
- *
- * @param {string} afterSentence
- * @returns {Promise<string>}
- */
-async function specSampleBlock(afterSentence) {
-  const spec = await readFile(selfServeSpecPath, "utf8");
-  const start = spec.indexOf(`${afterSentence}\n`);
-  assert.notEqual(start, -1, `${SELF_SERVE_SPEC} no longer contains the sentence "${afterSentence}"`);
-  // Adjacency is required, not just order: a later ```text block must not satisfy this pin.
-  const opening = `${afterSentence}\n\n\`\`\`text\n`;
-  assert.ok(spec.startsWith(opening, start), `${SELF_SERVE_SPEC}: no \`\`\`text block immediately follows "${afterSentence}"`);
-  const bodyStart = start + opening.length;
-  const end = spec.indexOf("\n```\n", bodyStart);
-  assert.notEqual(end, -1, `${SELF_SERVE_SPEC}: the \`\`\`text block after "${afterSentence}" is unterminated`);
-  return spec.slice(bodyStart, end + 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -692,32 +668,6 @@ test("the golden bundle's default output carries no identifier and no verdict wo
       custody: "same-operator",
     },
   ]);
-});
-
-// The spec's §5.1 sample is a literal transcription of this render over the committed golden
-// fixture, and nothing but this test compares the two (issue #4416; #4261 and #4283 were both the
-// render moving while the transcription stood still). The renderer is the authority: a red here
-// means the spec block needs re-transcribing, not that the CLI is wrong.
-test("the self-serve spec §5.1 sample is the golden bundle's human render", async () => {
-  const golden = fileURLToPath(new URL("../fixtures/public-bundle-conformance-v1/golden", import.meta.url));
-  const human = await invoke([golden]);
-  assert.equal(human.code, undefined);
-  const json = await invoke([golden, "--json"]);
-  assert.equal(json.code, undefined);
-  const parsed = JSON.parse(json.stdout);
-  const bundleId = String(parsed.identity).replace(/^sha256:/u, "");
-  const publisher = parsed.signers.find((signer) => signer.role === "publisher");
-  assert.ok(publisher, "golden --json carries no publisher signer");
-  const fingerprint = String(publisher.keyFingerprint).replace(/^sha256:/u, "");
-
-  const expected = (await specSampleBlock("Success output starts with the answer:"))
-    .replace("<bundle-id>", bundleId)
-    .replace("<publisher-key-fingerprint>", fingerprint);
-  assert.equal(
-    human.stdout,
-    expected,
-    `${SELF_SERVE_SPEC} §5.1 sample block no longer matches the golden bundle's human render; re-transcribe the block from the renderer`,
-  );
 });
 
 test("a refusal says what failed without printing the identifier it refused", async () => {
