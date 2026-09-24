@@ -379,9 +379,11 @@ the one thing the issue's instinct — "put something outside the publisher's co
 into this picture" — was correctly reaching for. Its target was simply the wrong
 object: the lock is already externally witnessed; the *stream* is not.
 
-This disclosure is printed as `LOCAL_VENUE_LIMITS` in
-`packages/benchmark-product/core/src/operations/run-results.ts` and quoted in
-`packages/benchmark-product/EXTERNAL-VERIFICATION.md`.
+The product's self-run disclosure is `LOCAL_VENUE_LIMITS` in
+`packages/benchmark-product/core/src/operations/run-results.ts` (mirrored in
+`packages/benchmark-product/check/src/profile/run-results.ts`), quoted in
+`packages/benchmark-product/EXTERNAL-VERIFICATION.md`; it names owner-controlled
+dispatch, not the publication source.
 
 ## 8. The one thing worth building — head anchoring
 
