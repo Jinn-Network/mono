@@ -231,6 +231,35 @@ describe('buildCurrentSupply', () => {
     expect(result.incompleteActivityRows).toBe(2);
   });
 
+  it('counts a route-shaped duplicated orphan input once per row, excluding out-of-window rows', () => {
+    // The route passes `attempts` as `[...attempts, ...priorAttempts]`:
+    // in-window attempts, PLUS attempts referenced by an in-window verdict's
+    // task fetched again without the window filter. When that task row is
+    // itself missing, the SAME physical attempt row can appear in both
+    // halves, and the unfiltered half can also surface other attempt rows
+    // for that task outside the window.
+    const orphanedInWindowAttempt = attempt({ taskId: '404', attemptIndex: 1 });
+    const orphanedOutOfWindowAttempt = attempt({
+      taskId: '404',
+      attemptIndex: 2,
+      createdAtTimestamp: BigInt(AS_OF / 1000) - BigInt(50 * HOUR),
+    });
+    const orphanedVerdict = verdict({ taskId: '404' });
+    const result = build({
+      attempts: [
+        attempt(),
+        orphanedInWindowAttempt, orphanedInWindowAttempt, // duplicated by the route's spread
+        orphanedOutOfWindowAttempt,
+      ],
+      verdicts: [verdict(), orphanedVerdict],
+    });
+    expect(result.status).toBe('available');
+    // Without the fix this counts 4: the duplicated in-window attempt twice,
+    // the out-of-window attempt once, and the orphaned verdict once. One
+    // orphaned attempt key plus one orphaned verdict key is the true count.
+    expect(result.incompleteActivityRows).toBe(2);
+  });
+
   it('omits incompleteActivityRows when every activity row joined', () => {
     expect(build()).not.toHaveProperty('incompleteActivityRows');
   });

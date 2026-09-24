@@ -318,19 +318,30 @@ export function assembleCurrentSupply(input: BuildCurrentSupplyInput): Assembled
     taskById.set(row.id, row);
   }
 
-  let incompleteActivityRows = 0;
+  // The route caller passes `attempts` as in-window rows PLUS attempts
+  // referenced by an in-window verdict's task, fetched again WITHOUT the
+  // window filter — so the same physical row can appear twice, and a prior
+  // attempt for an orphaned task can appear out-of-window. Counting distinct
+  // KEYS (rather than incrementing per row) absorbs the route's duplication;
+  // scoping to the window excludes rows that were never window evidence to
+  // begin with, so neither can inflate `incompleteActivityRows` beyond the
+  // physical rows actually excluded from the window's answer.
+  const incompleteAttemptKeys = new Set<string>();
+  const incompleteVerdictKeys = new Set<string>();
   const attemptByKey = new Map<string, SupplyAttemptRow>();
   for (const row of input.attempts) {
     if (row.chainId !== input.chainId) continue;
     if (!validTimestamp(row.createdAtTimestamp) || !Number.isSafeInteger(row.attemptIndex) || row.attemptIndex < 0) {
       return unknown(input, 'unusable attempt timestamp or index');
     }
+    const key = activityKey(row.chainId, row.taskId, row.attemptIndex);
     const task = taskById.get(row.taskId);
     if (!task) {
-      incompleteActivityRows += 1;
+      if (row.createdAtTimestamp >= windowStart && row.createdAtTimestamp < windowEnd) {
+        incompleteAttemptKeys.add(key);
+      }
       continue;
     }
-    const key = activityKey(row.chainId, row.taskId, row.attemptIndex);
     const prior = attemptByKey.get(key);
     if (prior && prior.operator.toLowerCase() !== row.operator.toLowerCase()) {
       return unknown(input, 'contradictory attempt operator');
@@ -367,7 +378,10 @@ export function assembleCurrentSupply(input: BuildCurrentSupplyInput): Assembled
     // skipped attempt cannot black out the chain through the verdict join.
     const task = taskById.get(row.taskId);
     if (!task) {
-      incompleteActivityRows += 1;
+      // Already window-scoped by the `continue` above; verdict identity
+      // includes verdictIndex, so its key namespace cannot collide with an
+      // attempt key of the same chain/task/attemptIndex.
+      incompleteVerdictKeys.add(`${row.chainId}:${row.taskId}:${row.attemptIndex}:${row.verdictIndex}`);
       continue;
     }
     const attempt = attemptByKey.get(activityKey(row.chainId, row.taskId, row.attemptIndex));
@@ -378,6 +392,8 @@ export function assembleCurrentSupply(input: BuildCurrentSupplyInput): Assembled
     aggregate.verdicts.add(`${row.chainId}:${row.taskId}:${row.attemptIndex}:${row.verdictIndex}`);
     if (row.createdAtTimestamp > aggregate.latestVerdict) aggregate.latestVerdict = row.createdAtTimestamp;
   }
+
+  const incompleteActivityRows = incompleteAttemptKeys.size + incompleteVerdictKeys.size;
 
   const classes = [...classRows.entries()]
     .filter(([, row]) => row.operators.size > 0 && row.verdicts.size > 0)
