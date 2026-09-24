@@ -2,23 +2,22 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createQuickstartCommand, type PasswordFileIO, type QuickstartDeps } from '../../../src/cli/commands/quickstart.js';
-import { makeCommandCtx } from '@test/cli.js';
 import {
-  legacyKeystorePasswordPath,
-  primaryKeystorePasswordPath,
-  replacePasswordFileAtomically,
-} from '../../../src/earning/password-file.js';
+  createQuickstartCommand,
+  DEFAULT_PASSWORD_FILE_IO,
+  type PasswordFileIO,
+  type QuickstartDeps,
+} from '../../../src/cli/commands/quickstart.js';
+import { makeCommandCtx } from '@test/cli.js';
+import { legacyKeystorePasswordPath, primaryKeystorePasswordPath } from '../../../src/earning/password-file.js';
 
+// Reuses the production I/O object (not a reimplementation of it) so that a
+// regression in the real `write` path -- e.g. reverting to a plain
+// `writeFileSync` -- fails these tests instead of a parallel test-only copy.
 function diskPasswordFileIO(): PasswordFileIO {
   return {
-    exists: (path) => existsSync(path),
-    read: (path) => readFileSync(path, 'utf-8'),
-    // Matches the production default: sibling tmp + rename, never a
-    // writeFileSync-in-place whose `mode` only applies on create (#4610).
-    write: (path, content) => replacePasswordFileAtomically(path, content),
+    ...DEFAULT_PASSWORD_FILE_IO,
     remove: () => { /* unused in these tests */ },
-    ensureDir: (path) => mkdirSync(path, { recursive: true, mode: 0o700 }),
   };
 }
 

@@ -74,7 +74,7 @@ export interface PasswordFileIO {
   ensureDir(path: string): void;
 }
 
-const DEFAULT_PASSWORD_FILE_IO: PasswordFileIO = {
+export const DEFAULT_PASSWORD_FILE_IO: PasswordFileIO = {
   exists: (path) => existsSync(path),
   read: (path) => readFileSync(path, 'utf-8'),
   // Sibling tmp + rename: a failed write never truncates a live file, and an
