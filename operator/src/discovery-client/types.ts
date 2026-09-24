@@ -61,16 +61,25 @@ export interface SolverNetManifestSummary {
  * one branch callers act on distinctly: it means the configured RPC endpoint
  * returned a 429 (or otherwise rate-limited the daemon), which — on the shared
  * default RPC — is an operator-actionable condition ("add your own key"), not
- * an indexer outage. Any other transport failure is left untyped (`undefined`).
+ * an indexer outage. `invalid_request` is a caller/config/4xx problem
+ * (malformed discovery.url, non-positive chainId, indexer 4xx refusal, a
+ * response the indexer answered but that names a different chain).
+ * `invalid_response` is narrower: the indexer answered, but its response body
+ * does not decode against this client's schema — most often an older client
+ * against a newer indexer — so it needs a distinct code from
+ * `invalid_request` (whose hint would otherwise point at the wrong service).
+ * Any other transport failure is left untyped (`undefined`).
  */
-export type DiscoveryUnavailableCode = 'rpc_rate_limited';
+export type DiscoveryUnavailableCode = 'rpc_rate_limited' | 'invalid_request' | 'invalid_response';
 
 export class DiscoveryUnavailableError extends Error {
   override readonly cause?: unknown;
   /**
-   * Typed reason, when one can be classified — currently only
-   * `rpc_rate_limited`, surfaced end-to-end so the operator UI can render a
-   * distinct "your RPC is throttled" message instead of a generic failure.
+   * Typed reason, when one can be classified — currently `rpc_rate_limited`
+   * (RPC 429), `invalid_request` (caller/config/4xx), or `invalid_response`
+   * (indexer answered but the body failed to decode — usually version skew,
+   * not an outage). Untyped transport and 5xx failures stay `undefined` so
+   * the CLI can treat them as transient.
    */
   readonly code?: DiscoveryUnavailableCode;
 
@@ -220,7 +229,8 @@ export type CurrentSupplyResponse =
       classes: SupplyClass[];
       /**
        * How many launched SolverNet rows the indexer excluded for incomplete
-       * manifest evidence. Absent when none were.
+       * manifest evidence or an identifier over the decoder's length cap.
+       * Absent when none were.
        *
        * Present, it means `classes` is known-possibly-SHORT. The listed classes
        * are still proven live; a class's ABSENCE from the list must be read as
@@ -229,6 +239,13 @@ export type CurrentSupplyResponse =
        * failed cannot subtract from a class whose own evidence is complete.
        */
       incompleteManifestRows?: number;
+      /**
+       * How many attempt or verdict rows the indexer skipped because no matching
+       * task joined. Absent when none were. Same monotone-short-list reading as
+       * `incompleteManifestRows`: listed classes remain proven; a class's
+       * ABSENCE is "no evidence", not "no supply".
+       */
+      incompleteActivityRows?: number;
     }
   | {
       schemaVersion: 1;
