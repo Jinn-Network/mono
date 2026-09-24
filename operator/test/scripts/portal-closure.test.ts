@@ -48,8 +48,32 @@ describe('shared portal-closure walk', () => {
     write('deep', {});
 
     expect(reachablePortalEdges(join(context, 'app'), context)).toEqual([
+      { name: '@x/lib', consumer: 'app', target: 'declared' },
       { name: '@x/lib', consumer: 'app', target: 'resolved' },
       { name: '@x/deep', consumer: 'resolved', target: 'deep' },
+    ]);
+  });
+
+  it('walks every distinct portal target a package declares for one name', () => {
+    const context = mkdtempSync(join(tmpdir(), 'portal-closure-both-'));
+    const write = (dir: string, manifest: object) => {
+      mkdirSync(join(context, dir), { recursive: true });
+      writeFileSync(join(context, dir, 'package.json'), JSON.stringify(manifest));
+    };
+    write('app', {
+      dependencies: { '@x/lib': 'portal:../from-deps' },
+      resolutions: { '@x/lib': 'portal:../from-resolutions' },
+    });
+    write('from-deps', { resolutions: { '@x/via-deps': 'portal:../via-deps' } });
+    write('from-resolutions', { resolutions: { '@x/via-res': 'portal:../via-res' } });
+    write('via-deps', {});
+    write('via-res', {});
+
+    expect(reachablePortalEdges(join(context, 'app'), context)).toEqual([
+      { name: '@x/lib', consumer: 'app', target: 'from-deps' },
+      { name: '@x/via-deps', consumer: 'from-deps', target: 'via-deps' },
+      { name: '@x/lib', consumer: 'app', target: 'from-resolutions' },
+      { name: '@x/via-res', consumer: 'from-resolutions', target: 'via-res' },
     ]);
   });
 
@@ -120,6 +144,88 @@ describe('shared portal-closure walk', () => {
 
   it('names a consumer whose manifest COPY no install follows', () => {
     const dockerfile = GOOD.replace('RUN corepack enable && yarn install --immutable', 'RUN true');
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([
+      'app: no yarn install follows a COPY of its manifest',
+    ]);
+  });
+
+  it('treats a bare yarn as the install that resolves the consumer', () => {
+    const dockerfile = GOOD.replace(
+      'RUN corepack enable && yarn install --immutable',
+      'RUN corepack enable && yarn',
+    );
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([]);
+    const late = dockerfile.replace('COPY lib/package.json ./lib/\n', '').replace(
+      'RUN corepack enable && yarn\n',
+      'RUN corepack enable && yarn\nCOPY lib/package.json ./lib/\n',
+    );
+    expect(missingPortalManifestCopies(late, EDGES)).toEqual([
+      "@x/lib (lib): not copied before app's install in its build stage",
+    ]);
+  });
+
+  it('treats yarn --immutable as the install that resolves the consumer', () => {
+    const dockerfile = GOOD.replace(
+      'RUN corepack enable && yarn install --immutable',
+      'RUN corepack enable && yarn --immutable',
+    );
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([]);
+    const late = dockerfile.replace('COPY lib/package.json ./lib/\n', '').replace(
+      'RUN corepack enable && yarn --immutable\n',
+      'RUN corepack enable && yarn --immutable\nCOPY lib/package.json ./lib/\n',
+    );
+    expect(missingPortalManifestCopies(late, EDGES)).toEqual([
+      "@x/lib (lib): not copied before app's install in its build stage",
+    ]);
+  });
+
+  it('treats yarn --cwd <dir> install as the install that resolves the consumer', () => {
+    const dockerfile = GOOD.replace(
+      'RUN corepack enable && yarn install --immutable',
+      'RUN yarn --cwd ./app install --immutable',
+    );
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([]);
+    const late = dockerfile.replace('COPY lib/package.json ./lib/\n', '').replace(
+      'RUN yarn --cwd ./app install --immutable\n',
+      'RUN yarn --cwd ./app install --immutable\nCOPY lib/package.json ./lib/\n',
+    );
+    expect(missingPortalManifestCopies(late, EDGES)).toEqual([
+      "@x/lib (lib): not copied before app's install in its build stage",
+    ]);
+  });
+
+  it('fails closed when an unrecognized yarn step sits between COPY and a later yarn install', () => {
+    const dockerfile = [
+      'FROM node:22-slim AS build',
+      'COPY app/package.json app/yarn.lock ./app/',
+      'RUN yarn mysterious',
+      'COPY lib/package.json ./lib/',
+      'RUN yarn install --immutable',
+      'FROM node:22-slim',
+      'COPY --from=build /app ./',
+    ].join('\n');
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([
+      "@x/lib (lib): not copied before app's install in its build stage",
+    ]);
+  });
+
+  it('sees a cache-mount yarn install even when a later plain yarn install also exists (#4635)', () => {
+    const dockerfile = [
+      'FROM node:22-slim AS build',
+      'COPY app/package.json app/yarn.lock ./app/',
+      'RUN --mount=type=cache,target=/root/.yarn yarn install --immutable',
+      'COPY lib/package.json ./lib/',
+      'RUN corepack enable && yarn install --immutable',
+      'FROM node:22-slim',
+      'COPY --from=build /app ./',
+    ].join('\n');
+    expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([
+      "@x/lib (lib): not copied before app's install in its build stage",
+    ]);
+  });
+
+  it('does not treat yarn test as an install', () => {
+    const dockerfile = GOOD.replace('RUN corepack enable && yarn install --immutable', 'RUN yarn test');
     expect(missingPortalManifestCopies(dockerfile, EDGES)).toEqual([
       'app: no yarn install follows a COPY of its manifest',
     ]);
