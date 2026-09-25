@@ -200,11 +200,11 @@ __metadata:
   resolution: "@jinn-network/explorer-spa@workspace:."
   dependencies:
     "@playwright/test": "npm:^1.63.0"
-    "@tanstack/react-query": "npm:^5.102.8"
+    "@tanstack/react-query": "npm:^5.103.2"
     "@testing-library/dom": "npm:^10"
     "@testing-library/jest-dom": "npm:^7"
     "@testing-library/react": "npm:^16"
-    "@types/node": "npm:^26.5.1"
+    "@types/node": "npm:^26.6.2"
     "@types/react": "npm:^19.3.0"
     "@types/react-dom": "npm:^19.3.0"
     "@vitejs/plugin-react": "npm:^6.1.1"
@@ -492,21 +492,21 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@tanstack/query-core@npm:5.102.8":
-  version: 5.102.8
-  resolution: "@tanstack/query-core@npm:5.102.8"
-  checksum: 10c0/b8b8413c2372ff26605f63283f2bfe0edc17be1daad858a437d154ca38b30e8b6e47a5b8a0eb5c40b93fd66b8461f1cf2ac6cf5e1c9a03919d0079a0b4ae8bfa
+"@tanstack/query-core@npm:5.103.2":
+  version: 5.103.2
+  resolution: "@tanstack/query-core@npm:5.103.2"
+  checksum: 10c0/52362dd214a487b2194728a79c7fd1bd7af1831f21928030866a8ad28877eaec050e7215a6f3b3a0c4fdf601644ae8edb652e4cef7270f6f82d7371d2bbe9f41
   languageName: node
   linkType: hard
 
-"@tanstack/react-query@npm:^5.102.8":
-  version: 5.102.8
-  resolution: "@tanstack/react-query@npm:5.102.8"
+"@tanstack/react-query@npm:^5.103.2":
+  version: 5.103.2
+  resolution: "@tanstack/react-query@npm:5.103.2"
   dependencies:
-    "@tanstack/query-core": "npm:5.102.8"
+    "@tanstack/query-core": "npm:5.103.2"
   peerDependencies:
     react: ^18 || ^19
-  checksum: 10c0/cae0b1c9eb4b6cce8679ebe58d0391cd247bc26c39105aaa4d2c624db14deb8c051f747f714aaa0dbe6bb3ac94c70e30af6423090e9014aa5c7c6ef6cf5b4af4
+  checksum: 10c0/7845c13af6761c00141ef6025c4ee385bff8f16e053f8583ba1b95db47a2c1df9764a751080981226658f45487881933517d24813f47c98238b8dbdd6acee80a
   languageName: node
   linkType: hard
 
@@ -606,12 +606,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node@npm:^26.5.1":
-  version: 26.5.1
-  resolution: "@types/node@npm:26.5.1"
+"@types/node@npm:^26.6.2":
+  version: 26.6.2
+  resolution: "@types/node@npm:26.6.2"
   dependencies:
     undici-types: "npm:~8.9.0"
-  checksum: 10c0/40aa7aa4c099c8a08bf39b5bcb15eaf2cc073666c2191b1d9ac8243ce6b68b23ace904a044c521f6d310b70e94514b531be5f4fc184f141a7ce7f0679ebc7bb3
+  checksum: 10c0/bb411ff5863a79a28ffa4ebadf2499d44046aa114d25a7a6c78f57def118123a0a7dea99e8fe38849099e9dba2b41b8853a7a282037618559f58653c35e7c5c5
   languageName: node
   linkType: hard
 
