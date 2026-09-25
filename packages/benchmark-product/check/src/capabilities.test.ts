@@ -229,6 +229,10 @@ describe("the registry invariants have teeth", () => {
       .toContain('reader release "check@0.9.0" is listed after "check@0.10.0", a release of the same package that is not older');
     expect(capabilityRegistryViolations([], { "0.2.1": row }))
       .toContain('reader release "0.2.1" is not <package>@<major>.<minor>.<patch>');
+    // A table without the base cannot rank a section-less entry against it, so it says so once
+    // rather than reporting every such entry as raising the line.
+    expect(capabilityRegistryViolations([sectionless("alpha", 1)], { "verify@0.2.1": row }))
+      .toEqual(['the composed generation\'s base reader release "check@0.2.1" is not in the table']);
     // Across packages a tie is not an ordering claim: the table's own `verify@0.2.1` then
     // `check@0.2.1` is sound, and so is a later row of either package.
     expect(capabilityRegistryViolations([], { ...READER_RELEASE_LINES, "verify@0.2.2": row, "check@0.3.0": row }))

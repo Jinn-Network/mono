@@ -338,6 +338,9 @@ function readerReleaseTableViolations(readerReleases: Readonly<Record<string, un
     }
     latest.set(match[1]!, { key, version });
   }
+  if (!Object.hasOwn(readerReleases, COMPOSED_FORMAT_MINIMUM_READER_RELEASE)) {
+    violations.push(`the composed generation's base reader release "${COMPOSED_FORMAT_MINIMUM_READER_RELEASE}" is not in the table`);
+  }
   return violations;
 }
 
@@ -391,6 +394,7 @@ export function capabilityRegistryViolations(
       violations.push(`${quoted} names unpublished reader release "${entry.minimumReaderRelease}"`);
     } else if (
       entry.claimSection === undefined
+      && releaseOrder.includes(COMPOSED_FORMAT_MINIMUM_READER_RELEASE)
       && releaseOrder.indexOf(entry.minimumReaderRelease) > releaseOrder.indexOf(COMPOSED_FORMAT_MINIMUM_READER_RELEASE)
     ) {
       // A claim's reader line is re-derived from its sections, so a capability the claim cannot
