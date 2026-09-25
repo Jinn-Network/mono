@@ -875,12 +875,12 @@ __metadata:
   dependencies:
     "@electric-sql/pglite": "npm:^0.5.8"
     "@jinn-network/indexer": "portal:../indexer"
-    "@types/node": "npm:^25.9.6"
+    "@types/node": "npm:^25.9.8"
     "@types/pg": "npm:^8.23.1"
-    drizzle-orm: "npm:0.45.2"
+    drizzle-orm: "npm:0.45.3"
     esbuild: "npm:^0.28.2"
     pg: "npm:^8.23.0"
-    tsx: "npm:^4.23.13"
+    tsx: "npm:^4.23.15"
     typescript: "npm:^5.4.0"
     vitest: "npm:^4.1.11"
   bin:
@@ -1397,12 +1397,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node@npm:^25.9.6":
-  version: 25.9.6
-  resolution: "@types/node@npm:25.9.6"
+"@types/node@npm:^25.9.8":
+  version: 25.9.8
+  resolution: "@types/node@npm:25.9.8"
   dependencies:
     undici-types: "npm:>=7.24.0 <7.24.7"
-  checksum: 10c0/1ee8d7cb629caa3906b0958200747c8d557c339b4cc4fb000eaf4be8715091394dc845f45302e76a96c715a16153b240dc7884cdd3e11d22c48273d244c5ecdf
+  checksum: 10c0/482b8f1d8532fb034d4b49b8c7a5942aee4bb21482d7e49a5d3fbc1dcb3f04fde0c312f91f6aeca185875a325e14e75f94b6171f1ef7a718a6d62c0862c2ab80
   languageName: node
   linkType: hard
 
@@ -2008,7 +2008,105 @@ __metadata:
   languageName: node
   linkType: hard
 
-"drizzle-orm@npm:0.45.2, drizzle-orm@npm:^0.45.2":
+"drizzle-orm@npm:0.45.3":
+  version: 0.45.3
+  resolution: "drizzle-orm@npm:0.45.3"
+  peerDependencies:
+    "@aws-sdk/client-rds-data": ">=3"
+    "@cloudflare/workers-types": ">=4"
+    "@electric-sql/pglite": ">=0.2.0"
+    "@libsql/client": ">=0.10.0"
+    "@libsql/client-wasm": ">=0.10.0"
+    "@neondatabase/serverless": ">=0.10.0"
+    "@netlify/db": ">=0.4.0"
+    "@op-engineering/op-sqlite": ">=2"
+    "@opentelemetry/api": ^1.4.1
+    "@planetscale/database": ">=1.13"
+    "@prisma/client": "*"
+    "@tidbcloud/serverless": "*"
+    "@types/better-sqlite3": "*"
+    "@types/pg": "*"
+    "@types/sql.js": "*"
+    "@upstash/redis": ">=1.34.7"
+    "@vercel/postgres": ">=0.8.0"
+    "@xata.io/client": "*"
+    better-sqlite3: ">=7"
+    bun-types: "*"
+    expo-sqlite: ">=14.0.0"
+    gel: ">=2"
+    knex: "*"
+    kysely: "*"
+    mysql2: ">=2"
+    pg: ">=8"
+    postgres: ">=3"
+    sql.js: ">=1"
+    sqlite3: ">=5"
+  peerDependenciesMeta:
+    "@aws-sdk/client-rds-data":
+      optional: true
+    "@cloudflare/workers-types":
+      optional: true
+    "@electric-sql/pglite":
+      optional: true
+    "@libsql/client":
+      optional: true
+    "@libsql/client-wasm":
+      optional: true
+    "@neondatabase/serverless":
+      optional: true
+    "@netlify/db":
+      optional: true
+    "@op-engineering/op-sqlite":
+      optional: true
+    "@opentelemetry/api":
+      optional: true
+    "@planetscale/database":
+      optional: true
+    "@prisma/client":
+      optional: true
+    "@tidbcloud/serverless":
+      optional: true
+    "@types/better-sqlite3":
+      optional: true
+    "@types/pg":
+      optional: true
+    "@types/sql.js":
+      optional: true
+    "@upstash/redis":
+      optional: true
+    "@vercel/postgres":
+      optional: true
+    "@xata.io/client":
+      optional: true
+    better-sqlite3:
+      optional: true
+    bun-types:
+      optional: true
+    expo-sqlite:
+      optional: true
+    gel:
+      optional: true
+    knex:
+      optional: true
+    kysely:
+      optional: true
+    mysql2:
+      optional: true
+    pg:
+      optional: true
+    postgres:
+      optional: true
+    prisma:
+      optional: true
+    sql.js:
+      optional: true
+    sqlite3:
+      optional: true
+  checksum: 10c0/493919fae4431b3b360227b929fca27b2d220114d7ebd07c2f299efa2a968af52d35f39745daedf9ce2c8c52c6fa875d7a97cb970f144598ed7cd70bc3b1004b
+  languageName: node
+  linkType: hard
+
+"drizzle-orm@npm:^0.45.2":
   version: 0.45.2
   resolution: "drizzle-orm@npm:0.45.2"
   peerDependencies:
@@ -3877,9 +3975,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"tsx@npm:^4.23.13":
-  version: 4.23.13
-  resolution: "tsx@npm:4.23.13"
+"tsx@npm:^4.23.15":
+  version: 4.23.15
+  resolution: "tsx@npm:4.23.15"
   dependencies:
     esbuild: "npm:~0.28.0"
     fsevents: "npm:~2.3.3"
@@ -3888,7 +3986,7 @@ __metadata:
       optional: true
   bin:
     tsx: dist/cli.mjs
-  checksum: 10c0/dc99c8988b42ec2443963a0b9051f42d068bc7e2a44e82f3b94b40539a991c5c01ea3ee049cf317d1040b2245711dd4c64ace9ac875f3b07edee29f610702e3c
+  checksum: 10c0/3c5fc53e578da87d3a63565286b1ecbb0e01b9bb646daec1957294ef890d14f22cc67bb4b09b5daffab0e7ce0217b1e7645393feb0f524b1ddf26ae9595d7e75
   languageName: node
   linkType: hard
 
