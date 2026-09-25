@@ -439,6 +439,7 @@ export async function verifyRunWorkspace(
             projectsBinaryQualification: reportRecord.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument,
             declaresDisclosure: disclosureCarriage !== undefined,
             importedRun: importedCarriage !== undefined,
+            wilsonReport: reportRecord.method.id === BENCHMARKING_METHOD_IDS.wilson,
           })
           : undefined;
 

@@ -17,7 +17,8 @@
  * Single-sourced here for the reason `binding/report-face.ts` gives: `@colophon-claims/core`
  * depends on this package, so producer and reader run one function rather than two that can drift.
  *
- * The published bundle page does not render this yet. See the standing note in `assets.ts`.
+ * The published bundle page renders the pair in the Report's arm table when the bundle declares the
+ * `/10` capability `slot-denominators` (`assets.ts`, issue #3698).
  */
 
 /** The per-arm slice of a sealed Matrix's attrition this derivation reads. */

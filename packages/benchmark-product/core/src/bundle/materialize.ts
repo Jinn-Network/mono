@@ -1106,8 +1106,10 @@ function recordClosure(input: MaterializeBundleInput): {
   // `/10` and states capability in its vector rather than in the choice of number (issue #3403).
   // The vector comes from the registry's activation predicates over the facts derived above --
   // the same facts, and the same predicates, `report` sealed the claim's sections from. An
-  // imported run is a fourth fact (issue #3417). `composedFormat: false` at `report` still seals
-  // a legacy claim, and this function then emits the enumerated cell that claim implies.
+  // imported run is a fourth fact (issue #3417), and a wilson-scored Report a fifth (issue #3698).
+  // `composedFormat: false` at `report` still seals a legacy claim, and this function then emits
+  // the enumerated cell that claim implies. Hoisted with the format because the page reads it too:
+  // `slot-denominators` selects the report page that carries the denominator pair.
   const legacyFormat = anchored
     ? binaryQualification
       ? disclosed
@@ -1118,8 +1120,18 @@ function recordClosure(input: MaterializeBundleInput): {
       ? BUNDLE_V4_FORMAT
       : BUNDLE_FORMAT;
   const format = composedGeneration ? BUNDLE_V10_FORMAT : legacyFormat;
+  const capabilities = composedGeneration
+    ? activeCapabilityVector({
+      anchoredClosure: anchored,
+      projectsBinaryQualification: binaryQualification,
+      declaresDisclosure: disclosureCarriage !== undefined,
+      importedRun: importedCarriage !== undefined,
+      wilsonReport: report.method.id === BENCHMARKING_METHOD_IDS.wilson,
+    })
+    : undefined;
   for (const [path, bytes] of Object.entries(buildPublicAssets({
     format,
+    ...(capabilities === undefined ? {} : { capabilities }),
     claim,
     matrix,
     report,
@@ -1140,18 +1152,10 @@ function recordClosure(input: MaterializeBundleInput): {
     // pre-composition cell. Everything else emits exactly the version it emitted before any of
     // these features existed, byte for byte. Derived above, where the presentation render also
     // reads it -- one selection, so the manifest and the page can never disagree about which
-    // generation this bundle is.
-    ...(composedGeneration
-      ? {
-        format: BUNDLE_V10_FORMAT,
-        capabilities: activeCapabilityVector({
-          anchoredClosure: anchored,
-          projectsBinaryQualification: binaryQualification,
-          declaresDisclosure: disclosureCarriage !== undefined,
-          importedRun: importedCarriage !== undefined,
-        }),
-      }
-      : { format: legacyFormat }),
+    // generation this bundle is, or about which capabilities it declares.
+    ...(capabilities === undefined
+      ? { format: legacyFormat }
+      : { format: BUNDLE_V10_FORMAT, capabilities }),
   };
 }
 

@@ -73,15 +73,18 @@ describe("D1 clean cutover: new bundles emit composed /10", () => {
     });
     const bundleDir = await reportAndPublish(prepared.workspaceDir, prepared.draftId, prepared.benchmarkSha256);
 
+    // The synthetic run is wilson-scored, so it declares `slot-denominators` (issue #3698) and its
+    // report page carries the denominator pair. The capability adds no check.
     const manifest = json(bundleDir, "bundle.json");
     expect(manifest["format"]).toBe(BUNDLE_V10_FORMAT);
-    expect(manifest["capabilities"]).toEqual([]);
+    expect(manifest["capabilities"]).toEqual(["slot-denominators"]);
     expect(json(bundleDir, "claim-package.json")["claimSchema"]).toBe(COMPOSED_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(readFileSync(join(bundleDir, "index.html"), "utf8")).toContain("All planned slots (Matrix)");
 
     const verified = await verifyPublicBundle(bundleDir);
     expect(verified.format).toBe(BUNDLE_V10_FORMAT);
     if (verified.format !== BUNDLE_V10_FORMAT) throw new Error("unreachable");
-    expect(verified.capabilities).toEqual([]);
+    expect(verified.capabilities).toEqual(["slot-denominators"]);
     const outcome = summarizeVerificationOutcome(verified);
     expect(outcome.passed).toBe(outcome.total);
     expect(outcome.total).toBe(6);

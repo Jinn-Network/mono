@@ -65,13 +65,20 @@ function entry(token: string, order: number, overrides: Partial<CapabilityEntry>
   };
 }
 
+/** `entry` with no claim section at all, the shape `slot-denominators` registers. */
+function sectionless(token: string, order: number, overrides: Partial<CapabilityEntry> = {}): CapabilityEntry {
+  const { claimSection: _omitted, ...rest } = entry(token, order, overrides);
+  return rest;
+}
+
 describe("the registered capabilities", () => {
-  test("exactly four, under their stable wire tokens", () => {
+  test("exactly five, under their stable wire tokens", () => {
     expect(CAPABILITY_REGISTRY.map((capability) => capability.token)).toEqual([
       "binary-qualification",
       "anchoring",
       "disclosure-specification",
       "external-import",
+      "slot-denominators",
     ]);
   });
 
@@ -112,7 +119,7 @@ describe("the registered capabilities", () => {
     // The role name is the one the evidence catalog spells, and the deriving fact is the Report
     // extension: the only edge that reaches the record. A derivation is additive, never a
     // refinement target, so contributing one does not make the capability a refiner.
-    const [qualification, anchoring, disclosure, imported] = CAPABILITY_REGISTRY;
+    const [qualification, anchoring, disclosure, imported, slots] = CAPABILITY_REGISTRY;
     expect(disclosure!.roleDerivations).toEqual([{
       role: "disclosure-specification",
       derivedFrom: "https://spec.jinn.network/extensions/disclosure-specification/v1",
@@ -121,6 +128,7 @@ describe("the registered capabilities", () => {
     expect(qualification!.roleDerivations).toEqual([]);
     expect(anchoring!.roleDerivations).toEqual([]);
     expect(imported!.roleDerivations).toEqual([]);
+    expect(slots!.roleDerivations).toEqual([]);
   });
 
   test("external-import adds a mandatory marker member, a check, and no grammar", () => {
@@ -132,6 +140,24 @@ describe("the registered capabilities", () => {
     expect(imported.refines).toEqual([]);
     expect(imported.checks).toEqual(["external-import"]);
     expect(imported.claimSection).toBe("externalImport");
+  });
+
+  test("slot-denominators adds no member, no check, and no claim section (issue #3698)", () => {
+    const slots: CapabilityEntry = CAPABILITY_REGISTRY[4]!;
+    expect(slots.mandatoryFiles).toEqual([]);
+    expect(slots.memberPatterns).toEqual([]);
+    expect(slots.requires).toEqual([]);
+    expect(slots.conflicts).toEqual([]);
+    expect(slots.refines).toEqual([]);
+    expect(slots.checks).toEqual([]);
+    expect("claimSection" in slots).toBe(false);
+    // Declaring it alone derives the plain base graph's closure: what it changes is which report
+    // page the presentation byte-compare expects, and nothing the claim pins.
+    const closure = composeClosure(["slot-denominators"]);
+    expect(closure.mandatoryFiles).toEqual(PUBLIC_BUNDLE_FILES);
+    expect(closure.checks).toEqual(PUBLIC_BUNDLE_VERIFICATION_CHECKS);
+    expect(closure.claimSections).toEqual([]);
+    expect(readerInstructions(["slot-denominators"])).toEqual(readerInstructions([]));
   });
 });
 
@@ -175,6 +201,38 @@ describe("the registry invariants have teeth", () => {
   test("a minimum reader release that was never published", () => {
     expect(capabilityRegistryViolations([entry("alpha", 1, { minimumReaderRelease: "9.9.9" as never })]))
       .toContain('"alpha" names unpublished reader release "9.9.9"');
+  });
+
+  test("a capability without a claim section that adds a check or raises the reader line", () => {
+    // A claim's check list and reader line are re-derived from its sections, so a capability the
+    // claim cannot see must move neither.
+    const later = { ...READER_RELEASE_LINES, "check@0.2.2": READER_RELEASE_LINES["check@0.2.1"] };
+    expect(capabilityRegistryViolations([sectionless("alpha", 1, { checks: ["integrity-anchors"] })]))
+      .toContain('"alpha" has no claim section, so it cannot add a check');
+    expect(capabilityRegistryViolations([sectionless("alpha", 1, { minimumReaderRelease: "check@0.2.2" as never })], later))
+      .toContain('"alpha" has no claim section, so it cannot raise the reader line past "check@0.2.1"');
+    // The same release is sound for an entry the claim can see, and at or below the composed
+    // generation's own base line it is sound without a section.
+    expect(capabilityRegistryViolations([entry("alpha", 1, { minimumReaderRelease: "check@0.2.2" as never })], later))
+      .toEqual([]);
+    for (const release of ["verify@0.1.0", "verify@0.2.1", "check@0.2.1"] as const) {
+      expect(capabilityRegistryViolations([sectionless("alpha", 1, { minimumReaderRelease: release })]), release)
+        .toEqual([]);
+    }
+  });
+
+  test("reader releases of one package out of version order (issue #4767 review)", () => {
+    const row = READER_RELEASE_LINES["check@0.2.1"];
+    expect(capabilityRegistryViolations([], { "verify@0.1.0": row, "check@0.2.2": row, "check@0.2.1": row }))
+      .toContain('reader release "check@0.2.1" is listed after "check@0.2.2", a release of the same package that is not older');
+    expect(capabilityRegistryViolations([], { "check@0.10.0": row, "check@0.9.0": row }))
+      .toContain('reader release "check@0.9.0" is listed after "check@0.10.0", a release of the same package that is not older');
+    expect(capabilityRegistryViolations([], { "0.2.1": row }))
+      .toContain('reader release "0.2.1" is not <package>@<major>.<minor>.<patch>');
+    // Across packages a tie is not an ordering claim: the table's own `verify@0.2.1` then
+    // `check@0.2.1` is sound, and so is a later row of either package.
+    expect(capabilityRegistryViolations([], { ...READER_RELEASE_LINES, "verify@0.2.2": row, "check@0.3.0": row }))
+      .toEqual([]);
   });
 
   test("a claim section or a check two capabilities both add", () => {
@@ -392,6 +450,7 @@ describe("reader instructions", () => {
       "disclosure-specification": "verify@0.2.1",
       // New with the composed generation: no verify release implements it.
       "external-import": "check@0.2.1",
+      "slot-denominators": "check@0.2.1",
     });
   });
 
@@ -409,6 +468,7 @@ describe("producer-side activation", () => {
     projectsBinaryQualification: false,
     declaresDisclosure: false,
     importedRun: false,
+    wilsonReport: false,
   };
 
   test("each predicate turns on exactly its own token, in canonical wire order", () => {
@@ -417,18 +477,23 @@ describe("producer-side activation", () => {
     expect(activeCapabilityVector({ ...NONE, projectsBinaryQualification: true }))
       .toEqual(["binary-qualification"]);
     expect(activeCapabilityVector({ ...NONE, importedRun: true })).toEqual(["external-import"]);
+    expect(activeCapabilityVector({ ...NONE, wilsonReport: true })).toEqual(["slot-denominators"]);
     expect(activeCapabilityVector({
       anchoredClosure: true,
       projectsBinaryQualification: true,
       declaresDisclosure: true,
       importedRun: false,
+      wilsonReport: false,
     })).toEqual(["anchoring", "binary-qualification", "disclosure-specification"]);
     expect(activeCapabilityVector({
       anchoredClosure: true,
       projectsBinaryQualification: true,
       declaresDisclosure: true,
       importedRun: true,
+      wilsonReport: false,
     })).toEqual(["anchoring", "binary-qualification", "disclosure-specification", "external-import"]);
+    expect(activeCapabilityVector({ ...NONE, anchoredClosure: true, importedRun: true, wilsonReport: true }))
+      .toEqual(["anchoring", "external-import", "slot-denominators"]);
   });
 
   test("a declaration rides the qualification analysis alone, and needs no anchor", () => {
@@ -447,8 +512,10 @@ describe("producer-side activation", () => {
       for (const projectsBinaryQualification of [false, true]) {
         for (const declaresDisclosure of [false, true]) {
           for (const importedRun of [false, true]) {
-            const facts = { anchoredClosure, projectsBinaryQualification, declaresDisclosure, importedRun };
-            expect(() => composeClosure(activeCapabilityVector(facts)), JSON.stringify(facts)).not.toThrow();
+            for (const wilsonReport of [false, true]) {
+              const facts = { anchoredClosure, projectsBinaryQualification, declaresDisclosure, importedRun, wilsonReport };
+              expect(() => composeClosure(activeCapabilityVector(facts)), JSON.stringify(facts)).not.toThrow();
+            }
           }
         }
       }

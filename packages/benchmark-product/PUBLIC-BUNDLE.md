@@ -535,9 +535,9 @@ Every token is **must-understand**. A reader that does not implement a token in
 the vector refuses the bundle whole, naming the token, before it reads any
 member. There is no tier of tokens a reader may ignore.
 
-Four capabilities are registered. Each one's members, checks, and claim section
-are exactly what the closure it came from carries, except `external-import`,
-which is new with this generation:
+Five capabilities are registered. Each one's members, checks, and claim section
+are exactly what the closure it came from carries, except `external-import` and
+`slot-denominators`, which are new with this generation:
 
 | Token | Adds | Check it appends | Claim section |
 | --- | --- | --- | --- |
@@ -545,10 +545,33 @@ which is new with this generation:
 | `anchoring` | `anchors/<sha256>.bin`, which may be empty under the declared-but-absent rule stated for v6 | `integrity-anchors` | `anchors` |
 | `disclosure-specification` | no member of its own; the sealed record travels at `records/<sha256>.bin`, named by the Report extension stated for v8 | `disclosure-specification` | `disclosure` |
 | `external-import` | `external-import.json`, the dump digest plus one row per sealed Matrix cell | `external-import` | `externalImport` |
+| `slot-denominators` | no member; the denominator pair in the Report's `wilson@1` arm table on `index.html` | none | none |
 
 `disclosure-specification` requires `binary-qualification`, because the evidence
 role that carries its record exists only in the v4 grammar. It does not require
 `anchoring`.
+
+`slot-denominators` (issue #3698) changes only the report page. In the Report's
+`wilson@1` arm table on `index.html`, each arm's declared denominator `n` is
+followed by the strict all-slots denominator, which counts every slot the sealed
+Matrix planned for that arm whatever became of it, and by the count of planned
+slots `n` leaves out. All three come from `armDenominators` over the sealed
+Report and Matrix, so they cannot disagree with either. An arm the Matrix
+carries no accounting for reads `Not stated`, never zero, and a negative count
+is printed as it is. The presentation byte-compare rebuilds the page the
+declared vector selects, so a bundle that declares the capability over a page
+without the pair, or carries the pair without declaring it, is refused at
+`index.html`, and a bundle declaring it over a Report scored by any other method
+is refused at the vector. It adds no member, no check, and no claim section, so
+the claim reads the same with or without it.
+
+The gap this leaves: a `wilson@1` v10 bundle that does **not** declare
+`slot-denominators` still verifies, with the page it was sealed with and no pair
+beside the headline rate. Refusing it would break every such bundle made before
+the capability existed. The strict number is still on that page, as the
+`Expected` column of the per-arm Matrix attrition table; what the bundle lacks
+is the adjacency. Nothing in the bundle says whether it predates the capability
+or was sealed without the declaration.
 
 Everything else is derived from the vector. The mandatory members are v2's plus
 each declared capability's. The checks are v2's **six**, then each declared
@@ -566,9 +589,9 @@ Stripping a declaration never produces a quieter bundle that still passes; it
 produces a different bundle identity that is refused.
 
 Its claim package is `benchmark-product.claim-package/7`, one id for every
-vector: `claim-package/1`'s base plus one section per capability, present
-exactly when the capability is declared. `claim-consistency` rebuilds the claim
-from the vector `bundle.json` declares, so a section without its declaration and
+vector: `claim-package/1`'s base plus one section per capability that has one,
+present exactly when the capability is declared. `claim-consistency` rebuilds
+the claim from the vector `bundle.json` declares, so a section without its declaration and
 a declaration without its section are both refused on the field that disagrees.
 Section contents are unchanged from the closures they came from, and
 `qualification.json` keeps its frozen `benchmark-product.claim-package/2`
@@ -585,7 +608,9 @@ rulings of issue #3016: each of the page's statements is made once, in the
 highest-priority slot that carries it, and the narrated control above the
 per-cell disclosures is cut. No disclosure the v6 page carries is absent from
 the v10 page. Later presentation features register as presentation capability
-entries inside this generation rather than taking a further format number.
+entries inside this generation rather than taking a further format number. A
+presentation feature that must not reach an already-made v10 bundle is declared
+in the vector instead, as `slot-denominators` is.
 
 v10 pins neither v6's first public `@0.1` line nor the `verify` `0.2.1` line v7
 and v8 pin: both readers predate the format and refuse it at manifest parse, so
@@ -614,8 +639,9 @@ the composed generation, so a run that does not ask otherwise publishes on
 `benchmark-product-public-bundle/10` with the capability vector derived from the run's own
 facts: an anchored run declares `anchoring`, a run projecting a binary qualification
 declares `binary-qualification`, a qualification run with a sealed disclosure
-declaration declares `disclosure-specification`, anchored or not, and a run whose
-evidence was imported (`run import`) declares `external-import`. The enumerated v2, v4,
+declaration declares `disclosure-specification`, anchored or not, a run whose
+evidence was imported (`run import`) declares `external-import`, and a run whose
+Report is scored by `wilson@1` declares `slot-denominators`. The enumerated v2, v4,
 v6, v7, and v8 producer paths remain behind `composedFormat: false` on `report` --- that is
 the rollback. The verifier's legacy path for those formats remains forever.
 

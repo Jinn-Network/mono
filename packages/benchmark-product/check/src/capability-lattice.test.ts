@@ -101,7 +101,9 @@ describe("the generated lattice", () => {
         expect(closure.mandatoryFiles).toEqual([...PUBLIC_BUNDLE_FILES, ...byOrder.flatMap((entry) => entry.mandatoryFiles)]);
         expect(closure.memberPatterns).toEqual(byOrder.flatMap((entry) => entry.memberPatterns));
         expect(closure.checks).toEqual([...PUBLIC_BUNDLE_VERIFICATION_CHECKS, ...byOrder.flatMap((entry) => entry.checks)]);
-        expect(closure.claimSections).toEqual(byOrder.map((entry) => entry.claimSection));
+        // A capability without a section (`slot-denominators`) contributes none.
+        expect(closure.claimSections)
+          .toEqual(byOrder.flatMap((entry) => entry.claimSection === undefined ? [] : [entry.claimSection]));
         expect([...closure.refinedMembers.keys()].sort()).toEqual(byOrder.flatMap((entry) => entry.refines).sort());
         // Role derivations compose like everything else: the declared capabilities' and no others.
         // Both halves of what that buys -- a record reachable only through a declared contribution
@@ -111,6 +113,17 @@ describe("the generated lattice", () => {
         expect(closure.roleDerivations).toEqual(byOrder.flatMap((entry) => entry.roleDerivations));
         const releases = [COMPOSED_FORMAT_MINIMUM_READER_RELEASE, ...subset.map((entry) => entry.minimumReaderRelease)];
         expect(closure.minimumReaderRelease).toBe(releases.sort(compareReaderReleases).at(-1));
+      });
+
+      test("the claim's pins are the ones its sections alone derive", () => {
+        // A claim states its check list and reader line, and the claim schema re-derives both from
+        // the vector its SECTIONS imply, which cannot see a capability without one. So dropping
+        // every section-less capability from the vector must leave both pins where they were.
+        const sectioned = subset.filter((entry) => entry.claimSection !== undefined);
+        const closure = composeClosure(vector);
+        const fromSections = composeClosure(vectorOf(sectioned));
+        expect(closure.checks).toEqual(fromSections.checks);
+        expect(closure.minimumReaderRelease).toBe(fromSections.minimumReaderRelease);
       });
 
       test("an exactly-closed manifest passes", () => {

@@ -1226,7 +1226,8 @@ describe("portable public bundle", () => {
       expect(verified.identity).toBe(materialized.identity);
       expect(verified.format).toBe(BUNDLE_V10_FORMAT);
       if (verified.format !== BUNDLE_V10_FORMAT) throw new Error("unreachable");
-      expect(verified.capabilities).toEqual([]);
+      // A wilson-scored run declares `slot-denominators` (issue #3698), which adds no check.
+      expect(verified.capabilities).toEqual(["slot-denominators"]);
       expect(verified.checks).toEqual([
         "manifest",
         "evidence-closure",

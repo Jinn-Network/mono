@@ -100,6 +100,7 @@ export {
   CapabilityVectorSchema,
   DISCLOSURE_SPECIFICATION_CAPABILITY,
   EXTERNAL_IMPORT_CAPABILITY,
+  SLOT_DENOMINATORS_CAPABILITY,
   activeCapabilityVector,
   composeClosure,
   expectedChecks,

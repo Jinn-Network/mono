@@ -179,3 +179,53 @@ describe("declaration is authoritative", () => {
     });
   });
 });
+
+describe("slot-denominators: the page follows the declaration (issue #3698)", () => {
+  /** The composed golden with its report page rendered with or without the pair, and its vector
+   * declaring the capability or not, each chosen independently. */
+  async function slotGolden(options: { readonly declare: boolean; readonly render: boolean }): Promise<string> {
+    const bundleDir = await composedGolden();
+    const claim = json(bundleDir, "claim-package.json");
+    const assets = buildPublicAssets({
+      ...(await goldenInput(BUNDLE_V10_FORMAT)),
+      claim: claim as never,
+      capabilities: options.render ? ["slot-denominators"] : [],
+    });
+    for (const [path, bytes] of Object.entries(assets)) writeFileSync(join(bundleDir, path), bytes);
+    reseal(bundleDir, options.declare ? ["slot-denominators"] : []);
+    return bundleDir;
+  }
+
+  test("declared and rendered, it verifies with the base checks and the same reader line", async () => {
+    const bundleDir = await slotGolden({ declare: true, render: true });
+    expect(readFileSync(join(bundleDir, "index.html"), "utf8")).toContain("All planned slots (Matrix)");
+    const verified = await verifyPublicBundle(bundleDir);
+    expect(verified.format).toBe(BUNDLE_V10_FORMAT);
+    if (verified.format !== BUNDLE_V10_FORMAT) throw new Error("unreachable");
+    expect(verified.capabilities).toEqual(["slot-denominators"]);
+    // No check and no claim section: the claim a declaring bundle carries is the empty vector's.
+    expect(verified.checks).toEqual(PUBLIC_BUNDLE_VERIFICATION_CHECKS);
+    expect(readerInstructions(["slot-denominators"])).toEqual(readerInstructions([]));
+    const outcome = summarizeVerificationOutcome(verified);
+    expect(outcome.passed).toBe(outcome.total);
+  });
+
+  test("undeclared and not rendered, the page bundles already carry still verifies", async () => {
+    const verified = await verifyPublicBundle(await slotGolden({ declare: false, render: false }));
+    expect(verified.checks).toEqual(PUBLIC_BUNDLE_VERIFICATION_CHECKS);
+  });
+
+  test("declared over the page without the pair is refused at the page", async () => {
+    expect(await refusal(await slotGolden({ declare: true, render: false }))).toEqual({
+      path: "index.html",
+      message: expect.stringContaining("not the exact projection"),
+    });
+  });
+
+  test("the page with the pair under a vector that does not declare it is refused at the page", async () => {
+    expect(await refusal(await slotGolden({ declare: false, render: true }))).toEqual({
+      path: "index.html",
+      message: expect.stringContaining("not the exact projection"),
+    });
+  });
+});

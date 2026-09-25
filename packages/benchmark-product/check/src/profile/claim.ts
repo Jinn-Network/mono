@@ -417,8 +417,11 @@ const ClaimPackageWireSchema = z.object({
     // block below (design §8). The vector is the one the claim's own sections imply, and the pins
     // are whatever the registry derives from it, so a claim cannot state a check list or a reader
     // line that its own sections do not compose to.
+    // A capability without a section is invisible here, and harmlessly so: the registry forbids it
+    // from adding a check or raising the reader line, so omitting it derives the same pins.
     const implied = CAPABILITY_REGISTRY
-      .filter((capability) => (claim as Readonly<Record<string, unknown>>)[capability.claimSection] !== undefined)
+      .filter((capability) => "claimSection" in capability
+        && (claim as Readonly<Record<string, unknown>>)[capability.claimSection] !== undefined)
       .map((capability) => capability.token)
       .sort(compareCodeUnitStrings);
     let pinned: { readonly checks: readonly string[]; readonly command: string; readonly compatibleCommand: string };
@@ -1133,13 +1136,18 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
   if (composed !== undefined) {
     // Total over the registry's sections: a capability registered without stating here how its
     // section is supplied is a compile error, not a composed claim that can no longer be built.
-    const supplied: Readonly<Record<(typeof CAPABILITY_REGISTRY)[number]["claimSection"], boolean>> = {
+    const supplied: Readonly<Record<
+      Extract<(typeof CAPABILITY_REGISTRY)[number], { readonly claimSection: string }>["claimSection"],
+      boolean
+    >> = {
       qualification: projection.qualification !== undefined,
       anchors: anchored,
       disclosure: disclosure !== undefined,
       externalImport: input.externalImport !== undefined,
     };
     for (const capability of CAPABILITY_REGISTRY) {
+      // A capability without a section has nothing to supply: its declaration is its whole carriage.
+      if (!("claimSection" in capability)) continue;
       if (supplied[capability.claimSection] !== input.composedCapabilities!.includes(capability.token)) {
         throw new Error(
           `claim package: capability "${capability.token}" and its "${capability.claimSection}" section`

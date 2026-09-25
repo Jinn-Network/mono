@@ -45,7 +45,8 @@ import type { PublicBundleVerificationCheck } from "./verify.js";
  * release that `/7` and `/8` pin, which predates the composed generation and refuses it at
  * manifest parse, and the first `check` release, which reads it (issue #4746). A version-only key
  * cannot hold both. Order is the table's, not the version's: each release reads every format the
- * one before it reads, so a later row is a later reader even where the versions tie.
+ * one before it reads, so a later row is a later reader even where the versions tie. Within one
+ * package the rows run oldest version first, which `capabilityRegistryViolations` enforces.
  *
  * The `verify` rows alias the frozen commands. The `check` row is spelled here, and this file is in
  * the publish guard's `CLAIM_PIN_SOURCES` (`.github/scripts/colophon-publish-manifest.mjs`), so
@@ -111,6 +112,8 @@ export interface CapabilityActivationFacts {
   readonly declaresDisclosure: boolean;
   /** The run's evidence was imported (`run import`) rather than dispatched on a venue. */
   readonly importedRun: boolean;
+  /** The Report this bundle publishes is scored by `wilson@1`. */
+  readonly wilsonReport: boolean;
 }
 
 /** The uniform per-entry contract (design §4). */
@@ -133,8 +136,15 @@ export interface CapabilityEntry {
   readonly refines: readonly string[];
   /** The evidence-catalog role derivations this capability contributes, possibly none. */
   readonly roleDerivations: readonly CapabilityRoleDerivation[];
-  /** The claim-package section this capability adds, present exactly when it is declared. */
-  readonly claimSection: string;
+  /**
+   * The claim-package section this capability adds, present exactly when it is declared. Absent for
+   * a capability the claim does not carry at all: a claim's check list and reader line are
+   * re-derived from its SECTIONS (`profile/claim.ts`), so an entry without one can add no check and
+   * cannot raise the reader line past the composed generation's base, which
+   * `capabilityRegistryViolations` enforces. That is only sound for a capability the first `/10`
+   * reader release already implements.
+   */
+  readonly claimSection?: string;
   /** Check names this capability appends, in order. */
   readonly checks: readonly PublicBundleVerificationCheck[];
   /** First published reader release implementing this capability. */
@@ -147,6 +157,7 @@ export const BINARY_QUALIFICATION_CAPABILITY = "binary-qualification" as const;
 export const ANCHORING_CAPABILITY = "anchoring" as const;
 export const DISCLOSURE_SPECIFICATION_CAPABILITY = "disclosure-specification" as const;
 export const EXTERNAL_IMPORT_CAPABILITY = "external-import" as const;
+export const SLOT_DENOMINATORS_CAPABILITY = "slot-denominators" as const;
 
 /**
  * Every capability this build implements, in `order`.
@@ -156,7 +167,8 @@ export const EXTERNAL_IMPORT_CAPABILITY = "external-import" as const;
  * already exists.
  * `binary-qualification` is REFINING: it replaces the grammar of two existing members and extends
  * the mandatory member list. Composition is free on the additive axis and gated on the refining
- * one, which `capabilityRegistryViolations` enforces.
+ * one, which `capabilityRegistryViolations` enforces. `slot-denominators` adds nothing the closure
+ * examines: it selects which report page the presentation byte-compare expects.
  */
 export const CAPABILITY_REGISTRY = [
   {
@@ -234,6 +246,25 @@ export const CAPABILITY_REGISTRY = [
     minimumReaderRelease: "check@0.2.1",
     activation: (facts) => facts.importedRun,
   },
+  {
+    // Issue #3698. Presentation only: the wilson arm table on `index.html` renders the declared
+    // denominator, the strict all-slots one, and the planned slots the declared one leaves out,
+    // side by side (`assets.ts`). No member, no check, and no claim section: the page is already
+    // byte-compared against the rebuild the declared vector selects, so a declaration without the
+    // render, or the render without the declaration, is refused there. A wilson `/10` bundle that
+    // does not declare it keeps the page it has (operator ruling, 2026-09-24).
+    token: SLOT_DENOMINATORS_CAPABILITY,
+    order: 5,
+    requires: [],
+    conflicts: [],
+    mandatoryFiles: [],
+    memberPatterns: [],
+    refines: [],
+    roleDerivations: [],
+    checks: [],
+    minimumReaderRelease: "check@0.2.1",
+    activation: (facts) => facts.wilsonReport,
+  },
 ] as const satisfies readonly CapabilityEntry[];
 
 export type CapabilityToken = (typeof CAPABILITY_REGISTRY)[number]["token"];
@@ -275,13 +306,53 @@ export function compareReaderReleases(left: ReaderRelease, right: ReaderRelease)
   return readerReleasePosition(left) - readerReleasePosition(right);
 }
 
+const READER_RELEASE_KEY = /^([a-z][a-z0-9-]*)@(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
+
+/** Negative, zero, or positive as `left` is older than, the same as, or newer than `right`. */
+function compareVersions(left: readonly number[], right: readonly number[]): number {
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return left[index]! - right[index]!;
+  }
+  return 0;
+}
+
+/**
+ * Every way a reader-release table breaks the ordering `compareReaderReleases` relies on. The
+ * table ranks releases by position, and a position is only a version order within one package: a
+ * `check@0.2.2` row written above `check@0.2.1` would rank the older release as the later reader
+ * and silently mis-rank every minimum taken against it.
+ */
+function readerReleaseTableViolations(readerReleases: Readonly<Record<string, unknown>>): string[] {
+  const violations: string[] = [];
+  const latest = new Map<string, { readonly key: string; readonly version: readonly number[] }>();
+  for (const key of Object.keys(readerReleases)) {
+    const match = READER_RELEASE_KEY.exec(key);
+    if (match === null) {
+      violations.push(`reader release "${key}" is not <package>@<major>.<minor>.<patch>`);
+      continue;
+    }
+    const version = match.slice(2).map(Number);
+    const previous = latest.get(match[1]!);
+    if (previous !== undefined && compareVersions(version, previous.version) <= 0) {
+      violations.push(`reader release "${key}" is listed after "${previous.key}", a release of the same package that is not older`);
+    }
+    latest.set(match[1]!, { key, version });
+  }
+  return violations;
+}
+
 /**
  * Every way `registry` breaks an invariant the derivations rely on (design §5.2, §9). Empty for a
  * sound registry. Run against `CAPABILITY_REGISTRY` on every build, so a second refiner of one
  * target is a design-time conflict rather than a runtime surprise discovered by a publisher.
+ * `readerReleases` is the table minimums are ranked in; it defaults to the one this build ships.
  */
-export function capabilityRegistryViolations(registry: readonly CapabilityEntry[]): string[] {
-  const violations: string[] = [];
+export function capabilityRegistryViolations(
+  registry: readonly CapabilityEntry[],
+  readerReleases: Readonly<Record<string, unknown>> = READER_RELEASE_LINES,
+): string[] {
+  const violations: string[] = readerReleaseTableViolations(readerReleases);
+  const releaseOrder = Object.keys(readerReleases);
   const tokens = new Set(registry.map((entry) => entry.token));
   /** Reports the second claimant of anything only one entry may claim. */
   const claimOnce = (claimed: Map<string, string>, key: string, token: string, describe: (owner: string) => string) => {
@@ -302,7 +373,10 @@ export function capabilityRegistryViolations(registry: readonly CapabilityEntry[
     for (const member of entry.refines) {
       claimOnce(refiners, member, entry.token, (owner) => `"${member}" is refined by both "${owner}" and ${quoted}`);
     }
-    claimOnce(sections, entry.claimSection, entry.token, (owner) => `claim section "${entry.claimSection}" is added by both "${owner}" and ${quoted}`);
+    if (entry.claimSection !== undefined) {
+      const section = entry.claimSection;
+      claimOnce(sections, section, entry.token, (owner) => `claim section "${section}" is added by both "${owner}" and ${quoted}`);
+    }
     for (const check of entry.checks) {
       claimOnce(checks, check, entry.token, (owner) =>
         `check "${check}" is added by both ${owner === "the base graph" ? owner : `"${owner}"`} and ${quoted}`);
@@ -313,8 +387,18 @@ export function capabilityRegistryViolations(registry: readonly CapabilityEntry[
     for (const conflicting of entry.conflicts) {
       if (!tokens.has(conflicting)) violations.push(`${quoted} conflicts with unregistered token "${conflicting}"`);
     }
-    if (!Object.hasOwn(READER_RELEASE_LINES, entry.minimumReaderRelease)) {
+    if (!Object.hasOwn(readerReleases, entry.minimumReaderRelease)) {
       violations.push(`${quoted} names unpublished reader release "${entry.minimumReaderRelease}"`);
+    } else if (
+      entry.claimSection === undefined
+      && releaseOrder.indexOf(entry.minimumReaderRelease) > releaseOrder.indexOf(COMPOSED_FORMAT_MINIMUM_READER_RELEASE)
+    ) {
+      // A claim's reader line is re-derived from its sections, so a capability the claim cannot
+      // see must not be the one that moves it.
+      violations.push(`${quoted} has no claim section, so it cannot raise the reader line past "${COMPOSED_FORMAT_MINIMUM_READER_RELEASE}"`);
+    }
+    if (entry.claimSection === undefined && entry.checks.length > 0) {
+      violations.push(`${quoted} has no claim section, so it cannot add a check`);
     }
   }
   const requiresOf = new Map(registry.map((entry) => [entry.token, entry.requires] as const));
@@ -343,7 +427,8 @@ export interface ComposedClosure {
   readonly roleDerivations: readonly CapabilityRoleDerivation[];
   /** The base checks, then each declared capability's, by `order`. */
   readonly checks: readonly PublicBundleVerificationCheck[];
-  /** The claim sections that must be present, by `order`. Every other capability's must be absent. */
+  /** The claim sections that must be present, by `order`. Every other capability's must be absent.
+   * A declared capability without a section contributes none. */
   readonly claimSections: readonly string[];
   readonly minimumReaderRelease: ReaderRelease;
 }
@@ -393,7 +478,7 @@ export function composeClosure(
     refinedMembers: new Map(declared.flatMap((entry) => entry.refines.map((member) => [member, entry.token] as const))),
     roleDerivations: declared.flatMap((entry) => entry.roleDerivations),
     checks: [...PUBLIC_BUNDLE_VERIFICATION_CHECKS, ...declared.flatMap((entry) => entry.checks)],
-    claimSections: declared.map((entry) => entry.claimSection),
+    claimSections: declared.flatMap((entry) => entry.claimSection === undefined ? [] : [entry.claimSection]),
     minimumReaderRelease: declared
       .map((entry) => entry.minimumReaderRelease)
       .reduce(

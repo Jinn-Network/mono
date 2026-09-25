@@ -83,8 +83,10 @@ function once(label: string, build: (workspaceDir: string) => Promise<{ workspac
 
 const CELLS = [
   {
+    // The two wilson cells also declare `slot-denominators` (issue #3698): no member, no check,
+    // and no claim section, so each still reproduces its legacy cell's closure.
     cell: "/2",
-    vector: [],
+    vector: ["slot-denominators"],
     checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
     run: () => once("base", (workspaceDir) => createSyntheticV6BundleFixture({ workspaceDir, composedFormat: true })),
   },
@@ -97,7 +99,7 @@ const CELLS = [
   },
   {
     cell: "/6",
-    vector: ["anchoring"],
+    vector: ["anchoring", "slot-denominators"],
     checks: PUBLIC_BUNDLE_V6_CHECKS,
     run: () => once("anchored", (workspaceDir) =>
       createSyntheticV6BundleFixture({ workspaceDir, plans: [{ kind: "rfc3161-lock" }], composedFormat: true })),
@@ -198,6 +200,7 @@ describe("composed bundle v10 — producer, one run per pre-composition cell", (
       const claim = json(built.bundleDir, "claim-package.json");
       expect(claim["claimSchema"]).toBe(COMPOSED_CLAIM_PACKAGE_SCHEMA_ID);
       for (const capability of CAPABILITY_REGISTRY) {
+        if (!("claimSection" in capability)) continue;
         expect(claim[capability.claimSection] !== undefined, capability.claimSection)
           .toBe((expected.vector as readonly string[]).includes(capability.token));
       }

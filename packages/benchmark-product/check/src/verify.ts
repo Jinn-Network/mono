@@ -2108,6 +2108,10 @@ export async function verifyPublicBundleSnapshot(
     // The bundle's own declared format, never a re-derivation: it is what `bundle.json` seals, and
     // it selects which presentation generation's page the byte-compare below expects.
     format: checked.manifest.format,
+    // And, for `/10`, its declared vector, for the same reason: the page follows the declaration.
+    // A wilson `/10` bundle that does not declare `slot-denominators` is held to the page it was
+    // sealed with, and one that declares it to the page carrying the pair (issue #3698).
+    ...(checked.manifest.format === BUNDLE_V10_FORMAT ? { capabilities: checked.manifest.capabilities } : {}),
     claim,
     matrix,
     report: verifiedReport.record,

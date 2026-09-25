@@ -74,8 +74,8 @@ function memberSet(bundleDir: string): string[] {
 
 function claimSections(claim: Record<string, unknown>): string[] {
   return CAPABILITY_REGISTRY
-    .filter((capability) => claim[capability.claimSection] !== undefined)
-    .map((capability) => capability.claimSection);
+    .flatMap((capability) => "claimSection" in capability ? [capability.claimSection] : [])
+    .filter((section) => claim[section] !== undefined);
 }
 
 function copyWorkspace(source: string, label: string): string {
@@ -120,8 +120,10 @@ interface PreparedRun {
 
 const CELLS = [
   {
+    // The two wilson cells also declare `slot-denominators` (issue #3698), which adds no member,
+    // no check, and no claim section: the closure the composed bundle must reproduce is unchanged.
     cell: "/2",
-    vector: [],
+    vector: ["slot-denominators"],
     legacyFormat: BUNDLE_FORMAT,
     prepare: (workspaceDir: string): Promise<PreparedRun> =>
       createSyntheticV6BundleFixture({ workspaceDir, skipReport: true }),
@@ -135,7 +137,7 @@ const CELLS = [
   },
   {
     cell: "/6",
-    vector: ["anchoring"],
+    vector: ["anchoring", "slot-denominators"],
     legacyFormat: BUNDLE_V6_FORMAT,
     prepare: (workspaceDir: string): Promise<PreparedRun> =>
       createSyntheticV6BundleFixture({ workspaceDir, plans: [{ kind: "rfc3161-lock" }], skipReport: true }),

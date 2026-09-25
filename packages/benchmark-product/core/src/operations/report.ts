@@ -428,6 +428,7 @@ export function runReport(
             projectsBinaryQualification: entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument,
             declaresDisclosure: disclosureCarriage !== undefined,
             importedRun,
+            wilsonReport: entry.method === BENCHMARKING_METHOD_IDS.wilson,
           })
           : undefined;
         const entryIsDisclosed = composedCapabilities !== undefined

@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       package:
-        description: 'Package to publish (check publishes the verify alias too; core before cli)'
+        description: 'Package to publish (check publishes the verify alias too; check, then core, then cli)'
         required: true
         type: choice
         options:
