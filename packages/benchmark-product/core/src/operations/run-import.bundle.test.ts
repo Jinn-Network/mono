@@ -206,7 +206,9 @@ describe("run.import — the imported bundle passes the public reader", () => {
       expect(verified.identity).toBe(materialized.identity);
       expect(verified.format).toBe(BUNDLE_V10_FORMAT);
       if (verified.format !== BUNDLE_V10_FORMAT) throw new Error("unreachable");
-      expect(verified.capabilities).toEqual(["external-import"]);
+      // The imported run is wilson-scored, so it also declares `slot-denominators` (issue #3698),
+      // which adds no check.
+      expect(verified.capabilities).toEqual(["external-import", "slot-denominators"]);
       // `matrix-rederivation` is the load-bearing one: it recomputes the Matrix from the bundle's
       // own evidence closure and byte-compares it against the carried Matrix. Its passing is what
       // proves the imported outcomes are the honest aggregation of the imported evidence rather
