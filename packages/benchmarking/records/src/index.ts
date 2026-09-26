@@ -133,6 +133,7 @@ export {
   RunBeaconSourceExtensionSchema,
   readBeaconSource,
   readRunBeaconSourceExtension,
+  readRunDeclaredSealInstant,
   runBeaconSourceExtension,
   withRunBeaconSourceExtension,
 } from "./beacon-source.js";

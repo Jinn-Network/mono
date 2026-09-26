@@ -7,6 +7,7 @@ import {
   RunBeaconSourceExtensionSchema,
   readBeaconSource,
   readRunBeaconSourceExtension,
+  readRunDeclaredSealInstant,
   runBeaconSourceExtension,
   withRunBeaconSourceExtension,
 } from "./beacon-source.js";
@@ -52,8 +53,38 @@ describe("attaching and reading the declaration", () => {
     expect(readBeaconSource(parsed)).toBe("drand/quicknet");
   });
 
+  test("a declared sealedAt round-trips through a sealed Run, and reads back beside the source", () => {
+    const declared = withRunBeaconSourceExtension(minimalRun(), {
+      source: "drand/quicknet",
+      sealedAt: "2026-01-02T03:04:05Z",
+    });
+    const parsed = parseRun(sealRun(declared).bytes) as unknown as Record<string, unknown>;
+    expect(readRunBeaconSourceExtension(parsed)).toEqual({
+      source: "drand/quicknet",
+      sealedAt: "2026-01-02T03:04:05Z",
+    });
+    expect(readRunDeclaredSealInstant(parsed)).toBe("2026-01-02T03:04:05Z");
+    expect(readBeaconSource(parsed)).toBe("drand/quicknet");
+  });
+
+  test("a declaration without sealedAt still parses and reads the instant as undefined", () => {
+    // Every Run sealed before this field existed is this case, and it must stay legal: the round
+    // the operator could admissibly bind to is unchanged, only the bundle's ability to check the
+    // publisher's claimed seal time against the sealed record is absent.
+    const declared = withRunBeaconSourceExtension(minimalRun(), { source: "drand/quicknet" });
+    const parsed = parseRun(sealRun(declared).bytes) as unknown as Record<string, unknown>;
+    expect(readRunDeclaredSealInstant(parsed)).toBeUndefined();
+    expect(readBeaconSource(parsed)).toBe("drand/quicknet");
+  });
+
+  test("refuses a sealedAt that is not a calendar-strict RFC 3339 instant", () => {
+    expect(RunBeaconSourceExtensionSchema.safeParse({ source: "drand/quicknet", sealedAt: "2026-02-30T00:00:00Z" }).success).toBe(false);
+    expect(RunBeaconSourceExtensionSchema.safeParse({ source: "drand/quicknet", sealedAt: "yesterday" }).success).toBe(false);
+  });
+
   test("an undeclared Run reads as undefined rather than as a default source", () => {
     expect(readBeaconSource(minimalRun())).toBeUndefined();
+    expect(readRunDeclaredSealInstant(minimalRun())).toBeUndefined();
     expect(readRunBeaconSourceExtension(minimalRun())).toBeUndefined();
   });
 
