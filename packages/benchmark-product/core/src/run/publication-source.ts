@@ -38,7 +38,7 @@ import {
   type SourceAppendIntentStore,
   type SourceStateStore,
 } from "@jinn-network/record-discovery-serve";
-import { createArchiveHttpHandler, createFsBlobStore, IMMUTABLE_CACHE_CONTROL } from "@jinn-network/record-discovery-transport-http";
+import { createArchiveHttpHandler, createFsBlobStore, IMMUTABLE_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL } from "@jinn-network/record-discovery-transport-http";
 import { sha256 as publicationSha256, type CasResult, type PublicationJournal, type PublicationJournalStore } from "@jinn-network/record-publication";
 import { atomicWriteFileSync, fsyncDirectorySync, readFileIfExistsSync } from "../fs/atomic.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
@@ -472,7 +472,13 @@ export function createWorkspacePublicationJournal(workspaceDir: string, draftId:
   };
 }
 
-/** Plain Request/Response composition for a future web mount (PUB-14 owns mounting). */
+/**
+ * The generated lock index (#3398). Same path the lock-index module writes; kept here as a
+ * literal so this handler does not import that module (it already imports this one).
+ */
+const PUBLICATION_LOCK_INDEX_HTTP_PATH = "/lock-index.json";
+
+/** Plain Request/Response composition for the web mount and `publication serve`. */
 export function createWorkspacePublicationHttpHandler(workspaceDir: string): (request: Request) => Promise<Response> {
   const root = publicationServeRoot(workspaceDir);
   const confinedReader = {
@@ -527,6 +533,19 @@ export function createWorkspacePublicationHttpHandler(workspaceDir: string): (re
           headers: {
             "content-type": object.contentType,
             "cache-control": IMMUTABLE_CACHE_CONTROL,
+            "x-content-type-options": "nosniff",
+          },
+        });
+      }
+      if (path === PUBLICATION_LOCK_INDEX_HTTP_PATH) {
+        if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
+        const object = await confinedReader.get(path);
+        if (object === undefined) return new Response(null, { status: 404 });
+        return new Response(request.method === "HEAD" ? null : object.bytes, {
+          status: 200,
+          headers: {
+            "content-type": object.contentType,
+            "cache-control": REVALIDATE_CACHE_CONTROL,
             "x-content-type-options": "nosniff",
           },
         });

@@ -31,12 +31,10 @@
  * (`lockIndexRefreshFailure`) rather than failing.
  */
 
-import { constants, readdirSync } from "node:fs";
-import { open } from "node:fs/promises";
-import { join } from "node:path";
+import { readdirSync } from "node:fs";
 import { RUN_MEDIA_TYPE } from "@jinn-network/benchmarking-records";
 import { archivePagePath, recordPath } from "@jinn-network/record-discovery-protocol";
-import { REVALIDATE_CACHE_CONTROL, createFsBlobStore } from "@jinn-network/record-discovery-transport-http";
+import { createFsBlobStore } from "@jinn-network/record-discovery-transport-http";
 import { publicationServeRoot, runsDir } from "../workspace/layout.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import { createWorkspacePublicationSource, withWorkspacePublicationSourceLock } from "./publication-source.js";
@@ -170,42 +168,4 @@ export async function refreshWorkspacePublicationLockIndex(
     }
     return true;
   }, onContended);
-}
-
-/**
- * Answers `/lock-index.json` and returns `undefined` for every other path, so a caller can place
- * it in front of the archive handler. Read failures are indistinguishable from absence, as they
- * are on the archive handler.
- */
-export function createPublicationLockIndexHttpHandler(
-  workspaceDir: string,
-): (request: Request) => Promise<Response | undefined> {
-  return async (request) => {
-    let pathname: string;
-    try { pathname = new URL(request.url).pathname; } catch { return undefined; }
-    if (pathname !== PUBLICATION_LOCK_INDEX_PATH) return undefined;
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
-    }
-    let bytes: Uint8Array;
-    try {
-      // A fixed name at the root, opened without following a link: a symlink planted here must
-      // not serve bytes from outside the archive.
-      const handle = await open(join(publicationServeRoot(workspaceDir), PUBLICATION_LOCK_INDEX_PATH), constants.O_RDONLY | constants.O_NOFOLLOW);
-      try {
-        if (!(await handle.stat()).isFile()) return new Response(null, { status: 404 });
-        bytes = new Uint8Array(await handle.readFile());
-      } finally { await handle.close(); }
-    } catch {
-      return new Response(null, { status: 404 });
-    }
-    return new Response(request.method === "HEAD" ? null : bytes, {
-      status: 200,
-      headers: {
-        "content-type": PUBLICATION_LOCK_INDEX_MEDIA_TYPE,
-        "cache-control": REVALIDATE_CACHE_CONTROL,
-        "x-content-type-options": "nosniff",
-      },
-    });
-  };
 }
