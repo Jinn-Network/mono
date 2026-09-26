@@ -86,7 +86,7 @@ describe('Phase B native solution architecture boundaries', () => {
     expect(workLoop).toContain('nativeSolutionCoordinator!.reconcileEngagement(result.engagementId)');
   });
 
-  it('distinguishes the legacy marketplace E2E gap from native settlement wiring', () => {
+  it('keeps the marketplace E2E on the legacy helper and sequences verdicts after router settlement', () => {
     expect(marketplaceE2eMain).toContain('composition: { manifestCid: KNOWN_MANIFEST_CID }');
     expect(startSweRebenchSolverDaemonHelper).toMatch(
       /opts\.composition[\s\S]*enableComposition: true/u,
@@ -121,7 +121,12 @@ describe('Phase B native solution architecture boundaries', () => {
     expect(recordBroadcast).toBeGreaterThan(broadcastSettlement);
     expect(recordFinalized).toBeGreaterThan(recordBroadcast);
 
-    expect(marketplaceE2eSource).toContain(
+    // Issue #3715: the marketplace e2e still runs the explicit legacy helper, but
+    // assertions 4-5 must not open a verdict until the router has claimed the
+    // solution (`waitForSolutionSettlement`). Mech `Deliver` alone leaves the
+    // attempt unsubmitted (`TCAttemptNotSubmitted`).
+    expect(marketplaceE2eMain).toContain('waitForSolutionSettlement');
+    expect(marketplaceE2eSource).not.toContain(
       'legacy-lane E2E gap, not a gap in the explicitly selected native composition.',
     );
     expect(marketplaceE2eSource).not.toContain(
