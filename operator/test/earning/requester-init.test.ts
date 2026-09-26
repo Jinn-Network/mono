@@ -13,6 +13,9 @@ import { FleetBootstrapper, stage1MinMasterEth } from '../../src/earning/bootstr
 import { FleetStateStore } from '../../src/earning/store.js';
 import {
   REQUESTER_SAFE_DEPLOY_ETH,
+  REQUESTER_MASTER_ETH_CAP,
+  SAFE_CREATE_PROXY_GAS,
+  quoteRequesterSafeFunding,
   requesterMinMasterEth,
 } from '../../src/earning/requester-init.js';
 import { encryptMnemonic, generateMnemonic } from '../../src/earning/wallet.js';
@@ -34,13 +37,35 @@ async function seedKeystore(earningDir: string): Promise<FleetStateStore> {
   return store;
 }
 
+describe('quoteRequesterSafeFunding', () => {
+  it('returns the static floor when fees are unknown', () => {
+    expect(quoteRequesterSafeFunding(0n)).toEqual({
+      agentWei: REQUESTER_SAFE_DEPLOY_ETH,
+      masterWei: requesterMinMasterEth(),
+    });
+  });
+
+  it('raises the agent transfer when gas × fee exceeds the 0.001 ETH floor', () => {
+    // 10 gwei × 800k gas × 2 headroom = 0.016 ETH, then cap at 0.01.
+    const tenGwei = 10_000_000_000n;
+    const quote = quoteRequesterSafeFunding(tenGwei);
+    expect(quote.masterWei).toBe(REQUESTER_MASTER_ETH_CAP);
+    expect(quote.masterWei).toBeLessThan(20_000_000_000_000_000n);
+    expect(quote.agentWei).toBeGreaterThan(REQUESTER_SAFE_DEPLOY_ETH);
+    expect(SAFE_CREATE_PROXY_GAS * tenGwei).toBeGreaterThan(REQUESTER_SAFE_DEPLOY_ETH);
+  });
+
+  it('stays on the floor at current Base Sepolia sub-gwei fees', () => {
+    const subGwei = 6_000_000n;
+    expect(quoteRequesterSafeFunding(subGwei).masterWei).toBe(requesterMinMasterEth());
+  });
+});
+
 describe('requesterMinMasterEth', () => {
   it('is far below the operator bootstrap target', () => {
-    // The §4.2 defect in one assertion: a requester was being asked for the
-    // operator's number. At ~0.0001 ETH per CDP drip that difference is the
-    // difference between ~15 drips and ~200 against a 4:30 budget.
     const operator = stage1MinMasterEth({ minEoaGasEth: 5_000_000_000_000_000n }, 1);
     expect(requesterMinMasterEth()).toBeLessThan(operator / 10n);
+    expect(quoteRequesterSafeFunding(10_000_000_000n).masterWei).toBeLessThan(operator);
   });
 });
 
@@ -234,6 +259,13 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
 
     // Still short after every drip: the loop must terminate on its cap, not spin.
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(0n);
+    vi.spyOn((bootstrapper as any).publicClient, 'estimateFeesPerGas').mockRejectedValue(
+      new Error('offline'),
+    );
+    vi.spyOn((bootstrapper as any).publicClient, 'getGasPrice').mockRejectedValue(
+      new Error('offline'),
+    );
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const result = await bootstrapper.ensureRequesterSafe('test-password');
 
@@ -242,6 +274,56 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
     expect(requestFunding.mock.calls.length).toBeLessThan(60);
     expect(result.ok).toBe(false);
     expect(result.funding).toBeDefined();
+    const logged = errorSpy.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(logged.some((line) => line.includes('CDP faucet reached target'))).toBe(false);
+  });
+
+  it('logs when the CDP faucet reaches the requester target', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-b0a-'));
+    dirs.push(earningDir);
+    const store = await seedKeystore(earningDir);
+
+    const requestFunding = vi.fn(async () => ({ ok: true as const, txHash: '0xabc' }));
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base-sepolia',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      requestFunding,
+      autoTestnetFaucet: true,
+    });
+    vi.spyOn((bootstrapper as any).publicClient, 'estimateFeesPerGas').mockRejectedValue(
+      new Error('offline'),
+    );
+    vi.spyOn((bootstrapper as any).publicClient, 'getGasPrice').mockRejectedValue(
+      new Error('offline'),
+    );
+
+    let getBalanceCalls = 0;
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockImplementation(async () => {
+      getBalanceCalls += 1;
+      return getBalanceCalls === 1 ? 0n : requesterMinMasterEth();
+    });
+    let safeDeployed = false;
+    vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockImplementation(async () =>
+      safeDeployed ? '0xdeadbeef' : '0x',
+    );
+    vi.spyOn(bootstrapper as any, 'stepFleetSafePredict').mockImplementation(async () => {
+      await store.patchFleet({ fleet_safe_address: PREDICTED_SAFE });
+      return store.load('base-sepolia');
+    });
+    vi.spyOn(bootstrapper as any, 'stepFleetSafeDeploy').mockImplementation(async () => {
+      safeDeployed = true;
+      return store.load('base-sepolia');
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await bootstrapper.ensureRequesterSafe('test-password');
+
+    const logged = errorSpy.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(logged).toContain('[requester-init] CDP faucet reached target after 5 drips');
+    expect(logged.some((line) => line.includes('CDP faucet stopped after'))).toBe(false);
+    expect(result.ok).toBe(true);
   });
 
   it('funds the deploying EOA with an amount the requester gate can actually cover', async () => {
@@ -268,5 +350,67 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
     const agentFundingWei = deploy.mock.calls[0]![2] as bigint;
     expect(agentFundingWei).toBe(REQUESTER_SAFE_DEPLOY_ETH);
     expect(agentFundingWei).toBeLessThan(requesterMinMasterEth());
+  });
+
+  it('quotes a higher agent transfer on Base Sepolia when maxFee is high', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-b0a-'));
+    dirs.push(earningDir);
+    const store = await seedKeystore(earningDir);
+    await store.patchFleet({ fleet_safe_address: PREDICTED_SAFE });
+    const tenGwei = 10_000_000_000n;
+    const quote = quoteRequesterSafeFunding(tenGwei);
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base-sepolia',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+    vi.spyOn((bootstrapper as any).publicClient, 'estimateFeesPerGas').mockResolvedValue({
+      maxFeePerGas: tenGwei,
+      maxPriorityFeePerGas: 1_000_000n,
+    });
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(quote.masterWei);
+    vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0x');
+    const deploy = vi.spyOn(bootstrapper as any, 'stepFleetSafeDeploy')
+      .mockImplementation(async () => store.load('base-sepolia'));
+
+    await bootstrapper.ensureRequesterSafe('test-password');
+
+    expect(deploy).toHaveBeenCalledTimes(1);
+    expect(deploy.mock.calls[0]![2]).toBe(quote.agentWei);
+    expect(quote.agentWei).toBeGreaterThan(REQUESTER_SAFE_DEPLOY_ETH);
+  });
+
+  it('maps a post-gate insufficient-funds deploy to a funding pause, not a bare failure', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-b0a-'));
+    dirs.push(earningDir);
+    const store = await seedKeystore(earningDir);
+    await store.patchFleet({ fleet_safe_address: PREDICTED_SAFE });
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base-sepolia',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+    });
+    vi.spyOn((bootstrapper as any).publicClient, 'estimateFeesPerGas').mockRejectedValue(
+      new Error('no fees'),
+    );
+    vi.spyOn((bootstrapper as any).publicClient, 'getGasPrice').mockRejectedValue(
+      new Error('no gas'),
+    );
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
+      requesterMinMasterEth(),
+    );
+    vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0x');
+    vi.spyOn(bootstrapper as any, 'stepFleetSafeDeploy').mockRejectedValue(
+      new Error('insufficient funds for gas * price + value'),
+    );
+
+    const result = await bootstrapper.ensureRequesterSafe('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.funding).toBeDefined();
+    expect(result.funding?.master_address).toBe(result.fleet_state.master_address);
+    expect(result.funding?.eth_required).toBeDefined();
   });
 });

@@ -17,6 +17,10 @@ import {
   waitForTransactionReceiptWithRetry,
 } from '../../tx-retry.js';
 import { STAGE1_AGENT_ETH } from '../bootstrap.js';
+import {
+  REQUESTER_MASTER_TRANSFER_GAS,
+  SAFE_CREATE_PROXY_GAS,
+} from '../requester-init.js';
 
 /**
  * Deploy the predicted fleet Safe. Funds the agent EOA from master if needed.
@@ -62,6 +66,7 @@ export async function stepFleetSafeDeploy(
         account: masterAccount as Account,
         to: addr(agentAddress),
         value: fundAmount,
+        gas: REQUESTER_MASTER_TRANSFER_GAS,
       },
     );
     await waitForTransactionReceiptWithRetry(ctx.publicClient, fundHash);
@@ -84,6 +89,7 @@ export async function stepFleetSafeDeploy(
       to: deployTx.to as Address,
       value: BigInt(deployTx.value),
       data: deployTx.data as Hex,
+      gas: SAFE_CREATE_PROXY_GAS,
     },
   );
   const receipt = await waitForTransactionReceiptWithRetry(ctx.publicClient, deployHash);
