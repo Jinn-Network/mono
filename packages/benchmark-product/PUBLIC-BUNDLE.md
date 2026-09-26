@@ -9,6 +9,38 @@ private keys are gone.
 `publish` means local immutable emission, not hosting. It does **not** upload, host, deploy,
 register, release, or write remotely. Deployment status is none.
 
+## Reader vocabulary
+
+This document quotes contract spellings. The table maps each contract term to the
+reader-facing name from
+[`docs/superpowers/specs/2026-09-02-reader-facing-vocabulary.md`](../../docs/superpowers/specs/2026-09-02-reader-facing-vocabulary.md)
+§5. Body text below keeps the contract spellings.
+
+| Contract spelling | Reader-facing name |
+| --- | --- |
+| `benchmark-product-public-bundle/N` | bundle |
+| `arm`, `armId` | configuration |
+| `cell`, `cellKey` | run |
+| `replicate` | repeat |
+| `Matrix`, `matrix.json` | the runs |
+| `Report`, `report.json` | the result |
+| `claim-package.json` | the claim |
+| `method.id` (`jinn.benchmarking.method/…`), `method.version` | method |
+| `preregistered` | preregistered |
+| `records/<sha256>.bin` | evidence file |
+| `instrument`, evaluator | judge |
+| `conflicted`, assembly dissent | runs the judges disagreed on |
+| `disagreements` (pairwise-disagreement) | decided differently |
+| `sha256`, digest | fingerprint |
+| `anchor` | timestamp proof |
+| `verify`, `verification.checks` | recompute |
+| `venue` | where it ran |
+| `venueHonesty` | who ran this |
+| `disclosure`, six-variable disclosure | what was pinned |
+| `qualification.configuration` | how the judges were qualified |
+| `instability` | answer changed on rerun |
+| `parserInvalid`, `parser-invalid` | answer could not be read |
+
 ## Identity and closure
 
 `bundle.json` is the exact canonical manifest and is not listed inside itself.
