@@ -350,6 +350,7 @@ export function runReport(
         matrixRecord.cells,
         runRecord,
         carriage.anchors,
+        undefined,
         importedRun,
       );
       // issue #2839: the sealed disclosure declaration, if this run has one. Read once for the same

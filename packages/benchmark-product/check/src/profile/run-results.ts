@@ -22,8 +22,9 @@ export function localVenueLimitsForRun(run: Pick<RunRecord, "policy">, imported 
  *
  * `binding` is the run's verified `beacon-binding/1` record (issue #2976) and obeys the same rule:
  * omitting it is the identity, so every run that carries no binding keeps its exact limits bytes.
- * It is only ever passed by a caller that can show BOTH sides the same binding — today that means
- * it is not passed, because the public bundle carries no binding record yet. */
+ * It is only ever passed by a caller that can show BOTH sides the same binding — since issue #3370
+ * the public bundle carries the record at `beacon-binding.json`, so the portable rebuild does pass
+ * it, resolved from those carried bytes and gated on the bundle's own declared capability vector. */
 export function buildLocalVenueHonesty(
   cells: readonly MatrixCell[],
   run: Pick<RunRecord, "policy">,

@@ -94,7 +94,7 @@ export function assertClaimConsistency(input: {
     reportRecord,
     reportSha256: identities.reportSha256,
     reportEnvelopeSha256: identities.reportEnvelopeSha256,
-    venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, input.anchors ?? [], imported),
+    venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, input.anchors ?? [], undefined, imported),
     verificationCommandVerb: "bundle verify",
     assurance: {
       preset: input.assurancePreset,

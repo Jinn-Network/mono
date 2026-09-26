@@ -10,11 +10,15 @@
  * check, made by `core/src/binding/carriage.ts` workspace-side and by step 2c of
  * `EXTERNAL-VERIFICATION.md` for an external reader.
  *
- * Today the gap is closed by an accident nothing states: `buildLocalVenueHonesty`'s `binding`
- * parameter is optional and no in-repo caller supplies it, so the public bundle carries no binding
- * record and the face never reaches a reader. A future change that adds the record to the bundle
- * would look like passing an argument that was already there, and a hand-written binding could then
- * print "the sealed record names the beacon this run binds to" over a beacon the seal never named.
+ * Since issue #3370 the public bundle DOES carry the record, under the `beacon-binding` capability,
+ * so the face reaches a reader and the gap is closed by the check rather than by nobody exercising
+ * the path: every site that supplies a binding names, inline, the rule that makes its argument
+ * sound -- `assertRunBindingLinkage`, the one function both the workspace producer and the
+ * standalone verifier compare the record's restated fields against the sealed Run with. Before that
+ * the gap was closed by an accident nothing stated: the parameter was optional and no in-repo caller
+ * supplied it. Adding a site would have looked like passing an argument that was already there, and
+ * a hand-written binding could then print "the sealed record names the beacon this run binds to"
+ * over a beacon the seal never named.
  *
  * So this is a source scan, in the shape `core/src/runtime/child-temp-env.test.ts` uses for the
  * same class of per-site obligation: a call site that supplies the binding argument must carry an
@@ -84,13 +88,15 @@ const memberByPackageName = new Map<string, string>(
  * the class label instead of the sentence, which is the same disclosure in one word (#3953).
  *
  * Keyed by module because the bare name is not unique in this tree (#3952):
- * `core/src/operations/run-results.ts` exports an unrelated three-parameter
- * `buildLocalVenueHonesty`, and its callers must not be handed a constraint about an argument they
- * do not pass. The failure direction was the safe one -- noise, not a hole -- but the noise landed
- * on someone editing a function with nothing to do with binding carriage.
+ * `core/src/operations/run-results.ts` exports its own `buildLocalVenueHonesty`, the producer twin
+ * of this package's. Issue #3370 aligned the two signatures -- `core`'s gained the same `binding` at
+ * position 3, because two functions that must emit identical bytes should not differ positionally --
+ * so the module keying is now COVERAGE rather than the workaround it started as: both are emitters,
+ * both are listed below, and a site of either is held to the same obligation.
  */
 const EMITTERS: ReadonlyArray<readonly [string, string, number]> = [
   ["check/src/profile/run-results.ts", "buildLocalVenueHonesty", 3],
+  ["core/src/operations/run-results.ts", "buildLocalVenueHonesty", 3],
   ["check/src/binding/report-face.ts", "runBoundVenueLimits", 1],
   ["check/src/binding/report-face.ts", "runBindingSentence", 0],
   ["check/src/binding/report-face.ts", "runBindingClass", 0],
@@ -122,15 +128,21 @@ const IDENTIFIER_END = String.raw`(?![\w$])`;
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 
 /**
- * The complete set of marker-bearing sites. A forward is not an origin: `buildLocalVenueHonesty`
- * passes its own optional parameter through, so the obligation belongs to whoever supplies it, and
- * no in-repo caller does. Any addition here is the change #3464 exists to make visible.
+ * The complete set of marker-bearing sites. A forward is not an origin: both
+ * `buildLocalVenueHonesty` copies pass their own optional parameter through, so the obligation
+ * belongs to whoever supplies it. Any addition here is the change #3464 exists to make visible.
  *
  * The three `runBindingSentence` origins covered since #3757 are the wrapper inside `report-face.ts`
  * -- which states that it forwards rather than originates -- and the two `core` operations that
  * reach the sentence from a binding this run's own sealed identity vouches for. `run-status.ts`
  * appears twice since #3953: it writes the class label and the sentence from the same checked
  * binding, and each is its own emission.
+ *
+ * Issue #3370 added the four that put the face in a published bundle: the producer seal
+ * (`core/src/operations/report.ts`), both claim-consistency rebuilds, and `core`'s own
+ * `run-results.ts` forward. Each names `assertRunBindingLinkage`, and each of the three that pick a
+ * binding to pass gates on the DECLARED capability vector rather than on "the run has a binding" --
+ * which is what makes a section the vector does not declare a difference rather than a tautology.
  */
 const EXPECTED_JUSTIFIED_SITES = [
   "core/src/operations/run-bind.ts:runBindingSentence",
@@ -138,15 +150,18 @@ const EXPECTED_JUSTIFIED_SITES = [
   "core/src/operations/run-status.ts:runBindingSentence",
   "check/src/binding/report-face.ts:runBindingSentence",
   "check/src/profile/run-results.ts:runBoundVenueLimits",
+  "core/src/operations/run-results.ts:runBoundVenueLimits",
 ];
 
 const CONSTRAINT = [
   "A binding may be turned into reader-facing prose only after it has been cross-checked against",
-  "the sealed Run: `readRunBindingCarriage` (core/src/binding/carriage.ts) workspace-side, or step",
-  "2c of EXTERNAL-VERIFICATION.md for an external reader. `verifyRunBinding` alone does NOT",
-  "establish this -- it never sees the Run. If this site is sound, write an inline",
-  "`binding-carriage:` comment above it naming the check it satisfies, and add it to",
-  "EXPECTED_JUSTIFIED_SITES in this file so the addition is reviewed rather than assumed.",
+  "the sealed Run by `assertRunBindingLinkage` (check/src/binding/bundle-carriage.ts) -- reached",
+  "through `readRunBindingCarriage` (core/src/binding/carriage.ts) workspace-side and through",
+  "`verifyPublicBundle` on the reader path, or performed by hand per steps 2c and 2d of",
+  "EXTERNAL-VERIFICATION.md. `verifyRunBinding` alone does NOT establish this -- it never sees the",
+  "Run. If this site is sound, write an inline `binding-carriage:` comment above it naming the check",
+  "it satisfies, and add it to EXPECTED_JUSTIFIED_SITES in this file so the addition is reviewed",
+  "rather than assumed.",
 ].join(" ");
 
 /**
@@ -678,16 +693,19 @@ describe("the binding face is never emitted from an unchecked binding", () => {
 
   // The bare name is not unique in this tree, so the key is proven to discriminate before the scan
   // is pointed anywhere (#3952) -- and proven against the real modules rather than a fixture, since
-  // the two same-named functions are the fact being relied on.
+  // the two same-named functions are the fact being relied on. Both `buildLocalVenueHonesty` copies
+  // are emitters since #3370, so what the key must discriminate is each one's own callers from a
+  // module that declares no emitter at all.
   test("keys an emitter by its declaring module, so a same-named function elsewhere is not one", () => {
     const emitterModule = "check/src/profile/run-results.ts";
-    const otherModule = "core/src/operations/run-results.ts";
+    const twinModule = "core/src/operations/run-results.ts";
+    const nonEmitterModule = "core/src/report/claim.ts";
     const read = (path: string): [string, string] => [readFileSync(join(productRoot, path), "utf8"), join(productRoot, path)];
 
     const [verifyCaller, verifyPath] = read("check/src/profile/claim-consistency.ts");
     expect(resolveOrigin(verifyCaller, verifyPath, "buildLocalVenueHonesty")).toBe(emitterModule);
     const [coreCaller, corePath] = read("core/src/operations/report.ts");
-    expect(resolveOrigin(coreCaller, corePath, "buildLocalVenueHonesty")).toBe(otherModule);
+    expect(resolveOrigin(coreCaller, corePath, "buildLocalVenueHonesty")).toBe(twinModule);
     // A package specifier resolves through the entry's re-export to the module that declares it.
     const [statusCaller, statusPath] = read("core/src/operations/run-status.ts");
     expect(resolveOrigin(statusCaller, statusPath, "runBindingClass")).toBe("check/src/binding/report-face.ts");
@@ -717,12 +735,15 @@ describe("the binding face is never emitted from an unchecked binding", () => {
       new Map([["runBindingSentence", resolveOrigin(directoryImport, directoryPlant, "runBindingSentence")]]))[0]?.binding)
       .toBe("forged");
 
-    // And the resolved origin is what decides: the same call text is counted under the emitter's
-    // module and dropped under the other's.
+    // And the resolved origin is what decides: the same call text is counted under either emitter
+    // module -- both declare the name, and both hold the binding at position 3 -- and dropped under
+    // a module that declares no emitter, which is the discrimination the key exists for.
     const call = "const honesty = buildLocalVenueHonesty(cells, run, anchors, forged);\n";
-    expect(emitterCallSites(call, "fixture.ts", new Map([["buildLocalVenueHonesty", emitterModule]])))
-      .toHaveLength(1);
-    expect(emitterCallSites(call, "fixture.ts", new Map([["buildLocalVenueHonesty", otherModule]])))
+    for (const module of [emitterModule, twinModule]) {
+      expect(emitterCallSites(call, "fixture.ts", new Map([["buildLocalVenueHonesty", module]])))
+        .toHaveLength(1);
+    }
+    expect(emitterCallSites(call, "fixture.ts", new Map([["buildLocalVenueHonesty", nonEmitterModule]])))
       .toEqual([]);
   });
 

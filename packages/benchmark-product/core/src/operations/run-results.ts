@@ -38,7 +38,8 @@ import {
   anchoredPreRegistration,
   anchoredVenueLimits,
 } from "@colophon-claims/check";
-import type { ClaimAnchor } from "@colophon-claims/check";
+import { runBoundVenueLimits } from "@colophon-claims/check";
+import type { ClaimAnchor, VerifiedRunBinding } from "@colophon-claims/check";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { refuse } from "../errors.js";
 import {
@@ -278,12 +279,17 @@ export function buildLocalVenueHonesty(
   cells: readonly MatrixCell[],
   runRecord: Pick<RunRecord, "policy">,
   anchors: readonly ClaimAnchor[] = [],
+  binding?: VerifiedRunBinding,
   imported = false,
 ): VenueHonesty {
   return {
     venue: "self-run",
     preRegistration: anchoredPreRegistration(anchors),
-    limits: anchoredVenueLimits(localVenueLimitsForRun(runRecord, imported), anchors),
+    // binding-carriage: forwards this function's own `binding` parameter rather than originating
+    // one, so the obligation stays with whoever supplies it -- `assertRunBindingLinkage`, reached
+    // through `readRunBindingCarriage` workspace-side and through `verifyPublicBundle` on the
+    // reader path. `binding-face-carriage.test.ts` pins every supplying site.
+    limits: runBoundVenueLimits(anchoredVenueLimits(localVenueLimitsForRun(runRecord, imported), anchors), binding),
     unverifiableAxisCounts: unverifiableAxisCounts(cells),
   };
 }
@@ -411,6 +417,10 @@ export function runResults(
           matrix.cells,
           runRecord,
           readRunAnchorCarriage(context.workspaceDir, runState).anchors,
+          // Deliberately no binding (Rule 3): this derived workspace artifact is byte-compared by
+          // nothing, and `run status` already states the run's binding through its own two pinned
+          // emitters. A literal `undefined` carries no obligation and needs no marker.
+          undefined,
           externalRunImportMarker(context.workspaceDir, input.draftId, runState) !== undefined,
         ),
         ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
