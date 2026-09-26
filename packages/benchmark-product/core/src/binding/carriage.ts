@@ -10,20 +10,26 @@
  * - **The projection is the shared one.** `verifyRunBinding` lives in `@colophon-claims/check` and
  *   is the same function an external reader recomputes with. A second local implementation would
  *   turn "the verifier recomputes and fails on mismatch" into a comparison of two guesses.
- * - **The record must belong to THIS run.** `verifyRunBinding` proves a record is internally
- *   consistent -- that its declared order derives from the `sealDigest` it itself carries, and that
- *   its beacon postdates the `sealedAt` it itself carries. It cannot know which run the record was
- *   written for, and `getSealedBytes` cannot either: a foreign record filed under its own true
- *   digest passes both. So the two fields the postdating claim rests on are compared against this
- *   run's own sealed identity here, exactly as `readRunAnchorCarriage` refuses an anchor whose
- *   subject is neither this bundle's Run nor its Matrix. Without it a run sealed after its results
- *   were known could point at an older run's honest binding and print "proven-offline" over a link
- *   nothing verified.
+ * - **The record must belong to THIS run, and that rule is also the shared one.**
+ *   `verifyRunBinding` proves a record is internally consistent -- that its declared order derives
+ *   from the `sealDigest` it itself carries, and that its beacon postdates the `sealedAt` it itself
+ *   carries. It cannot know which run the record was written for, and `getSealedBytes` cannot
+ *   either: a foreign record filed under its own true digest passes both. So the fields the
+ *   postdating claim rests on are compared against this run's own sealed identity, exactly as
+ *   `readRunAnchorCarriage` refuses an anchor whose subject is neither this bundle's Run nor its
+ *   Matrix. Without it a run sealed after its results were known could point at an older run's
+ *   honest binding and print "proven-offline" over a link nothing verified. Since issue #3370 a
+ *   published bundle carries the record too, so a reader makes the same comparison -- and this
+ *   module's own argument for sharing `verifyRunBinding` applies verbatim to the comparison itself:
+ *   a second local implementation would turn "the verifier recomputes and fails on mismatch" into a
+ *   comparison of two guesses. The rule is therefore `assertRunBindingLinkage` in
+ *   `@colophon-claims/check`, and what this side still owns is only WHERE its four inputs are read:
+ *   from the workspace's own `RunState` and sealed store rather than from a bundle's members.
  * - **A projection failure is a typed product refusal**, never a swallowed throw crossing a
  *   package boundary.
  */
 
-import { RunBindingError, verifyRunBinding } from "@colophon-claims/check";
+import { RunBindingError, assertRunBindingLinkage, verifyRunBinding } from "@colophon-claims/check";
 import type { VerifiedRunBinding } from "@colophon-claims/check";
 import { parseRun, readBeaconSource } from "@jinn-network/benchmarking-records";
 import { refuse } from "../errors.js";
@@ -46,34 +52,23 @@ export function readRunBindingCarriage(
   }
   const path = `records/${recorded.recordSha256}.bin`;
   const binding = projectBindingBytes(getSealedBytes(workspaceDir, recorded.recordSha256), path);
-  const sealDigest = `sha256:${runState.runSha256}`;
-  if (binding.sealDigest !== sealDigest) {
-    refuse(
-      "record-integrity",
-      path,
-      `binding covers ${binding.sealDigest}, which is not this run's sealed Run ${sealDigest}`,
-    );
-  }
-  if (binding.sealedAt !== runState.lockedAt) {
-    refuse(
-      "record-integrity",
-      path,
-      `binding names a seal at ${binding.sealedAt}, but this run was sealed at ${runState.lockedAt}`,
-    );
-  }
-  // The declared source is the third field the binding restates from the sealed record (#3426), and
-  // it is checked against the sealed bytes for the same reason the two above are: `verifyRunBinding`
-  // can only tell that the restatement agrees with the binding's OWN beacon, never that it agrees
-  // with the Run. Omission is the case that makes this load-bearing rather than tidy -- a binding
-  // that simply drops the field verifies clean and reports `operator-chosen`, which would let a run
-  // that declared a source bind any other one and print the honest-looking weaker sentence over it.
-  const declared = readRunDeclaredBeaconSource(workspaceDir, runState.runSha256);
-  if (binding.declaredSource !== declared) {
-    const carried = binding.declaredSource === undefined
-      ? "binding declares no beacon source"
-      : `binding names ${binding.declaredSource} as this run's declared beacon source`;
-    const sealed = declared === undefined ? "its sealed Run declares none" : `its sealed Run declares ${declared}`;
-    refuse("record-integrity", path, `${carried}, but ${sealed}`);
+  try {
+    assertRunBindingLinkage({
+      binding,
+      runSha256: runState.runSha256,
+      // `lockedAt` rather than the Run's own declared instant: workspace-side this IS the
+      // authoritative seal time, it is always present for a locked run, and for a run whose Run
+      // declares one the two are the same instant by construction -- `run lock` writes both from a
+      // single clock reading. Passing it unconditionally also keeps the comparison running for every
+      // run this side sees, including one sealed before the declaration existed.
+      sealedAt: runState.lockedAt,
+      declaredSource: readRunDeclaredBeaconSource(workspaceDir, runState.runSha256),
+    });
+  } catch (cause) {
+    if (cause instanceof RunBindingError) {
+      refuse("record-integrity", path, cause.message);
+    }
+    throw cause;
   }
   return binding;
 }
