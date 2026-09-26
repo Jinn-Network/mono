@@ -402,9 +402,11 @@ The post carries four things and nothing else that is load-bearing:
    RFC 3161 token, the attested Bitcoin block height for OpenTimestamps. A
    calendar proof that is still `pending` has no time to quote: say `pending`
    rather than quoting the acquisition moment, which proves nothing.
-3. **The archive URL of the sealed Run record and of each anchor record.**
-   `<base>/records/<sha256>`, one per record. The Run record is the registration
-   pointer; the anchor records are what a stranger re-verifies against it.
+3. **The archive URL of the sealed Run record and of each anchor record.** The
+   Run record is the registration pointer; the anchor records are what a stranger
+   re-verifies against it. Take each URL from the served path the index gives —
+   `/records/<sha256>` for an announced record, `/publication-artifacts/sha256/<sha256>`
+   for a publication artifact — rather than composing one.
 4. **The standing immutability clause**, one sentence:
    `Nothing in the sealed freeze moves once judging starts.`
 
@@ -416,7 +418,13 @@ A `null` path means those exact bytes are not served here, so quote the digest
 and do not invent a URL for it. `anchor --subject lock --json` reports the same
 provider and `recordSha256` at acquisition time; the anchor's time lives in the
 proof bytes, which the sealed record carries unchanged — for an RFC 3161 token
-obtained out of band, `openssl ts -reply -in <token> -text` prints it.
+obtained out of band, `openssl ts -reply -in <token> -token_in -text` prints
+it (`-token_in` because the anchor path carries a bare token, not a response).
+
+Expect every anchor `path` to be `null` today: this archive does not serve
+AnchorEvidence records, so item 3 currently resolves to the Run record's URL
+plus each anchor's digest quoted inline. That is the honest form of item 3, not
+a gap in it.
 
 What does not belong in the post:
 
