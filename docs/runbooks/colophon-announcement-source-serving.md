@@ -13,6 +13,7 @@ Record Discovery serving layout:
 | Path | What it is | Mutability |
 |------|------------|------------|
 | `/.well-known/jinn-record-discovery` | names this workspace's source, its head path, and its newest archive page | rewritten after every announcement |
+| `/lock-index.json` | generated listing of this workspace's announced locks, each with archive paths and carried anchors | rewritten when regenerated; everything it points at is immutable |
 | `/sources/<name>/head` | the signed source head — current sequence, entry digest, `refreshBy` | rewritten after every announcement |
 | `/sources/<name>/entries/<page>` | a signed archive page, one entry per page, linked to its predecessor via `prevArchive` | immutable once written |
 | `/records/<sha256>` | the exact announced record bytes | immutable |
@@ -22,11 +23,18 @@ Everything a consumer trusts is signed or digest-addressed, so serving is a
 read-only static problem. There is no write route, no session, and no
 credential: the archive subtree is public by construction.
 
-The well-known document is the one derived object. It exists so a first-time
+The well-known document is one derived object. It exists so a first-time
 consumer can find the newest archive page without being told its name —
 `coldSync` starts there and walks `prevArchive` back to genesis. It is rewritten
 from the writer's committed position after every append, and rebuilt at serve
 time for any workspace whose announcements predate this serving path.
+
+`/lock-index.json` is the other derived object: a presentation listing of
+announced locks. It is rewritten on regeneration; every path it names is
+digest-addressed or signed and never changes. It is not part of a bundle, a
+claim package, a registration closure, or the Record Discovery path grammar.
+A static host should serve it as `application/json` and must re-sync it with
+the head after each regeneration.
 
 ## Before you announce: the public URL must already serve
 
@@ -108,8 +116,9 @@ Three things the static host must get right:
    from what you publish (as above) and configure the media types yourself:
    `application/vnd.jinn.record-discovery.head.v1+json` for the head,
    `application/vnd.jinn.record-discovery.well-known.v1+json` for the
-   well-known document, `application/json` for archive pages, and each record's
-   own announced media type for its digest path. Cold sync and returning sync
+   well-known document, `application/json` for archive pages and for
+   `/lock-index.json`, and each record's own announced media type for its digest
+   path. Cold sync and returning sync
    do not check the declared type, but consumers that stream the live tail do —
    and a mirror that serves everything as `text/plain` is a mirror nobody can
    build a typed reader against.
@@ -118,7 +127,8 @@ Three things the static host must get right:
    stale head against fresh pages is a chain a consumer reads as behind, not
    broken — but a stale well-known document points at an archive page that is no
    longer the newest, and a cold-syncing consumer silently misses everything
-   after it.
+   after it. `/lock-index.json` is rewritten the same way and must be copied
+   with those two files.
 3. **Do not serve anything else from the mount.** Publish the archive subtree at
    its own path or origin. The product's handler enforces a closed path grammar;
    a static host enforces whatever directory you point it at.

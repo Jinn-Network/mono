@@ -115,6 +115,22 @@ describe("workspace public source composition", () => {
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
   });
 
+  test("serves /lock-index.json from the serving root with revalidate cache (#3398)", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "publication-lock-index-http-"));
+    createWorkspaceLayout(workspaceDir, "2026-08-13T12:00:00Z");
+    const index = new TextEncoder().encode('{"format":"colophon-archive-lock-index/1","locks":[]}\n');
+    await createFsBlobStore(publicationServeRoot(workspaceDir)).put("/lock-index.json", index, "application/json");
+    const handler = createWorkspacePublicationHttpHandler(workspaceDir);
+    const get = await handler(new Request("http://loopback.test/lock-index.json"));
+    expect(get.status).toBe(200);
+    expect(get.headers.get("content-type")).toBe("application/json");
+    expect(get.headers.get("cache-control")).toBe("no-cache");
+    expect(new Uint8Array(await get.arrayBuffer())).toEqual(index);
+    expect((await handler(new Request("http://loopback.test/lock-index.json", { method: "HEAD" }))).status).toBe(200);
+    expect((await handler(new Request("http://loopback.test/lock-index.json", { method: "POST" }))).status).toBe(405);
+    expect((await handler(new Request("http://loopback.test/lock-index.json/not-this"))).status).toBe(404);
+  });
+
   test("refuses encoded traversal and symlinked objects or content-type sidecars", async () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "publication-http-confinement-"));
     createWorkspaceLayout(workspaceDir, "2026-08-13T12:00:00Z");
