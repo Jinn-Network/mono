@@ -25,9 +25,10 @@
  *    `sealDsseEnvelope` under a placeholder signature. No verification is being skipped — no port
  *    on `MethodComputeInput` verifies a verdict envelope's signature (its one verifier port,
  *    `verifyAnchoredBenchmarkAnnouncement`, authenticates anchored announcements and is not
- *    consulted by `binary-instrument@1`), the aggregate only ever `parseDsseEnvelope`s the bytes,
- *    and `localAssemblyPorts` is called without `trust`, so nothing on this path verifies a
- *    verdict signature. The production signer and attestation issuer are simply outside the join.
+ *    consulted by `binary-instrument@1`), the aggregate only ever `parseDsseEnvelope`s the
+ *    verdict bytes, and `localAssemblyPorts` is called without `trust`, so nothing on this path
+ *    verifies a verdict signature. The production signer and attestation issuer are simply
+ *    outside the join.
  * 2. Assemble is fed `InScopeCell`/`InScopeVerdict` literals, not the product's own
  *    `buildRunAssemblyPorts` projector, which is what sets `evaluationTerminal` from the folded
  *    run journal. Absent it, `deriveOutcome` can never reach `"unscorable"` — so the
