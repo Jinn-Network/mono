@@ -1,4 +1,5 @@
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import type { DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
@@ -23,6 +24,10 @@ export interface RunPublishInput {
 }
 
 export interface RunPublishDeps extends MaterializeBundleDeps {
+  /** Race-test boundary after every bundle is materialized and verified, before the publication
+   * lock is taken. The only point at which a concurrent publisher that has ADOPTED a peer's
+   * directory can be observed after it has finished verifying it and before it can name it. */
+  readonly beforeLock?: () => void | Promise<void>;
   /** Fault-injection boundary after the final directory is durable, before RunState. */
   readonly beforeRunState?: () => void | Promise<void>;
   /** Race-test boundary while the publication lock is held and RunState is durable. */
@@ -134,11 +139,13 @@ function bundleDirsNamedByRunState(workspaceDir: string, draftId: string): Reado
  * serializes publication, and skipping every directory that lock-held read finds named, keeps this
  * invocation's refusal from deleting a bundle a peer has already published.
  *
- * This NARROWS the race rather than closing it. Only the peer's `writeRunState` is inside the lock;
- * its adoption of the directory is not. A peer that has adopted but not yet named its bundle is
- * still invisible to the lock-held read, so `adopt → we take the lock and read → we remove →
- * peer takes the lock and names` remains reachable. Closing it needs adoption itself moved inside
- * the lock (or a materialization-side marker), which is a larger change to where bundles are built.
+ * The window that leaves is closed from the other end (issue #3242). Adoption still happens outside
+ * this lock and is still invisible to the read above — a peer that has adopted but not yet named its
+ * bundle cannot be seen here. It does not need to be: naming requires this same lock, so before
+ * `runPublish` writes RunState it re-checks, under the lock it holds, that every directory that
+ * write names is still on disk. The two critical sections cannot interleave. Either the peer names
+ * first, and this read finds the directory named and skips it; or this cleanup removes first, and
+ * the peer's check finds the directory gone and refuses rather than naming an absent one.
  *
  * `heldLock` is the caller's lock when the refusal happened inside the locked region; otherwise the
  * lock is acquired for the cleanup alone, under a short timeout — the caller is already returning a
@@ -305,6 +312,7 @@ export function runPublish(
           });
         }
 
+        await deps.beforeLock?.();
         publication = await acquirePublicationLock(clockedContext.workspaceDir, input.draftId);
         {
           const latestDocument = readDraftDocument(clockedContext.workspaceDir, input.draftId);
@@ -322,6 +330,22 @@ export function runPublish(
             const existing = (latestState.additionalBundles ?? []).find((candidate) => candidate.method === entry.method && candidate.version === entry.version);
             if (existing !== undefined && (existing.bundleIdentity !== entry.bundleIdentity || existing.bundleRelativePath !== entry.bundleRelativePath)) {
               refuse("conflict", "bundle.target", `RunState already names a different immutable public bundle for "${entry.method}@${entry.version}"`);
+            }
+          }
+          // Every directory the write below is about to name must still be on disk (issue #3242).
+          // Materialization, and so a peer's EEXIST adoption of a directory this invocation
+          // created, happens outside this lock, so a peer that has adopted but not yet named its
+          // bundle cannot be seen from inside it. It does not need to be: naming requires this same
+          // lock, so re-checking here is enough. Either this check runs first and
+          // `removeRefusedBundles` then finds the directory named and skips it, or the removal ran
+          // first and this refuses rather than naming a directory that is gone. `bundle.json` is
+          // written by every bundle format and a recursive removal unlinks it before it can rmdir
+          // the root, so checking it is strictly stronger than checking the directory. Deliberately
+          // not a re-verification: `verifyPublicBundle` already read these bytes, and re-hashing
+          // every file would lengthen the lock hold in proportion to bundle size.
+          for (const identity of [canonical.identity, ...additional.map((entry) => entry.bundleIdentity)]) {
+            if (!existsSync(join(publicBundlePath(clockedContext.workspaceDir, input.draftId, identity), "bundle.json"))) {
+              refuse("conflict", "bundle.target", "the immutable public bundle directory disappeared before publication completed");
             }
           }
           const publishedAt = latestDocument.state === "published-bundle"
