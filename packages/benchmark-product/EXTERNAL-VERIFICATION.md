@@ -53,6 +53,7 @@ itself; the sentences below are carried verbatim in `claim-package.json`
 - Run pinning on the harness, model, and loadout axes is enforced by an admission gate at dispatch time. The isolation axis is vacuous: this venue's launchers admit only one isolation policy, so matching it proves nothing about containment strength.
 - Cost figures, where present, are self-reported by this venue and were never independently settled.
 - Distinct solver and evaluator identities prove agent-distinctness only — each evaluator identity is backed by its own workspace-minted signing key, whose verdict signature this product verifies — not that they are independent real-world parties.
+- This venue's publication source is owner-controlled: the operator holds the signing key and hosts the archive, so they can rewrite the announcement chain from any point, re-sign a shorter or different head, and no reader who had not previously fetched the old head could tell.
 
 The trust root is equally blunt, from `claim-package.json` `verification.trustRoot`:
 "Signatures verify against the bundle-carried public keys minted by this
@@ -61,17 +62,14 @@ workspace; there is no third-party trust anchor on the self-run venue."
 What the interoperability profile and the neutral-freeze spec add. The
 interoperability profile (`docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md`
 section 9.3) requires a self-run publisher to disclose that its dispatch source
-and publication source are owner-controlled. The neutral-freeze spec
+and publication source are owner-controlled. The last sealed sentence above is
+that publication-source disclosure in the words of the neutral-freeze spec
 (`docs/superpowers/specs/2026-08-29-neutral-freeze-announcement-surface.md` section
-7.2) establishes why: the announcement chain (the sequence plus `previous` hash
-chain defined in `docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md`
-section 5.1) has every transparency-log property except a witness, so the
-publisher who holds the signing key and hosts the archive can rewrite the chain
-from any point, re-sign a shorter or different head, and no reader who had not
-previously fetched the old head could tell. The five sealed sentences above do
-not say this in those words. A reader should treat the announcement chain the
-publisher serves as the publisher's own statement about its own history, not as
-independent evidence of it.
+7.2): the announcement chain (the sequence plus `previous` hash chain defined in
+`docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md` section
+5.1) has every transparency-log property except a witness. A reader should treat
+the announcement chain the publisher serves as the publisher's own statement
+about its own history, not as independent evidence of it.
 
 ## Post-seal randomness: `beacon-binding/1`
 

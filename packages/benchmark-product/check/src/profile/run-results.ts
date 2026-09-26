@@ -11,6 +11,7 @@ export const LOCAL_VENUE_LIMITS: readonly string[] = [
   "Run pinning on the harness, model, and loadout axes is enforced by an admission gate at dispatch time. The isolation axis is vacuous: this venue's launchers admit only one isolation policy, so matching it proves nothing about containment strength.",
   "Cost figures, where present, are self-reported by this venue and were never independently settled.",
   "Distinct solver and evaluator identities prove agent-distinctness only — each evaluator identity is backed by its own workspace-minted signing key, whose verdict signature this product verifies — not that they are independent real-world parties.",
+  "This venue's publication source is owner-controlled: the operator holds the signing key and hosts the archive, so they can rewrite the announcement chain from any point, re-sign a shorter or different head, and no reader who had not previously fetched the old head could tell.",
 ];
 const MULTI = "Run pinning on the harness, model, and loadout axes is enforced by an admission gate at dispatch time. The isolation axis is unverifiable: this configured venue admits both unrestricted and OCI-container execution, so its multi-policy inventory cannot establish containment from admission alone.";
 export function localVenueLimitsForRun(run: Pick<RunRecord, "policy">, imported = false): readonly string[] {

@@ -159,18 +159,20 @@ export interface RunResultsDocument {
   readonly report?: RunResultsReport;
 }
 
-/** Plain-language statements of what a local, self-run venue does and does not prove (spec §7.1).
- * Never hidden, never softened into a stronger claim — this is the disclosure the design
- * requires "in the product and in every report produced from a local run". Exported (BP-13) so
- * `../operations/report.ts` can pass the same limits into every sealed Report, and
- * `../report/claim.ts` into every claim package's `venueHonesty` block — one list, never
- * duplicated. */
+/** Plain-language statements of what a local, self-run venue does and does not prove
+ * (benchmark-product design spec §7.1, plus announcement-chain stream integrity from
+ * `2026-08-29-neutral-freeze-announcement-surface.md` §7.2). Never hidden, never softened
+ * into a stronger claim — this is the disclosure the design requires "in the product and in
+ * every report produced from a local run". Exported (BP-13) so `../operations/report.ts` can
+ * pass the same limits into every sealed Report, and `../report/claim.ts` into every claim
+ * package's `venueHonesty` block — one list, never duplicated. */
 export const LOCAL_VENUE_LIMITS: readonly string[] = [
   "This is a local, self-run venue: the same operator controls task dispatch, execution, and evaluation.",
   "Pre-registration here is a discipline enforced by this tool, not a proof against the run's own owner — nothing prevents the owner from having altered the record before publishing it.",
   "Run pinning on the harness, model, and loadout axes is enforced by an admission gate at dispatch time. The isolation axis is vacuous: this venue's launchers admit only one isolation policy, so matching it proves nothing about containment strength.",
   "Cost figures, where present, are self-reported by this venue and were never independently settled.",
   "Distinct solver and evaluator identities prove agent-distinctness only — each evaluator identity is backed by its own workspace-minted signing key, whose verdict signature this product verifies — not that they are independent real-world parties.",
+  "This venue's publication source is owner-controlled: the operator holds the signing key and hosts the archive, so they can rewrite the announcement chain from any point, re-sign a shorter or different head, and no reader who had not previously fetched the old head could tell.",
 ];
 
 const MULTI_POLICY_ISOLATION_LIMIT =
