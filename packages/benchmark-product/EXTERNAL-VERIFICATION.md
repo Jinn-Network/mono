@@ -82,6 +82,10 @@ a **public beacon value that did not exist when the seal was taken**
 (`beacon-binding/1`, issue #2976). `colophon status` reports the binding, and
 the derivation below is the whole procedure — recompute it yourself.
 
+A `benchmark-product-public-bundle/10` bundle whose `capabilities` declare
+`beacon-binding` carries the record at `beacon-binding.json`, verbatim, and its
+digest is pinned in `bundle.json` like every other member.
+
 The binding record names the sealed digest it postdates (`sealDigest`), when that
 seal was taken (`sealedAt`), the beacon (`source`, `round`, `value`), optionally the
 beacon source the sealed record declared (`declaredSource`), and either a drawn
@@ -137,7 +141,9 @@ under the extension key
 https://spec.jinn.network/extensions/beacon-source/v1
 ```
 
-whose value is `{ "source": "<beacon source id>" }`. Two checks, and they are
+whose value is
+`{ "source": "<beacon source id>", "sealedAt": "<RFC 3339 instant>" }` — the
+instant being optional, and the subject of step 2d. Two checks, and they are
 separate:
 
 1. **Inside the binding record.** If it carries `declaredSource`, it must equal
@@ -156,6 +162,28 @@ Colophon's `bind` refuses a binding naming any other source. Declaring a source
 does **not** rescue `bitcoin/mainnet`: the beacon is then fixed, but no round
 follows from a seal on a height-indexed source, so the height remains the
 operator's choice and the face keeps saying so.
+
+**Step 2d — check the seal instant against the sealed Run.** Every check above
+turns on `sealedAt`, and `sealedAt` is a field of the *binding* record: step 1
+compares the beacon's instant against it, and step 2b derives the one admissible
+round from it. A publisher free to write it could therefore lower it, so that a
+beacon which actually predated the real seal passes the postdating check, or solve
+for it, so that any chosen round becomes the one the seal derives — and every
+check above would still pass.
+
+So read `sealedAt` from the `beacon-source/v1` extension on the Run record the
+binding's `sealDigest` names, and check it equals the binding's own —
+*including when either is absent*, for the reason step 2c gives about omission.
+
+**This check does not always run, and where it cannot, say so rather than assume
+it did.** A Run that declares no seal instant is a legitimate and historical
+state: the field is newer than the extension, so every run sealed before it
+declares none, and so does every Run that declares no beacon source at all. For
+such a run the seal time is the *publisher's own assertion* and nothing in the
+bundle checks it. What remains is step 2 — fetching the `(round, value)` pair from
+the beacon itself — which is the independent check either way, and an integrity
+anchor on the sealed Run, which is what grounds the seal's own time against a
+third party rather than against the publisher.
 
 **Step 3 — recompute the derivation.** For each item identity — a
 `sha256:`-prefixed lowercase-hex task digest — compute

@@ -535,9 +535,9 @@ Every token is **must-understand**. A reader that does not implement a token in
 the vector refuses the bundle whole, naming the token, before it reads any
 member. There is no tier of tokens a reader may ignore.
 
-Four capabilities are registered. Each one's members, checks, and claim section
-are exactly what the closure it came from carries, except `external-import`,
-which is new with this generation:
+Five capabilities are registered. Each one's members, checks, and claim section
+are exactly what the closure it came from carries, except `external-import` and
+`beacon-binding`, which are new with this generation:
 
 | Token | Adds | Check it appends | Claim section |
 | --- | --- | --- | --- |
@@ -545,10 +545,22 @@ which is new with this generation:
 | `anchoring` | `anchors/<sha256>.bin`, which may be empty under the declared-but-absent rule stated for v6 | `integrity-anchors` | `anchors` |
 | `disclosure-specification` | no member of its own; the sealed record travels at `records/<sha256>.bin`, named by the Report extension stated for v8 | `disclosure-specification` | `disclosure` |
 | `external-import` | `external-import.json`, the dump digest plus one row per sealed Matrix cell | `external-import` | `externalImport` |
+| `beacon-binding` | `beacon-binding.json`, the sealed `beacon-binding/1` record verbatim | `beacon-binding` | `binding` |
 
 `disclosure-specification` requires `binary-qualification`, because the evidence
 role that carries its record exists only in the v4 grammar. It does not require
 `anchoring`.
+
+`beacon-binding` requires nothing, and its member sits at a fixed path rather
+than in `records/`. Binding is a run-level fact --- a census-bound headline run
+is as bound as a qualified one --- so requiring the qualification grammar would
+tie it to an unrelated analysis shape. The fixed path follows from that: a record
+under `records/` is allowlisted only because the evidence catalog enumerates it,
+so it would need an evidence role, and the only artifact sealed after the binding
+exists is the Report --- which would put `beacon-binding` into the frozen v2
+catalog vocabulary. `anchoring` is the precedent: a carried record with its own
+member shape and no evidence role, belonging to this bundle because its own
+subject field names this bundle's Run.
 
 Everything else is derived from the vector. The mandatory members are v2's plus
 each declared capability's. The checks are v2's **six**, then each declared
@@ -659,7 +671,7 @@ out where it applies.
 | `benchmark-product-public-bundle/6` | `@0.1.0` | `@0.1` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/7` | `@0.2.1` | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/8` | `@0.2.1` | `@0.2` | eight | `--tsa-root`, `--ots-headers` |
-| `benchmark-product-public-bundle/10` | `@colophon-claims/check@0.2.1` | `@colophon-claims/check@0.2` | six to nine, by declared capability | `--tsa-root`, `--ots-headers`, when `anchoring` is declared |
+| `benchmark-product-public-bundle/10` | `@colophon-claims/check@0.2.1` | `@colophon-claims/check@0.2` | six to ten, by declared capability | `--tsa-root`, `--ots-headers`, when `anchoring` is declared |
 
 Prompted screening is why the format string is not sufficient for the first four rows. It is a
 fourth axis: the format is selected by anchoring, qualification, and disclosure only, so a
