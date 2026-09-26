@@ -505,10 +505,9 @@ implementation gets wrong:
 ## Identifier note
 
 The platform's sealed benchmarking record schemas declare canonical `$id`s
-under `https://spec.jinn.network/protocols/benchmarking/v1/schemas/`. Those
-identifiers are names first: the `spec.jinn.network` origin is not hosted yet,
-and fetching them will not retrieve documents until it ships. Until then the
-schema bytes are retrievable from the source repository and from the published
+in the protocol-schema namespace (`protocols/benchmarking/v1/schemas/`). Those
+identifiers are names, not addresses: verification fetches nothing from them.
+Schema bytes are retrievable from the source repository and from the published
 `@jinn-network/benchmarking-records` npm package (`schemas/`). The
 product-level schemas in this package (`schemas/`) deliberately carry no URL
 identity: they are non-normative for the platform, describe Colophon's tier-4

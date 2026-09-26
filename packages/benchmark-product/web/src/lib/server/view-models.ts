@@ -17,6 +17,7 @@ import {
   type RunStatusResult,
 } from "@colophon-claims/core";
 import { projectProductErrorForGui } from "./gui-error";
+import { presentAnchorProfile } from "../present-protocol-profile";
 import {
   createProductOperationContext,
   readProductServerConfiguration,
@@ -117,9 +118,12 @@ export function loadWorkspaceView() {
       authority: authority.ok ? authority : { ...authority, error: projectProductErrorForGui(authority.error) },
       // Profiles only, never endpoints: an endpoint is an operator-typed URL that can carry
       // userinfo or a key in its path or query, and this projection is rendered into the browser.
+      // Issue #2981: the profile URI's host is not hosted; the reader-facing line names the path.
       anchoringConfiguration: {
         available: configuration.anchorProviders !== undefined,
-        providerProfiles: (configuration.anchorProviders ?? []).map((entry) => entry.providerProfile),
+        providerProfiles: (configuration.anchorProviders ?? []).map((entry) =>
+          presentAnchorProfile(entry.providerProfile),
+        ),
       },
     };
   } catch {
