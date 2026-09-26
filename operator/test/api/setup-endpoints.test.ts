@@ -403,7 +403,7 @@ describe('POST /v1/setup/change-password', () => {
       expect(res.status).toBe(200);
       // Operator A's host-wide file — and their keystore — are untouched.
       expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('old-password');
-      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: false });
       expect(readFileSync(join(secondEarningDir, 'keystore-password'), 'utf-8').trim()).toBe('new-password-99');
       expect(
         await decryptMnemonic(
@@ -538,7 +538,7 @@ describe('POST /v1/setup/change-password', () => {
       expect(res.status).toBe(200);
       expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('a-password');
       expect(readFileSync(join(secondEarningDir, 'keystore-password'), 'utf-8').trim()).toBe('new-password-99');
-      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: false });
     } finally {
       if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
       else process.env['JINN_EARNING_DIR'] = oldEnv;
@@ -848,10 +848,9 @@ describe('POST /v1/setup/change-password', () => {
       });
 
       expect(res.status).toBe(200);
-      // `passwordFileUpdated` reports the primary (earning-dir) write for
-      // THIS operator, which succeeds; the host-wide legacy file it must
-      // not touch (checked below) belongs to the default operator.
-      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+      // Host-wide file belongs to the default operator, so the flag is false
+      // even though this daemon's primary earning-dir file was written (#4117).
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: false });
       expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('some-other-value');
     } finally {
       if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
