@@ -132,13 +132,9 @@ describeLive('live requester init on Base Sepolia', () => {
       const result = await runRequesterInit(childEnv);
       const elapsed = Date.now() - started;
 
-      expect(result.exitCode, `exit ${result.exitCode}; stderr=${result.stderr.slice(-800)}`).toBe(0);
-      const payload = parseJsonStdout(result.stdout);
-      expect(payload.chain).toBe('base-sepolia');
-      expect(payload.master).toMatch(ADDRESS_RE);
-      expect(payload.creatorSafe).toMatch(ADDRESS_RE);
+      // Faucet measurements are independent of Safe deploy. Assert them before
+      // exitCode so a post-faucet deploy failure still records N and the 4:30 budget.
       expect(elapsed, `wall-clock ${elapsed}ms`).toBeLessThanOrEqual(270_000);
-
       const dripMatch = DRIP_REACHED_RE.exec(result.stderr);
       expect(dripMatch, `missing reach-target log; stderr=${result.stderr.slice(-800)}`).not.toBeNull();
       const dripCount = Number(dripMatch![1]);
@@ -148,6 +144,15 @@ describeLive('live requester init on Base Sepolia', () => {
         );
       }
       expect(dripCount).toBeLessThanOrEqual(25);
+
+      expect(
+        result.exitCode,
+        `exit ${result.exitCode}; drips=${dripCount}; stderr=${result.stderr.slice(-800)}`,
+      ).toBe(0);
+      const payload = parseJsonStdout(result.stdout);
+      expect(payload.chain).toBe('base-sepolia');
+      expect(payload.master).toMatch(ADDRESS_RE);
+      expect(payload.creatorSafe).toMatch(ADDRESS_RE);
 
       const earningDir = join(scratchHome, '.jinn-operator', 'earning');
       expect(existsSync(join(earningDir, 'master_keystore.json'))).toBe(true);

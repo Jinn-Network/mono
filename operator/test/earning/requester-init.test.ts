@@ -234,6 +234,7 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
 
     // Still short after every drip: the loop must terminate on its cap, not spin.
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(0n);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const result = await bootstrapper.ensureRequesterSafe('test-password');
 
@@ -242,6 +243,8 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
     expect(requestFunding.mock.calls.length).toBeLessThan(60);
     expect(result.ok).toBe(false);
     expect(result.funding).toBeDefined();
+    const logged = errorSpy.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(logged.some((line) => line.includes('CDP faucet reached target'))).toBe(false);
   });
 
   it('logs when the CDP faucet reaches the requester target', async () => {
@@ -280,10 +283,10 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
 
     const result = await bootstrapper.ensureRequesterSafe('test-password');
 
-    expect(result.ok).toBe(true);
     const logged = errorSpy.mock.calls.map((call) => String(call[0] ?? ''));
     expect(logged).toContain('[requester-init] CDP faucet reached target after 5 drips');
     expect(logged.some((line) => line.includes('CDP faucet stopped after'))).toBe(false);
+    expect(result.ok).toBe(true);
   });
 
   it('funds the deploying EOA with an amount the requester gate can actually cover', async () => {
