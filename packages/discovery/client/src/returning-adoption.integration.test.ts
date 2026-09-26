@@ -11,7 +11,12 @@ import {
   sealJson,
   sha256Hex,
 } from "@jinn-network/record-discovery-protocol";
-import type { AnnouncementEntry, SourceHead } from "@jinn-network/record-discovery-protocol";
+import type {
+  AnchoredEntryHold,
+  AnchoredEntryHoldStore,
+  AnnouncementEntry,
+  SourceHead,
+} from "@jinn-network/record-discovery-protocol";
 
 import { createInMemoryHighWaterMarkStore } from "./high-water-mark.js";
 import type { Transport, TransportResponse } from "./ports.js";
@@ -161,7 +166,10 @@ function serve(entries: readonly AnnouncementEntry[], issuedAt: string) {
 }
 
 /** A fresh driver over a DURABLE high-water-mark store -- i.e. a process restart. */
-function bootConsumer(hwm: ReturnType<typeof createInMemoryHighWaterMarkStore>) {
+function bootConsumer(
+  hwm: ReturnType<typeof createInMemoryHighWaterMarkStore>,
+  holds?: AnchoredEntryHoldStore,
+) {
   const trust = createTrustAdapter({
     bindingResolver: bindingResolver(),
     keyCatalog: {
@@ -179,6 +187,7 @@ function bootConsumer(hwm: ReturnType<typeof createInMemoryHighWaterMarkStore>) 
     records: { "fetch": async () => new Uint8Array() },
     entries: { "fetch": async () => new Uint8Array() },
     now: () => NOW,
+    ...(holds === undefined ? {} : { holds }),
   });
 }
 
@@ -280,6 +289,61 @@ describe("a returning consumer accepts the NEXT announcement across a restart (#
     }
     expect(await hwm.get({ agent: AGENT, name: SOURCE })).toMatchObject({
       sequence: "0000000000000004",
+    });
+  });
+
+  it("keeps a recorded anchored-entry hold across a returningSync suffix on the same HWM store", async () => {
+    const hwm = createInMemoryHighWaterMarkStore();
+    const recorded = new Map<string, AnchoredEntryHold>();
+    const holds: AnchoredEntryHoldStore = {
+      async get(origin) {
+        return recorded.get(origin);
+      },
+      async put(hold) {
+        recorded.set(hold.origin, hold);
+      },
+    };
+    const genesisDigest = sealJson(GENESIS).digest as `sha256:${string}`;
+
+    const cold = serve([GENESIS, SECOND], "2026-07-28T12:05:00.000Z");
+    const coldHead = await fetchHead(cold.endpoint, cold.transport);
+    expect(
+      (
+        await bootConsumer(hwm, holds).verifySource({
+          source: { agent: AGENT, name: SOURCE },
+          head: coldHead.head,
+          headSignature: coldHead.signature!,
+          entries: signedEntries(await collect(coldSync(cold.endpoint, { transport: cold.transport }))),
+          firstAdoption: true,
+          observedAnchoredEntry: {
+            sequence: GENESIS.sequence,
+            entryDigest: genesisDigest,
+            anchorRecordDigest: `sha256:${"b".repeat(64)}`,
+            anchoredTime: "2026-07-28T12:00:00.000Z",
+          },
+        })
+      ).status,
+    ).toBe("ok");
+
+    const warm = serve([GENESIS, SECOND, THIRD], "2026-07-28T12:10:00.000Z");
+    const warmHead = await fetchHead(warm.endpoint, warm.transport);
+    const mark = (await hwm.get({ agent: AGENT, name: SOURCE }))!;
+    const resumed = await collect(
+      returningSync(warm.endpoint, mark, { transport: warm.transport }),
+    );
+    expect(resumed.map((e) => e.entry.sequence)).toEqual(["0000000000000003"]);
+
+    const second = await bootConsumer(hwm, holds).verifySource({
+      source: { agent: AGENT, name: SOURCE },
+      head: warmHead.head,
+      headSignature: warmHead.signature!,
+      entries: signedEntries(resumed),
+      firstAdoption: false,
+    });
+    expect(second.status).toBe("ok");
+    expect(await hwm.get({ agent: AGENT, name: SOURCE })).toMatchObject({
+      sequence: "0000000000000003",
+      entry: sealJson(THIRD).digest,
     });
   });
 });

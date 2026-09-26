@@ -397,6 +397,7 @@ export async function handleTaskAttemptCreated({
       priorityMech: event.args.priorityMech,
       deliveryRate: event.args.deliveryRate,
       createdAtBlock: event.block.number,
+      createdAtTimestamp: event.block.timestamp,
       chainId: context.chain.id,
     })
     .onConflictDoNothing();
@@ -450,6 +451,7 @@ export async function handleVerdictDeliveryClaimed({
       requestId: event.args.requestId,
       verdictCode: Number(event.args.verdictCode),
       createdAtBlock: event.block.number,
+      createdAtTimestamp: event.block.timestamp,
       chainId,
     })
     .onConflictDoNothing();

@@ -87,14 +87,11 @@ Routing is governed by three Project (v2) single-select fields set at Friday tri
 
 ### Daily entry point
 
-`eng-day` skill (in `.claude/skills/eng-day/`) is the canonical daily brief; it reads the Issue Type and the Blocked on / Effort / Priority Project fields. Fallback: `gh issue list --search 'is:open no:assignee'` + `gh pr list --search 'is:open draft:false'` (the fallback does not see the Project-layer routing fields).
+`gh issue list --search 'is:open no:assignee'` + `gh pr list --search 'is:open draft:false'` is the daily entry point. Note this does not see the Project-layer routing fields (Issue Type, Blocked on / Effort / Priority); read those from the Project board directly when they matter.
 
 ## Repository Structure
 
 ```
-legacy/jinn-cli-agents-reference/  Git subtree — historical Jinn agent repo, retained as
-                 read-only reference (IMPORTANT: see below)
-
 operator/          TypeScript daemon — the main runnable component
   src/
     main.ts              Production entry point (`jinn run` from the published package)
@@ -158,18 +155,9 @@ spec/            Dated specification proposals
 docs/            Design specs and implementation plans
 ```
 
-## jinn-cli-agents-reference
+## Pre-pivot agent reference
 
-**Always check `legacy/jinn-cli-agents-reference/` when working on OLAS integration, staking, tokenomics, or Phase 1 contracts.** This subtree (from github.com/oaksprout/jinn-gemini) contains a wealth of relevant context. It is retained deliberately as reference material — the `-reference` suffix marks it consulted-but-never-built: it carries no `package.json`, is in no workspace, and nothing in the repository imports from it. Paths below are relative to that directory:
-
-- `contracts/staking/` — JinnRouter.sol (the deployed router), DeliveryActivityChecker, WhitelistedRequesterActivityChecker, deployment JSONs with all on-chain addresses
-- `docs/context/olas-protocol.md` — Full OLAS architecture: governance (veOLAS, Governor, Timelock), registries, tokenomics (Treasury, Dispenser, Depository, Tokenomics epochs)
-- `docs/context/olas-integration.md` — Wallet/key storage, service lifecycle, operating modes
-- `docs/reference/jinn-staking.md` — All deployed staking contracts (V1-V3), parameters, reward economics, veOLAS lock strategy, nominee mechanics
-- `docs/reference/olas-contracts.md` — Base mainnet contract addresses, MechMarketplace ABI
-- `docs/reference/blood-written-rules.md` — Hard-won operational lessons (RPC limits, IPFS, polling, etc.)
-- `docs/runbooks/` — Setup, deployment, recovery, troubleshooting guides
-- `CLAUDE.md` — System architecture overview for the agent orchestration layer
+The pre-pivot Jinn agent repository, vendored here until 2026-09-24 as `legacy/jinn-cli-agents-reference/`, is preserved read-only at [mono@81cbb1b806](https://github.com/Jinn-Network/mono/tree/81cbb1b806f7405b65e879277bf25c5f397ef1ae/legacy/jinn-cli-agents-reference); it predates the tokenless pivot (DR-2026-06-30), and its lasting value is the deployed V1 JinnRouter source (`contracts/staking/`) and the operational lessons in `docs/reference/blood-written-rules.md`.
 
 ## Running the Client
 
@@ -201,7 +189,8 @@ flow is:
    `dist/` tree. The human surface is the operator console (`apps/operator-console`).
 
 The CLI auto-generates a keystore password on first run and reads it from
-`~/.jinn-operator/keystore-password` thereafter (read-fallback from a populated
+`<earningDir>/keystore-password` thereafter (legacy fallback
+`~/.jinn-operator/keystore-password`; read-fallback from a populated
 `~/.jinn-client` when the new directory is empty); set `JINN_PASSWORD` only if
 you need to manage the password yourself (CI, secrets manager).
 
@@ -311,12 +300,15 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | _(none — env-only)_  | JINN_EVAL_DISK_FLOOR_GB | 20 (free-disk floor in GB before each swe-rebench-v2 eval round; below it the runner prunes Docker and aborts the run cleanly if still short) |
 | _(none — env-only)_  | JINN_SWE_REBENCH_COMMAND_TIMEOUT_MS | 300000 (5 min) — wall-clock bound per short-lived CLI shell-out in the swe-rebench-v2 stack (`docker image inspect`, `docker rmi`, the `docker … prune` family, `git rev-parse`). On expiry the child is SIGTERMed (SIGKILL after 10s) and the call rejects with a typed `CommandTimeoutError`, distinct from a real non-zero Docker exit. Set `0` to disable; empty means unset, not disabled. Without it a wedged Docker daemon hangs a run indefinitely — and because the per-round prune runs in a `finally`, it blocked the grade job before its attempt record was written. |
 | _(none — env-only)_  | JINN_SWE_REBENCH_DOCKER_PULL_TIMEOUT_MS | 1800000 (30 min) — separate, far larger bound for `docker pull`; multi-GB eval images legitimately take many minutes on a cold cache. Same expiry semantics as above; `0` disables. |
+| _(none — env-only)_  | JINN_INSPECT_OCI_COMMAND_TIMEOUT_MS | 300000 (5 min) — wall-clock bound per short-lived `docker` shell-out on the OCI Inspect path (`docker version`, `docker image inspect`) in `packages/benchmark-product/core/src/runtime/inspect/oci.ts` (#4025). These calls bounded their child by bytes only, and the `AbortSignal` that was their one wall-clock escape is supplied by no caller, so a wedged Docker Engine hung the launcher indefinitely instead of refusing — the same hazard `JINN_SWE_REBENCH_COMMAND_TIMEOUT_MS` exists to prevent for the sibling stack. On expiry the child is SIGTERMed (SIGKILL after 10s, a grace the OCI runner uses to reap its worker container) and the call rejects with a typed `InspectOciCommandTimeoutError` naming the command, distinct from a real non-zero docker exit. A `docker version` that expires still reaches the operator as the actionable engine-unavailable refusal. Set `0` to disable; empty means unset, not disabled; any other out-of-range value falls back to the default. |
+| _(none — env-only)_  | JINN_INSPECT_OCI_WORKER_TIMEOUT_MS | 1800000 (30 min) — separate, far larger bound for the OCI Inspect worker probes: the selection probe, the credential-broker preflight, and the catalog probe, each a `docker run` of the Inspect image or the OCI runner supervising one. These legitimately take many minutes. Same expiry semantics as above; `0` disables. |
 | _(none — env-only)_  | JINN_NATIVE_IPFS_FETCH_TIMEOUT_MS | 8000 (8s) — bound per native public-record IPFS `block/get` fetch (`createBaseSepoliaRecordTransport`, #30). Short by design: a locally-pinned block resolves in ms, and an unpinned CID's kubo DHT lookup (which never returns) must be abandoned fast so the eval-spec resolver's #2559 HTTP-locator fallback engages on the timeout the same way it does on a clean miss. Well below the 30s fleet worker lease TTL. A timeout REJECTS (miss/error, never valid empty bytes) so the digest check still guards any bytes that arrive. `0` disables the bound (unbounded); unset/invalid → default. |
 | _(none — env-only)_  | JINN_NATIVE_HTTP_FETCH_TIMEOUT_MS | 20000 (20s) — bound per native public-record HTTP `byLocation` fetch (#30). Larger than the IPFS bound because a legitimately large record served over HTTP can take longer; still below the lease TTL. Same reject/`0`-disables semantics. |
 | _(none — env-only)_  | JINN_CORPUS_ARTIFACT_FETCH_TIMEOUT_MS | 30000 (30s) — whole-operation deadline for one manifest-supplied corpus artifact origin fetch (#1901): connect, every redirect hop, and the body read. On expiry the transport is aborted and the fetch REJECTS with reason `timeout`, so a stalled peer cannot hold a worker and no partial artifact is persisted. `0` disables the bound. |
 | _(none — env-only)_  | JINN_CORPUS_ARTIFACT_MAX_BYTES | 33554432 (32 MiB) — byte cap per corpus artifact origin fetch (#1901). An oversized `content-length` is refused before the body is read; otherwise the body is streamed through a counter and abandoned the moment it exceeds the cap, so it is never fully buffered. Reason `too_large`. Unlike the timeout, `0` does **not** disable the bound — a cap of zero would refuse every artifact — so `0` and any other out-of-range value fall back to the default. |
 | _(none — env-only)_  | JINN_CORPUS_ARTIFACT_MAX_REDIRECTS | 3 — redirect hop cap for a corpus artifact origin fetch (#1901). Redirects are followed manually, **every hop is revalidated** against the destination policy, and each hop's socket is pinned to the address that check approved; exceeding the cap fails with reason `blocked`. |
 | _(none — env-only)_  | JINN_CORPUS_ALLOW_PRIVATE_ORIGINS | unset (fail-closed) — corpus artifact origins must be credential-free public `http:`/`https:` destinations; loopback, private, link-local, CGNAT, multicast, unspecified, broadcast, and reserved addresses are refused for IPv4 and IPv6 (including IPv4-mapped / NAT64 / 6to4 embeddings), as are `file:`, `ftp:`, and every other scheme (#1901). Set truthy to permit private destinations. Nothing in-repo sets it, so a manifest whose origin is loopback or private space fails closed with reason `blocked`; the opt-in exists for an operator running against a local origin, because `operator.publicEndpoint` falls back to `http://localhost:<apiPort>` when unset (`operator/src/main.ts`). Non-http(s) schemes and credential-bearing URLs stay refused either way, and the hatch skips address pinning — the socket resolves the hostname normally. |
+| _(none — env-only)_  | JINN_IPFS_MAX_RESPONSE_BYTES | 8388608 (8 MiB) — default byte cap on any single IPFS gateway response, JSON or raw — envelopes, source-bundle files, sealed documents, and every other read that does not state its own bound (#3453). Distinct from the `JINN_CORPUS_ARTIFACT_*` family above, which bounds the corpus artifact *origin* fetch — a different transport. An explicit per-call bound wins over it, so it never clamps a call site that states its own; concretely it does not reach `fetchTrajectoryFromIpfs`'s 64 MiB (`MAX_TRAJECTORY_IPFS_RESPONSE_BYTES`). Like the artifact byte cap, `0` does **not** disable the bound — a cap of zero would refuse every response — so `0`, a negative, a non-integer, and an empty value all fall back to the default. |
 | _(none — env-only)_  | JINN_AUTOPILOT_CLEANUP_ENABLED | enabled in active mode (default on). Opt out with `false`. Each active cycle sweeps dead attempt worktrees under `~/.jinn-operator/autopilot/attempts/v2/` (legacy `~/.jinn-client/...` is still read when that dir is populated and the new path is empty). |
 | _(none — env-only)_  | JINN_AUTOPILOT_ATTEMPT_GRACE_MS | 1800000 (30 minutes). Dead dirty/ahead/preparing attempts are removed after this grace; clean+pushed attempts are removed immediately. |
 | _(none — env-only)_  | JINN_AUTOPILOT_DISK_FLOOR_GB | 10. Below this free-disk floor on the attempts directory, autopilot force-evicts oldest dead attempts and pauses new worktree-creating claims until space recovers. |
@@ -587,7 +579,7 @@ Read first:
 - [`GROWTH.md`](GROWTH.md) — product-led distribution; positioning derives from the GTM plan and `BRAND.md`.
 - [`docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md`](docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md) — current product and go-to-market framing.
 
-Operate the workflow through the `create-press-release` skill (`.claude/skills/create-press-release/SKILL.md`) when the artifact is release-shaped; the skill composes `distil-writing` and enforces these rules.
+When the artifact is release-shaped, apply the External Communication canon named above (`BRAND.md`, `GROWTH.md`, the GTM plan) and enforce the rules above by hand; there is no skill for it.
 
 ### Framing and structure
 

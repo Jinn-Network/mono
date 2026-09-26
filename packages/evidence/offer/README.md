@@ -45,8 +45,14 @@ The protocol takes no fee and no cut, ever. There is no fee field to take one wi
   ships with this package; concrete rails arrive as their own adapters. `to` keeps that
   openness — its syntax is opaque, because no address shape can be imposed on a rail that
   does not exist yet — but it must carry at least one character that is neither whitespace nor
-  a format character, and it may not carry control characters, line separators, or Unicode
-  bidi controls, whose whole effect here is to make one destination display as another.
+  a format character; it may not carry control characters, line separators, or Unicode
+  bidi controls, whose whole effect here is to make one destination display as another; and
+  inside the value it may carry no format character but ZWJ and ZWNJ. Those two are kept
+  because they are load-bearing in Indic and Arabic scripts; the rest go because the
+  96-character tag block among them hides arbitrary ASCII inside a payment address. That last
+  rule shrinks the invisible-payload alphabet rather than emptying it — variation selectors
+  and other invisible non-`Cf` characters are outside its reach, as `src/schema.ts` records —
+  because emptying it is the unbounded confusables problem this package declines.
 - **No reference currency and no conversion, anywhere.** Equivalence across a multi-rail
   offer is the holder's assertion, sealed with the offer.
 - **Repricing is supersession, never mutation.** A new price is a new record with a new
@@ -81,7 +87,10 @@ trailing dot as meaningful. Refusing these keeps one destination from arriving u
 identifiers, and the cost is stated rather than hidden: `https://r.example./v1`,
 `https://r.example/v1?`, and `https://r.example/v1#` have **no** accepted spelling here at all. A
 vocabulary that means something by any of them needs its own rule, the same way an opaque scheme
-does.
+does. A fourth string is refused without being anyone's policy — a raw `'` in the query
+(`https://r.example/v1?a'b`), which WHATWG's special-query encode set rewrites and the round-trip
+check therefore cannot accept; unlike the three above it is still reachable, spelled `%27`, and
+only in the query (`…/v1'x` and `…/v1#a'b` both pass raw).
 
 Stated positively, and this is the whole of it: under a special scheme, two strings this check
 calls equivalent never both pass, and every equivalence class it admits has an accepted spelling.
@@ -135,6 +144,14 @@ independent claim: in practice the offer's announcement, on a chain that is hold
 caller who derives the holder from the signing key has asked the signature to vouch for
 itself and learned nothing.
 
+`atTime` carries the same obligation, and the record cannot help you here either: an offer
+seals no time of its own, so the validity window and the binding's revocation check both hang
+off a value the caller supplies. Suppose a key is revoked effective some date, and an attacker
+seals an offer naming their own `to` and publishes it in a feed that also supplies the
+`atTime` to check it at. A consumer that takes both from that feed gets `ok: true` on an offer
+signed by a revoked key. So `atTime` must come from the consumer's own clock, or from a source
+independent of the feed that supplied the offer — exactly as the holder IRI must.
+
 ## Supersession
 
 "The current price" is a property of a *set* of offers, never a field on one, so
@@ -143,6 +160,17 @@ supersession is honored only when it names an offer in the set with the same sub
 same holder — an offer prices one subject, and only the holder can retire their own offer.
 A fork (two successors to one predecessor) leaves both live; the holder's own append-only
 announcement chain, not this package, orders them.
+
+Being a fold, it takes each entry's `digest` and `holder` entirely on trust, and both carry the
+same obligation the holder IRI does: they must be carried across from `verifyOffer`, never
+assembled by the feed. An entry claiming a victim's digest and listed first shadows the genuine
+offer out of `live` — not silently, the dropped copy is reported as a `DUPLICATE_OFFER`
+diagnostic, but shadowed all the same — and an entry claiming a victim's holder can supersede
+offers that are not its own. Neither is fixable inside this package.
+
+It also cannot see an absence: a set holding only a stale, expensive offer resolves as
+live with no diagnostic at all, because a feed that withholds the successor looks exactly like
+one where none exists — a further reason the set itself has to come from somewhere you trust.
 
 ## Two consequences worth stating plainly
 

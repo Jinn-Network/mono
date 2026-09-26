@@ -5,7 +5,7 @@
  * assembles and streams the .tar.gz. The decompress-and-grep-for-planted-
  * secrets assertion is the binding end-to-end redaction gate.
  */
-import { describe, expect, it, afterEach } from 'vitest';
+import { describe, expect, it, afterEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import { gunzipSync } from 'node:zlib';
 import { Store } from '../../src/store/store.js';
@@ -164,5 +164,49 @@ describe('POST /v1/debug-report', () => {
     addDebugReportRoutes(app, depsFor(memoryStore()));
     const res = await app.request('/v1/debug-report', { method: 'POST' });
     expect(res.status).toBe(200);
+  });
+});
+
+/**
+ * Pins the catch path that writes `status.message` from a thrown gather
+ * error. The route does not mask at the catch — `assembleDebugReport` runs
+ * `redactValue` over the payload — so this is the bundle dialect, not
+ * `sanitizeErrorText`. Isolated from the rest of the file via resetModules
+ * + doMock so the top-level route import is left alone.
+ */
+describe('POST /v1/debug-report status.json gather failure (#4248)', () => {
+  afterEach(() => {
+    vi.doUnmock('../../src/api/gather-status.js');
+    vi.resetModules();
+    vi.restoreAllMocks();
+  });
+
+  it('keeps the RPC host and strips the key-in-path from status.message', async () => {
+    const host = 'base-mainnet.paid-provider.example';
+    const secret = 'SUPERSECRETKEY1234567';
+    vi.resetModules();
+    vi.doMock('../../src/api/gather-status.js', () => ({
+      gatherStatusForApi: async () => {
+        throw new Error(`HTTP request failed. URL: https://${host}/v2/${secret}`);
+      },
+    }));
+    const { addDebugReportRoutes: addRoutes } = await import('../../src/api/debug-report-endpoint.js');
+    const app = new Hono();
+    addRoutes(app, depsFor(memoryStore()));
+    const res = await app.request('/v1/debug-report', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(200);
+    const entries = readTarEntries(gunzipSync(Buffer.from(await res.arrayBuffer())));
+    const statusEntry = entries.find((e) => e.name.endsWith('status.json'));
+    expect(statusEntry).toBeDefined();
+    const statusJson = JSON.parse(statusEntry!.content.toString('utf8')) as {
+      error?: string;
+      message?: string;
+    };
+    expect(JSON.stringify(statusJson)).not.toContain(secret);
+    expect(statusJson.message).toContain(host);
   });
 });

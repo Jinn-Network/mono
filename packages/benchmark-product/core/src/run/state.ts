@@ -184,6 +184,8 @@ export const AdditionalBundleIdentitySchema = z.object({
     "integrity-anchors",
     /** Recorded only by a disclosed publication (issue #2839). Additive in the same way. */
     "disclosure-specification",
+    /** Recorded only by an imported-run publication (issue #3417). Additive in the same way. */
+    "external-import",
   ])),
 });
 
@@ -248,6 +250,8 @@ export const RunStateSchema = z.object({
     "integrity-anchors",
     /** Recorded only by a disclosed publication (issue #2839). Additive in the same way. */
     "disclosure-specification",
+    /** Recorded only by an imported-run publication (issue #3417). Additive in the same way. */
+    "external-import",
   ])).optional(),
   /** N-1 additional public bundle identities, one per additional Report, set at `publish` in the
    * SAME invocation as the canonical `bundleIdentity`/`bundleRelativePath`/`bundleChecks` triple
@@ -490,6 +494,19 @@ export function writeRunState(workspaceDir: string, draftId: string, state: RunS
       ) {
         refuse("conflict", `runs.${draftId}.binding`, "a recorded beacon binding cannot be changed — a run binds once");
       }
+    }
+    // Bind-before-launch, durably (issue #3334). `runBind` refuses a launched run too, but its
+    // check reads a snapshot and writes later, so a `bind` that read the state before `runLaunch`
+    // stamped `launchedAt` can still land after it — recording a binding whose derived order the
+    // run never dispatched in, and a census sentence asserting post-seal randomness for a run that
+    // ran in the operator's own sealed order. This is the same standard the write-once rule above
+    // holds bind-vs-bind to, applied to bind-vs-launch, and it holds for any writer.
+    if (current?.launchedAt !== undefined && current.binding === undefined && result.data.binding !== undefined) {
+      refuse(
+        "conflict",
+        `runs.${draftId}.binding`,
+        "this run has already launched — a beacon chosen after execution began binds nothing",
+      );
     }
     if (current?.publication !== undefined) {
       const stages = [current.publication.registration, current.publication.accounting, current.publication.matrixV2, current.publication.report];

@@ -43,7 +43,7 @@ Three single-select fields on the "Jinn engineering" Project (v2), project numbe
 - **Effort** — `Low` / `Medium` / `High`. Default for new items: `Medium`.
 - **Priority** — `P0` / `P1` / `P2` / `P3` / `P4`. Default for new items: `P2`.
 
-The ready-queue filter in the `eng-day` skill consults the **Blocked on** field; only items with `Blocked on = Nothing` are top-3-eligible. **Priority** and **Effort** are ranking / surfacing inputs (see the `eng-day` skill's "Routing signals" sub-section).
+The ready queue consults the **Blocked on** field; only items with `Blocked on = Nothing` are pickup-eligible. **Priority** and **Effort** are ranking / surfacing inputs (see [`docs/engineering/handbook.md`](../engineering/handbook.md) §Routing axes — Project fields).
 
 To re-verify from the CLI:
 

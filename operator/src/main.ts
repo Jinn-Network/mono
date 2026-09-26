@@ -11,9 +11,9 @@
  *   3. Built-in defaults
  *
  * Keystore password (used to encrypt the wallet at rest) resolves in this
- * order: JINN_PASSWORD env var → ~/.jinn-client/keystore-password file →
- * auto-generated random value (persisted mode 0600 to that same file). A
- * brand-new operator can run `jinn run` with no env var and no input.
+ * order: JINN_PASSWORD env var → <earningDir>/keystore-password → legacy
+ * ~/.jinn-operator/keystore-password → auto-generated into the primary file.
+ * A brand-new operator can run `jinn run` with no env var and no input.
  *
  * Canonical operator command:
  *   jinn run
@@ -25,7 +25,9 @@ import { homedir, hostname, userInfo } from 'node:os';
 import { randomBytes as cryptoRandomBytes, randomUUID as cryptoRandomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
+import { loadConfig, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
+import { requireConfigPathFromArgs } from './config/path-args.js';
+import { readKeystorePasswordFile, writePrimaryKeystorePassword } from './earning/password-file.js';
 import { writeConfigFileAtomic } from './config/atomic-write.js';
 import { resolveApiBindHost, isLoopbackBindHost } from './preflight/api-bind-host.js';
 import { Store } from './store/store.js';
@@ -35,7 +37,7 @@ import { setDefaultTxSubmissionLedger, withEoaBroadcastLock } from './tx-retry.j
 // (jinn-mono-u34i). No direct import needed.
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import { ensureUiTokenRecord, defaultTokenPath } from './api/ui-token.js';
-import { daemonApiTokenPath, ensureDaemonApiToken } from './api/daemon-token.js';
+import { daemonApiTokenPath, resolveDaemonApiToken } from './api/daemon-token.js';
 import { decideUiAutoOpen } from './cli/ui-auto-open-gate.js';
 import { getFileLogger, closeFileLogger } from './observability/file-logger.js';
 import { emitProgress } from './observability/progress.js';
@@ -54,12 +56,14 @@ import { applyDeploymentReadinessGate } from './preflight/deployment-readiness.j
 import { ensureStableCwd } from './preflight/stable-cwd.js';
 import { detectAuthContext } from './preflight/claude-auth.js';
 import { FleetBootstrapper, recoverEvictedService as recoverEvictedServiceFn } from './earning/bootstrap.js';
-import { runFleetBootstrap, runBootstrapWithDegradeOpen } from './earning/bootstrap-run.js';
+import { runFleetBootstrap, runBootstrapWithDegradeOpen, resolveDegradedStart } from './earning/bootstrap-run.js';
 import { isEconomicBootstrapHalt, isPendingMasterFundingHalt } from './earning/bootstrap-halt-classification.js';
 import { startDegradedRecoveryLoops } from './daemon/degraded-recovery.js';
 import {
   setDaemonReadiness,
   getDaemonReadiness,
+  setDegradedRecoveryRunning,
+  getDegradedRecoveryRunning,
   buildLoopMetricsSnapshot,
 } from './daemon/loop-heartbeat.js';
 import { applyChainGasOverrides, getChainConfig } from './earning/contracts.js';
@@ -171,12 +175,31 @@ if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'dev
   dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
 }
 
-// ── Password (env > file > auto-generated) ─────────────────────────────────
+// ── Load config (before password so auto-gen lands next to this earning dir) ─
+// Never generate a keystore password before loadConfig: the primary file is
+// join(config.earningDir, 'keystore-password').
+
+let CONFIG_PATH: string | undefined;
+try {
+  CONFIG_PATH = requireConfigPathFromArgs();
+} catch (err) {
+  emitEnvelope({
+    code: 'invalid_invocation',
+    message: err instanceof Error ? err.message : String(err),
+    hint: 'Pass a config path or omit --config.',
+    exampleCli: 'jinn run --config ~/.jinn-operator/config.json',
+    details: { field: 'config' },
+  });
+}
+const config = loadConfig(CONFIG_PATH);
+
+// ── Password (env > primary earning-dir file > legacy host-wide file > auto-generated)
 //
 // Resolution order:
 //   1. JINN_PASSWORD env var (explicit operator-set, never in config files)
-//   2. ~/.jinn-client/keystore-password (file from a previous auto-gen)
-//   3. Auto-generate a 32-byte hex string, persist mode 0600, and reuse next run
+//   2. <earningDir>/keystore-password (primary auto-gen)
+//   3. ~/.jinn-operator/keystore-password (legacy host-wide fallback)
+//   4. Auto-generate into the primary path only
 //
 // Auto-generation matches `jinn run` CLI password behavior so a brand-new
 // operator can run `jinn run` with no env var, no setup, no input. The
@@ -184,7 +207,7 @@ if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'dev
 // plaintext on disk + encrypted keystore on the same disk only defends
 // against casual snooping. Treat the wallet as hot until rotated.
 
-function resolveOrGenerateKeystorePassword(): {
+function resolveOrGenerateKeystorePassword(earningDir: string): {
   password: string;
   source: 'env' | 'file' | 'generated';
   filePath?: string;
@@ -194,22 +217,17 @@ function resolveOrGenerateKeystorePassword(): {
     return { password: envPw, source: 'env' };
   }
 
-  const home = process.env['HOME'] ?? homedir();
-  const pwFilePath = join(resolveDefaultStateDir({ home }), 'keystore-password');
-  if (existsSync(pwFilePath)) {
-    const fromDisk = readFileSync(pwFilePath, 'utf-8').trim();
-    if (fromDisk.length > 0) {
-      return { password: fromDisk, source: 'file', filePath: pwFilePath };
-    }
+  const fromFile = readKeystorePasswordFile(earningDir, process.env);
+  if (fromFile) {
+    return { password: fromFile.password, source: 'file', filePath: fromFile.path };
   }
 
   const generated = cryptoRandomBytes(32).toString('hex');
-  mkdirSync(dirname(pwFilePath), { recursive: true, mode: 0o700 });
-  writeFileSyncMain(pwFilePath, generated + '\n', { mode: 0o600 });
-  return { password: generated, source: 'generated', filePath: pwFilePath };
+  const filePath = writePrimaryKeystorePassword(earningDir, generated);
+  return { password: generated, source: 'generated', filePath };
 }
 
-const passwordResolution = resolveOrGenerateKeystorePassword();
+const passwordResolution = resolveOrGenerateKeystorePassword(config.earningDir);
 const PASSWORD: string = passwordResolution.password;
 // Sub-commands (e.g. the embedded `init` invocation below) read JINN_PASSWORD
 // from env. Mirror our resolved value so they don't have to redo this dance.
@@ -223,11 +241,6 @@ if (passwordResolution.source === 'generated') {
   console.log('  To rotate: JINN_NEW_PASSWORD=<new> jinn keys change-password');
   console.log('━'.repeat(64));
 }
-
-// ── Load config ─────────────────────────────────────────────────────────────
-
-const CONFIG_PATH = getConfigPathFromArgs();
-const config = loadConfig(CONFIG_PATH);
 /**
  * One-swap M2 (#2461): the network AS WRITTEN, captured before the pre-launch clamp below rewrites
  * mainnet to testnet. `resolveFleetCompositionMode` gates on THIS value, not the clamped one — an
@@ -364,18 +377,25 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // 8-char prefix. The token is forwarded to the MCP subprocess via
   // `DAEMON_API_TOKEN` env so `acquire_artifact` and
   // `submit_restoration_result` can authenticate their calls back to the
-  // daemon.
-  const envToken = process.env['DAEMON_API_TOKEN']?.trim();
+  // daemon. An env-supplied token is written to the same file (issue #2418)
+  // so the hook never resolves a token this daemon has stopped accepting.
   const daemonApiTokenFilePath = daemonApiTokenPath(config.earningDir);
-  let apiToken: string;
-  if (envToken && envToken.length > 0) {
-    apiToken = envToken;
-  } else {
-    const resolved = ensureDaemonApiToken(daemonApiTokenFilePath);
-    apiToken = resolved.token;
-    const verb = resolved.source === 'generated' ? 'Generated' : 'Loaded';
-    console.log(`[main] ${verb} DAEMON_API_TOKEN at ${daemonApiTokenFilePath} (prefix=${apiToken.slice(0, 8)}...)`);
-  }
+  const resolvedApiToken = resolveDaemonApiToken({
+    path: daemonApiTokenFilePath,
+    envToken: process.env['DAEMON_API_TOKEN'],
+    warn: (message) => {
+      console.warn(`[main] ${message}`);
+    },
+  });
+  const apiToken = resolvedApiToken.token;
+  // An 8-char prefix identifies a >=32-char token without disclosing it. A
+  // shorter operator-supplied token is redacted outright: 8 characters of it
+  // could be the whole credential.
+  const tokenPrefix = apiToken.length >= 32 ? `${apiToken.slice(0, 8)}...` : '<redacted>';
+  console.log(
+    `[main] DAEMON_API_TOKEN source=${resolvedApiToken.source} file=${daemonApiTokenFilePath} ` +
+    `(${resolvedApiToken.persisted}, prefix=${tokenPrefix})`,
+  );
 
   // The keystore-presence probe happens twice: once now (to decide initial
   // setup-mode) and once after we run init below (to flip the controller).
@@ -658,6 +678,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // on ApiServerConfig in server.ts.
       getDaemonReadiness,
       getLoopSnapshot: () => buildLoopMetricsSnapshot(sharedStore),
+      getDegradedRecoveryRunning,
       hermesDoctor: {
         hermesPath: config.hermesPath,
         hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
@@ -718,9 +739,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       operatorArtifacts: {
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
         operatorConfig: operatorArtifactsConfig,
-        onOperatorConfigUpdated: (operator) => {
-          config.operator = operator;
-        },
       },
       // Issue #420: one-click operator debug report. The bundle assembler
       // reads the live resolved `config` so the download reflects env
@@ -1113,6 +1131,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     bootstrapResult = await runBootstrapWithDegradeOpen({
       runBootstrap: () => runFleetBootstrap({ config, password: PASSWORD, network: NETWORK_CHAIN, emitProgress }),
       setReadiness: setDaemonReadiness,
+      setDegradedRecoveryRunning,
       // #2407 / spec §5: degrade-open boot. An economic-class halt (funding
       // shortfall, incomplete fleet, a recoverable on-chain error) must not
       // leave the daemon fully dark while the caller awaits the retry signal
@@ -1127,12 +1146,16 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // mechAddress/safeAddress/composition/adapter resolved from a
       // COMPLETED bootstrap, none of which exist mid-halt — see
       // degraded-recovery.ts's docstring.
-      startDegraded: (envelope) => {
-        if (!isEconomicBootstrapHalt(envelope)) {
-          console.log('[main] Halt cause is integrity-class — staying fail-closed (no degraded recovery loops).');
-          return null;
-        }
-        try {
+      //
+      // #2425: the classify-then-start decision lives in
+      // `resolveDegradedStart` (bootstrap-run.ts) so it is unit-testable and
+      // so an economic halt whose loops FAIL to start is reported as
+      // `'start-failed'` rather than being flattened into the integrity
+      // halt's `'fail-closed'` — the latter left `/ready` at 503 and
+      // restart-looped a funding-halted daemon.
+      startDegraded: (envelope) => resolveDegradedStart(envelope, {
+        isEconomic: isEconomicBootstrapHalt,
+        start: () => {
           const handle = startDegradedRecoveryLoops({
             earningDir: config.earningDir,
             network: NETWORK_CHAIN,
@@ -1167,14 +1190,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               (isPendingMasterFundingHalt(envelope) ? ' balance-topup omitted (pending master-EOA funding halt).' : ''),
           );
           return handle;
-        } catch (degradedErr) {
-          console.error(
-            '[main] Failed to start degraded recovery loops (non-fatal — still waiting for retry):',
-            degradedErr instanceof Error ? degradedErr.message : degradedErr,
-          );
-          return null;
-        }
-      },
+        },
+      }),
       // hjex.6: Auto-resume funding poller. When the halt is a funding
       // shortfall, poll the master EOA balance every
       // JINN_FUNDING_POLL_INTERVAL_MS (default 15s). When the balance meets

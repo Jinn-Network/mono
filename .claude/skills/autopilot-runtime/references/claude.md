@@ -17,20 +17,10 @@ SESSION_REPORT_DIR="$(dirname -- "$JINN_AUTOPILOT_SESSION_MANIFEST")/reports"
 STAGE_PROMPT="$(mktemp "$SESSION_REPORT_DIR/stage-${STAGE_NUMBER}-${STAGE_NAME}.md.XXXXXX")"
 chmod 600 "$STAGE_PROMPT"
 # Write only this stage's curated prompt to "$STAGE_PROMPT".
-if [ -z "${JINN_AUTOPILOT_PACKAGE_DIR:-}" ]; then
-  echo "error: stage:run requires JINN_AUTOPILOT_PACKAGE_DIR (standalone Autopilot checkout)" >&2
-  exit 1
-fi
-case "${JINN_AUTOPILOT_PACKAGE_DIR%/}" in
-  */packages/autopilot|packages/autopilot)
-    echo "error: JINN_AUTOPILOT_PACKAGE_DIR must not point at the retired vendored tree" >&2
-    exit 1
-    ;;
-esac
-(cd "$JINN_AUTOPILOT_PACKAGE_DIR" && yarn stage:run \
+autopilot internal run-stage \
   --prompt-file "$STAGE_PROMPT" \
   --worktree "$WORKTREE_PATH" \
-  [--model <model>])
+  [--model <model>]
 rm -f -- "$STAGE_PROMPT"
 ```
 
@@ -40,7 +30,7 @@ each receive their own `mktemp` result.
 
 Each invocation is a distinct root process. Use a separate invocation whenever
 the workflow requires a fresh independent context or internal fan-out.
-`stage:run` removes the coordinator's GitHub credentials, Git/SSH publication
+`autopilot internal run-stage` removes the coordinator's GitHub credentials, Git/SSH publication
 paths, and session manifest before spawning the root. Do not launch a fresh
 root directly in a way that bypasses that environment boundary.
 

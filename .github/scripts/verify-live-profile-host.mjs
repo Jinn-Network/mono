@@ -38,9 +38,9 @@
 // entry is guarded so `import` is side-effect-free.
 
 import { createHash, createPublicKey, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { assertLiteralRoutePath, assertReleaseGroupSegment } from './build-profile-host-bundle.mjs';
 import { canonicalJsonBytes, catalogSha256 } from './build-prepublication-bundle.mjs';
@@ -632,7 +632,11 @@ export function parseArgs(argv) {
   return parsed;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   let result;
   try {
     const args = parseArgs(process.argv.slice(2));

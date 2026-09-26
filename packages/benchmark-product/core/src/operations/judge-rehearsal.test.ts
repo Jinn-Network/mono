@@ -17,13 +17,12 @@ import {
 } from "@jinn-network/benchmarking-records";
 import {
   BUNDLE_QUALIFICATION_FORMAT,
-  BUNDLE_V4_FORMAT,
+  BUNDLE_V10_FORMAT,
   BundleQualificationSchema,
   verifyPublicBundle,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { buildBundleManifest } from "../bundle/manifest.js";
-import { BUNDLE_V4_FORMAT as CORE_BUNDLE_V4_FORMAT } from "../legacy-closures.js";
 import { findBundleLeaks } from "../bundle/testing/leak-scan.js";
 import { createSyntheticV4BundleFixture } from "../bundle/testing/v4-synthetic-fixture.js";
 import {
@@ -37,7 +36,7 @@ import {
 import {
   PROMPTED_SCREENING_LIMITATIONS,
   PROMPTED_SCREENING_PROFILE,
-} from "../human-review/contracts.js";
+} from "@colophon-claims/check/admission";
 import { CERTIFICATION_ACCOUNTING_DIVERGENCE_SENTENCE } from "../runtime/suite-protocol/comparability.js";
 import { readRunState } from "../run/state.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
@@ -47,7 +46,7 @@ import { exportDerivedBundle } from "./method.js";
 import { runPublish } from "./publish.js";
 
 const EXTERNAL_VERIFY_SCRIPT = fileURLToPath(
-  new URL("../../node_modules/@colophon-claims/verify/scripts/external-verify.py", import.meta.url),
+  new URL("../../node_modules/@colophon-claims/check/scripts/external-verify.py", import.meta.url),
 );
 const EXTERNAL_VERIFY_CHECKS = [
   "manifest-files", "cas-records", "sealed-bytes", "report-signature",
@@ -128,9 +127,12 @@ function rewriteManifest(bundleDir: string): void {
   for (const record of evidence.records as Array<{ sha256: string }>) {
     paths.add(`records/${record.sha256}.bin`);
   }
+  const capabilities = Array.isArray(prior.capabilities)
+    ? (prior.capabilities as readonly string[])
+    : ["binary-qualification"];
   writeFileSync(
     join(bundleDir, "bundle.json"),
-    buildBundleManifest(bundleDir, [...paths], { format: CORE_BUNDLE_V4_FORMAT }).bytes,
+    buildBundleManifest(bundleDir, [...paths], { format: BUNDLE_V10_FORMAT, capabilities }).bytes,
   );
 }
 
@@ -194,6 +196,7 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     const fixture = await createSyntheticV4BundleFixture({
       workspaceDir,
       truthAdmission: "operator-only",
+      composedFormat: true,
     });
     const copied = mkdtempSync(join(tmpdir(), "judge-p8-four-arm-cold-"));
     roots.push(copied);
@@ -202,8 +205,9 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     expect(existsSync(workspaceDir)).toBe(false);
 
     const verified = await verifyPublicBundle(copied);
-    expect(verified.format).toBe(BUNDLE_V4_FORMAT);
-    if (verified.format !== BUNDLE_V4_FORMAT || verified.qualification === undefined) throw new Error("expected V4 qualification bundle");
+    expect(verified.format).toBe(BUNDLE_V10_FORMAT);
+    if (verified.format !== BUNDLE_V10_FORMAT || verified.qualification === undefined) throw new Error("expected V10 qualification bundle");
+    expect(verified.capabilities).toEqual(["binary-qualification"]);
     expect(verified.qualification.armCount).toBe(4);
     expect(verified.qualification.strata).toEqual(["core", "stress"]);
 
@@ -332,8 +336,9 @@ describe("packet P8 judge rehearsal (#2847)", () => {
       const verified = await verifyPublicBundle(bundle.dir);
       expect(verified.checks).toContain("claim-consistency");
       if (bundle.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {
-        expect(verified.format).toBe(BUNDLE_V4_FORMAT);
-        if (verified.format !== BUNDLE_V4_FORMAT || verified.qualification === undefined) throw new Error("primary rehearsal bundle must stay on the V4 qualification path");
+        expect(verified.format).toBe(BUNDLE_V10_FORMAT);
+        if (verified.format !== BUNDLE_V10_FORMAT || verified.qualification === undefined) throw new Error("primary rehearsal bundle must stay on the V10 qualification path");
+        expect(verified.capabilities).toEqual(["binary-qualification"]);
         expect(verified.qualification.armCount).toBe(6);
         expect(verified.qualification.truthAdmission).toBe("screened-operator-sampled");
         expect(verified.qualification.exclusionCount).toBe(1);
@@ -356,8 +361,8 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     expect(records[0]!.runSha256).toBe(fixture.runSha256);
     expect(records[0]!.matrixSha256).toBe(fixture.matrixSha256);
     for (const claim of claims) {
-      expect(claim.verification.command).toBe("npx @colophon-claims/verify@0.2.1 <bundle-dir>");
-      expect(claim.verification.compatibleCommand).toBe("npx @colophon-claims/verify@0.2 <bundle-dir>");
+      expect(claim.verification.command).toBe("npx @colophon-claims/check@0.2.1 <bundle-dir>");
+      expect(claim.verification.compatibleCommand).toBe("npx @colophon-claims/check@0.2 <bundle-dir>");
     }
 
     const readoutNames = [...claims.map((claim) => readoutName(String(claim.method.id), String(claim.method.version)))].sort();

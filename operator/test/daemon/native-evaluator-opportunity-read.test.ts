@@ -30,12 +30,6 @@ import {
   deriveMarketplaceAttemptUri,
 } from '@jinn-network/marketplace-binding';
 import { documentDigest, sealDelivery } from '@jinn-network/task-execution-protocol';
-import type {
-  BindingResolver,
-  DsseChainVerifier,
-  PolicyCheckInput,
-  WitnessVerifier,
-} from '@jinn-network/trust-core';
 import { Store } from '../../src/store/store.js';
 import { NativeMarketplaceEventRepository } from '../../src/daemon/native-canonical-observations.js';
 import {
@@ -46,7 +40,7 @@ import {
 import { buildNativeEvaluatorOpportunityReader } from '../../src/daemon/native-evaluator-opportunity-source.js';
 import { NativeRecordDestinationError } from '../../src/daemon/native-base-sepolia-infrastructure.js';
 import type { NativeRecordSource } from '../../src/config/native-sections.js';
-import type { NativeTrustAuthority } from '../../src/daemon/native-trust-catalog.js';
+import { fakeTrust } from '../_support/native-trust.js';
 
 const COORDINATOR = BASE_SEPOLIA_TODAY.taskCoordinator as `0x${string}`;
 const ROUTER = `0x${'7'.repeat(40)}` as const;
@@ -61,28 +55,6 @@ const SOURCES: readonly NativeRecordSource[] = [
   { role: 'requester', agent: REQUESTER_AGENT, name: 'requester-records', baseUrl: 'https://requester-a.example' },
   { role: 'solver', agent: SOLVER_AGENT, name: 'solver-records', baseUrl: 'https://solver-b.example' },
 ];
-
-function fakeTrust(): NativeTrustAuthority {
-  const bindingResolver: BindingResolver = { async resolveBinding() { return null; } };
-  const witnessVerifier: WitnessVerifier = {
-    async verify1271Witness() { return { verified: false, reason: 'fixture never verifies' }; },
-  };
-  const dsseVerifier: DsseChainVerifier = () => ({ validSignerKeyids: [] });
-  return {
-    bindingResolver,
-    dsseVerifier,
-    witnessVerifier,
-    conflicts: [],
-    newestPolicyVersion: 1,
-    rawSignatureVerifier: { async verify() { return false; } },
-    async assertFresh() { /* no-op fixture */ },
-    candidateKeys() { return []; },
-    policy(purpose) { return { accepted: [`accepted-for-${purpose}`], requiredStrength: 'strong' } as PolicyCheckInput; },
-    async verifyRoleBinding() { return { bindingDigest: `sha256:${'0'.repeat(64)}` as const }; },
-    async verifyOnchainAuthority() { return { bindingDigest: `sha256:${'0'.repeat(64)}` as const }; },
-    resolverFor() { return bindingResolver; },
-  } as unknown as NativeTrustAuthority;
-}
 
 /** One engagement: an on-chain posting, its Delivery bytes, and the two signed solver cards. */
 interface Engagement {

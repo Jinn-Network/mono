@@ -821,6 +821,36 @@ describe('gatherStatusForApi', () => {
     });
   });
 
+  it('security.lastPasswordRotationAt prefers the primary filePath when both files exist', async () => {
+    mockStatusRpc();
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+    const { writeFileSync, utimesSync, mkdirSync } = await import('node:fs');
+    await withTempStore(async (store) => {
+      const home = mkdtempSync(join(tmpdir(), 'jinn-pw-both-'));
+      const earningDir = join(home, 'earning');
+      mkdirSync(earningDir, { recursive: true });
+      const primaryPath = join(earningDir, 'keystore-password');
+      const legacyPath = join(home, 'keystore-password');
+      writeFileSync(primaryPath, 'primary\n', { mode: 0o600 });
+      writeFileSync(legacyPath, 'legacy\n', { mode: 0o600 });
+      const primaryWhen = new Date('2024-06-01T00:00:00.000Z');
+      const legacyWhen = new Date('2020-01-01T00:00:00.000Z');
+      utimesSync(primaryPath, primaryWhen, primaryWhen);
+      utimesSync(legacyPath, legacyWhen, legacyWhen);
+
+      const status = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        passwordRotation: { source: 'file', filePath: primaryPath },
+      });
+
+      expect(status.security.lastPasswordRotationAt).toBe('2024-06-01T00:00:00.000Z');
+    });
+  });
+
   it('security.lastPasswordRotationAt is null when the password is env-sourced', async () => {
     mockStatusRpc();
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
@@ -1032,6 +1062,43 @@ describe('gather-status RPC error masking (spec §14.2 item 2, issue #2402)', ()
         .find((e) => e.role === 'service.0.agent');
       expect(cacheEntry?.error).toContain('base-mainnet.g.alchemy.com');
       expect(cacheEntry?.error).not.toContain('SECRETKEY123');
+    });
+  });
+
+  it('masks a nested-cause RPC URL that never appears on the top-level message', async () => {
+    vi.doMock('viem', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('viem')>();
+      const throwNested = () => {
+        const outer = new Error('The request failed.');
+        (outer as { cause?: unknown }).cause = new Error(`HTTP request failed. URL: ${LEAKY_URL}`);
+        throw outer;
+      };
+      return {
+        ...actual,
+        createPublicClient: () => ({
+          getBlockNumber: async () => throwNested(),
+          getChainId: async () => throwNested(),
+          getBalance: async () => throwNested(),
+          readContract: async () => throwNested(),
+        }),
+        http: () => ({}),
+      };
+    });
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      const earningDir = mkdtempSync(join(tmpdir(), 'jinn-mask-nested-'));
+      const status = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: LEAKY_URL,
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+
+      expect(JSON.stringify(status)).not.toContain('SECRETKEY123');
+      expect(status.rpc.error).not.toContain('SECRETKEY123');
+      expect(status.rpc.error).toContain('base-mainnet.g.alchemy.com');
     });
   });
 });

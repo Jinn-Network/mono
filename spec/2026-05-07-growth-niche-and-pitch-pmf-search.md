@@ -1,3 +1,5 @@
+> **Status (2026-09-24): superseded by [spec/2026-05-07-growth-cluster-tightening-coding-agents.md](2026-05-07-growth-cluster-tightening-coding-agents.md) and the 2026-06-02 growth deprecation ([growth/archive/README.md](../growth/archive/README.md)).** Its §3 audience cluster ("open-source agentic project contributors") was tightened the same day to "open-source coding agent contributors", the growth approach it amended was archived on 2026-06-02, and the 2026-07-07 rewrite retired the target-cluster and GTM-phase framing ([GROWTH.md](../GROWTH.md), revision note). For the current direction read [GROWTH.md](../GROWTH.md).
+
 - **Date:** 2026-05-07
 - **Author:** Oak (with Claude)
 - **Status:** Proposal

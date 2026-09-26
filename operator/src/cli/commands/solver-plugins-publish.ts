@@ -9,7 +9,7 @@
  * funding the EOA and re-running is the expected resolution.
  *
  * Pipeline:
- *   1. resolveCliPassword (env > keystore-password file > prompt-fd)
+ *   1. loadConfig, then resolveCliPassword (env > primary/legacy file > prompt-fd)
  *   2. resolveSolverPlugin(source) → loaded plug-in metadata + sha256
  *   3. pack tarball into a temp dir, capturing pluginSha256
  *   4. bootstrapper.ensureStage1(password) — lazy; no-op if already stage1+
@@ -48,20 +48,6 @@ export async function publishHandler(
   opts: PublishOptions,
   deps: SolverPluginsDeps,
 ): Promise<void> {
-  const passwordResult = deps.resolveCliPassword(ctx.argv, ctx.env);
-  if (!passwordResult.ok) {
-    writeJson(ctx, {
-      error: {
-        code: 'keystore_missing',
-        message:
-          'Could not resolve password. Set JINN_PASSWORD, write ~/.jinn-client/keystore-password, or pass --password-fd.',
-      },
-    });
-    ctx.exit(1);
-    return;
-  }
-  const password = passwordResult.password;
-
   let config: ReturnType<typeof deps.loadConfig>;
   try {
     config = deps.loadConfig(opts.configPath);
@@ -75,6 +61,20 @@ export async function publishHandler(
     ctx.exit(1);
     return;
   }
+
+  const passwordResult = deps.resolveCliPassword(ctx.argv, ctx.env, { earningDir: config.earningDir });
+  if (!passwordResult.ok) {
+    writeJson(ctx, {
+      error: {
+        code: 'keystore_missing',
+        message:
+          'Could not resolve password. Set JINN_PASSWORD, write <earningDir>/keystore-password, or pass --password-fd.',
+      },
+    });
+    ctx.exit(1);
+    return;
+  }
+  const password = passwordResult.password;
 
   // 1. Resolve plug-in.
   let loaded: Awaited<ReturnType<typeof resolveSolverPlugin>>;

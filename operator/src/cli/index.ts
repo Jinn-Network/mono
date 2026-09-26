@@ -57,6 +57,8 @@ import onboardingCompleteCommand from './commands/onboarding-complete.js';
 import policyCommand from './commands/policy.js';
 import wiringCommand from './commands/wiring.js';
 import restartCommand from './commands/restart.js';
+import supplyCommand from './commands/supply.js';
+import requesterCommand from './commands/requester.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -102,6 +104,8 @@ const COMMANDS: CommandModule[] = [
   policyCommand,
   wiringCommand,
   restartCommand,
+  supplyCommand,
+  requesterCommand,
 ];
 
 /**

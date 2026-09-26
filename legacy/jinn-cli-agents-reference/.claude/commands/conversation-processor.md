@@ -1,1 +1,0 @@
-../../skills/conversation-processor/SKILL.md

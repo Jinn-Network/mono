@@ -37,20 +37,22 @@
 import { z } from "zod";
 import { Buffer } from "node:buffer";
 import { validateBinaryInstrumentQualificationProjection } from "@jinn-network/benchmarking-aggregate";
-import { BENCHMARKING_METHOD_IDS, BENCHMARKING_METHOD_VERSION } from "@jinn-network/benchmarking-records";
+import { BENCHMARKING_METHOD_IDS, BENCHMARKING_METHOD_VERSION, compareCodeUnitStrings } from "@jinn-network/benchmarking-records";
 import type { MatrixRecord, ReportRecord, RunRecord } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
+import type { ClaimAnchor, ClaimDisclosureSection, ClaimExternalImportSection } from "@colophon-claims/check";
 import {
+  CAPABILITY_REGISTRY,
   ClaimAnchorSchema,
   ClaimDisclosureSectionSchema,
+  ClaimExternalImportSectionSchema,
   PROMPTED_SCREENING_PROFILE,
   PUBLIC_BUNDLE_V8_CHECKS as READER_DISCLOSED_VERIFICATION_CHECKS,
-  PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND,
-  PUBLIC_BUNDLE_V9_VERIFICATION_COMMAND,
   SELF_RUN_TRUST_ROOT,
   anchoredTrustRoot,
-} from "@colophon-claims/verify";
-import type { ClaimAnchor, ClaimDisclosureSection } from "@colophon-claims/verify";
+  composeClosure,
+  readerInstructions,
+} from "@colophon-claims/check";
 import {
   ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
   ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
@@ -104,6 +106,20 @@ export {
  * than in `../legacy-closures.ts`.
  */
 export const DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/6";
+/**
+ * The composed generation's shared claim package (bundle-capability-composition design §8, issue
+ * #3403), carried by `benchmark-product-public-bundle/10`: claim-package/1's base plus one optional
+ * section per capability, under the biconditional rule — capability declared ⟺ its section
+ * present. It is the last claim-package id a capability pairing costs: from here a capability
+ * contributes a section key, never an id.
+ *
+ * The design names `/6`, which the disclosed closure had taken by the time this landed (issue
+ * #2839), so this is the next free number — the number the later designs that register
+ * capabilities in this generation already name. Section CONTENTS are unchanged: the F6
+ * qualification projection, the `anchors` section, and the `disclosure` section move across
+ * verbatim. The allocation is an ADDITION: /1 through /6 keep their meanings and their bytes.
+ */
+export const COMPOSED_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/7";
 
 const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/, "must be a lowercase sha256 hex digest");
 
@@ -268,6 +284,7 @@ const ClaimPackageWireSchema = z.object({
     z.literal(ANCHORED_CLAIM_PACKAGE_SCHEMA_ID),
     z.literal(ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID),
     z.literal(DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID),
+    z.literal(COMPOSED_CLAIM_PACKAGE_SCHEMA_ID),
   ]),
   scope: z.object({
     draftId: z.string().min(1),
@@ -338,6 +355,10 @@ const ClaimPackageWireSchema = z.object({
    * claim-package/6 — the refine below refuses it on every earlier allocation, so a claim cannot
    * grow a disclosure section without moving to the closure whose check reads it. */
   disclosure: ClaimDisclosureSectionSchema.optional(),
+  /** issue #3417: present exactly when the composed vector declares `external-import`. The refine
+   * below refuses it on every earlier allocation. Contents are the marker's projection, never a
+   * second opinion. */
+  externalImport: ClaimExternalImportSectionSchema.optional(),
   /** Optional Colophon suite-protocol bits. Not Report v2 required fields. */
   suiteComparability: z.object({
     executionConformance: z.boolean(),
@@ -350,7 +371,12 @@ const ClaimPackageWireSchema = z.object({
   // The disclosed allocation is the anchored binary one plus a section, so it inherits BOTH parents'
   // rules by falling through every branch below that /5 falls through (issue #2839).
   const disclosedClosure = claim.claimSchema === DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID;
-  if (!disclosedClosure && claim.disclosure !== undefined) {
+  // The composed allocation carries each capability section exactly when its bundle's vector
+  // declares the capability, so no section is illegal on it by id alone. WHICH sections a given
+  // bundle must carry is settled by `claim-consistency`, which rebuilds the claim from the vector
+  // the bundle's own manifest declares — read from the bundle, never from the claim under test.
+  const composedClosure = claim.claimSchema === COMPOSED_CLAIM_PACKAGE_SCHEMA_ID;
+  if (!disclosedClosure && !composedClosure && claim.disclosure !== undefined) {
     ctx.addIssue({
       code: "custom",
       message: `only ${DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID} carries a disclosure section`,
@@ -368,12 +394,19 @@ const ClaimPackageWireSchema = z.object({
       path: ["disclosure"],
     });
   }
+  if (!composedClosure && claim.externalImport !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "only the composed claim-package/7 allocation carries an externalImport section",
+      path: ["externalImport"],
+    });
+  }
   const anchoredClosure = claim.claimSchema === ANCHORED_CLAIM_PACKAGE_SCHEMA_ID
     || claim.claimSchema === ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID
     // /6 is /5 plus a disclosure section, so it is anchored by inheritance: it carries the anchors
     // section under the same presence rule, and an omitted one refuses identically.
     || disclosedClosure;
-  if (!anchoredClosure && claim.anchors !== undefined) {
+  if (!anchoredClosure && !composedClosure && claim.anchors !== undefined) {
     ctx.addIssue({
       code: "custom",
       message: `only ${ANCHORED_CLAIM_PACKAGE_SCHEMA_ID} and ${ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID} carry an anchors section`,
@@ -391,6 +424,64 @@ const ClaimPackageWireSchema = z.object({
       message: `${claim.claimSchema} must carry its anchors section, even when the section is empty`,
       path: ["anchors"],
     });
+  }
+  if (composedClosure) {
+    // One guard parameterized by the vector, where every earlier allocation has a hand-written
+    // block below (design §8). The vector is the one the claim's own sections imply, and the pins
+    // are whatever the registry derives from it, so a claim cannot state a check list or a reader
+    // line that its own sections do not compose to.
+    const implied = CAPABILITY_REGISTRY
+      .filter((capability) => (claim as Readonly<Record<string, unknown>>)[capability.claimSection] !== undefined)
+      .map((capability) => capability.token)
+      .sort(compareCodeUnitStrings);
+    let pinned: { readonly checks: readonly string[]; readonly command: string; readonly compatibleCommand: string };
+    try {
+      pinned = { checks: composeClosure(implied).checks, ...readerInstructions(implied) };
+    } catch (cause) {
+      // The sections name a combination the registry does not admit — a disclosure section with no
+      // qualification to ride on. Resolution refuses it, and so does the claim.
+      ctx.addIssue({ code: "custom", message: cause instanceof Error ? cause.message : String(cause), path: ["claimSchema"] });
+      return;
+    }
+    if (
+      claim.verification.command !== pinned.command
+      || claim.verification.compatibleCommand !== pinned.compatibleCommand
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "composed claim package must pin the reader release its capability sections derive",
+        path: ["verification"],
+      });
+    }
+    if (
+      claim.verification.checks.length !== pinned.checks.length
+      || claim.verification.checks.some((check, index) => check !== pinned.checks[index])
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "composed claim package must state the six base checks plus each carried capability's, in registry order",
+        path: ["verification", "checks"],
+      });
+    }
+    // Without a qualification this is the headline/comparison family, exactly as /1 and /4 are.
+    // With one — or with a binary-instrument method that ought to carry one — it falls through to
+    // the binary projection rules every qualification-projecting allocation shares.
+    if (claim.qualification === undefined && claim.method.id !== BENCHMARKING_METHOD_IDS.binaryInstrument) {
+      if (
+        claim.headline === undefined
+        && claim.comparison === undefined
+        && claim.pairwiseDisagreement === undefined
+        && claim.pairedMajorityDelta === undefined
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          message: "claim package must carry headline (wilson@1), comparison (paired-delta@1), "
+            + "pairwiseDisagreement (pairwise-disagreement@1), or pairedMajorityDelta (paired-majority-delta@1)",
+          path: ["headline"],
+        });
+      }
+      return;
+    }
   }
   if (claim.claimSchema === ANCHORED_CLAIM_PACKAGE_SCHEMA_ID) {
     if (claim.qualification !== undefined) {
@@ -413,25 +504,11 @@ const ClaimPackageWireSchema = z.object({
         path: ["headline"],
       });
     }
-    // Two lines, because claim-package/4 is carried by two bundle formats that differ only in the
-    // page they render (issue #3698): `/6`, whose reader is the first public `0.1` line, and `/9`,
-    // whose page states the denominator pair and reads on the `0.2` line. The claim carries no
-    // format literal, so from the claim alone either pin is honest -- the same shape the
-    // prompted-screening guard already has, where a historical `0.2.0` line stays acceptable
-    // alongside the current one. Nothing is lost by admitting both: inside a bundle the format IS
-    // known, and `claim-consistency` rebuilds `verification` from it, so a `/6` bundle carrying a
-    // `/9` claim (or the reverse) fails there on the exact field that disagrees.
     if (
-      (
-        claim.verification.command !== PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
-        || claim.verification.compatibleCommand !== PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND
-      )
-      && (
-        claim.verification.command !== PUBLIC_BUNDLE_V9_VERIFICATION_COMMAND
-        || claim.verification.compatibleCommand !== PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND
-      )
+      claim.verification.command !== PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
+      || claim.verification.compatibleCommand !== PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND
     ) {
-      ctx.addIssue({ code: "custom", message: "anchored claim package must pin verifier 0.1.0/@0.1 (a /6 bundle) or 0.2.1/@0.2 (a /9 bundle)", path: ["verification"] });
+      ctx.addIssue({ code: "custom", message: "anchored claim package must pin verifier 0.1.0/@0.1", path: ["verification"] });
     }
     if (
       claim.verification.checks.length !== READER_ANCHORED_VERIFICATION_CHECKS.length
@@ -511,6 +588,8 @@ const ClaimPackageWireSchema = z.object({
   if (!exactResult) {
     ctx.addIssue({ code: "custom", message: "qualification must exactly equal the Report's one F6 per-subject result", path: ["qualification"] });
   }
+  // The composed allocation's pins were settled by its own guard above.
+  if (composedClosure) return;
   if (
     claim.claimSchema === ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID
     || disclosedClosure
@@ -588,7 +667,7 @@ function exactBinaryClaimControls(input: Record<string, unknown>): boolean {
   // generic control-shape failure. Neither field is ever set on an actual binary-instrument claim
   // (`methodProjection`'s dispatch is exclusive), so admitting them here is defense in depth, not
   // a widening any real claim exercises.
-  return exactKeys(input, ["claimSchema", "scope", "records", "method", "results", "completeness", "attrition", "conflicted", "assurance", "disclosures", "limitations", "venueHonesty", "verification", "rehearsal", "qualification", "anchors", "disclosure", "pairwiseDisagreement", "pairedMajorityDelta"])
+  return exactKeys(input, ["claimSchema", "scope", "records", "method", "results", "completeness", "attrition", "conflicted", "assurance", "disclosures", "limitations", "venueHonesty", "verification", "rehearsal", "qualification", "anchors", "disclosure", "externalImport", "pairwiseDisagreement", "pairedMajorityDelta"])
     && exactKeys(scope, ["draftId", "benchmarkSha256", "taskCount", "arms", "replicates", "venue"])
     && Array.isArray((scope as { arms?: unknown }).arms)
     && ((scope as { arms: unknown[] }).arms).every((arm) => exactKeys(arm, ["armId", "pinning"]))
@@ -613,9 +692,16 @@ const BINARY_CLAIM_PACKAGE_SCHEMA_IDS: readonly unknown[] = [
   DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID,
 ];
 
+/** The composed allocation passes through the same gate exactly when it projects a qualification:
+ * what the gate guards is the projection, and a composed claim carries it under one id, not three. */
+function projectsBinaryQualification(input: Record<string, unknown>): boolean {
+  return BINARY_CLAIM_PACKAGE_SCHEMA_IDS.includes(input.claimSchema)
+    || (input.claimSchema === COMPOSED_CLAIM_PACKAGE_SCHEMA_ID && input.qualification !== undefined);
+}
+
 export const ClaimPackageSchema = z.preprocess((input) => {
   if (typeof input === "object" && input !== null && !Array.isArray(input)
-    && BINARY_CLAIM_PACKAGE_SCHEMA_IDS.includes((input as { readonly claimSchema?: unknown }).claimSchema)
+    && projectsBinaryQualification(input as Record<string, unknown>)
     && !exactBinaryClaimControls(input as Record<string, unknown>)) {
     return { claimSchema: "invalid-binary-claim-control-shape" };
   }
@@ -665,34 +751,28 @@ export interface BuildClaimPackageInput {
    * here: this builder is pure, and the derivation needs the record bytes the caller already
    * authenticated. */
   readonly anchors?: readonly ClaimAnchor[];
+  /**
+   * The capability vector of the composed bundle this claim is for (issue #3403). **Supplying it at
+   * all** — even empty — makes this the composed generation's claim (claim-package/7), whose id,
+   * check list, and reader line are derived from the vector; omitting it leaves every existing
+   * claim byte-identical. The sections supplied must be exactly the ones the vector declares. On
+   * the reader path it is read from the BUNDLE's manifest, never from the claim under test — that
+   * is what makes a section the vector does not declare a difference rather than a tautology.
+   */
+  readonly composedCapabilities?: readonly string[];
   /** disclosure-specification-record design §6.6: the projected disclosure section, already derived
    * from the sealed record's exact bytes by the shared `deriveDisclosureSpecification`. Absent for
    * every run with no declaration, which is what keeps every existing claim byte-identical. */
   readonly disclosure?: ClaimDisclosureSection;
+  /** issue #3417: the projected external-import section, already derived from the authenticated
+   * marker. Absent for every driven run, which is what keeps every existing claim byte-identical. */
+  readonly externalImport?: ClaimExternalImportSection;
   /** Optional two-axis official-suite comparability. Absent unless a suite protocol is bound. */
   readonly suiteComparability?: {
     readonly executionConformance: boolean;
     readonly coverage: "one_task" | "ten_task" | "full" | "custom";
     readonly leaderboardSubmitReady: boolean;
   };
-  /**
-   * Which reader line an anchored, non-qualifying claim pins.
-   *
-   * Two bundle formats carry `benchmark-product.claim-package/4` -- `/6` and `/9` -- and they
-   * differ only in the page they render and the release that renders it (issue #3698), so which
-   * line the claim pins is not derivable from any record this builder reads. Unset means `/6`,
-   * which is the allocation every producer still emits and every anchored bundle so far published
-   * carries; `/9` is stated explicitly, by a reader rebuilding a `/9` bundle's sealed claim from
-   * the format its own manifest declares.
-   *
-   * The default is `/6` rather than the newer allocation because a pin is sealed forever: `/9`'s
-   * exact pin names `@colophon-claims/verify` at `0.2.1`, a published, immutable release that
-   * predates `/9` and refuses it at manifest parse. Nothing may seal that command until a release
-   * serving `/9` exists and `/9` pins it.
-   */
-  readonly anchoredBundleFormat?:
-    | "benchmark-product-public-bundle/6"
-    | "benchmark-product-public-bundle/9";
 }
 
 type Comparison = z.infer<typeof ComparisonSchema>;
@@ -718,13 +798,27 @@ interface MethodProjection {
 const REPORT_SOURCE = "report.json";
 
 /*
- * Issue #3943: the mirror of the accounting block in `@colophon-claims/verify`'s
- * `profile/claim.ts` (issue #3855). That file typed its ten projection-rebuild throws; this copy
- * is on a reader path of its own — `operations/verify.ts` calls core's `assertClaimConsistency`,
- * which calls this `buildClaimPackage` — so leaving it bare classified the SAME malformed sealed
- * Report two ways depending on the entry point. The same rule sorts the sites on both sides: a
- * projection check refuses when nothing earlier settles the same fact, and stays a bare throw
- * when an earlier check or the caller already does.
+ * Issue #3943: the mirror of the accounting block in `@colophon-claims/check`'s
+ * `profile/claim.ts` (issue #3855). That file typed its ten projection-rebuild throws; core
+ * reaches this `buildClaimPackage` from TWO paths. The reader path: `operations/verify.ts`
+ * calls core's `assertClaimConsistency`, which calls this function against a sealed Report a
+ * reader was handed. The producer path: `operations/report.ts` calls it directly, after sealing
+ * the Report core's own analysis just produced, to build the claim package it writes next to it.
+ * Leaving the throws bare classified the SAME malformed sealed Report two ways depending on the
+ * entry point. The same rule sorts the sites on both sides: a projection check refuses when
+ * nothing earlier settles the same fact, and stays a bare throw when an earlier check or the
+ * caller already does.
+ *
+ * ON THE PRODUCER PATH (issue #3998). The "named disagreement with the record a reader was
+ * handed" framing below describes the reader path. Reached from `report.ts`, the same shape
+ * mismatch means core's own analysis produced a Report whose `results` do not match the method
+ * it declares — an internal producer fault, not a reader's disagreement. It is surfaced as
+ * `record-integrity` at `report.json` anyway, deliberately: `report.ts` already refuses with
+ * `record-integrity` (at source `"report"`) a few lines above this call when the produced records
+ * fail the platform's own exactness checks, so the code is not foreign to that region, and one
+ * code per condition regardless of entry point is the rule this block states. Nothing is
+ * swallowed either way — the message names the exact condition. The verify-side mirror has no
+ * producer, so the two accounting blocks legitimately diverge on exactly this paragraph.
  *
  * WHAT REFUSES. This rebuild is the FIRST reader of the sealed Report's results and method
  * identity. `ReportRecordSchema` types `results` as `JsonValueSchema` and `MethodRefSchema`'s
@@ -739,7 +833,7 @@ const REPORT_SOURCE = "report.json";
  * surfaced as `execution`, the code `toErrorEnvelope` carries an untyped throw as; they now
  * surface as `record-integrity` at `report.json`, which is what a reader already got for the
  * same bytes through the standalone verifier. Where that code reaches a reader through
- * `colophon-verify`'s exit mapping, this is the 2 ("the verifier broke") to 1 ("the bundle is
+ * `colophon-check`'s exit mapping, this is the 2 ("the verifier broke") to 1 ("the bundle is
  * bad") shift issue #3943 named, and it is the same shift issues #3741 and #3855 each stated for
  * their own conversions. `errors.ts` documents why the two "not supported" conditions live under
  * `record-integrity` rather than a compat code of their own (issue #3944).
@@ -1054,15 +1148,46 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
   // headline/comparison analyses project no qualification, so they have nowhere to put the section.
   // Refusing here rather than dropping it silently is what makes the caller state which entry the
   // record belongs to instead of discovering later that one bundle quietly lost it.
-  if (disclosure !== undefined && !anchoredQualification) {
+  if (input.composedCapabilities === undefined && disclosure !== undefined && !anchoredQualification) {
     throw new Error(
       "claim package: only the anchored binary-qualification closure carries a disclosure section"
       + " — this projection has no qualification, and no other closure version expresses one",
     );
   }
 
+  // The composed generation replaces that enumeration with one derivation (design §8): the vector
+  // fixes the check list and the reader line, and the biconditional rule fixes the sections.
+  // Resolution refuses a vector the registry does not admit. A section the vector does not declare,
+  // or a declaration with no section, is the CALLER's fault and stays a bare throw: on the reader
+  // path the sections are derived under the same vector, so they cannot disagree there.
+  const composed = input.composedCapabilities === undefined ? undefined : {
+    checks: composeClosure(input.composedCapabilities).checks,
+    ...readerInstructions(input.composedCapabilities),
+  };
+  if (composed !== undefined) {
+    // Total over the registry's sections: a capability registered without stating here how its
+    // section is supplied is a compile error, not a composed claim that can no longer be built.
+    const supplied: Readonly<Record<(typeof CAPABILITY_REGISTRY)[number]["claimSection"], boolean>> = {
+      qualification: projection.qualification !== undefined,
+      anchors: anchored,
+      disclosure: disclosure !== undefined,
+      externalImport: input.externalImport !== undefined,
+    };
+    for (const capability of CAPABILITY_REGISTRY) {
+      if (supplied[capability.claimSection] !== input.composedCapabilities!.includes(capability.token)) {
+        throw new Error(
+          `claim package: capability "${capability.token}" and its "${capability.claimSection}" section`
+          + " must be declared and supplied together — a composed claim carries a section exactly when"
+          + " its bundle declares the capability",
+        );
+      }
+    }
+  }
+
   return {
-    claimSchema: anchoredQualification && disclosure !== undefined
+    claimSchema: composed !== undefined
+      ? COMPOSED_CLAIM_PACKAGE_SCHEMA_ID
+      : anchoredQualification && disclosure !== undefined
       ? DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID
       : anchoredQualification
       ? ANCHORED_BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID
@@ -1116,32 +1241,31 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     limitations: [...(reportRecord.limitations ?? [])],
     venueHonesty: input.venueHonesty,
     verification: {
-      command: anchoredQualification
+      command: composed !== undefined
+        ? composed.command
+        : anchoredQualification
         ? PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND
         : anchored
-          // Anchored and non-qualifying is still `/6` (issue #3698). `/9` renders the denominator
-          // pair and can only read on the `0.2` line -- `/6`'s `@0.1` reader rebuilds the old page
-          // -- so a reader rebuilding a `/9` bundle's claim says so and gets that line.
-          ? input.anchoredBundleFormat === "benchmark-product-public-bundle/9"
-            ? PUBLIC_BUNDLE_V9_VERIFICATION_COMMAND
-            : PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
+          ? PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND
           : promptedScreening
             ? PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND
             : projection.qualification === undefined
               ? PUBLIC_BUNDLE_VERIFICATION_COMMAND
               : BINARY_QUALIFICATION_VERIFICATION_COMMAND,
-      compatibleCommand: anchoredQualification
+      compatibleCommand: composed !== undefined
+        ? composed.compatibleCommand
+        : anchoredQualification
         ? PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND
         : anchored
-          ? input.anchoredBundleFormat === "benchmark-product-public-bundle/9"
-            ? PUBLIC_BUNDLE_V9_COMPATIBLE_VERIFICATION_COMMAND
-            : PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND
+          ? PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND
           : promptedScreening
             ? PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND
             : projection.qualification === undefined
               ? PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND
               : BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
-      checks: anchoredQualification && disclosure !== undefined
+      checks: composed !== undefined
+        ? [...composed.checks]
+        : anchoredQualification && disclosure !== undefined
         ? [...DISCLOSED_CLAIM_VERIFICATION_CHECKS]
         : anchored ? [...ANCHORED_CLAIM_VERIFICATION_CHECKS] : [...CLAIM_VERIFICATION_CHECKS],
       // §9.2: the trust-root sentence is replaced only by a governing lock anchor. A bundle whose
@@ -1153,6 +1277,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     // over the sealed record's exact bytes, and this builder is not entitled to a second opinion
     // about what that record says (issue #2839, design §6.6).
     ...(disclosure === undefined ? {} : { disclosure }),
+    ...(input.externalImport === undefined ? {} : { externalImport: input.externalImport }),
     ...(input.previewDisclosure !== undefined
       ? {
           rehearsal: {

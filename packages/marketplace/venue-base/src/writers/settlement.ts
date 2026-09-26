@@ -11,7 +11,9 @@ import {
   JINN_ROUTER_V4_ABI,
   MECH_ABI,
   MECH_DELIVER_TO_MARKETPLACE_ABI,
+  MECH_MARKETPLACE_ABI,
   SafeInnerRevertError,
+  TASK_COORDINATOR_ABI,
   decodeRawCodecCidDigestHex,
   encodeRevisedSolutionRequestData,
   type MarketplaceChainConfig,
@@ -26,106 +28,6 @@ import {
 } from "viem";
 import type { BaseVenueSafeBroadcaster } from "../broadcast/safe-broadcaster.js";
 import type { ChainLogSource } from "../log-source/chain-log-source.js";
-
-const CLAIMED_VIEW_ABI = [{
-  name: "claimed", type: "function", stateMutability: "view",
-  inputs: [{ name: "requestId", type: "bytes32" }],
-  outputs: [{ name: "", type: "bool" }],
-}] as const;
-
-/**
- * `TaskCoordinator.getRequestRef` -- resolves a today-generation requestId to the
- * `(taskId, attemptIndex)` its attempt record lives at. Real on the deployed contract
- * (`contracts/src/tasks/TaskCoordinator.sol:453`) but not part of the exported
- * `TASK_COORDINATOR_ABI` slice (adaptation; see PR/task notes).
- */
-const REQUEST_REF_VIEW_ABI = [{
-  name: "getRequestRef", type: "function", stateMutability: "view",
-  inputs: [{ name: "requestId", type: "bytes32" }],
-  outputs: [
-    { name: "taskId", type: "uint256" },
-    { name: "attemptIndex", type: "uint32" },
-    { name: "exists", type: "bool" },
-  ],
-}] as const;
-
-/**
- * `TaskCoordinator.getAttempt` -- the field named `solutionCidDigest` in the deployed contract is
- * today generation's keccak evidence hash (the exact value `claimSolutionDelivery`'s
- * `solutionDigest` argument writes through `recordSubmission`), not a CID digest despite the name.
- */
-const GET_ATTEMPT_VIEW_ABI = [{
-  name: "getAttempt", type: "function", stateMutability: "view",
-  inputs: [
-    { name: "taskId", type: "uint256" },
-    { name: "attemptIndex", type: "uint32" },
-  ],
-  outputs: [{
-    name: "attempt", type: "tuple",
-    components: [
-      { name: "taskId", type: "uint256" },
-      { name: "attemptIndex", type: "uint32" },
-      { name: "operator", type: "address" },
-      { name: "requestId", type: "bytes32" },
-      { name: "solutionCidDigest", type: "bytes32" },
-      { name: "solutionWeight", type: "uint256" },
-      { name: "verdictCount", type: "uint32" },
-      { name: "status", type: "uint8" },
-    ],
-  }],
-}] as const;
-
-/**
- * `JinnRouterV4.solutionReservations` public mapping getter (`contracts/src/staking/
- * JinnRouterV4.sol:156`) -- flat positional outputs matching `struct Reservation`'s field order
- * (Solidity's auto-getter convention for a struct-valued mapping). Not part of any exported
- * binding ABI; resolves `priorityMech`/`rate` for the revised settlement batch without requiring
- * the host to inject them.
- */
-const SOLUTION_RESERVATION_VIEW_ABI = [{
-  name: "solutionReservations", type: "function", stateMutability: "view",
-  inputs: [
-    { name: "taskId", type: "uint256" },
-    { name: "attemptIndex", type: "uint32" },
-  ],
-  outputs: [
-    { name: "kind", type: "uint8" },
-    { name: "taskId", type: "uint256" },
-    { name: "attemptIndex", type: "uint32" },
-    { name: "verdictIndex", type: "uint32" },
-    { name: "party", type: "address" },
-    { name: "priorityMech", type: "address" },
-    { name: "rate", type: "uint256" },
-    { name: "deadline", type: "uint64" },
-    { name: "settled", type: "bool" },
-    { name: "released", type: "bool" },
-  ],
-}] as const;
-
-const TOKEN_PAYMENT_TYPE_VIEW_ABI = [{
-  name: "tokenPaymentType", type: "function", stateMutability: "view",
-  inputs: [], outputs: [{ name: "", type: "bytes32" }],
-}] as const;
-
-/** `IMechMarketplaceV4` read slice (`contracts/src/staking/JinnRouterV4.sol:21-53`). */
-const MECH_MARKETPLACE_NONCE_VIEW_ABI = [{
-  name: "mapNonces", type: "function", stateMutability: "view",
-  inputs: [{ name: "requester", type: "address" }],
-  outputs: [{ name: "", type: "uint256" }],
-}] as const;
-
-const MECH_MARKETPLACE_REQUEST_ID_VIEW_ABI = [{
-  name: "getRequestId", type: "function", stateMutability: "view",
-  inputs: [
-    { name: "mech", type: "address" },
-    { name: "requester", type: "address" },
-    { name: "data", type: "bytes" },
-    { name: "deliveryRate", type: "uint256" },
-    { name: "paymentType", type: "bytes32" },
-    { name: "nonce", type: "uint256" },
-  ],
-  outputs: [{ name: "requestId", type: "bytes32" }],
-}] as const;
 
 /** Gnosis Safe `MultiSend` v1.3.0 canonical singleton (identical address across EVM chains). */
 export const DEFAULT_MULTISEND_ADDRESS = "0x40A2aCCbd92BCA938b02010E17A5b8929b49130" as Address;
@@ -228,8 +130,10 @@ async function readRouterDeliveryFacts(
   args: { readonly requestId: Hex; readonly config: MarketplaceChainConfig },
 ): Promise<RouterDeliveryFacts> {
   if (args.config.generation === "today") {
+    // `getRequestRef` resolves a today-generation requestId to the `(taskId, attemptIndex)` its
+    // attempt record lives at (`contracts/src/tasks/TaskCoordinator.sol:453`).
     const [taskId, attemptIndex, exists] = await input.publicClient.readContract({
-      address: args.config.taskCoordinator, abi: REQUEST_REF_VIEW_ABI,
+      address: args.config.taskCoordinator, abi: TASK_COORDINATOR_ABI,
       functionName: "getRequestRef", args: [args.requestId],
     });
     if (!exists) {
@@ -238,8 +142,11 @@ async function readRouterDeliveryFacts(
         + "delivery facts",
       );
     }
+    // The field named `solutionCidDigest` in the deployed contract is today generation's keccak
+    // evidence hash (the exact value `claimSolutionDelivery`'s `solutionDigest` argument writes
+    // through `recordSubmission`), not a CID digest despite the name.
     const attempt = await input.publicClient.readContract({
-      address: args.config.taskCoordinator, abi: GET_ATTEMPT_VIEW_ABI,
+      address: args.config.taskCoordinator, abi: TASK_COORDINATOR_ABI,
       functionName: "getAttempt", args: [taskId, attemptIndex],
     });
     return { generation: "today", requestId: args.requestId, keccakEvidenceHash: attempt.solutionCidDigest };
@@ -275,7 +182,7 @@ async function claimSolutionDelivery(
   readonly txHash?: Hex;
 }> {
   const alreadyClaimed = await input.publicClient.readContract({
-    address: input.chain.jinnRouter, abi: CLAIMED_VIEW_ABI, functionName: "claimed", args: [args.requestId],
+    address: input.chain.jinnRouter, abi: JINN_ROUTER_V3_ABI, functionName: "claimed", args: [args.requestId],
   });
   if (alreadyClaimed) {
     return {
@@ -427,24 +334,29 @@ async function settleRevisedSolutionDelivery(
       readonly requestId: Hex;
     }
 > {
+  // `solutionReservations` is a public-mapping auto-getter (`contracts/src/staking/
+  // JinnRouterV4.sol:156`) with flat positional outputs matching `struct Reservation`'s field
+  // order (Solidity's convention for a struct-valued mapping) -- which is why `priorityMech` and
+  // `rate` are read by index below. Reading them here is what lets the revised settlement batch
+  // resolve them without the host injecting them.
   const reservation = await input.publicClient.readContract({
-    address: input.chain.jinnRouter, abi: SOLUTION_RESERVATION_VIEW_ABI,
+    address: input.chain.jinnRouter, abi: JINN_ROUTER_V4_ABI,
     functionName: "solutionReservations", args: [args.taskId, args.attemptIndex],
   });
   const priorityMech = reservation[5];
   const rate = reservation[6];
   const tokenPaymentType = await input.publicClient.readContract({
-    address: input.chain.jinnRouter, abi: TOKEN_PAYMENT_TYPE_VIEW_ABI, functionName: "tokenPaymentType",
+    address: input.chain.jinnRouter, abi: JINN_ROUTER_V4_ABI, functionName: "tokenPaymentType",
   });
   const requestData = encodeRevisedSolutionRequestData({
     taskId: args.taskId, attemptIndex: args.attemptIndex, deliveryDigest: args.deliveryDigest,
   });
   const nonce = await input.publicClient.readContract({
-    address: input.chain.mechMarketplace, abi: MECH_MARKETPLACE_NONCE_VIEW_ABI,
+    address: input.chain.mechMarketplace, abi: MECH_MARKETPLACE_ABI,
     functionName: "mapNonces", args: [input.chain.jinnRouter],
   });
   const expectedRequestId = await input.publicClient.readContract({
-    address: input.chain.mechMarketplace, abi: MECH_MARKETPLACE_REQUEST_ID_VIEW_ABI,
+    address: input.chain.mechMarketplace, abi: MECH_MARKETPLACE_ABI,
     functionName: "getRequestId",
     args: [priorityMech, input.chain.jinnRouter, requestData, rate, tokenPaymentType, nonce],
   });

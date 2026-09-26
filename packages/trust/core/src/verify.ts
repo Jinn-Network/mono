@@ -59,6 +59,21 @@ function voucherIdentityEquals(a: VoucherIdentity, b: VoucherIdentity): boolean 
   }
 }
 
+function describeVoucherIdentity(v: VoucherIdentity): string {
+  switch (v.kind) {
+    case "account":
+      return `account ${v.did}`;
+    case "agentId":
+      return `agentId ${v.caip19}`;
+    case "oidc-machine":
+      return `oidc-machine ${v.subject}`;
+    case "github-human":
+      return `github-human ${v.profile} (id ${v.id})`;
+    default:
+      return "unknown voucher identity";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // verifyEnvelopeBinding (§7.5 steps 1, 2, 3, 4, 5).
 // ---------------------------------------------------------------------------
@@ -114,6 +129,11 @@ export type VerificationFailureReason =
 
 export interface VerificationOutcome {
   readonly ok: boolean;
+  /**
+   * Whatever step 2 resolved, attached on failure as well as success — including the
+   * `binding-not-resolved` failure for a resolver that echoed a binding for a different Agent
+   * IRI. Never infer success from its presence; `ok` is the only success signal.
+   */
   readonly resolvedBinding?: ResolvedBinding;
   readonly reason?: VerificationFailureReason;
   readonly detail?: string;
@@ -242,10 +262,19 @@ async function checkConsentChain(
     return { ok: true }; // cross-account consent (§7.4a option 2)
   }
 
+  if (resolved.incumbentControlVoucher === undefined) {
+    return {
+      ok: false,
+      detail: "non-genesis binding carries no incumbent controls voucher and no "
+        + "bindings-scoped consent countersignature (§7.4a).",
+    };
+  }
   return {
     ok: false,
-    detail: "non-genesis binding carries neither an incumbent controls voucher nor a "
-      + "bindings-scoped consent countersignature (§7.4a).",
+    detail: `non-genesis binding's incumbent controls voucher `
+      + `(${describeVoucherIdentity(resolved.incumbentControlVoucher)}) is not the binding's own voucher `
+      + `(${describeVoucherIdentity(binding.voucher)}) and it carries no bindings-scoped consent `
+      + "countersignature (§7.4a).",
   };
 }
 

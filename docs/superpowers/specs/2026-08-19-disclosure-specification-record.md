@@ -30,7 +30,7 @@ actually ran (`packages/benchmarking/records/src/report/schema.ts:26-50`). Arm
 pinning is an open bag of requirement keys with no declared vocabulary
 (`packages/benchmark-product/core/src/domain/draft.ts:38-45`). The qualification
 projection names item banks, arms, and admission evidence, all of them things the
-venue carried out (`packages/benchmark-product/verify/src/schema.ts:177-208`). There
+venue carried out (`packages/benchmark-product/check/src/schema.ts:177-208`). There
 is no surface anywhere that says *this variable was fixed by someone else, here is
 what they stated, and this bundle proves nothing about it*.
 

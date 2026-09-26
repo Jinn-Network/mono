@@ -214,6 +214,11 @@ describe('redactValue — recursion into nested structures and arrays', () => {
     expect(String(out.s)).toMatch(/redacted:unserializable/);
   });
 
+  it('markers a bigint rather than passing it through (#3746)', () => {
+    const out = redactValue({ amount: 10n }) as Record<string, unknown>;
+    expect(String(out.amount)).toMatch(/redacted:unserializable/);
+  });
+
   it('recurses without a depth cap so a deeply nested secret is still stripped (#3038)', () => {
     let node: Record<string, unknown> = { privateKey: '0x' + '33'.repeat(32) };
     for (let i = 0; i < 20; i++) node = { nested: node };
@@ -344,7 +349,7 @@ describe('redaction report', () => {
 
 describe('redaction — #420 code-review hardening', () => {
   it('does not stack-overflow on a malformed URL in free text (mutual-recursion guard)', () => {
-    // `http://[bad` matches URL_RE but `new URL()` throws — the catch path
+    // `http://[bad` matches EMBEDDED_URL_RE but `new URL()` throws — the catch path
     // must not re-enter the URL scanner. A pre-fix build recurses to death.
     const out = redactValue({ note: 'boom at http://[bad while connecting' });
     expect((out as { note: string }).note).toContain('http://[bad');
@@ -369,6 +374,23 @@ describe('redaction — #420 code-review hardening', () => {
     expect(out.rpcUrls[1]).not.toContain('PLANTEDwssPass');
   });
 
+  it('redacts a wss:// URL carrying an opaque credential in free text (#3108)', () => {
+    // `note` does not satisfy isRpcUrlKey, so this reaches redactStringValue's
+    // free-text EMBEDDED_URL_RE pass rather than the plural-array branch. All three
+    // planted values are opaque — non-hex64 and non-JWT — so HEX64_RE and
+    // JWT_RE cannot catch them by shape; only the scheme widening can.
+    const out = redactValue({
+      note:
+        'socket wss://operator:PLANTEDwssUser@ws.example.com/v2/PLANTEDwssPath01' +
+        '?token=PLANTEDwssQuery closed',
+    }) as { note: string };
+
+    expect(out.note).toContain('ws.example.com');
+    expect(out.note).not.toContain('PLANTEDwssUser');
+    expect(out.note).not.toContain('PLANTEDwssPath01');
+    expect(out.note).not.toContain('PLANTEDwssQuery');
+  });
+
   it('strips a credential hidden in a URL fragment', () => {
     const out = redactRpcUrl('https://rpc.example.com/#apikey=PLANTEDfragmentKey');
     expect(out).toContain('rpc.example.com');
@@ -390,5 +412,79 @@ describe('redaction — #420 code-review hardening', () => {
     expect(out['txHash']).toBe(h);
     expect(out['blockHash']).toBe(h);
     expect(out['deliveryTxHash']).toBe(h);
+  });
+});
+
+// Issue #4426: the free-text URL scanner excluded `]` and `)` from the URL
+// body and had no `i` flag. A bracketed-IPv6 host was truncated at `]`, so
+// `new URL` threw and the catch path returned the credentials intact; an
+// uppercase scheme never matched at all. `transport.ts`'s
+// `maskUrlsInMessage` already had the correct pattern — the two now share
+// one constant so they cannot drift apart again.
+describe('redaction — #4426 free-text URL pattern shared with transport', () => {
+  it('redacts userinfo, key path and query from a bracketed-IPv6 wss:// URL in free text', () => {
+    const out = redactValue({
+      note: 'probe failed: wss://u:SECRETpw@[2001:db8::1]:8546/v2/SECRETKEYSECRETKEY01?apikey=SECRETQ',
+    }) as { note: string };
+    expect(out.note).toContain('[2001:db8::1]:8546');
+    expect(out.note).not.toContain('SECRETpw');
+    expect(out.note).not.toContain('SECRETKEYSECRETKEY01');
+    expect(out.note).not.toContain('SECRETQ');
+  });
+
+  it('redacts an uppercase-scheme URL in free text', () => {
+    const out = redactValue({
+      note: 'HTTPS://u:SECRETpw@rpc.example/v3/SECRETKEYSECRETKEY01',
+    }) as { note: string };
+    expect(out.note).toContain('rpc.example');
+    expect(out.note).not.toContain('SECRETpw');
+    expect(out.note).not.toContain('SECRETKEYSECRETKEY01');
+  });
+
+  // The shared pattern keeps `]`, so a URL closed by a prose bracket right
+  // after its authority (`[https://u:pw@host]`) swallows the `]` into the
+  // host and `new URL()` throws. The catch path must still strip the
+  // credential rather than hand the string back intact.
+  it('strips userinfo from a bracket-terminated URL that defeats `new URL`', () => {
+    const out = redactValue({
+      note: 'tried [https://u:SECRETpw@rpc.example] then gave up',
+    }) as { note: string };
+    expect(out.note).toContain('rpc.example');
+    expect(out.note).not.toContain('SECRETpw');
+  });
+
+  it('strips userinfo and query from a bracket-terminated URL with a port and query', () => {
+    const out = redactValue({
+      note: 'tried [https://u:SECRETpw@rpc.example:8545]?apikey=SECRETQ then gave up',
+    }) as { note: string };
+    expect(out.note).toContain('rpc.example');
+    expect(out.note).not.toContain('SECRETpw');
+    expect(out.note).not.toContain('SECRETQ');
+  });
+
+  // #4547: the catch path must also apply the parse path's key-segment rules
+  // (`/v<n>/<seg>` and long opaque segments), textually.
+  it('strips a /v<n>/<key> path segment from a bracket-terminated URL that defeats `new URL`', () => {
+    const out = redactValue({
+      note: 'tried [wss://u:pw@rpc.example]/v2/SECRETKEYSECRETKEY01 then',
+    }) as { note: string };
+    expect(out.note).toBe('tried [wss://rpc.example]/v2/<redacted:rpc-key> then');
+  });
+
+  it('strips a key segment and query from an unparseable URL with a template port', () => {
+    const out = redactValue({
+      note: 'x https://u:pw@rpc.example:${PORT}/v3/SECRETKEYSECRETKEY01?apikey=Q y',
+    }) as { note: string };
+    expect(out.note).toBe('x https://rpc.example:${PORT}/v3/<redacted:rpc-key> y');
+  });
+
+  it('strips a long opaque path segment from an unparseable URL', () => {
+    expect(redactRpcUrl('https://rpc.example]/rpc/AbCdEfGhIjKlMnOpQrStUv12/x')).toBe(
+      'https://rpc.example]/rpc/<redacted:rpc-key>/x',
+    );
+  });
+
+  it('bumps REDACTION_VERSION for the catch-path key-segment strip', () => {
+    expect(REDACTION_VERSION).toBe('6');
   });
 });

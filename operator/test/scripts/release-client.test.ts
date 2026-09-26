@@ -8,7 +8,9 @@ import {
   redactSecrets,
   releaseGateSteps,
   REQUIRED_SDK_VERSION,
+  RELEASE_WORKFLOW_WAITS,
   runRelease,
+  selectWorkflowRun,
 } from '../../scripts/lib/release-client.mjs';
 
 type MockResult = {
@@ -144,6 +146,105 @@ describe('release-client helpers', () => {
 
     expect(olasRailsSmoke?.args).toEqual(['release:olas-rails-smoke']);
     expect(releaseGateSteps(true).some((step: { id: string }) => step.id === 'gate-olas-rails-smoke')).toBe(false);
+  });
+
+  it('accepts a dispatched re-run of a red release lane', () => {
+    // `operator/RELEASING.md` tells a Captain to republish a red `docker.yml`
+    // release run via `workflow_dispatch` from the release tag (#2811). A wait
+    // that only ever saw `--event release` runs re-read the same red run
+    // forever, so the documented recovery published the images and still left
+    // `--publish` throwing at `publish-wait-docker-workflow`.
+    const commit = 'a'.repeat(40);
+    const runs = [
+      {
+        databaseId: 2,
+        status: 'completed',
+        conclusion: 'success',
+        event: 'workflow_dispatch',
+        headSha: commit,
+        createdAt: '2026-09-08T12:00:00Z',
+      },
+      {
+        databaseId: 1,
+        status: 'completed',
+        conclusion: 'failure',
+        event: 'release',
+        headSha: commit,
+        createdAt: '2026-09-08T10:00:00Z',
+      },
+    ];
+
+    expect(selectWorkflowRun(runs, commit, ['release', 'workflow_dispatch'])?.databaseId).toBe(2);
+    // Still red where the retry is not an accepted trigger for that workflow.
+    expect(selectWorkflowRun(runs, commit, ['release'])?.conclusion).toBe('failure');
+  });
+
+  it('prefers a successful run over a newer failed one', () => {
+    // Two dispatches, the second red: the images the first one published are
+    // still there, so the release must not be blocked by the later attempt.
+    const commit = 'c'.repeat(40);
+    const selected = selectWorkflowRun(
+      [
+        {
+          databaseId: 3,
+          status: 'completed',
+          conclusion: 'failure',
+          event: 'workflow_dispatch',
+          headSha: commit,
+          createdAt: '2026-09-08T14:00:00Z',
+        },
+        {
+          databaseId: 2,
+          status: 'completed',
+          conclusion: 'success',
+          event: 'workflow_dispatch',
+          headSha: commit,
+          createdAt: '2026-09-08T12:00:00Z',
+        },
+      ],
+      commit,
+      ['release', 'workflow_dispatch'],
+    );
+
+    expect(selected?.databaseId).toBe(2);
+  });
+
+  it('wires the dispatched-retry trigger onto the Docker wait', () => {
+    const dockerWait = RELEASE_WORKFLOW_WAITS.find(
+      (wait: { workflow: string }) => wait.workflow === 'docker.yml',
+    );
+
+    expect(dockerWait?.events).toEqual(['release', 'workflow_dispatch']);
+  });
+
+  it('keeps polling while an accepted re-run is still in flight', () => {
+    const commit = 'b'.repeat(40);
+    const selected = selectWorkflowRun(
+      [
+        {
+          databaseId: 2,
+          status: 'in_progress',
+          conclusion: null,
+          event: 'workflow_dispatch',
+          headSha: commit,
+          createdAt: '2026-09-08T12:00:00Z',
+        },
+        {
+          databaseId: 1,
+          status: 'completed',
+          conclusion: 'failure',
+          event: 'release',
+          headSha: commit,
+          createdAt: '2026-09-08T10:00:00Z',
+        },
+      ],
+      commit,
+      ['release', 'workflow_dispatch'],
+    );
+
+    // Newest run wins when nothing has succeeded, so the poll waits for the
+    // retry instead of resolving early on the older red run.
+    expect(selected?.status).toBe('in_progress');
   });
 
   it('derives REQUIRED_SDK_VERSION from the sdk manifest instead of a pinned literal', () => {

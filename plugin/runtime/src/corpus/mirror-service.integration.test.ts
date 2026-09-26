@@ -466,10 +466,22 @@ describe("the mirror as a standing service", () => {
 
     // The black hole: never resolves on its own, and ends only when the
     // caller's signal says so — which is what a real `fetch` does, and what
-    // this transport had no way to ask for.
+    // this transport had no way to ask for. A real `fetch` also checks
+    // `signal.aborted` SYNCHRONOUSLY at call time and rejects immediately if
+    // it is already true, because `addEventListener("abort", ...)` on a
+    // signal that already fired never sees that past event again. Without
+    // the same check here, a call that lands after `fetchHead`'s deadline
+    // timer already aborted -- plausible any time the event loop is behind,
+    // not just under CI load -- attaches a listener that never fires and
+    // hangs until the test's own timeout, not `syncTimeoutMs`, ends it.
     const blackHole: FetchLike = (_url, init) =>
       new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener("abort", () =>
+        const signal = init?.signal;
+        if (signal?.aborted === true) {
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+          return;
+        }
+        signal?.addEventListener("abort", () =>
           reject(new DOMException("The operation was aborted.", "AbortError")),
         );
       });

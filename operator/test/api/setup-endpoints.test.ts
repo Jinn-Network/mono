@@ -1,13 +1,45 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Hono } from 'hono';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { addSetupRoutes } from '../../src/api/setup-endpoints.js';
 import { stage1MinMasterEth } from '../../src/earning/bootstrap.js';
 import { getChainConfig } from '../../src/earning/contracts.js';
 import { FleetStateStore } from '../../src/earning/store.js';
-import { encryptMnemonic, generateMnemonic } from '../../src/earning/wallet.js';
+import { decryptMnemonic, encryptMnemonic, generateMnemonic } from '../../src/earning/wallet.js';
+
+// Passthrough, except a chosen destination can be made to truncate-then-fail
+// on writeFileSync, and writes whose path is that destination or a sibling
+// tmp (`<path>.…`) can be refused wholesale — the in-place rewrite hazard
+// #4610 closes.
+const fsFaults = vi.hoisted(() => ({
+  truncateThenFailPath: undefined as string | undefined,
+  failWritesUnder: undefined as string | undefined,
+}));
+// MOCK_JUSTIFICATION: writeFileSync is a leaf syscall the route calls directly; a mid-write ENOSPC cannot be staged on a real volume the test user owns.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    writeFileSync: (
+      path: Parameters<typeof actual.writeFileSync>[0],
+      data: Parameters<typeof actual.writeFileSync>[1],
+      options?: Parameters<typeof actual.writeFileSync>[2],
+    ) => {
+      const asString = String(path);
+      if (asString === fsFaults.truncateThenFailPath) {
+        actual.writeFileSync(path, '');
+        throw new Error('ENOSPC: no space left on device, write');
+      }
+      if (fsFaults.failWritesUnder && asString.startsWith(fsFaults.failWritesUnder)) {
+        if (asString === fsFaults.failWritesUnder) actual.writeFileSync(path, '');
+        throw new Error('ENOSPC: no space left on device, write');
+      }
+      actual.writeFileSync(path, data, options);
+    },
+  };
+});
 
 describe('GET /v1/auth/claude', () => {
   it('returns binary status and skips auth probe when claude is missing', async () => {
@@ -331,6 +363,505 @@ describe('POST /v1/setup/change-password', () => {
       else process.env['HOME'] = oldHome;
     }
   }, 15000);
+
+  // #4086: `<default state dir>/keystore-password` is host-wide, not
+  // earning-dir relative. Rotating a second operator through the console used
+  // to overwrite it with a password that does not open the default operator's
+  // keystore — worse than deleting it, because the file still looks valid.
+  it("leaves the default operator's password file intact when rotating a second operator", async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-cp-home-'));
+    const stateDir = join(home, '.jinn-operator');
+    const defaultEarningDir = join(stateDir, 'earning');
+    mkdirSync(defaultEarningDir, { recursive: true });
+
+    const mnemonic = generateMnemonic();
+    // Operator A (default dir) and operator B (second dir) happen to share the
+    // same current password — the worst case for the staleness proof.
+    const defaultKeystore = await encryptMnemonic(mnemonic, 'old-password');
+    await new FleetStateStore(defaultEarningDir).saveMnemonicKeystore(defaultKeystore);
+    const pwFilePath = join(stateDir, 'keystore-password');
+    writeFileSync(pwFilePath, 'old-password\n', { mode: 0o600 });
+
+    const secondEarningDir = mkdtempSync(join(tmpdir(), 'jinn-cp-op-b-'));
+    const secondStore = new FleetStateStore(secondEarningDir);
+    await secondStore.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'old-password'));
+
+    const oldEnv = process.env['JINN_EARNING_DIR'];
+    const oldHome = process.env['HOME'];
+    const oldPassword = process.env['JINN_PASSWORD'];
+    delete process.env['JINN_EARNING_DIR'];
+    process.env['HOME'] = home;
+    try {
+      const app = new Hono();
+      addSetupRoutes(app, { earningDir: secondEarningDir });
+      const res = await app.request('/v1/setup/change-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ current: 'old-password', next: 'new-password-99' }),
+      });
+
+      expect(res.status).toBe(200);
+      // Operator A's host-wide file — and their keystore — are untouched.
+      expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('old-password');
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+      expect(readFileSync(join(secondEarningDir, 'keystore-password'), 'utf-8').trim()).toBe('new-password-99');
+      expect(
+        await decryptMnemonic(
+          await new FleetStateStore(defaultEarningDir).loadMnemonicKeystore(),
+          'old-password',
+        ),
+      ).toBe(mnemonic);
+      // Operator B's keystore did rotate.
+      expect(await decryptMnemonic(await secondStore.loadMnemonicKeystore(), 'new-password-99'))
+        .toBe(mnemonic);
+    } finally {
+      if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
+      else process.env['JINN_EARNING_DIR'] = oldEnv;
+      if (oldHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = oldHome;
+      if (oldPassword === undefined) delete process.env['JINN_PASSWORD'];
+      else process.env['JINN_PASSWORD'] = oldPassword;
+    }
+  }, 30000);
+
+  it('updates the password file when the rotated keystore is the one it opens', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-cp-home-'));
+    const stateDir = join(home, '.jinn-operator');
+    const earningDir = join(stateDir, 'earning');
+    mkdirSync(earningDir, { recursive: true });
+
+    const mnemonic = generateMnemonic();
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'old-password'));
+    const pwFilePath = join(stateDir, 'keystore-password');
+    writeFileSync(pwFilePath, 'old-password\n', { mode: 0o600 });
+
+    const oldEnv = process.env['JINN_EARNING_DIR'];
+    const oldHome = process.env['HOME'];
+    const oldPassword = process.env['JINN_PASSWORD'];
+    delete process.env['JINN_EARNING_DIR'];
+    process.env['HOME'] = home;
+    try {
+      const app = new Hono();
+      addSetupRoutes(app, { earningDir });
+      const res = await app.request('/v1/setup/change-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ current: 'old-password', next: 'new-password-99' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+      expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('new-password-99');
+      expect(readFileSync(join(earningDir, 'keystore-password'), 'utf-8').trim()).toBe('new-password-99');
+      expect(process.env['JINN_PASSWORD']).toBe('new-password-99');
+    } finally {
+      if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
+      else process.env['JINN_EARNING_DIR'] = oldEnv;
+      if (oldHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = oldHome;
+      if (oldPassword === undefined) delete process.env['JINN_PASSWORD'];
+      else process.env['JINN_PASSWORD'] = oldPassword;
+    }
+  }, 30000);
+
+  it('creates the password file for a default-operator rotation when none exists', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-cp-home-'));
+    const stateDir = join(home, '.jinn-operator');
+    const earningDir = join(stateDir, 'earning');
+    mkdirSync(earningDir, { recursive: true });
+
+    const mnemonic = generateMnemonic();
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'old-password'));
+    const pwFilePath = join(stateDir, 'keystore-password');
+
+    const oldEnv = process.env['JINN_EARNING_DIR'];
+    const oldHome = process.env['HOME'];
+    const oldPassword = process.env['JINN_PASSWORD'];
+    delete process.env['JINN_EARNING_DIR'];
+    process.env['HOME'] = home;
+    try {
+      const app = new Hono();
+      addSetupRoutes(app, { earningDir });
+      const res = await app.request('/v1/setup/change-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ current: 'old-password', next: 'new-password-99' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(readFileSync(join(earningDir, 'keystore-password'), 'utf-8').trim()).toBe('new-password-99');
+      expect(existsSync(pwFilePath)).toBe(false);
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+    } finally {
+      if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
+      else process.env['JINN_EARNING_DIR'] = oldEnv;
+      if (oldHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = oldHome;
+      if (oldPassword === undefined) delete process.env['JINN_PASSWORD'];
+      else process.env['JINN_PASSWORD'] = oldPassword;
+    }
+  }, 30000);
+
+  it('does not rewrite the host-wide legacy file when rotating a second operator', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-cp-home-'));
+    const stateDir = join(home, '.jinn-operator');
+    const defaultEarningDir = join(stateDir, 'earning');
+    mkdirSync(defaultEarningDir, { recursive: true });
+
+    const mnemonic = generateMnemonic();
+    await new FleetStateStore(defaultEarningDir).saveMnemonicKeystore(
+      await encryptMnemonic(mnemonic, 'a-password'),
+    );
+    const secondEarningDir = mkdtempSync(join(tmpdir(), 'jinn-cp-op-b-'));
+    await new FleetStateStore(secondEarningDir).saveMnemonicKeystore(
+      await encryptMnemonic(mnemonic, 'old-password'),
+    );
+    const pwFilePath = join(stateDir, 'keystore-password');
+    writeFileSync(pwFilePath, 'a-password\n', { mode: 0o600 });
+
+    const oldEnv = process.env['JINN_EARNING_DIR'];
+    const oldHome = process.env['HOME'];
+    const oldPassword = process.env['JINN_PASSWORD'];
+    delete process.env['JINN_EARNING_DIR'];
+    process.env['HOME'] = home;
+    try {
+      const app = new Hono();
+      addSetupRoutes(app, { earningDir: secondEarningDir });
+      const res = await app.request('/v1/setup/change-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ current: 'old-password', next: 'new-password-99' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('a-password');
+      expect(readFileSync(join(secondEarningDir, 'keystore-password'), 'utf-8').trim()).toBe('new-password-99');
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+    } finally {
+      if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
+      else process.env['JINN_EARNING_DIR'] = oldEnv;
+      if (oldHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = oldHome;
+      if (oldPassword === undefined) delete process.env['JINN_PASSWORD'];
+      else process.env['JINN_PASSWORD'] = oldPassword;
+    }
+  }, 30000);
+
+  // #4116: keystore identity proves the host-wide file is the default operator's
+  // whatever it holds, so a file drifted off the live password is repaired.
+  it('repairs a drifted password file for a default-operator rotation', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-cp-home-'));
+    const stateDir = join(home, '.jinn-operator');
+    const earningDir = join(stateDir, 'earning');
+    mkdirSync(earningDir, { recursive: true });
+
+    const mnemonic = generateMnemonic();
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'old-password'));
+    const pwFilePath = join(stateDir, 'keystore-password');
+    writeFileSync(pwFilePath, 'some-other-value\n', { mode: 0o600 });
+
+    const oldEnv = process.env['JINN_EARNING_DIR'];
+    const oldHome = process.env['HOME'];
+    const oldPassword = process.env['JINN_PASSWORD'];
+    delete process.env['JINN_EARNING_DIR'];
+    process.env['HOME'] = home;
+    try {
+      const app = new Hono();
+      addSetupRoutes(app, { earningDir });
+      const res = await app.request('/v1/setup/change-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ current: 'old-password', next: 'new-password-99' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+      expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('new-password-99');
+    } finally {
+      if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
+      else process.env['JINN_EARNING_DIR'] = oldEnv;
+      if (oldHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = oldHome;
+      if (oldPassword === undefined) delete process.env['JINN_PASSWORD'];
+      else process.env['JINN_PASSWORD'] = oldPassword;
+    }
+  }, 30000);
+
+  // `writeFileSync`'s `mode` applies only on creation, so a hand-made 0644 file
+  // that drifted would otherwise receive the new password world-readable.
+  it('tightens a loose drifted password file to 0600 when rewriting it', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-cp-home-'));
+    const stateDir = join(home, '.jinn-operator');
+    const earningDir = join(stateDir, 'earning');
+    mkdirSync(earningDir, { recursive: true });
+
+    const mnemonic = generateMnemonic();
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'old-password'));
+    const pwFilePath = join(stateDir, 'keystore-password');
+    writeFileSync(pwFilePath, 'some-other-value\n');
+    chmodSync(pwFilePath, 0o644);
+
+    const oldEnv = process.env['JINN_EARNING_DIR'];
+    const oldHome = process.env['HOME'];
+    const oldPassword = process.env['JINN_PASSWORD'];
+    delete process.env['JINN_EARNING_DIR'];
+    process.env['HOME'] = home;
+    try {
+      const app = new Hono();
+      addSetupRoutes(app, { earningDir });
+      const res = await app.request('/v1/setup/change-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ current: 'old-password', next: 'new-password-99' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+      expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('new-password-99');
+      expect(statSync(pwFilePath).mode & 0o777).toBe(0o600);
+    } finally {
+      if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
+      else process.env['JINN_EARNING_DIR'] = oldEnv;
+      if (oldHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = oldHome;
+      if (oldPassword === undefined) delete process.env['JINN_PASSWORD'];
+      else process.env['JINN_PASSWORD'] = oldPassword;
+    }
+  }, 30000);
+
+  // #4610: an in-place writeFileSync that fails after truncating left a
+  // destroyed password file. Atomic replace never writes the live path, so a
+  // destination-only write fault is ignored and the new password lands.
+  it('never writes the live password file in place', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-cp-home-'));
+    const stateDir = join(home, '.jinn-operator');
+    const earningDir = join(stateDir, 'earning');
+    mkdirSync(earningDir, { recursive: true });
+
+    const mnemonic = generateMnemonic();
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'old-password'));
+    const pwFilePath = join(stateDir, 'keystore-password');
+    writeFileSync(pwFilePath, 'old-password\n', { mode: 0o600 });
+
+    const oldEnv = process.env['JINN_EARNING_DIR'];
+    const oldHome = process.env['HOME'];
+    const oldPassword = process.env['JINN_PASSWORD'];
+    delete process.env['JINN_EARNING_DIR'];
+    process.env['HOME'] = home;
+    fsFaults.truncateThenFailPath = pwFilePath;
+    try {
+      const app = new Hono();
+      addSetupRoutes(app, { earningDir });
+      const res = await app.request('/v1/setup/change-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ current: 'old-password', next: 'new-password-99' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+      expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('new-password-99');
+    } finally {
+      fsFaults.truncateThenFailPath = undefined;
+      if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
+      else process.env['JINN_EARNING_DIR'] = oldEnv;
+      if (oldHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = oldHome;
+      if (oldPassword === undefined) delete process.env['JINN_PASSWORD'];
+      else process.env['JINN_PASSWORD'] = oldPassword;
+    }
+  }, 30000);
+
+  it('leaves the live password file intact when the atomic rewrite itself fails', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-cp-home-'));
+    const stateDir = join(home, '.jinn-operator');
+    const earningDir = join(stateDir, 'earning');
+    mkdirSync(earningDir, { recursive: true });
+
+    const mnemonic = generateMnemonic();
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'old-password'));
+    const pwFilePath = join(stateDir, 'keystore-password');
+    writeFileSync(pwFilePath, 'old-password\n', { mode: 0o600 });
+
+    const oldEnv = process.env['JINN_EARNING_DIR'];
+    const oldHome = process.env['HOME'];
+    const oldPassword = process.env['JINN_PASSWORD'];
+    const warnings: string[] = [];
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation((message: unknown) => {
+      warnings.push(String(message));
+    });
+    delete process.env['JINN_EARNING_DIR'];
+    process.env['HOME'] = home;
+    fsFaults.failWritesUnder = pwFilePath;
+    try {
+      const app = new Hono();
+      addSetupRoutes(app, { earningDir });
+      const res = await app.request('/v1/setup/change-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ current: 'old-password', next: 'new-password-99' }),
+      });
+
+      expect(res.status).toBe(200);
+      // `passwordFileUpdated` reports the primary (earning-dir) write, which
+      // succeeds independently of the legacy mirror attempted below.
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+      expect(readFileSync(pwFilePath, 'utf-8')).toBe('old-password\n');
+      expect(warnings.join('\n')).toMatch(/leaving it in place/);
+    } finally {
+      fsFaults.failWritesUnder = undefined;
+      warnSpy.mockRestore();
+      if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
+      else process.env['JINN_EARNING_DIR'] = oldEnv;
+      if (oldHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = oldHome;
+      if (oldPassword === undefined) delete process.env['JINN_PASSWORD'];
+      else process.env['JINN_PASSWORD'] = oldPassword;
+    }
+  }, 30000);
+
+  // #4610: rename replaces a symlink at the password-file path rather than
+  // writing through it, so a former target that another operator still
+  // reads is left holding its own password.
+  it('replaces a password-file symlink and leaves its former target intact', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-cp-home-'));
+    const stateDir = join(home, '.jinn-operator');
+    const earningDir = join(stateDir, 'earning');
+    mkdirSync(earningDir, { recursive: true });
+
+    const mnemonic = generateMnemonic();
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'old-password'));
+    const targetPath = join(home, 'someone-elses-password');
+    writeFileSync(targetPath, 'old-password\n', { mode: 0o600 });
+    const pwFilePath = join(stateDir, 'keystore-password');
+    symlinkSync(targetPath, pwFilePath);
+
+    const oldEnv = process.env['JINN_EARNING_DIR'];
+    const oldHome = process.env['HOME'];
+    const oldPassword = process.env['JINN_PASSWORD'];
+    delete process.env['JINN_EARNING_DIR'];
+    process.env['HOME'] = home;
+    try {
+      const app = new Hono();
+      addSetupRoutes(app, { earningDir });
+      const res = await app.request('/v1/setup/change-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ current: 'old-password', next: 'new-password-99' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+      expect(lstatSync(pwFilePath).isSymbolicLink()).toBe(false);
+      expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('new-password-99');
+      expect(statSync(pwFilePath).mode & 0o777).toBe(0o600);
+      expect(readFileSync(targetPath, 'utf-8')).toBe('old-password\n');
+    } finally {
+      if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
+      else process.env['JINN_EARNING_DIR'] = oldEnv;
+      if (oldHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = oldHome;
+      if (oldPassword === undefined) delete process.env['JINN_PASSWORD'];
+      else process.env['JINN_PASSWORD'] = oldPassword;
+    }
+  }, 30000);
+
+  // The keystore is rotated before the file write, so an unwritable password
+  // file (here a directory) must not turn a completed rotation into a 500.
+  it('still succeeds when the default operator password file cannot be written', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-cp-home-'));
+    const stateDir = join(home, '.jinn-operator');
+    const earningDir = join(stateDir, 'earning');
+    mkdirSync(earningDir, { recursive: true });
+
+    const mnemonic = generateMnemonic();
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'old-password'));
+    const pwFilePath = join(stateDir, 'keystore-password');
+    mkdirSync(pwFilePath);
+
+    const oldEnv = process.env['JINN_EARNING_DIR'];
+    const oldHome = process.env['HOME'];
+    const oldPassword = process.env['JINN_PASSWORD'];
+    delete process.env['JINN_EARNING_DIR'];
+    process.env['HOME'] = home;
+    try {
+      const app = new Hono();
+      addSetupRoutes(app, { earningDir });
+      const res = await app.request('/v1/setup/change-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ current: 'old-password', next: 'new-password-99' }),
+      });
+
+      expect(res.status).toBe(200);
+      // `passwordFileUpdated` reports the primary (earning-dir) write, which
+      // succeeds independently of the legacy mirror this test blocks.
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+      expect(process.env['JINN_PASSWORD']).toBe('new-password-99');
+    } finally {
+      if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
+      else process.env['JINN_EARNING_DIR'] = oldEnv;
+      if (oldHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = oldHome;
+      if (oldPassword === undefined) delete process.env['JINN_PASSWORD'];
+      else process.env['JINN_PASSWORD'] = oldPassword;
+    }
+  }, 30000);
+
+  it('leaves a drifted password file alone when rotating a second operator', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jinn-cp-home-'));
+    const stateDir = join(home, '.jinn-operator');
+    const defaultEarningDir = join(stateDir, 'earning');
+    mkdirSync(defaultEarningDir, { recursive: true });
+
+    const mnemonic = generateMnemonic();
+    await new FleetStateStore(defaultEarningDir).saveMnemonicKeystore(
+      await encryptMnemonic(mnemonic, 'a-password'),
+    );
+    const secondEarningDir = mkdtempSync(join(tmpdir(), 'jinn-cp-op-b-'));
+    await new FleetStateStore(secondEarningDir).saveMnemonicKeystore(
+      await encryptMnemonic(mnemonic, 'old-password'),
+    );
+    const pwFilePath = join(stateDir, 'keystore-password');
+    writeFileSync(pwFilePath, 'some-other-value\n', { mode: 0o600 });
+
+    const oldEnv = process.env['JINN_EARNING_DIR'];
+    const oldHome = process.env['HOME'];
+    const oldPassword = process.env['JINN_PASSWORD'];
+    delete process.env['JINN_EARNING_DIR'];
+    process.env['HOME'] = home;
+    try {
+      const app = new Hono();
+      addSetupRoutes(app, { earningDir: secondEarningDir });
+      const res = await app.request('/v1/setup/change-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ current: 'old-password', next: 'new-password-99' }),
+      });
+
+      expect(res.status).toBe(200);
+      // `passwordFileUpdated` reports the primary (earning-dir) write for
+      // THIS operator, which succeeds; the host-wide legacy file it must
+      // not touch (checked below) belongs to the default operator.
+      expect(await res.json()).toEqual({ ok: true, passwordFileUpdated: true });
+      expect(readFileSync(pwFilePath, 'utf-8').trim()).toBe('some-other-value');
+    } finally {
+      if (oldEnv === undefined) delete process.env['JINN_EARNING_DIR'];
+      else process.env['JINN_EARNING_DIR'] = oldEnv;
+      if (oldHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = oldHome;
+      if (oldPassword === undefined) delete process.env['JINN_PASSWORD'];
+      else process.env['JINN_PASSWORD'] = oldPassword;
+    }
+  }, 30000);
 });
 
 describe('POST /v1/setup/drip', () => {

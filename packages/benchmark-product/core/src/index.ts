@@ -14,11 +14,12 @@ export * from "./agent/index.js";
 export { BENCHMARKING_PROTOCOL } from "./platform.js";
 export { OPERATION_TO_GUI as GUI_CAPABILITY_CATALOG } from "./cli/parity-map.js";
 export type { GuiCapability } from "./cli/parity-map.js";
-export * from "./human-review/contracts.js";
-export * from "./human-review/application.js";
-export * from "./human-review/verification.js";
-export * from "./human-review/verification-workspace.js";
 export * from "./evidence-first.js";
+export {
+  buildBinaryJudgmentAdmissionClosureWorkspacePorts,
+  verifyBinaryJudgmentAdmissionClosureInWorkspace,
+} from "./run/admission-workspace.js";
+export type { VerifyBinaryJudgmentAdmissionClosureInWorkspaceInput } from "./run/admission-workspace.js";
 
 // Typed errors (spec §4.3): callers branch on `code`, never on `message`.
 export { BenchmarkProductError, PRODUCT_ERROR_CODES, toErrorEnvelope } from "./errors.js";
@@ -320,195 +321,6 @@ export {
 } from "./runtime/inspect/binary-judge.js";
 export type { InspectBinaryJudgeWorkerInput } from "./runtime/inspect/binary-judge.js";
 
-// Demo-1's explicit real-Claude runtime and byte-preserving arm construction. The product does
-// not discover executables or source content ambiently; callers bind both before lock.
-export {
-  DEMO1_CLAUDE_EFFORT,
-  DEMO1_CLAUDE_HARNESS_ID,
-  DEMO1_CLAUDE_MODEL_ID,
-  DEMO1_CLAUDE_MD_PATH,
-  DEMO1_CLAUDE_OAUTH_FILE_ENV,
-  DEMO1_CLAUDE_OAUTH_GRANT_KEY,
-  DEMO1_CLAUDE_OAUTH_SECRET_TARGET,
-  DEMO1_EXPERIMENT_PATHS,
-  DEMO1_SKILL_PATH,
-  createDemo1ClaudeCandidateRuntimeBinding,
-  createDemo1ClaudeRuntimeBinding,
-  createDemo1ClaudeSelectedRuntimeBinding,
-  demo1ClaudeArmRequirements,
-  generateDemo1InstructionArtifacts,
-} from "./venue/demo1-claude.js";
-
-// Demo-1 pre-run selection is a fail-closed, product-owned method boundary. It consumes only
-// frozen source bytes and outcome-blind task evidence; a STOP inventory is a valid result.
-export {
-  DEMO1_DOCUMENT_SKILL_PATHS,
-  DEMO1_INSTRUCTION_TRANSFORM_ID,
-  DEMO1_INSTRUCTION_TRANSFORM_SPEC,
-  DEMO1_OUTCOME_BLIND_TASK_CHECKS,
-  DEMO1_PRE_E2_OFFICIAL_FEASIBILITY_FLOOR,
-  DEMO1_PRE_RUN_FREEZE_SCHEMA,
-  DEMO1_REHEARSAL_POOL_REQUIREMENT,
-  DEMO1_SKILLS_SOURCE_URL,
-  DEMO1_SUITABILITY_POOL_REQUIREMENT,
-  buildDemo1PreRunFreeze,
-  canonicalDemo1PreRunFreezeBytes,
-  demo1PreRunFreezeDigest,
-  parseDemo1UpstreamSkill,
-  verifyDemo1PreRunFreeze,
-} from "./method/demo1-prerun.js";
-
-// Demo-1 task-evidence recovery is append-only: v2 remains authenticated while v3 binds the
-// complete task universe, candidate-specific domain checks, and a product-owned pool partition.
-export {
-  DEMO1_PERMISSIVE_TASK_LICENSES,
-  DEMO1_TASK_EVIDENCE_CHECKS,
-  DEMO1_TASK_EVIDENCE_POLICY_ID,
-  DEMO1_TASK_EVIDENCE_SCHEMA,
-  buildDemo1TaskEvidenceArtifact,
-  canonicalDemo1TaskEvidenceBytes,
-  demo1TaskEvidenceDigest,
-  verifyDemo1TaskEvidenceArtifact,
-} from "./method/demo1-task-evidence.js";
-export type {
-  Demo1TaskEvidenceArtifact,
-  Demo1TaskEvidenceBuildInput,
-  Demo1TaskEvidenceCandidate,
-  Demo1TaskEvidenceEntry,
-  Demo1TaskEvidenceUniverseTask,
-} from "./method/demo1-task-evidence.js";
-export {
-  DEMO1_POOL_PARTITION_POLICY,
-  DEMO1_PRE_RUN_FREEZE_V3_SCHEMA,
-  buildDemo1PreRunFreezeV3,
-  canonicalDemo1PreRunFreezeV3Bytes,
-  demo1PreRunFreezeV3AsV2,
-  demo1PreRunFreezeV3Digest,
-  verifyDemo1PreRunFreezeV3,
-} from "./method/demo1-prerun-v3.js";
-export {
-  SKILLSBENCH_V1_1_SOURCE,
-} from "./method/skillsbench-source.js";
-export type { SkillsBenchPinnedTask } from "./method/skillsbench-source.js";
-export {
-  SKILLSBENCH_RESOURCE_CLASSES,
-  SKILLSBENCH_NETWORK_MODES,
-  SKILLSBENCH_TASK_BUNDLE_UNIT_SCHEMA,
-  buildSkillsBenchUnit,
-  canonicalSkillsBenchUnitBytes,
-  classifySkillsBenchResource,
-  skillsBenchUnitDigest,
-  verifySkillsBenchUnit,
-  verifySkillsBenchUnitBodies,
-} from "./method/skillsbench-unit.js";
-export type {
-  SkillsBenchEntry,
-  SkillsBenchNetworkMode,
-  SkillsBenchResource,
-  SkillsBenchResourceClass,
-  SkillsBenchSkill,
-  SkillsBenchUnit,
-  SkillsBenchUnitBuildInput,
-} from "./method/skillsbench-unit.js";
-export {
-  SKILLSBENCH_CLUSTER_EDGE_CLASSES,
-  SKILLSBENCH_CLUSTER_POLICY,
-  deriveSkillsBenchClusters,
-  skillsBenchClusterId,
-  skillsBenchClusterOf,
-  verifySkillsBenchClusterGraph,
-} from "./method/skillsbench-clusters.js";
-export type {
-  SkillsBenchCluster,
-  SkillsBenchClusterEdge,
-  SkillsBenchClusterEdgeClass,
-  SkillsBenchClusterGraph,
-  SkillsBenchClusterInput,
-} from "./method/skillsbench-clusters.js";
-export {
-  SKILLSBENCH_ADMISSION_CHECKS,
-  SKILLSBENCH_ADMISSION_POLICY,
-  SKILLSBENCH_CONFLICTING_INSTRUCTION_PATHS,
-  SKILLSBENCH_REQUIRED_CLUSTERS,
-  SKILLSBENCH_REQUIRED_UNITS,
-  SKILLSBENCH_STATIC_CHECKS,
-  assessSkillsBenchStaticAdmission,
-} from "./method/skillsbench-admission.js";
-export type {
-  SkillsBenchAdmissionCheck,
-  SkillsBenchAdmissionInput,
-  SkillsBenchCapacity,
-  SkillsBenchCheckResult,
-  SkillsBenchCheckStatus,
-  SkillsBenchStaticAdmission,
-  SkillsBenchUnitVerdict,
-} from "./method/skillsbench-admission.js";
-export {
-  SKILLSBENCH_CLAUDE_MD_TRANSFORM,
-  SKILLSBENCH_ARMS,
-  SKILLSBENCH_TREATMENT_SCHEMA,
-  buildSkillsBenchClaudeMd,
-  buildSkillsBenchTreatment,
-  canonicalSkillsBenchTreatmentBytes,
-  skillsBenchFlattenSpan,
-  verifySkillsBenchClaudeMdBodies,
-  verifySkillsBenchTreatment,
-} from "./method/skillsbench-treatment.js";
-export type {
-  SkillsBenchArm,
-  SkillsBenchArmFile,
-  SkillsBenchArmPlan,
-  SkillsBenchTreatment,
-  SkillsBenchTreatmentInput,
-} from "./method/skillsbench-treatment.js";
-export {
-  DEMO1_PRE_RUN_FREEZE_V4_SCHEMA,
-  buildDemo1PreRunFreezeV4,
-  canonicalDemo1PreRunFreezeV4Bytes,
-  demo1PreRunFreezeV4AsE2Input,
-  demo1PreRunFreezeV4Digest,
-  verifyDemo1PreRunFreezeV4,
-} from "./method/skillsbench-prerun-v4.js";
-export type {
-  Demo1PreRunFreezeV4,
-  Demo1PreRunFreezeV4Input,
-} from "./method/skillsbench-prerun-v4.js";
-export {
-  SKILLSBENCH_DENIED_HOSTS,
-  SKILLSBENCH_EGRESS_POLICY,
-  deriveSkillsBenchEgressPlan,
-  extractEgressHosts,
-  isDeniedEgressHost,
-  verifySkillsBenchEgressPlan,
-} from "./method/skillsbench-egress.js";
-export type {
-  SkillsBenchEgressDecision,
-  SkillsBenchEgressInput,
-  SkillsBenchEgressPlan,
-} from "./method/skillsbench-egress.js";
-export {
-  SKILLSBENCH_DEFAULT_FULL_SUCCESS,
-  SKILLSBENCH_REWARD_CONTRACT,
-  judgeSkillsBenchControls,
-  parseSkillsBenchCtrf,
-  readSkillsBenchReward,
-} from "./method/skillsbench-reward.js";
-export type {
-  SkillsBenchCtrfSummary,
-  SkillsBenchOutcome,
-  SkillsBenchRewardInput,
-  SkillsBenchRewardReading,
-} from "./method/skillsbench-reward.js";
-export {
-  SKILLSBENCH_PARTITION_POLICY,
-  partitionSkillsBenchPools,
-  verifySkillsBenchPartition,
-} from "./method/skillsbench-partition.js";
-export type {
-  SkillsBenchPartition,
-  SkillsBenchPartitionUnit,
-  SkillsBenchSelectedUnit,
-} from "./method/skillsbench-partition.js";
 export {
   NATIVE_SNAPSHOT_ALGORITHM,
   NativeSnapshotRefusedError,
@@ -521,149 +333,9 @@ export type {
   FilesystemSnapshotOptions,
   ProcessLauncherOptions,
 } from "./runtime/native-ports.js";
-export {
-  SKILLSBENCH_PLUGIN_DIR,
-  SKILLSBENCH_RESOURCE_ROOT,
-  SKILLSBENCH_WORKSPACE_LAYOUT,
-  materializeSkillsBenchWorkspace,
-  verifySkillsBenchWorkspaceTriple,
-} from "./runtime/skillsbench-workspace.js";
-export type {
-  SkillsBenchWorkspace,
-  SkillsBenchWorkspaceFile,
-  SkillsBenchWorkspaceInput,
-} from "./runtime/skillsbench-workspace.js";
-export type {
-  Demo1PreRunFreezeV3,
-  Demo1PreRunFreezeV3CandidateInventory,
-  Demo1PreRunFreezeV3Input,
-  Demo1PreRunFreezeV3SelectedTask,
-} from "./method/demo1-prerun-v3.js";
-
-// Demo-1 E4: benchmark-specific preregistration over an injected generic IPFS/ERC-8004 manifest
-// boundary. The witness is local handoff evidence, not a new record kind or publication claim.
-export {
-  DEMO1_PREREGISTRATION_BATCH_KIND,
-  DEMO1_PREREGISTRATION_MEDIA_TYPE,
-  anchorDemo1Preregistration,
-  canonicalDemo1PreregistrationCommitmentBytes,
-  canonicalDemo1PreregistrationWitnessBytes,
-  verifyDemo1PreregistrationOrdering,
-  verifyDemo1PreregistrationPreDispatch,
-  verifyDemo1PreregistrationRunOrdering,
-} from "./method/demo1-preregistration.js";
-export type {
-  Demo1OfficialDispatchEvidenceIdentity,
-  Demo1PreregistrationAnchorBoundary,
-  Demo1PreregistrationCommitment,
-  Demo1PreregistrationExternalBlock,
-  Demo1PreregistrationOrderingResult,
-  Demo1PreregistrationPreDispatchResult,
-  Demo1PreregistrationReadBack,
-  Demo1PreregistrationRunOrderingResult,
-  Demo1PreregistrationWitness,
-} from "./method/demo1-preregistration.js";
-export { DEMO1_PINNED_SKILLS_SOURCE } from "./method/demo1-prerun-source.js";
-export type {
-  Demo1AuthenticatedCandidateSource,
-  Demo1CandidateInput,
-  Demo1CandidateInventory,
-  Demo1EvidenceCheck,
-  Demo1EvidenceRef,
-  Demo1EvidenceStatus,
-  Demo1Pool,
-  Demo1PreRunFreeze,
-  Demo1PreRunFreezeDerived,
-  Demo1PreRunFreezeInput,
-  Demo1TaskEligibilityInput,
-  Demo1TaskInventory,
-} from "./method/demo1-prerun.js";
-
-// Demo-1 v2 selects the cheapest runtime that can produce an informative benchmark before any
-// official freeze. The accepted v1 Haiku/high artifacts remain unchanged and independently
-// verifiable.
-export {
-  DEMO1_PROVIDER_CALL_LIMITS,
-  DEMO1_RUNTIME_CANDIDATES,
-  DEMO1_RUNTIME_POLICY_SCHEMA,
-  DEMO1_RUNTIME_SELECTION_SCHEMA,
-  buildDemo1RuntimeSelection,
-  decideDemo1Runtime,
-  demo1RuntimePolicyDecisionDigest,
-  verifyDemo1RuntimeSelection,
-} from "./method/demo1-runtime-policy.js";
-export type {
-  Demo1RuntimeCandidate,
-  Demo1RuntimeDisposition,
-  Demo1RuntimePolicyDecision,
-  Demo1RuntimeSelection,
-  Demo1RuntimeSuitabilitySummary,
-} from "./method/demo1-runtime-policy.js";
-
-// Demo-1 suitability and E2 sizing are local method artifacts, not new evidence record kinds.
-// They schedule only task identities already frozen by the pre-run method and cannot execute
-// Docker/model cells or claim power without complete rehearsal observations.
-export {
-  DEMO1_ARMS,
-  DEMO1_DESIGN_ARTIFACT_KIND,
-  DEMO1_E2_DECISION_SCHEMA,
-  DEMO1_E2_MIN_REPOSITORIES,
-  DEMO1_E2_REPLICATES,
-  DEMO1_E2_TASKS,
-  DEMO1_EQUIVALENCE_MARGIN,
-  DEMO1_HAIKU_EFFORT,
-  DEMO1_HAIKU_MODEL,
-  DEMO1_OFFICIAL_ARMS,
-  DEMO1_OFFICIAL_CELL_CEILING,
-  DEMO1_POWER_SIMULATIONS,
-  DEMO1_REHEARSAL_PLAN_SCHEMA,
-  DEMO1_SUITABILITY_REPLICATES,
-  DEMO1_SUITABILITY_TASKS,
-  DEMO1_TARGET_EFFECT,
-  DEMO1_TARGET_POWER,
-  assessDemo1HaikuSuitability,
-  buildDemo1RehearsalPlan,
-  buildDemo1RehearsalPlanFromFreeze,
-  canonicalDemo1E2DesignBytes,
-  demo1E2DesignDigest,
-  demo1RehearsalPlanDigest,
-  deriveDemo1E2Design,
-  selectDemo1OfficialDesign,
-  verifyDemo1E2Design,
-  verifyDemo1HaikuSuitabilityAssessment,
-  verifyDemo1RehearsalPlan,
-} from "./method/demo1-e2-design.js";
-export type {
-  Demo1DesignTask,
-  Demo1E2DesignDecision,
-  Demo1E2Estimates,
-  Demo1E2RehearsalInput,
-  Demo1E2TaskResult,
-  Demo1EmptyLoadoutEvidence,
-  Demo1HaikuSuitabilityAssessment,
-  Demo1PlannedCell,
-  Demo1RehearsalPlan,
-  Demo1RehearsalPlanInput,
-  Demo1SelectedDesign,
-  Demo1SimulatedDesignCandidate,
-  Demo1SuitabilityAttemptOutcome,
-  Demo1SuitabilityCellObservation,
-} from "./method/demo1-e2-design.js";
-export type {
-  Demo1ClaudeArm,
-  Demo1ClaudeCandidateRuntimeOptions,
-  Demo1ClaudeCommand,
-  Demo1ClaudeOAuthCredentialOptions,
-  Demo1ClaudeReadiness,
-  Demo1ClaudeRuntimeBinding,
-  Demo1ClaudeRuntimeOptions,
-  Demo1ClaudeSelectedRuntimeOptions,
-  Demo1InstructionArtifacts,
-  Demo1SkillFrontmatter,
-} from "./venue/demo1-claude.js";
 
 // Workspace metadata and the sealed-bytes store (spec §4.5): exact bytes, digest-addressed.
-export { WORKSPACE_STORAGE_VERSION, WorkspaceAnchoringEntrySchema, WorkspaceMetadataSchema } from "./workspace/workspace.js";
+export { WORKSPACE_STORAGE_VERSION, WorkspaceAnchoringEntrySchema, WorkspaceMetadataSchema, DEFAULT_ENTRY_ANCHOR_SKEW_ALLOWANCE_MS, entryAnchorSkewAllowanceMs } from "./workspace/workspace.js";
 export type { WorkspaceAnchoringEntry, WorkspaceMetadata } from "./workspace/workspace.js";
 export { getSealedBytes, hasSealedBytes, putSealedBytes, sha256Hex } from "./workspace/sealed-store.js";
 
@@ -728,14 +400,9 @@ export {
   authorityGrant,
   authorityRevoke,
   authorityShow,
-  BINARY_ITEM_BANK_PROFILE,
   createDraft,
   getDraft,
-  importBinaryItemBank,
   importSweBenchRows,
-  admitHumanTruth,
-  createHumanReviewPackets,
-  signHumanReviewResponse,
   initWorkspace,
   importRunRecords,
   inspectDraft,
@@ -767,7 +434,6 @@ export {
   sampleInit,
   selectMethod,
   exportDerivedBundle,
-  migrateTerminalBenchLegacyTask,
   updateDraft,
 } from "./operations/index.js";
 export type {
@@ -783,24 +449,10 @@ export type {
   CreateDraftInput,
   DraftInspection,
   DraftSummary,
-  ImportBinaryItemBankInput,
-  ImportBinaryItemBankResult,
   ImportSweBenchRowsInput,
   ImportSweBenchRowsResult,
-  AdmitHumanTruthInput,
-  AdmitHumanTruthResult,
-  CreateHumanReviewPacketsInput,
-  CreateHumanReviewPacketsResult,
-  HumanAdmissionCandidateInput,
-  HumanAdmissionExclusionSummary,
-  HumanAdmissionResolutionSummary,
-  HumanReviewPacketSummary,
-  SignHumanReviewResponseInput,
-  SignHumanReviewResponseResult,
   OperationContext,
   OperationResult,
-  MigrateTerminalBenchLegacyTaskInput,
-  MigrateTerminalBenchLegacyTaskResult,
   PreviewArtifact,
   PublicationAccountingInput,
   PublicationAccountingResult,
@@ -880,7 +532,7 @@ export { LOCAL_VENUE_LIMITS } from "./operations/index.js";
 export { anchorAfterLockIfConfigured } from "./operations/run-anchor.js";
 export type { AnchorAfterLockOutcome } from "./operations/run-anchor.js";
 
-// Method catalog listing is CLI/GUI discovery, not a facade operation (DR-2026-08-19; parity stays 40).
+// Method catalog listing is CLI/GUI discovery, not a facade operation (DR-2026-08-19; parity stays 41).
 export { METHOD_CATALOG, isMethodCatalogId, listMethodCatalog } from "./operations/method-catalog.js";
 
 
@@ -892,45 +544,30 @@ export { verifyPublicBundle } from "./bundle/verify.js";
 // `bundleIdentityLabel` rides beside it for the same reason: the identity a reader quotes is
 // normalized once, so a surface cannot render `sha256:sha256:...` for the format whose identity
 // already carries the prefix (issue #3312).
-export { bundleIdentityLabel, summarizeVerificationOutcome } from "@colophon-claims/verify";
+export { bundleIdentityLabel, summarizeVerificationOutcome } from "@colophon-claims/check";
 export type {
   VerificationCheckOutcome,
   VerificationCheckState,
   VerificationOutcome,
-} from "@colophon-claims/verify";
+} from "@colophon-claims/check";
 export type { PublicBundleVerificationCheck, PublicBundleVerificationResult } from "./bundle/verify.js";
 
 // The `beacon-binding/1` surface a caller needs to OFFER a binding (issue #2976): the admitted
 // beacon sources and the reference shape. Re-exported through this facade for the same reason the
 // verification-outcome summary is — the product's GUI may import only this package, and a second
 // copy of the source registry would be a second place the admitted beacons could drift.
-export { BEACON_SOURCES, BEACON_SOURCE_IDS, MAX_BEACON_ROUND } from "@colophon-claims/verify";
-export type { BeaconReference, BeaconSourceId, RunBindingClass, VerifiedRunBinding } from "@colophon-claims/verify";
+export { BEACON_SOURCES, BEACON_SOURCE_IDS, MAX_BEACON_ROUND } from "@colophon-claims/check";
+export type { BeaconReference, BeaconSourceId, RunBindingClass, VerifiedRunBinding } from "@colophon-claims/check";
 
 // The declared denominator beside the strict all-slots one (issue #2977). Re-exported for the same
 // reason as the two surfaces above: the product's GUI imports only this package, and a second copy
 // of the derivation would be a second place the two numbers could disagree.
-export { armDenominators } from "@colophon-claims/verify";
-export type { ArmDenominators, PlannedSlotAccounting } from "@colophon-claims/verify";
+export { armDenominators } from "@colophon-claims/check";
+export type { ArmDenominators, PlannedSlotAccounting } from "@colophon-claims/check";
 
 // PUB-13b: an additive publication-profile projection. This is intentionally not wired into the
 // v2 `publish` operation or CLI: callers opt into its accounting-first, report-optional contract.
 export { BUNDLE_V3_FORMAT } from "./bundle/manifest.js";
-export { materializeBundleV3 } from "./bundle/v3-materialize.js";
-export type {
-  BundleV3NativeArtifactInput,
-  MaterializeBundleV3Deps,
-  MaterializeBundleV3Input,
-  MaterializedBundleV3,
-} from "./bundle/v3-materialize.js";
-export { verifyBundleV3 } from "./bundle/v3-verify.js";
-export type { BundleV3VerificationResult, VerifyBundleV3Deps } from "./bundle/v3-verify.js";
-export {
-  BUNDLE_V3_INDEX_FORMAT,
-  BundleV3IndexSchema,
-  BundleV3NativeDisclosureSchema,
-} from "./bundle/v3-schema.js";
-export type { BundleV3Index, BundleV3NativeDisclosure } from "./bundle/v3-schema.js";
 
 // The bundled sample benchmark (BP-11) and SWE-bench row intake, re-exported so a GUI
 // client can call them directly without a source dependency on ./intake/*.
@@ -939,27 +576,24 @@ export type { SampleBenchmark, SampleBenchmarkTask } from "./intake/sample.js";
 export { convertSweBenchRows } from "./intake/swebench.js";
 export type { ConvertSweBenchRowsOptions } from "./intake/swebench.js";
 export {
+  BINARY_ITEM_BANK_INTAKE_EXTENSION,
+  parseBinaryItemBankIntakeExtension,
+} from "./run/binary-instrument-profile.js";
+export {
   BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
   BINARY_ITEM_BANK_ENTRY_PROTOCOL,
-  BINARY_ITEM_BANK_INTAKE_EXTENSION,
   BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL,
   BinaryAdmissionIndexEntrySchema,
   BinaryItemBankEntrySchema,
   BinaryItemBankIntakeExtensionSchema,
   BinarySourceManifestEntrySchema,
-  convertBinaryItemBank,
-  parseBinaryItemBankIntakeExtension,
-  renderCanonicalJsonl,
-} from "./intake/binary-item-bank.js";
+} from "@colophon-claims/check/admission";
 export type {
   BinaryAdmissionIndexEntry,
   BinaryItemBankEntry,
   BinaryItemBankIntakeExtension,
   BinarySourceManifestEntry,
-  ConvertBinaryItemBankInput,
-  ConvertedBinaryItem,
-  ConvertedBinaryItemBank,
-} from "./intake/binary-item-bank.js";
+} from "@colophon-claims/check/admission";
 
 // The CLI as a library (spec §5.2): `runCli` is a pure function of argv and its context;
 // only dist/cli/bin.js touches the process.

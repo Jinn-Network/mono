@@ -91,12 +91,13 @@ test('each package distribution is restored straight into its package', () => {
 // comment block fails here instead of silently leaving the repository-wide
 // gate with nothing to enforce.
 test('the restore step carries a comment citing a precedent workflow', () => {
+  const stepName = 'Restore Policy Identity distribution';
   const lines = workflow.split('\n');
-  const restoreStep = lines.findIndex((line) => line.includes('- name: Restore Policy Identity distribution'));
+  const restoreStep = lines.findIndex((line) => line.includes(`- name: ${stepName}`));
   assert.ok(restoreStep > 0, 'the identity restore step must exist');
 
   assert.ok(
-    citedPrecedents(workflow, 'policy-ci.yml').length > 0,
+    citedPrecedents(workflow, 'policy-ci.yml', stepName).length > 0,
     'the restore step must carry a `# Precedent: <workflow>.yml` marker in its attached comment',
   );
 });

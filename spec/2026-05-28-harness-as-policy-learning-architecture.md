@@ -3,6 +3,7 @@ version: 1.0
 date: 2026-05-28
 author: opus + oaksprout
 status: proposed
+superseded-in-part-by: '[docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md](../docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md) §15.3 (2026-09-24): §3, the L2 to L5 roadmap (the ladder table and the §3.1 `jinn ablate` mechanism), is superseded by the campaign engine; §1, §1.1, §2 and §7 are kept, and §4 is composed through capability-eval; see also [docs/learning-engine.md](../docs/learning-engine.md)'
 parent-epic: '#601 — EPIC: Demonstrate solver learning'
 design-pass: '#689 — design: harness-as-policy learning architecture'
 ---

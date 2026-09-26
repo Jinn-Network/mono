@@ -1,0 +1,17 @@
+{
+  "export": "TASK_COORDINATOR_ABI",
+  "items": [
+    {
+      "type": "function",
+      "name": "nextTaskId",
+      "stateMutability": "view",
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "uint256",
+          "name": ""
+        }
+      ]
+    }
+  ]
+}

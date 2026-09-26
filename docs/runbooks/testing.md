@@ -282,10 +282,12 @@ can have it taken mid-run. Three sanctioned forms, in preference order:
 | nothing — the assertion *is* "nothing is listening here" | a fixed port **below 32768**, with a comment saying why |
 
 The invariant under all three: **never a literal inside 32768–65535 in a
-port-shaped position** — a `.listen(` argument, a port-shaped object key, or a
-port-ish `const`, and in the last two cases every element of an array bound
-there. Those are the positions the lint can see; a port buried in a
-URL string (`fetch('http://127.0.0.1:45020/health')`) is outside it, and so are
+port-shaped position** — a `.listen(` argument, a port-shaped object key, a
+port-ish `const` (scalar, defaulted, or array), a `return` of a scalar or an
+array from inside a port-ish block, or a port-ish concise arrow (`() => 45000`,
+`() => (45000)`, `() => [45000]`). Those are the positions the lint can see; a
+port buried in a URL string (`fetch('http://127.0.0.1:45020/health')`) is
+outside it, and so are
 the other gaps listed under "What this guard does not catch" in the header of
 [`operator/scripts/check-no-fixed-test-port.mjs`](../../operator/scripts/check-no-fixed-test-port.mjs),
 which also names the two false positives the guard can still produce and the
@@ -408,11 +410,46 @@ Results:
   the first run and re-compared against that same baseline afterwards, so its
   unchanged result covers the six runs cumulatively.
 
-Named but not fixed here, both load-sensitive budgets with CI evidence and no
-local reproduction: `test/cli/native-identity.test.ts` (18 real process boots
-against a 60s budget) and `test/_support/chain/anvil.test.ts` /
-`olas-funding.test.ts` (a 15s anvil readiness budget while forking Base mainnet
-over the network).
+**Both budgets named but not fixed under #1627 were resolved on 2026-09-05
+(#3581), one each way.**
+
+`test/cli/native-identity.test.ts` — **fixed.** The reproduction the #1627 pass
+lacked turned up on the first attempt: the `real two-process concurrent
+--create` race took **~56s of a flat 60s budget on an idle 12-core laptop**
+(~8-11s per iteration over 6 iterations, 18 real CLI process boots), and the
+same test went red at **60017ms on a CI `Typecheck & Test` job on 2026-09-05**
+— a ~7% margin, on a 4-vCPU runner sharing itself with two sibling workers.
+That measurement is of the 6-iteration form. On `next`, `409eab0b5`
+("test(operator): bound process identity race runtime", 2026-09-05) had
+already cut `ITERATIONS` 6→3 to leave headroom for the default suite's
+parallel workers on two-core CI runners. The wall-clock budget supersedes that
+flat cut: it bounds wall time under contention the way `409eab0b5` wanted,
+while leaving the extra iterations available on a host with room. It does not
+silently revert the cut. The fix applies both rules above: the loop is bounded
+by wall clock (a 60s budget, and the next iteration starts only if the slowest
+one seen so far still fits in what is left). The first iteration is
+unconditional, so a host that cannot finish even one race surfaces as the 90s
+`testTimeout` — that is why the backstop exists; the exhaustion assertion under
+the loop is a defensive invariant if the loop ever completes zero iterations
+without throwing. A race test's coverage is probabilistic, so the currency
+spent under load is iterations, not reliability. Verified: green idle (50.8s)
+and green under an added 8-way CPU load at load average 35 (48.7s).
+
+`test/_support/chain/anvil.test.ts` / `olas-funding.test.ts` — **measured, and
+left alone.** Anvil readiness against a live Base-mainnet fork was timed over
+13 spawns, 5 idle and 8 under an added 8-way CPU load: median **1.13s**, min
+0.97s, max **5.34s**, zero timeouts. The 15s budget is ~13x the median and
+~2.8x the worst observed. The tail is network-bound (fetching fork state), not
+CPU-bound, which is why the loaded runs look like the idle ones. Mining the CI
+history the same way as the census above — the last 300 `ci.yml` runs, which
+held 297 `check` jobs but only **5** `Typecheck & Test` failures, every one of
+those logs retrieved — found **zero** occurrences of `anvil did not become
+ready` (and one of the `native-identity` timeout above, which is how that one
+was caught). Five failure logs is a thin instrument; treat this as "no evidence
+of a problem", not as a measured rate. The wait already follows both rules (a
+`Date.now()` deadline, and a throw naming the budget and the port), and there
+is nothing here to fix on evidence. Re-derive with a spawn-and-poll loop
+against `spawnAnvilFork`'s own arguments if the picture changes.
 
 **Verifying that no test touched the real home.** The in-suite guards —
 `operator/test/config/home-isolation.test.ts`,
@@ -438,6 +475,78 @@ git -C <checkout> status --porcelain   # and nothing written into the tree
 
 Across the five original runs and the five confirmation runs: no new entries,
 no mtime or size change, and nothing written into the checkout.
+
+### Per-test overrides below the suite bound (#4390, 2026-09-15)
+
+`operator/vitest.config.ts` and `packages/benchmark-product/core/vitest.config.ts`
+both set `testTimeout: 30_000` (#2766, #3289), but a per-test override *below*
+that value lowers the bound for that one test, and the config cannot reach it.
+#4390 audited every such override in `operator/` at or below the 5000ms figure
+#3289 named. Search with `[[:space:]]`, never `\s` — `\s` is not portable in
+`git grep -E` and matches a literal `s`, which silently undercounts:
+
+```bash
+git grep -nE '\}, *[0-9_]+\);' -- operator/test          # closing-argument form
+git grep -nE 'timeout:[[:space:]]*[0-9_]+' -- operator/test # object form
+```
+
+Two real test bounds at 5000ms were found. Classification per site:
+
+- `operator/test/harnesses/impls/claude-mcp-hyperliquid/mcp-tools.test.ts`
+  (`'rejects within timeout + slack when fetch never resolves'`, formerly `}, 5_000)`) — **incidental,
+  removed.** The test awaits a 10ms tick and asserts a signal was passed to
+  `fetch`; nothing in it depends on 5s. It now inherits the suite's 30s.
+- `operator/test/daemon/native-base-sepolia-infrastructure.test.ts`
+  (`'bounds the response body read, not only time-to-headers (#3458)'`,
+  formerly `}, 5_000)`) — **deliberate-for-speed, wall-clock-exposed;
+  exposure accepted, override removed.** Its comment names the mutation it
+  guards: clear the transport timer at the response headers again and the
+  guarded call never settles, so the test "hangs to the suite's 30s
+  `testTimeout` rather than rejecting". That is still true at that bound — the
+  mutation check goes red either way; the 5s override only made it go red 25s
+  sooner.
+  There is no clock-free mechanism for detecting "this promise never
+  settles": every hang detector is a deadline, and fake timers do not help
+  because the thing under test is a real `fetch` body read. The choice was
+  therefore between a 5s deadline exposed to runner starvation on a test
+  whose real cost is ~30ms (the #3289 flake class) and a 30s one. It inherits
+  30s, and its comment says so.
+
+Every other `}, <=5000)` hit under `operator/test` is **not a test bound** and
+needs no re-derivation next time: `e2e/task-first-helpers.ts:1037` is a
+`setInterval` argument, `daemon/native-base-sepolia-infrastructure.test.ts:763`
+is a stream `setTimeout`, `helpers/multi-op-daemon.test.ts:36,56` sit inside a
+daemon source string, and the `{ timeout: 5_000 }` object-form hits are
+`execFileSync` options, `vi.waitFor` budgets, or product `timeout` fields, not
+vitest. The 8s tail in `operator/test/harnesses/impls/learner/` sits above
+the 5s figure and was left alone. `packages/benchmark-product/core` has none
+below 30s (`src/suite-timeouts.test.ts` holds that floor).
+
+**`plugin/runtime` stays on Vitest's 5s default.** It has no
+`vitest.config.ts`; 70 `src/**/*.test.ts` files; 14 per-test overrides, all on
+three files that do real capture, archive, or mirror I/O and are individually
+justified (`src/capture/capture.integration.test.ts` ×12 at 60s/120s,
+`src/mcp/concurrency.test.ts` at 60s, `src/corpus/mirror-service.integration.test.ts`
+at 20s: an apparent flake here (#4263 reconcile) traced to `blackHole`'s mock
+fetch not rejecting synchronously on an already-aborted signal, the way a
+real `fetch` does, so it hung to the test's own timeout instead of the
+deadline under test; fixing the mock left the bound untouched). Its one
+documented incident, `fc2308ffa`, was a **cost race** — a 5s
+bound against the archive busy budget's 10s default, fixed by shrinking the
+budget and bounding that one test — not scheduler starvation of a
+millisecond-cost test, so it supports the "cost-driven, not flake-driven"
+reading rather than refuting it. #2766's 30s was measured (114 hand-applied
+overrides that core had already converged on); `plugin/runtime` has no such
+measurement, and a blanket 30s buys a 6x slower failure for a genuine hang in
+what is mostly fast unit code. No `vitest.config.ts` is added.
+
+**What flips that answer:** a `plugin/runtime` test whose measured cost is
+milliseconds going red at exactly 5000ms in CI with no code change — the
+#2766 / #3289 signature, a same-tree flip — or per-test overrides appearing on
+a fast unit file that does no real I/O. Either is the starvation profile core
+had before #2766, and at that point the fix is the same suite-level
+`testTimeout: 30_000` with a `suite-timeouts.test.ts`-style floor guard, not
+another hand-applied override.
 
 ### Run `yarn test`, not a bare `vitest run`
 

@@ -13,7 +13,7 @@ canonical implementation methodology; do not own the shared lifecycle.
 Before doing work, read
 [`autopilot-runtime`](../autopilot-runtime/SKILL.md) completely. It selects
 process mechanics from the one process-wide
-`JINN_AUTOPILOT_RUNTIME=claude|hermes` setting. The configured runtime applies
+`JINN_AUTOPILOT_RUNTIME=claude|hermes|cursor|codex` setting. The configured runtime applies
 to the coordinator and every stage; never select a different runtime for an
 individual stage.
 

@@ -6,14 +6,29 @@ Conformance testing kit for the Jinn Record Discovery Protocol v1
 Ships the §18 golden-vector corpus, a reusable conformance harness, in-memory
 deterministic fakes for every injected port `@jinn-network/record-discovery-protocol`
 defines (including a `FactsRecompute` registry that recomputes the vectors' record facts
-from bytes), and the exported `run*Conformance` suites that `protocol` (source-chain and
-item verification), `serve` (source conformance), and `client` (query, subscribe, consumer
-conformance) drive against their own implementations.
+from bytes), and the exported `run*Conformance` suites that `protocol` (source-chain
+verification, source-head revalidation, and item verification), `serve` (source
+conformance), and `client` (query, subscribe, consumer conformance) drive against their
+own implementations.
 
 Fixtures are append-only: a vector that turns out to state a rule wrongly is retained
 unedited and replaced by a new one plus a dated erratum in
 `fixtures/manifest.sha256.json`. `loadVectors` skips every superseded vector, so the
 corpus a consumer runs is the corpus minus the errata.
+
+Vector DSSE envelopes (`headSignature`, `entries[].signature`) are stored as legible
+canonical text, not the base64 wire profile `parseWireDsseEnvelope` accepts. Any consumer
+that hands a vector envelope to production parsing or verification must first convert it
+with the exported `vectorEnvelopeToWire`. `runSourceChainConformance` does so internally;
+`runSourceConformance` hands `refreshes[]` to the `ServeUnderTest` implementer raw, so that
+implementer converts before any production DSSE parsing.
+The `source-head` vector `source-head-revalidation-invalid-head-envelope` is the exception:
+its `headSignature` is already an unparseable wire object, and converting it would mint valid
+base64 of the garbage payload plus a well-formed signature entry, reach the payload check, and
+report `head-payload-mismatch` instead, hiding the `invalid-head-envelope` outcome. Handing
+over the raw form of every other source-chain envelope is refused, and downstream that refusal
+is reported as `unauthorized-signer`, so a test that skips the conversion there can pass for
+the wrong reason.
 
 Depends only on `@jinn-network/record-discovery-protocol` — no cross-tree Jinn dependency.
 

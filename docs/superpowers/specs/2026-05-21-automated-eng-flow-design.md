@@ -1,5 +1,7 @@
 # Automated engineering flow — design
 
+> **Status (2026-09-24): partly superseded by [docs/superpowers/specs/2026-07-19-active-active-autopilot-lifecycle-design.md](2026-07-19-active-active-autopilot-lifecycle-design.md).** That design, as amended by the adopted [single-surface lifecycle](2026-07-21-single-surface-lifecycle.md), replaces this spec's board-driven dispatcher eligibility (§2) with branch-native claims, and its in-session finding fixes (§4) with child issues (single-surface §5). The merge skill and human batch-merge (§5, §6) are superseded by the merge queue on `next`, the only merger of ordinary PRs ([DR-2026-08-18-b](../../../log/decisions/2026-08-18-merge-queue-on-next.md)). The dispatcher itself now lives in the extracted Autopilot repository. For the current direction read [docs/superpowers/specs/2026-07-21-single-surface-lifecycle.md](2026-07-21-single-surface-lifecycle.md).
+
 **Version:** 0.1 (proposed)
 **Date:** 2026-05-21
 **Authors:** oak (Captain) and claude — co-designed in a brainstorming session, 2026-05-21

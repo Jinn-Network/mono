@@ -1,12 +1,13 @@
 import { BENCHMARKING_METHOD_IDS, type BenchmarkRecord, type MatrixRecord, type ReportRecord, type RunRecord } from "@jinn-network/benchmarking-records";
-import { firstDifference, type ClaimAnchor, type ClaimDisclosureSection } from "@colophon-claims/verify";
+import { firstDifference, type ClaimAnchor, type ClaimDisclosureSection, type ClaimExternalImportSection } from "@colophon-claims/check";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "../operations/run-results.js";
-import { buildClaimPackage, type ClaimPackage } from "../report/claim.js";
+import { buildClaimPackage, type BuildClaimPackageInput, type ClaimPackage } from "../report/claim.js";
 import { binaryInstrumentReportLimitations } from "../run/binary-instrument-profile.js";
 import { previewDisclosureSummaryLine } from "../run/preview-log.js";
 import { venueIsolationPostureForPolicy } from "../venue/isolation.js";
+import { EXTERNAL_IMPORT_CAPABILITY } from "@colophon-claims/check";
 
 /** Mirrors `operations/report.ts`'s own (unexported) copy of this exact string -- see the comment
  * at its use below. Not shared via export: `operations/publication-report.ts` already carries its
@@ -47,16 +48,17 @@ export function assertClaimConsistency(input: {
    * verification path authenticated, never read out of the claim being checked. Empty rebuilds the
    * unanchored claim, so a stored claim asserting an anchor nobody carries fails here. */
   readonly anchors?: readonly ClaimAnchor[];
+  /** issue #3403: the capability vector of the composed bundle this claim is for, so the rebuilt
+   * claim is the composed generation's, with the id, check list, and reader line that vector
+   * derives. Derived from the run's own facts, never read from the claim under test — that is what
+   * makes a section the vector does not declare a difference rather than a tautology. */
+  readonly composedCapabilities?: BuildClaimPackageInput["composedCapabilities"];
   /** disclosure-specification-record design §7 step 10 (issue #2839): the disclosure section
    * re-derived from the sealed record's own bytes, never read from the claim under test. */
   readonly disclosure?: ClaimDisclosureSection;
-  /** Issue #3698: which anchored, non-qualifying allocation this bundle is, `/6` or `/9`. The two
-   * carry the same claim shape and differ only in the reader line they pin, so each must rebuild
-   * to its own immutable pin rather than to whichever allocation is newest. Unset means `/6`,
-   * which is what every producer still emits. */
-  readonly anchoredBundleFormat?:
-    | "benchmark-product-public-bundle/6"
-    | "benchmark-product-public-bundle/9";
+  /** issue #3417: the external-import section re-derived from the authenticated marker, never
+   * read from the claim under test. */
+  readonly externalImport?: ClaimExternalImportSection;
   readonly suiteComparability?: {
     readonly executionConformance: boolean;
     readonly coverage: "one_task" | "ten_task" | "full" | "custom";
@@ -81,6 +83,7 @@ export function assertClaimConsistency(input: {
   if (minVerdicts === undefined || distinctEvaluator === undefined) {
     refuse("record-integrity", "claim-consistency", "sealed Run carries no complete evaluation-assurance primitives");
   }
+  const imported = input.composedCapabilities?.includes(EXTERNAL_IMPORT_CAPABILITY) === true;
   const expected = buildClaimPackage({
     draftId: input.draftId,
     benchmarkSha256: identities.benchmarkSha256,
@@ -91,7 +94,7 @@ export function assertClaimConsistency(input: {
     reportRecord,
     reportSha256: identities.reportSha256,
     reportEnvelopeSha256: identities.reportEnvelopeSha256,
-    venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, input.anchors ?? []),
+    venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, input.anchors ?? [], imported),
     verificationCommandVerb: "bundle verify",
     assurance: {
       preset: input.assurancePreset,
@@ -104,8 +107,9 @@ export function assertClaimConsistency(input: {
     },
     ...(input.rehearsal === undefined ? {} : { previewDisclosure: input.rehearsal }),
     ...(input.anchors === undefined ? {} : { anchors: input.anchors }),
+    ...(input.composedCapabilities === undefined ? {} : { composedCapabilities: input.composedCapabilities }),
     ...(input.disclosure === undefined ? {} : { disclosure: input.disclosure }),
-    ...(input.anchoredBundleFormat === undefined ? {} : { anchoredBundleFormat: input.anchoredBundleFormat }),
+    ...(input.externalImport === undefined ? {} : { externalImport: input.externalImport }),
     ...(input.suiteComparability === undefined ? {} : { suiteComparability: input.suiteComparability }),
   });
   if (!bytesEqual(canonicalJsonBytes(claim), canonicalJsonBytes(expected))) {
@@ -126,7 +130,7 @@ export function assertClaimConsistency(input: {
   // (coordinator ruling, packet #2837) -- mirrors `operations/report.ts`'s own method-conditional
   // exactly, so the cold rebuild here agrees with what `report` actually sealed. Computed from
   // `reportRecord.method.id` directly (like the portable verifier's own `binaryLimitations`,
-  // `verify/src/profile/claim-consistency.ts`) rather than threaded through
+  // `check/src/profile/claim-consistency.ts`) rather than threaded through
   // `input.additionalLimitations`, since it depends on WHICH method produced this Report, not on
   // venue/suite facts shared across every Report a run carries.
   const pairedEstimateLimitation =
@@ -135,7 +139,7 @@ export function assertClaimConsistency(input: {
       ? [PAIRED_ESTIMATE_LIMITATION]
       : [];
   const expectedLimitations = [
-    ...localVenueLimitsForRun(runRecord),
+    ...localVenueLimitsForRun(runRecord, imported),
     ...(input.additionalLimitations ?? []),
     ...binaryLimitations,
     ...pairedEstimateLimitation,

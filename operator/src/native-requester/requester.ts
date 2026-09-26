@@ -55,6 +55,7 @@ import {
   formatSequence,
   headPath,
   parseAnnouncementEntry,
+  parseHeadTimestamp,
   parseSourceHead,
   parseWireDsseEnvelope,
   recordDigest,
@@ -92,17 +93,23 @@ import {
   freezeRequesterSourceV1Intent,
 } from './requester-source-writer-adapter.js';
 
-// Public, stable product fixture name. The admission package may retain its
-// internal snapshot fixture directory; that storage detail must not leak into
-// the accepted requester command contract.
-const FIXTURE = 'prediction-forecast-golden.json' as const;
+import {
+  NATIVE_REQUESTER_FIXTURES,
+  PREDICTION_FORECAST_GOLDEN,
+  isNativeRequesterFixture,
+  nativeRequesterFixtureList,
+  type NativeRequesterFixture,
+} from './fixtures.js';
+
+const FIXTURE = PREDICTION_FORECAST_GOLDEN;
 
 /**
- * The single today-mode requester fixture name, exported so a composing host (the fleet posting
- * write path, one-swap M5e) can name the `NativeRequesterRequest.fixture` it drives `request()`
- * with without duplicating the literal. `request()` still refuses any other value.
+ * The requester fixture name, exported so a composing host (the fleet posting write path,
+ * one-swap M5e) can name the `NativeRequesterRequest.fixture` it drives `request()` with
+ * without duplicating the literal.
  */
 export const NATIVE_REQUESTER_FIXTURE = FIXTURE;
+export { NATIVE_REQUESTER_FIXTURES, isNativeRequesterFixture };
 const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 export const NATIVE_REQUESTER_ASSOCIATION_FACT = 'https://spec.jinn.network/facts/native-requester-association/v1';
 const UINT256_MAX = (1n << 256n) - 1n;
@@ -129,7 +136,7 @@ export interface NativeRequesterRoles {
 
 export interface NativeRequesterRequest {
   readonly network: 'base-sepolia';
-  readonly fixture: typeof FIXTURE;
+  readonly fixture: NativeRequesterFixture;
   readonly runId: string;
 }
 
@@ -1717,7 +1724,16 @@ async function appendRequesterSource(input: {
   const publication = currentAssociation.publication;
   const committed = await input.state.readSource();
   const requestedTimestamp = input.now().getTime();
-  const previousTimestamp = committed.last === undefined ? Number.NEGATIVE_INFINITY : new Date(committed.last.head.issuedAt).getTime();
+  // `parseHeadTimestamp` (#3482, #4096) reads the previous head's `issuedAt`
+  // exactly as the schema and `assertIntentOwnership` will. Note what NaN does
+  // here, since it is not the usual fail-closed: `Math.max(x, NaN)` is `NaN`, so
+  // the next line's `new Date(NaN).toISOString()` throws a bare `RangeError`
+  // rather than refusing. The shared reading removes that outcome for the one
+  // input class where the two disagree -- a leap second, which the §5.2 schema
+  // admits and `new Date` did not. A genuinely unreadable persisted `issuedAt`
+  // still yields NaN and still throws; this operator only ever reads its own
+  // `toISOString()`-minted head, so neither case is live.
+  const previousTimestamp = committed.last === undefined ? Number.NEGATIVE_INFINITY : parseHeadTimestamp(committed.last.head.issuedAt);
   const timestamp = new Date(Math.max(requestedTimestamp, previousTimestamp + 1)).toISOString();
   const command = publication.sequence === ''
     ? {
@@ -2049,7 +2065,9 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
     },
     async request(input): Promise<NativeRequesterResult> {
       assertRunId(input.runId);
-      if (input.fixture !== FIXTURE) throw new Error(`native requester fixture must be ${FIXTURE}`);
+      if (!isNativeRequesterFixture(input.fixture)) {
+        throw new Error(`native requester fixture must be one of: ${nativeRequesterFixtureList()}`);
+      }
       // This assertion is intentionally before role load, template signing, or post construction.
       const chain = assertBaseSepoliaTarget(input.network, await deps.readChain());
       // Complete the reusable requester-scope/WAL recovery pass before loading product keys or

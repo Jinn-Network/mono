@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,6 +14,7 @@ import { test } from 'node:test';
 
 import {
   DEFAULT_EXCLUSIONS,
+  ENFORCED_SCOPE_PREFIXES,
   findEnforcedScopeViolations,
   findLegacyOriginOccurrences,
   isEnforcedPath,
@@ -144,12 +146,11 @@ test('isExcludedPath: exact paths and directory prefixes both match, unrelated p
   assert.equal(isExcludedPath('spec/2026-01-01-example.md', DEFAULT_EXCLUSIONS), true);
   assert.equal(isExcludedPath('log/decisions/2026-08-04-x.md', DEFAULT_EXCLUSIONS), true);
   assert.equal(isExcludedPath('docs/press/2026-08-04-x.md', DEFAULT_EXCLUSIONS), true);
-  assert.equal(isExcludedPath('legacy/anything.ts', DEFAULT_EXCLUSIONS), true);
   assert.equal(isExcludedPath('apps/operator-console/app/page.tsx', DEFAULT_EXCLUSIONS), false);
   assert.equal(isExcludedPath('packages/core/schema.json', DEFAULT_EXCLUSIONS), false);
   // A path that merely starts with the same characters as an excluded prefix, without the
   // trailing separator, must not be treated as excluded.
-  assert.equal(isExcludedPath('legacy-lookalike/schema.json', DEFAULT_EXCLUSIONS), false);
+  assert.equal(isExcludedPath('spec-lookalike/schema.json', DEFAULT_EXCLUSIONS), false);
 });
 
 // --- Enforcement (DR-2026-08-04, component C2) ---
@@ -200,6 +201,26 @@ test('a violation inside an enforced scope is reported; the same string outside 
   });
 });
 
+test('every enforced scope prefix resolves to a real directory, so a rename cannot silently drop enforcement', () => {
+  // The prefixes are literal path spellings. A rename that leaves one behind turns the guard
+  // into a no-op over that tree, with a green build as its only signal (issue #4061).
+  for (const prefix of ENFORCED_SCOPE_PREFIXES) {
+    assert.equal(existsSync(join(repoRoot, prefix)), true, prefix);
+    assert.equal(statSync(join(repoRoot, prefix)).isDirectory(), true, prefix);
+  }
+});
+
+test('the enforced scope list is closed: widening it is a reviewed edit', () => {
+  // Named here so that adding or renaming an enforced prefix means touching this assertion
+  // too. Each entry's reason lives beside it in origin-tripwire.mjs.
+  assert.deepEqual(ENFORCED_SCOPE_PREFIXES, [
+    '.github/scripts/',
+    'operator/src/',
+    'operator/deployments/',
+    'plugin/runtime/src/',
+  ]);
+});
+
 test('every excluded exact path exists, so the list cannot rot into a silent blanket', () => {
   for (const path of DEFAULT_EXCLUSIONS.paths) {
     assert.equal(existsSync(join(repoRoot, path)), true, path);
@@ -216,7 +237,6 @@ test('the exclusion list is closed: widening it is a reviewed edit', () => {
     '.github/scripts/public-surface-assets.test.mjs',
     'operator/src/daemon/bridge-legacy-delivery.ts',
     'packages/benchmarking/records/src/identifiers.test.ts',
-    'packages/discovery/facts/benchmarking/src/identifiers.test.ts',
     'packages/discovery/protocol/src/grammar.test.ts',
     'packages/environments/chain-record/src/identifiers.test.ts',
     'packages/environments/chain-record/src/primitives.test.ts',
@@ -231,7 +251,6 @@ test('the exclusion list is closed: widening it is a reviewed edit', () => {
     'log/',
     'docs/press/',
     'docs/superpowers/',
-    'legacy/',
   ]);
 });
 

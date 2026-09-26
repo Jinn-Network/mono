@@ -38,8 +38,6 @@ const SKIPPED_DIRECTORIES = Object.freeze([
   '.git',
   '.yarn',
   'dist',
-  // Read-only reference subtree; in no workspace and imported by nothing.
-  'legacy',
 ]);
 
 /** Manifest fields whose values may carry a `portal:` protocol reference. */
@@ -329,6 +327,30 @@ const DIFF_SELECTION_EXEMPT = Object.freeze({
 });
 
 /**
+ * Workflows that select on `paths:` but gate no pull request, each with the
+ * reason it is not audited. A push-only lane decides release cadence, not
+ * whether a pull request was verified, and widening one changes what publishes
+ * -- a release-policy decision, not this gate's (#3661). Like
+ * DIFF_SELECTION_EXEMPT, the roster is deliberately loud: a new push-only path
+ * filter fails the gate until it is audited as a lane or listed here, so the
+ * asymmetry reads as a decision rather than as a corner the gate skips.
+ */
+export const PUSH_ONLY_EXEMPT = Object.freeze({
+  'layer-npm-publish.yml':
+    'publishes the layer packages\' canaries on push; widening its trigger changes what ' +
+    'publishes. Listed for its class: its filter covers its portal closure today.',
+  'operator-images.yml':
+    'canary cadence, not a pull-request gate; the image COPY set is verified before merge ' +
+    "behind ci.yml's wider selector. A push confined to a portal target it builds from source " +
+    '(for example packages/trust/core) rebuilds no canary, so operator-*:next lags until a push ' +
+    'under its own paths, as its paths: comment records.',
+  'sdk-npm-publish.yml':
+    'publishes @jinn-network/sdk canaries on push to next; widening its trigger changes what ' +
+    "publishes and how often. Its filter selects operator/** without that tree's portal closure, " +
+    'but packages/sdk portals nothing, so no canary content lags a portal-target change.',
+});
+
+/**
  * Every lane whose selection is derived from the diff, discovered rather than
  * listed: a hand-maintained roster is the same failure this module exists to
  * prevent, one level up. A workflow with no `paths:` block runs unconditionally
@@ -351,7 +373,9 @@ export function discoverLanes(root) {
           workflow,
           dialect: 'shell-ere',
           arrayName: SHELL_ARRAY_NAME,
-          required: (workspace) => `'^${workspace}/'`,
+          // Inverse of erePrefix's `\.` unescape. `.` is the only ERE metacharacter in the
+          // segment class erePrefix admits; escaping anything else would emit an entry it refuses.
+          required: (workspace) => `'^${workspace.replaceAll('.', '\\.')}/'`,
         }),
       );
       continue;
@@ -370,8 +394,19 @@ export function discoverLanes(root) {
     // Only lanes that gate a PULL REQUEST are in scope. A `push:`-only lane
     // (`*-npm-publish`, `operator-images`) decides release cadence, not whether
     // a pull request was verified; widening one would change what publishes,
-    // which is a release-policy call and not this gate's business.
-    if (!blocks.some(({ trigger }) => trigger === 'pull_request')) continue;
+    // which is a release-policy call and not this gate's business. That skip is
+    // explicit: a push-only path filter must be listed in PUSH_ONLY_EXEMPT with
+    // its reason. A workflow with no `paths:` block runs unconditionally and
+    // needs no entry.
+    if (!blocks.some(({ trigger }) => trigger === 'pull_request')) {
+      if (blocks.length > 0 && !Object.hasOwn(PUSH_ONLY_EXEMPT, file)) {
+        throw new Error(
+          `${workflow} selects on paths but gates no pull request. Audit it as a lane, or add it ` +
+            'to PUSH_ONLY_EXEMPT with a reason (widening a publish lane changes what publishes).',
+        );
+      }
+      continue;
+    }
     lanes.push(
       Object.freeze({
         id: file.slice(0, -'.yml'.length),

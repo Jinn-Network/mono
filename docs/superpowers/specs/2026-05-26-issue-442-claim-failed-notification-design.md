@@ -1,5 +1,7 @@
 # Issue #442 — wiring `claim_failed` notification from the SSE event stream
 
+> **Status (2026-09-24): superseded by [docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md](2026-08-04-headless-operator-rederivation-design.md).** Notification derivation moves server-side to `GET /v1/notifications` and leaves the browser bundle (§6, item 5; [OPERATOR-APP-SPEC.md](../../../apps/operator-console/OPERATOR-APP-SPEC.md), 2026-08-04 amendment), so this design's client-side derivation of `claim_failed` from the SPA's event stream is superseded. For the current direction read [apps/operator-console/OPERATOR-APP-SPEC.md](../../../apps/operator-console/OPERATOR-APP-SPEC.md) §2.10.
+
 **Date:** 2026-05-26
 **Shape:** `feat` (Medium / P2)
 **Follow-up to:** PR #426 (Ritsu's review item #5)

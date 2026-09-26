@@ -17,6 +17,7 @@ import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import type { ProxiedBackend } from "../run/drive.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
+import { acquirePublicationLock } from "../run/publication-lock.js";
 import { readRunState, writeRunState } from "../run/state.js";
 import { additionalClaimPackagePath } from "../report/claim.js";
 import { createWorkspacePublicationHttpHandler, createWorkspacePublicationSource, recordPath } from "../run/publication-source.js";
@@ -44,10 +45,10 @@ import { createDraft, readDraftDocument, updateDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
 import { readAuditEntries } from "../audit/journal.js";
 import { materializePublicBundle } from "../bundle/materialize.js";
-import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, PUBLIC_BUNDLE_FILES, PUBLIC_BUNDLE_V4_FILES } from "../legacy-closures.js";
+import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT, PUBLIC_BUNDLE_FILES, PUBLIC_BUNDLE_V4_FILES } from "../legacy-closures.js";
 import { createSyntheticV4BundleFixture } from "../bundle/testing/v4-synthetic-fixture.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
-import { BUNDLE_V3_FORMAT, buildBundleManifest } from "../bundle/manifest.js";
+import { BUNDLE_V3_FORMAT, BUNDLE_V8_FORMAT, BUNDLE_V10_FORMAT, buildBundleManifest, type BuildBundleManifestOptions } from "../bundle/manifest.js";
 import { runCli } from "../cli/main.js";
 import { runCollect } from "./run-collect.js";
 import { runLaunch } from "./run-launch.js";
@@ -89,11 +90,11 @@ function contextFor(clock: () => string, principal = "sponsor-1"): OperationCont
 }
 
 // ── packet P5 proof 1a: the shipped, packaged `external-verify.py` (spec §8.3) ────────────────
-// Invoked at the PACKAGED path (`node_modules/@colophon-claims/verify/scripts/...`), never the
+// Invoked at the PACKAGED path (`node_modules/@colophon-claims/check/scripts/...`), never the
 // repo source path — that packaged copy is the artifact a third party installs, per the verify
 // package's `files` list and `verify/scripts/pack-smoke.mjs`.
 const EXTERNAL_VERIFY_SCRIPT = fileURLToPath(
-  new URL("../../node_modules/@colophon-claims/verify/scripts/external-verify.py", import.meta.url),
+  new URL("../../node_modules/@colophon-claims/check/scripts/external-verify.py", import.meta.url),
 );
 const EXTERNAL_VERIFY_CHECKS = [
   "manifest-files", "cas-records", "sealed-bytes", "report-signature",
@@ -169,19 +170,54 @@ function utf8(json: unknown): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(json));
 }
 
+function rewriteManifestOptions(prior: {
+  readonly format?: string;
+  readonly capabilities?: unknown;
+}): BuildBundleManifestOptions {
+  if (prior.format === BUNDLE_V10_FORMAT) {
+    return {
+      format: BUNDLE_V10_FORMAT,
+      capabilities: Array.isArray(prior.capabilities) ? (prior.capabilities as readonly string[]) : [],
+    };
+  }
+  if (
+    prior.format === BUNDLE_FORMAT
+    || prior.format === BUNDLE_V3_FORMAT
+    || prior.format === BUNDLE_V4_FORMAT
+    || prior.format === BUNDLE_V6_FORMAT
+    || prior.format === BUNDLE_V7_FORMAT
+    || prior.format === BUNDLE_V8_FORMAT
+  ) {
+    return { format: prior.format };
+  }
+  return {};
+}
+
 function rewriteBundleManifest(bundleDir: string): void {
-  const prior = JSON.parse(readFileSync(join(bundleDir, "bundle.json"), "utf8")) as { files: Array<{ path: string }> };
-  const built = buildBundleManifest(bundleDir, prior.files.map((file) => file.path).filter((path) => existsSync(join(bundleDir, path))));
+  const prior = JSON.parse(readFileSync(join(bundleDir, "bundle.json"), "utf8")) as {
+    format?: string;
+    capabilities?: unknown;
+    files: Array<{ path: string }>;
+  };
+  const built = buildBundleManifest(
+    bundleDir,
+    prior.files.map((file) => file.path).filter((path) => existsSync(join(bundleDir, path))),
+    rewriteManifestOptions(prior),
+  );
   writeFileSync(join(bundleDir, "bundle.json"), built.bytes);
 }
 
 function rewriteBundleManifestWith(bundleDir: string, ...additionalPaths: string[]): void {
-  const prior = JSON.parse(readFileSync(join(bundleDir, "bundle.json"), "utf8")) as { files: Array<{ path: string }> };
+  const prior = JSON.parse(readFileSync(join(bundleDir, "bundle.json"), "utf8")) as {
+    format?: string;
+    capabilities?: unknown;
+    files: Array<{ path: string }>;
+  };
   const paths = [...new Set([
     ...prior.files.map((file) => file.path).filter((path) => existsSync(join(bundleDir, path))),
     ...additionalPaths,
   ])].sort();
-  writeFileSync(join(bundleDir, "bundle.json"), buildBundleManifest(bundleDir, paths).bytes);
+  writeFileSync(join(bundleDir, "bundle.json"), buildBundleManifest(bundleDir, paths, rewriteManifestOptions(prior)).bytes);
 }
 
 function addEvidenceRecord(bundleDir: string, bytes: Uint8Array, role: string): string {
@@ -795,7 +831,6 @@ describe("runReport — happy path", () => {
       expect(outcome.result.claimPackage.assurance.disclosure).toContain("agent-distinctness");
       expect(outcome.result.claimPackage.assurance.disclosure).toContain("party-independence");
     },
-    30_000,
   );
 });
 
@@ -839,7 +874,6 @@ describe("runReport — analysis method selection (P4b Task 3)", () => {
       // The whole point: the produced tuple must be exactly-JSON-equal to a sealed plan entry.
       expect(reportRecord.preregistered).toBe(true);
     },
-    30_000,
   );
 
   test(
@@ -856,7 +890,6 @@ describe("runReport — analysis method selection (P4b Task 3)", () => {
       expect(reportRecord.method.id).toBe("jinn.benchmarking.method/wilson");
       expect(reportRecord.preregistered).toBe(true);
     },
-    30_000,
   );
 
   /** APEX-SWE-dev is never `leaderboardSubmitReady` (DR-2026-08-18-c §5), so its protocol-named
@@ -929,11 +962,16 @@ describe("runReport — analysis method selection (P4b Task 3)", () => {
       expect(reportRecord.limitations).toContain(APEX_SWE_DEV_NOT_LEADERBOARD_READY_LIMITATION);
       expect(reportRecord.limitations).not.toContain(SUITE_NOT_LEADERBOARD_READY_LIMITATION);
     },
-    30_000,
   );
 });
 
 describe("portable public bundle", () => {
+  /** Digest-named bundle directories for a draft; none when the parent was never created. */
+  function digestNamedBundleDirs(draftId = "draft-1"): string[] {
+    const dir = publicBundlesDir(workspaceDir, draftId);
+    return existsSync(dir) ? readdirSync(dir).filter((name) => /^[a-f0-9]{64}$/u.test(name)) : [];
+  }
+
   test("publishes only from reported, writes bundle identity before transitioning, and is idempotently readable", async () => {
     const clock = makeClock();
     await setUpClosedRun(clock);
@@ -998,17 +1036,46 @@ describe("portable public bundle", () => {
     // digest-addressed directory in place. The caller never sees the return value, so before issue
     // #3195 its cleanup list was empty and the directory survived a publication that never
     // advanced — the same visible outcome issue #3074 removed, reached through an I/O failure.
+    // `onRenamed` fires before `afterRename` (`bundle/materialize.ts`), and the throw lands before
+    // `runPublish` takes the publication lock, so this drives `removeRefusedBundles`' unlocked
+    // (`heldLock === undefined`) branch: acquire the lock for the cleanup alone, then remove.
     const refused = await runPublish(contextFor(clock), { draftId: "draft-1" }, {
       afterRename: () => { throw new Error("fault between rename and return"); },
     });
     expect(refused.ok).toBe(false);
-    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
-      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
-      : []).toHaveLength(0);
+    expect(digestNamedBundleDirs()).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
     expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
     const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
     expect(retry.ok, JSON.stringify(retry)).toBe(true);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
+  });
+
+  test("a refusal that cannot take the publication lock for cleanup leaves the staged directory in place", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    expect((await runReport(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+    // A lock held elsewhere makes the unlocked branch's bounded acquire time out. Removing the
+    // directory unserialized could delete a bundle a peer is naming, so it must be left in place,
+    // and the caller still sees its own refusal rather than the lock timeout.
+    const held = await acquirePublicationLock(workspaceDir, "draft-1");
+    try {
+      const refused = await runPublish(contextFor(clock), { draftId: "draft-1" }, {
+        afterRename: () => { throw new Error("fault between rename and return"); },
+      });
+      expect(refused.ok).toBe(false);
+      if (refused.ok) return;
+      expect(refused.error.detail).toContain("fault between rename and return");
+      expect(refused.error.detail).not.toContain("publication lock");
+      expect(digestNamedBundleDirs()).toHaveLength(1);
+      expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
+    } finally {
+      held.release();
+    }
+    // The surviving directory is byte-identical, so a clean retry adopts it.
+    const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
+    expect(retry.ok, JSON.stringify(retry)).toBe(true);
+    expect(digestNamedBundleDirs()).toHaveLength(1);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
   });
 
@@ -1020,9 +1087,7 @@ describe("portable public bundle", () => {
       beforeRename: () => { throw new Error("fault before rename"); },
     });
     expect(failed.ok).toBe(false);
-    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
-      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
-      : []).toHaveLength(0);
+    expect(digestNamedBundleDirs()).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
     expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
   });
@@ -1038,9 +1103,7 @@ describe("portable public bundle", () => {
       beforeRunState: () => { throw new Error("refused after materialization"); },
     });
     expect(refused.ok).toBe(false);
-    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
-      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
-      : []).toHaveLength(0);
+    expect(digestNamedBundleDirs()).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
     expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
     const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
@@ -1079,16 +1142,18 @@ describe("portable public bundle", () => {
       beforeRunState: () => { throw new Error("refused after materialization"); },
     });
     expect(refused.ok).toBe(false);
-    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
-      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
-      : []).toHaveLength(0);
+    expect(digestNamedBundleDirs()).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
     expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
+    expect(readRunState(workspaceDir, "draft-1")?.additionalBundles).toBeUndefined();
 
     const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
     expect(retry.ok, JSON.stringify(retry)).toBe(true);
     if (!retry.ok) return;
     expect(retry.result.additionalBundles).toHaveLength(1);
+    const identities = [retry.result.bundleIdentity, ...retry.result.additionalBundles!.map((entry) => entry.bundleIdentity)];
+    // Two distinct directories, or the "removes both" assertion above could pass on one.
+    expect(new Set(identities).size).toBe(2);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
   }, 60_000);
 
@@ -1134,9 +1199,7 @@ describe("portable public bundle", () => {
     const refused = await runPublish(contextFor(clock), { draftId: "draft-1" });
     expect(refused.ok).toBe(false);
     if (!refused.ok) expect(refused.error.issues?.[0]?.path).toBe("claim-consistency");
-    expect(existsSync(publicBundlesDir(workspaceDir, "draft-1"))
-      ? readdirSync(publicBundlesDir(workspaceDir, "draft-1")).filter((name) => /^[a-f0-9]{64}$/u.test(name))
-      : []).toHaveLength(0);
+    expect(digestNamedBundleDirs()).toHaveLength(0);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
   });
 
@@ -1161,7 +1224,9 @@ describe("portable public bundle", () => {
       rmSync(workspaceDir, { recursive: true, force: true });
       const verified = await verifyPublicBundle(copied);
       expect(verified.identity).toBe(materialized.identity);
-      expect(verified.format).toBe(BUNDLE_FORMAT);
+      expect(verified.format).toBe(BUNDLE_V10_FORMAT);
+      if (verified.format !== BUNDLE_V10_FORMAT) throw new Error("unreachable");
+      expect(verified.capabilities).toEqual([]);
       expect(verified.checks).toEqual([
         "manifest",
         "evidence-closure",
@@ -1558,9 +1623,13 @@ describe("portable public bundle", () => {
       catalog.records.sort((left, right) => left.sha256.localeCompare(right.sha256));
       writeCanonical(catalogPath, catalog);
       writeFileSync(join(unreachable, "records", `${digest}.bin`), bytes);
-      const prior = JSON.parse(readFileSync(join(unreachable, "bundle.json"), "utf8")) as { files: Array<{ path: string }> };
+      const prior = JSON.parse(readFileSync(join(unreachable, "bundle.json"), "utf8")) as {
+        format?: string;
+        capabilities?: unknown;
+        files: Array<{ path: string }>;
+      };
       const paths = [...prior.files.map((file) => file.path), `records/${digest}.bin`].sort();
-      const built = buildBundleManifest(unreachable, paths);
+      const built = buildBundleManifest(unreachable, paths, rewriteManifestOptions(prior));
       writeFileSync(join(unreachable, "bundle.json"), built.bytes);
       await expect(verifyPublicBundle(unreachable)).rejects.toMatchObject({
         issues: [expect.objectContaining({ path: "evidence-closure" })],
@@ -1594,13 +1663,17 @@ describe("portable public bundle", () => {
       writeCanonical(catalogPath, catalog);
       writeFileSync(join(substituted, "records", `${taskDigest}.bin`), taskBytes);
       writeFileSync(join(substituted, "records", `${deliveryDigest}.bin`), deliveryBytes);
-      const prior = JSON.parse(readFileSync(join(substituted, "bundle.json"), "utf8")) as { files: Array<{ path: string }> };
+      const prior = JSON.parse(readFileSync(join(substituted, "bundle.json"), "utf8")) as {
+        format?: string;
+        capabilities?: unknown;
+        files: Array<{ path: string }>;
+      };
       const paths = [
         ...prior.files.map((file) => file.path),
         `records/${taskDigest}.bin`,
         `records/${deliveryDigest}.bin`,
       ].sort();
-      writeFileSync(join(substituted, "bundle.json"), buildBundleManifest(substituted, paths).bytes);
+      writeFileSync(join(substituted, "bundle.json"), buildBundleManifest(substituted, paths, rewriteManifestOptions(prior)).bytes);
       await expect(verifyPublicBundle(substituted)).rejects.toMatchObject({
         issues: [expect.objectContaining({ path: "evidence-closure" })],
       });
@@ -1901,7 +1974,7 @@ describe("portable public bundle", () => {
       ["assurance", (claim) => { claim.assurance.preset = "evaluator-panel"; }],
       ["disclosure summaries", (claim) => { claim.disclosures.integrityTierCounts["re-derivable"] += 1; }],
       ["venue honesty", (claim) => { claim.venueHonesty = { venue: "self-run", dishonest: true }; }],
-      ["verification", (claim) => { claim.verification.command = "benchmark-product verify --workspace /private/source --draft draft-1"; }],
+      ["verification", (claim) => { claim.verification.trustRoot = "tampered-trust-root"; }],
       ["rehearsal", (claim) => { claim.rehearsal = { previewCount: 1, timestamps: ["2026-08-05T00:00:00.000Z"] }; }],
     ];
     for (const [name, mutate] of claimVectors) {
@@ -2088,7 +2161,6 @@ describe("runReport — claim-package write failure does not strand the draft", 
       if (!verified.ok) return;
       expect(verified.result.checks).toContain("claim-consistency");
     },
-    30_000,
   );
 });
 
@@ -2205,7 +2277,6 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
           .toEqual(published.result.additionalBundles!.map((entry) => entry.bundleIdentity).sort());
       }
     },
-    30_000,
   );
 
   // ── Proof 1a (spec §8.3): the N-bundle cold-verify proof ──────────────────────────────────
@@ -2262,14 +2333,19 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
           // Report's own method, and a run can legitimately emit bundles of different formats).
           const manifest = JSON.parse(readFileSync(join(dir, "bundle.json"), "utf8")) as {
             readonly format: string;
+            readonly capabilities?: readonly string[];
             readonly files: ReadonlyArray<{ readonly path: string }>;
           };
           expect(verified.format).toBe(manifest.format);
-          expect([BUNDLE_FORMAT, BUNDLE_V4_FORMAT] as readonly string[]).toContain(manifest.format);
-          // PUBLIC_BUNDLE_FILES/V4 name the fixed, non-content-addressed members exactly; the
-          // remainder of the manifest is exactly the evidence catalog's own `records/<sha256>.bin`
-          // entries, never a numbered or otherwise-named extra member.
-          const expectedFixed = manifest.format === BUNDLE_V4_FORMAT ? PUBLIC_BUNDLE_V4_FILES : PUBLIC_BUNDLE_FILES;
+          expect(manifest.format).toBe(BUNDLE_V10_FORMAT);
+          expect(Array.isArray(manifest.capabilities)).toBe(true);
+          // PUBLIC_BUNDLE_FILES/V4 name the fixed, non-content-addressed members exactly; on /10
+          // the same lists are derived from the declared vector. The remainder of the manifest is
+          // exactly the evidence catalog's own `records/<sha256>.bin` entries, never a numbered or
+          // otherwise-named extra member.
+          const expectedFixed = (manifest.capabilities ?? []).includes("binary-qualification")
+            ? PUBLIC_BUNDLE_V4_FILES
+            : PUBLIC_BUNDLE_FILES;
           const paths = manifest.files.map((file) => file.path);
           const fixedPaths = paths.filter((path) => !path.startsWith("records/"));
           const recordPaths = paths.filter((path) => path.startsWith("records/"));
@@ -2282,7 +2358,6 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
         for (const { dir } of copiedDirs) rmSync(dir, { recursive: true, force: true });
       }
     },
-    30_000,
   );
 
   test.skipIf(!externalVerifyAvailable)(
@@ -2320,7 +2395,6 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
         for (const dir of copiedDirs) rmSync(dir, { recursive: true, force: true });
       }
     },
-    30_000,
   );
 
   test.skipIf(!externalVerifyAvailable)(
@@ -2447,6 +2521,5 @@ describe("packet P5 — pre-registered additional analyses (spec §8.3 option 5)
       expect(new Set(claimRecords.map((record) => record.matrixSha256)).size).toBe(1); // EQUAL
       expect(new Set(claimRecords.map((record) => record.reportSha256)).size).toBe(2); // DIFFERS
     },
-    30_000,
   );
 });

@@ -1,11 +1,12 @@
 /**
  * HTTP client for the surviving indexer read slice (one-swap R3b, issue #2494).
  *
- * Relocated verbatim out of `discovery/http.ts` — same GraphQL documents, same
+ * Relocated out of `discovery/http.ts` — same GraphQL documents, same
  * transport semantics (`/ready` gate, per-request timeout, transparent 502/503
- * retry), same result projections. `discovery/http.ts` now delegates these four
- * methods here rather than keeping a second copy, so the D-wave deletion of
- * `discovery/` cannot change what these consumers observe.
+ * retry), same result projections. `discovery/http.ts` delegates the relocated
+ * methods here rather than keeping a second copy, and the supply read lives on
+ * the same neutral client, so the D-wave deletion of `discovery/` cannot change
+ * what these consumers observe.
  *
  * Nothing in this module may import from `operator/src/discovery/` — see the
  * module note in `./types.ts`.
@@ -15,6 +16,7 @@ import {
   createHttpCorpusDiscovery,
   DiscoveryUnavailableError as CoreDiscoveryUnavailableError,
 } from '@jinn-network/core/corpus-read';
+import { z } from 'zod';
 
 import type { CorpusQuery, EnvelopeRef } from '../corpus/types.js';
 import {
@@ -22,9 +24,127 @@ import {
   type AutopilotDeliveryCandidateLookup,
   type AutopilotDeliveryRole,
   type CodeDigestRewardRow,
+  type CurrentSupplyResponse,
   type DiscoveryClient,
   type SolverNetManifestSummary,
 } from './types.js';
+
+const IsoTimestampSchema = z.string().datetime({ offset: true });
+const SafeCountSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const SupplyBucketSchema = z.object({
+  start: IsoTimestampSchema,
+  end: IsoTimestampSchema,
+}).strict();
+const SupplyWindowSchema = z.object({
+  start: IsoTimestampSchema,
+  end: IsoTimestampSchema,
+  bucketHours: z.literal(6),
+  buckets: z.array(SupplyBucketSchema).length(8),
+}).strict().superRefine((window, ctx) => {
+  const start = Date.parse(window.start);
+  const end = Date.parse(window.end);
+  const bucketMs = 6 * 60 * 60 * 1_000;
+  if (end - start !== 8 * bucketMs) {
+    ctx.addIssue({ code: 'custom', message: 'supply window must span eight six-hour buckets' });
+  }
+  window.buckets.forEach((bucket, index) => {
+    if (Date.parse(bucket.start) !== start + index * bucketMs
+      || Date.parse(bucket.end) !== start + (index + 1) * bucketMs) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['buckets', index],
+        message: 'supply buckets must be contiguous and cover the window',
+      });
+    }
+  });
+});
+/**
+ * Defense in depth against permissionless manifest strings. Mirrors
+ * `SUPPLY_IDENTIFIER_MAX_LENGTH` in `packages/indexer/src/api/supply.ts`, which
+ * drops an over-cap class into `incompleteManifestRows` before responding. An
+ * over-cap identifier reaching this decoder rejects the whole response, so the
+ * two values must move together.
+ */
+const SUPPLY_IDENTIFIER_MAX_LENGTH = 128;
+const SupplyClassSchema = z.object({
+  workClass: z.string().min(1).max(SUPPLY_IDENTIFIER_MAX_LENGTH),
+  contractId: z.string().min(1).max(SUPPLY_IDENTIFIER_MAX_LENGTH),
+  contractVersion: z.string().min(1).max(SUPPLY_IDENTIFIER_MAX_LENGTH),
+  acceptingSolverNets: SafeCountSchema.positive(),
+  claimingOperators: SafeCountSchema.positive(),
+  verdictDeliveries: SafeCountSchema.positive(),
+  latestAttemptAt: IsoTimestampSchema,
+  latestVerdictAt: IsoTimestampSchema,
+}).strict().superRefine((entry, ctx) => {
+  if (entry.workClass !== `${entry.contractId}.${entry.contractVersion}`) {
+    ctx.addIssue({ code: 'custom', path: ['workClass'], message: 'workClass does not match its contract tuple' });
+  }
+});
+const SupplyBaseShape = {
+  schemaVersion: z.literal(1),
+  chainId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  generatedAt: IsoTimestampSchema,
+  window: SupplyWindowSchema,
+};
+const CurrentSupplyResponseSchema = z.discriminatedUnion('status', [
+  z.object({
+    ...SupplyBaseShape,
+    status: z.literal('available'),
+    classes: z.array(SupplyClassSchema).min(1),
+    // Optional so an indexer that excluded nothing may omit it entirely; the
+    // count is only ever positive when present.
+    incompleteManifestRows: SafeCountSchema.positive().optional(),
+    incompleteActivityRows: SafeCountSchema.positive().optional(),
+  }).strict(),
+  z.object({
+    ...SupplyBaseShape,
+    status: z.literal('zero_supply'),
+    reason: z.enum(['no_requestable_solver_nets', 'no_recent_completed_loops']),
+    classes: z.tuple([]),
+  }).strict(),
+  z.object({
+    ...SupplyBaseShape,
+    status: z.literal('unknown'),
+    reason: z.literal('incomplete_indexer_evidence'),
+    classes: z.tuple([]),
+  }).strict(),
+]).superRefine((result, ctx) => {
+  const bucketMs = 6 * 60 * 60 * 1_000;
+  const generatedAt = Date.parse(result.generatedAt);
+  const windowStart = Date.parse(result.window.start);
+  const windowEnd = Date.parse(result.window.end);
+  const expectedWindowEnd = Math.floor(generatedAt / bucketMs) * bucketMs;
+  if (windowEnd !== expectedWindowEnd) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['window', 'end'],
+      message: 'supply window is not the latest completed bucket at generatedAt',
+    });
+  }
+  if (result.status !== 'available') return;
+
+  let previousWorkClass: string | undefined;
+  result.classes.forEach((entry, index) => {
+    if (previousWorkClass !== undefined && entry.workClass <= previousWorkClass) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['classes', index, 'workClass'],
+        message: 'supply classes must be unique and sorted by workClass',
+      });
+    }
+    previousWorkClass = entry.workClass;
+    for (const field of ['latestAttemptAt', 'latestVerdictAt'] as const) {
+      const timestamp = Date.parse(entry[field]);
+      if (timestamp < windowStart || timestamp >= windowEnd) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['classes', index, field],
+          message: `${field} must fall inside the completed supply window`,
+        });
+      }
+    }
+  });
+});
 
 // ── GraphQL query strings ─────────────────────────────────────────────────────
 
@@ -559,6 +679,7 @@ export function createHttpDiscoveryClient(
   transport: DiscoveryHttpTransport = createDiscoveryHttpTransport(opts),
 ): DiscoveryClient {
   const { gqlUrl, fetchImpl, ensureReady } = transport;
+  const supplyUrl = `${transport.readyUrl.replace(/\/ready$/, '')}/supply`;
   const corpusDiscovery = createHttpCorpusDiscovery({
     url: opts.url,
     fetchImpl: transport.baseFetch,
@@ -566,6 +687,87 @@ export function createHttpDiscoveryClient(
     retryDelaysMs: transport.retryDelaysMs,
     fetchTimeoutMs: transport.fetchTimeoutMs,
   });
+
+  async function getCurrentSupply(args: { chainId: number }): Promise<CurrentSupplyResponse> {
+    if (!Number.isSafeInteger(args.chainId) || args.chainId <= 0) {
+      throw new DiscoveryUnavailableError(
+        'Supply lookup requires a positive integer chainId',
+        undefined,
+        'invalid_request',
+      );
+    }
+
+    // Construct the request URL before the /ready probe. A malformed
+    // discovery.url makes fetch throw an untagged TypeError on `/ready`,
+    // which the CLI would map to a retryable outage. Fail closed here so
+    // the operator sees invalid_invocation instead.
+    let requestUrl: URL;
+    try {
+      requestUrl = new URL(supplyUrl);
+      requestUrl.searchParams.set('chainId', String(args.chainId));
+    } catch (error) {
+      throw new DiscoveryUnavailableError(
+        `Supply lookup has a malformed discovery.url: ${String(error)}`,
+        error,
+        'invalid_request',
+      );
+    }
+
+    await ensureReady();
+
+    let response: Response;
+    try {
+      response = await fetchImpl(requestUrl, { method: 'GET' });
+    } catch (error) {
+      throw new DiscoveryUnavailableError(`Supply endpoint network error: ${String(error)}`, error);
+    }
+    if (!response.ok) {
+      // Carry the server's own explanation through. A 400 here is the indexer
+      // saying it holds no evidence about this chain at all — the operator has
+      // to see that, not a bare status line they cannot act on.
+      let detail = '';
+      try {
+        const body = await response.text();
+        if (body) detail = `: ${body.slice(0, 500)}`;
+      } catch {
+        detail = '';
+      }
+      const code = response.status >= 400 && response.status < 500 ? 'invalid_request' : undefined;
+      throw new DiscoveryUnavailableError(
+        `Supply endpoint HTTP ${response.status} ${response.statusText}${detail}`,
+        undefined,
+        code,
+      );
+    }
+
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch (error) {
+      throw new DiscoveryUnavailableError(`Supply endpoint response parse error: ${String(error)}`, error);
+    }
+    const parsed = CurrentSupplyResponseSchema.safeParse(body);
+    if (!parsed.success) {
+      // The indexer answered; its body just doesn't decode against this
+      // client's schema. Most often that is version skew (an older client
+      // against a newer indexer), but a malformed indexer answer looks the
+      // same from here. Either way it is not a caller/config mistake, so it
+      // gets its own code rather than `invalid_request`.
+      throw new DiscoveryUnavailableError(
+        `Supply endpoint returned invalid evidence: ${z.prettifyError(parsed.error)}`,
+        undefined,
+        'invalid_response',
+      );
+    }
+    if (parsed.data.chainId !== args.chainId) {
+      throw new DiscoveryUnavailableError(
+        `Supply endpoint returned invalid evidence: response chainId ${parsed.data.chainId} does not match ${args.chainId}`,
+        undefined,
+        'invalid_request',
+      );
+    }
+    return parsed.data as CurrentSupplyResponse;
+  }
 
   async function getAutopilotDeliveryCandidates(args: {
     chainId: number;
@@ -883,6 +1085,7 @@ export function createHttpDiscoveryClient(
   }
 
   return {
+    getCurrentSupply,
     getAutopilotDeliveryCandidates,
     listLaunchedSolverNets,
     queryEnvelopes,

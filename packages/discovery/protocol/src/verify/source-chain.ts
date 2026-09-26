@@ -6,6 +6,7 @@ import { MEDIA_ENTRY, MEDIA_HEAD } from "../identifiers.js";
 import { dssePreAuthEncoding } from "../dsse.js";
 import { parseWireDsseEnvelope } from "../dsse.js";
 import { sealJson } from "../sealing.js";
+import { parseHeadTimestamp } from "../timestamps.js";
 import { checkGlobalChainRules, digestEntries, walkLinkage, type DigestedEntry } from "./chain-rules.js";
 import { MAX_REFRESH_BY_AHEAD_MS, checkRefreshWindow } from "./refresh-bound.js";
 import type { FreshnessPolicy, HighWaterMark, HighWaterMarkStore, KeyResolver, ResolvedKey, SignatureVerifier } from "./ports.js";
@@ -135,7 +136,7 @@ export async function verifySourceChain(opts: {
   // maliciously backdated re-sign), never accepted.
   if (
     highWaterMark !== undefined &&
-    !(new Date(head.issuedAt).getTime() > new Date(highWaterMark.issuedAt).getTime())
+    !(parseHeadTimestamp(head.issuedAt) > parseHeadTimestamp(highWaterMark.issuedAt))
   ) {
     return { status: "broken-chain", at: "issued-at-monotonicity" };
   }

@@ -692,7 +692,7 @@ git grep -l '.jinn-client' | wc -l
 git grep -n 'packages/discovery/client' | head
 ```
 
-- [ ] **Step 2: Homedir fallback test** — empty `~/.jinn-operator` + populated `~/.jinn-client` → daemon reads the old dir and logs one line that a future run will copy forward.
+- [ ] **Step 2: Homedir fallback test** — empty `~/.jinn-operator` + populated `~/.jinn-client` → daemon reads the old dir and logs one line naming the fallback. (The copy-forward this step originally promised was withdrawn by [DR-2026-09-02](../../../log/decisions/2026-09-02-f1-operator-naming-closure.md); the fallback is permanent.)
 - [ ] **Step 3: Dual-publish canary** — `npm-publish.yml` publishes both names during the window; `docker.yml` tags both images.
 - [ ] **Step 4: Drop window** is a later Monday cut, not this PR, unless the recensus shows zero external installers. This PR lands the new names + fallback.
 - [ ] **Step 5: Commit** `refactor(operator): rename published identity to @jinn-network/operator`.

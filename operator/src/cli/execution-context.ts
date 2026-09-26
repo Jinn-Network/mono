@@ -5,11 +5,16 @@
 
 import type { PublicClient } from 'viem';
 import type { WalletClient } from 'viem';
-import { loadConfig, getConfigPathFromArgs, type JinnConfig } from '../config.js';
+import { loadConfig, requireConfigPathFromArgvSources, type JinnConfig } from '../config.js';
 import { getChainConfig, type ChainConfig } from '../earning/contracts.js';
 import { getJinnRouterAddress } from '../contracts/addresses.js';
 import { FleetStateStore } from '../earning/store.js';
-import { isOperationalServiceStep, type FleetState, type ServiceState } from '../earning/types.js';
+import {
+  isOperationalServiceStep,
+  isRequesterPersona,
+  type FleetState,
+  type ServiceState,
+} from '../earning/types.js';
 import { decryptMnemonic, deriveMasterSigner, walletPrivateKeyAtIndex } from '../earning/wallet.js';
 import { base as baseChain, baseSepolia } from 'viem/chains';
 import { createJinnPublicClient, createJinnWalletClient } from '../earning/viem-clients.js';
@@ -48,7 +53,7 @@ export interface CliExecutionContext extends CliSignerContext {
 }
 
 function mergeArgvForConfig(argv?: string[]): string | undefined {
-  return getConfigPathFromArgs(argv ?? []) ?? getConfigPathFromArgs(process.argv.slice(2));
+  return requireConfigPathFromArgvSources(argv ?? []);
 }
 
 export function pickPrimaryMechService(services: ServiceState[]): ServiceState | undefined {
@@ -66,7 +71,24 @@ async function buildCliSignerContext(
   willBroadcast = true,
 ): Promise<{ ok: true; ctx: CliSignerContext } | { ok: false; envelope: BuildEnvelopeInput }> {
   const env = opts.env ?? process.env;
-  const pw = resolveCliPassword(opts.argv, env);
+  let configPath: string | undefined;
+  try {
+    configPath = mergeArgvForConfig(opts.argv);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return {
+      ok: false,
+      envelope: {
+        code: 'invalid_invocation',
+        message,
+        hint: 'Pass a config path or omit --config.',
+        exampleCli: 'jinn tasks submit --id x --description "…" --solver-net prediction --yes',
+        details: { field: 'config' },
+      },
+    };
+  }
+  const config = loadConfig(configPath);
+  const pw = resolveCliPassword(opts.argv, env, { earningDir: config.earningDir });
   if (!pw.ok) {
     return {
       ok: false,
@@ -79,8 +101,6 @@ async function buildCliSignerContext(
       },
     };
   }
-
-  const config = loadConfig(mergeArgvForConfig(opts.argv));
 
   // D0a P3 (#525/#562/#897): every context built from this shared function
   // hands the caller live signer key material (`masterWallet`, and
@@ -222,7 +242,14 @@ export async function createCliExecutionContext(
         message: 'No fleet service is complete with both a Safe and a mech address.',
         hint: 'Finish bootstrap through mech deployment, or configure testnet mech artifacts.',
         exampleCli: 'jinn bootstrap --json',
-        details: { field: 'fleet' },
+        // Carried so a persona-aware caller can rewrite this refusal without a
+        // second read of the fleet file: a wallet that is *presently* a
+        // requester (issue #2446) has no service by design, and pointing it at
+        // bootstrap is the operator supplier path. The derived boolean travels,
+        // never the raw marker — the marker outlives the requester phase, so a
+        // consumer testing it alone would mis-read a dual-role operator
+        // mid-bootstrap, and one whose service is `complete` but mech-less.
+        details: { field: 'fleet', requesterPersona: isRequesterPersona(fleetState) },
       },
     };
   }

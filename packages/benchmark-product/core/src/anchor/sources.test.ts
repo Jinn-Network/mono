@@ -16,13 +16,14 @@ import {
   encodeDerElement,
   readDerOid,
 } from "@jinn-network/trust-core";
-import { nodeCryptoAnchorPorts } from "@colophon-claims/verify";
+import { nodeCryptoAnchorPorts } from "@colophon-claims/check";
 import {
   KIT_AUTHORITY_SEED,
   KIT_BITCOIN_BLOCK_HEIGHT,
   KIT_CALENDAR_URI,
   KIT_SECOND_CALENDAR_URI,
   buildLinearOtsProof,
+  buildOtsCalendarNodeBody,
   createFixtureAuthority,
 } from "@jinn-network/trust-testing";
 import type { OtsAttestation, OtsOperation } from "./opentimestamps.js";
@@ -178,9 +179,9 @@ describe("createRfc3161ProofSource", () => {
 
 // --- OpenTimestamps ---------------------------------------------------------
 
-/** A bare timestamp node, as a calendar answers — the kit's proof minus its 36-byte header. */
+/** A bare timestamp node, as a calendar answers — the kit's proof minus its detached-file header. */
 function calendarBody(operations: readonly OtsOperation[], attestations: readonly OtsAttestation[]): Uint8Array {
-  return buildLinearOtsProof({ fileDigest, operations, attestations }).subarray(31 + 1 + 1 + 32);
+  return buildOtsCalendarNodeBody({ fileDigest, operations, attestations });
 }
 
 const FIRST_CALENDAR_PATH: readonly OtsOperation[] = [
@@ -349,15 +350,14 @@ describe("createOpenTimestampsProofSource — upgrading", () => {
 
 /**
  * A calendar's upgrade answer: a bare node, minted through the kit's serializer and stripped of
- * the 36-byte detached-file header. The node's own starting message is whatever the reader
+ * the detached-file header. The node's own starting message is whatever the reader
  * carries into it, so the body is independent of it.
  */
 function bodyFrom(
   operations: readonly OtsOperation[],
   attestations: readonly OtsAttestation[],
 ): Uint8Array {
-  return buildLinearOtsProof({ fileDigest: new Uint8Array(32), operations, attestations })
-    .subarray(31 + 1 + 1 + 32);
+  return buildOtsCalendarNodeBody({ fileDigest: new Uint8Array(32), operations, attestations });
 }
 
 function upgradeFrom(height: number): Uint8Array {

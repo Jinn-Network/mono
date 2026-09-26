@@ -13,12 +13,14 @@ export { cleanupHarnessSubtree, establishSubreaperCustody, installCustodianSigna
 export type { ShimCleanupPort, ShimSubreaperPort, ShimSignalGuardPort } from "./shim-control.js";
 export {
   listProcessGroupPids,
+  ProcessTableProbeError,
   nativeCustodySupport,
   fingerprintAlive,
   probeShimAlive,
   readHeartbeat,
   readShimCancellationResult,
   readOutcome,
+  readProcessGroupTable,
   readProcessStartTime,
   readShimFingerprint,
   requestShimCancellation,
@@ -27,7 +29,7 @@ export {
   writeShimCancellationCommand,
   writeOutcomeFile,
 } from "./shim.js";
-export type { OutcomeFile, ShimCancellationCommand, ShimCancellationResult, ShimFingerprint } from "./shim.js";
+export type { OutcomeFile, ProcessGroupTable, ShimCancellationCommand, ShimCancellationResult, ShimFingerprint } from "./shim.js";
 export type { JournalEvent, JournalEventIntent, SubmissionEvent, SubmissionEventIntent } from "./journal-types.js";
 export type { AttemptRecord, AttemptHarvestInput, AttemptOutputArtifact } from "./attempt-record.js";
 export type { AttemptReality, ReconciliationResult, ReconciliationClassification } from "./reconciler.js";

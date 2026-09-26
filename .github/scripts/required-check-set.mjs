@@ -27,7 +27,7 @@
 // log/decisions/2026-08-18-merge-queue-on-next.md). One source of truth plus
 // one enforcement test makes that state unrepresentable.
 
-import { resolve } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 export const REQUIRED_CHECK_SET = Object.freeze([
@@ -110,6 +110,10 @@ export const REQUIRED_CHECK_SET = Object.freeze([
 //   - `environment-suite` — permanently excluded, not deferred. It is a release
 //     gate, and its global ref-independent concurrency group would serialize the
 //     queue.
+//   - `native-restart-drill` — permanently excluded. It is a nightly /
+//     workflow_dispatch advisory lane for `yarn drill:native-restart:verify`
+//     (#4194). Twelve Anvil nodes and eighteen role-host processes are a flake
+//     on the merge path; a red is an Actions failure, not a required context.
 //
 // ACCEPTED v1 COVERAGE GAPS (same ruling). Advisory on the PR lane and on push
 // to `next` only, so breakage in them is landable through the queue. Named as
@@ -136,7 +140,11 @@ function main() {
   process.stdout.write(`${requiredContexts().join('\n')}\n`);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   try {
     main();
   } catch (error) {

@@ -19,6 +19,7 @@
  * this file alongside the GraphQL middleware if ever needed.
  *
  * Routes:
+ *   GET /supply                          — current requestable supply by ?chainId= (#2447)
  *   GET /builders/:agentId/runs         — builder-attributed run join (attd)
  *   GET /plugins                        — list plug-ins by ?solverNet= or ?builder= (ttz8)
  *   GET /plugins/:cid/scores            — score history for a plug-in CID (ttz8, ebu7 dep)
@@ -32,8 +33,14 @@
  * test/api.spa-route-order.test.ts.
  */
 import { db } from 'ponder:api';
-import schema, { pluginPublication } from 'ponder:schema';
-import { graphql, and, eq, sql } from 'ponder';
+import schema, {
+  attempt,
+  pluginPublication,
+  solverNetManifest,
+  task,
+  verdict,
+} from 'ponder:schema';
+import { graphql, and, eq, inArray, sql } from 'ponder';
 import { Hono } from 'hono';
 import { attributeRuns } from '../builder-attribution.js';
 import {
@@ -54,6 +61,18 @@ import { existsSync } from 'node:fs';
 import explorer from './explorer.js';
 import taskCoverage from './task-coverage.js';
 import { PLACEHOLDER_HTML } from './placeholder.js';
+import { indexedChainIds } from '../chain-config.js';
+import {
+  assembleCurrentSupply,
+  completedSupplyWindow,
+  resolveSupplyChainId,
+  type SupplyAttemptRow,
+  type SupplyManifestRow,
+  type SupplyTaskRow,
+  type SupplyVerdictRow,
+} from './supply.js';
+
+const SUPPLY_EVIDENCE_ROW_LIMIT = 10_000;
 
 const app = new Hono();
 
@@ -64,6 +83,163 @@ app.route('/explorer', explorer);
 // under /health rather than /explorer so monitoring tooling can scope a
 // liveness check to the health namespace.
 app.route('/health', taskCoverage);
+
+// ── GET /supply (#2447) ──────────────────────────────────────────────────────
+// Current requestable supply from one chain's native indexed facts. The pure
+// assembler preserves incomplete or contradictory evidence as `unknown`.
+//
+// The route refuses a chain this deployment does not index: an unindexed chain
+// has no rows, and "no rows" is indistinguishable at the database from "this
+// chain is genuinely empty" — answering it would render total absence of
+// evidence as an authoritative `zero_supply`.
+//
+// Sync state is NOT gated here: Ponder owns that signal and exposes it at
+// `/ready`. A cold or backfilling deployment can therefore answer `zero_supply`
+// on this route. Every in-repo consumer passes through `/ready` first
+// (`operator/src/discovery-client/http.ts` calls `ensureReady()` before this
+// endpoint), and production keeps the previous container serving until the new
+// one is ready, so the exposure is a direct unready-origin call.
+app.get('/supply', async (c) => {
+  const resolved = resolveSupplyChainId(c.req.query('chainId'), indexedChainIds());
+  if (!resolved.ok) {
+    return c.json({ error: resolved.error, detail: resolved.detail }, 400);
+  }
+  const { chainId } = resolved;
+
+  let asOfMs: number;
+  let manifests: SupplyManifestRow[];
+  let attempts: SupplyAttemptRow[];
+  let verdicts: SupplyVerdictRow[];
+  let priorAttempts: SupplyAttemptRow[];
+  let tasks: SupplyTaskRow[];
+  let manifestEvidenceComplete: boolean;
+  let activityEvidenceComplete: boolean;
+
+  try {
+    asOfMs = Date.now();
+    const window = completedSupplyWindow(asOfMs);
+    const windowStart = BigInt(Date.parse(window.start) / 1_000);
+    const windowEnd = BigInt(Date.parse(window.end) / 1_000);
+    const [launchedManifests, inWindowAttempts, inWindowVerdicts] = await Promise.all([
+      db.select({
+        id: solverNetManifest.id,
+        cidKeccak: solverNetManifest.cidKeccak,
+        status: solverNetManifest.status,
+        chainId: solverNetManifest.chainId,
+        openRoles: solverNetManifest.openRoles,
+        contractId: solverNetManifest.contractId,
+        contractVersion: solverNetManifest.contractVersion,
+        manifestEnrichmentStatus: solverNetManifest.manifestEnrichmentStatus,
+      }).from(solverNetManifest).where(
+        and(
+          eq(solverNetManifest.chainId, chainId),
+          eq(solverNetManifest.status, 'launched'),
+        ),
+      ).limit(SUPPLY_EVIDENCE_ROW_LIMIT + 1),
+      db.select({
+        taskId: attempt.taskId,
+        attemptIndex: attempt.attemptIndex,
+        operator: attempt.operator,
+        chainId: attempt.chainId,
+        createdAtTimestamp: attempt.createdAtTimestamp,
+      }).from(attempt).where(
+        and(
+          eq(attempt.chainId, chainId),
+          sql`${attempt.createdAtTimestamp} >= ${windowStart}`,
+          sql`${attempt.createdAtTimestamp} < ${windowEnd}`,
+        ),
+      ).limit(SUPPLY_EVIDENCE_ROW_LIMIT + 1),
+      db.select({
+        taskId: verdict.taskId,
+        attemptIndex: verdict.attemptIndex,
+        verdictIndex: verdict.verdictIndex,
+        verdictCode: verdict.verdictCode,
+        chainId: verdict.chainId,
+        createdAtTimestamp: verdict.createdAtTimestamp,
+      }).from(verdict).where(
+        and(
+          eq(verdict.chainId, chainId),
+          sql`${verdict.createdAtTimestamp} >= ${windowStart}`,
+          sql`${verdict.createdAtTimestamp} < ${windowEnd}`,
+        ),
+      ).limit(SUPPLY_EVIDENCE_ROW_LIMIT + 1),
+    ]);
+
+    manifests = launchedManifests as SupplyManifestRow[];
+    attempts = inWindowAttempts as SupplyAttemptRow[];
+    verdicts = inWindowVerdicts as SupplyVerdictRow[];
+    manifestEvidenceComplete = manifests.length <= SUPPLY_EVIDENCE_ROW_LIMIT;
+    const inWindowActivityComplete = attempts.length <= SUPPLY_EVIDENCE_ROW_LIMIT
+      && verdicts.length <= SUPPLY_EVIDENCE_ROW_LIMIT;
+
+    // A capped in-window activity read already forces `unknown`; skip the
+    // join reads rather than spending them on an answer that cannot be used.
+    if (!inWindowActivityComplete) {
+      priorAttempts = [];
+      tasks = [];
+      activityEvidenceComplete = false;
+    } else {
+      // Attempts referenced by an in-window verdict are fetched WITHOUT the window
+      // filter. A task claimed before the window and delivered inside it is an
+      // ordinary long loop; without its attempt row the assembler would read the
+      // broken join as index corruption and black out the whole chain's answer.
+      // An out-of-window attempt still never counts toward operator liveness.
+      const verdictTaskIds = [...new Set(verdicts.map((row) => row.taskId))];
+      priorAttempts = verdictTaskIds.length === 0 ? [] : await db.select({
+        taskId: attempt.taskId,
+        attemptIndex: attempt.attemptIndex,
+        operator: attempt.operator,
+        chainId: attempt.chainId,
+        createdAtTimestamp: attempt.createdAtTimestamp,
+      }).from(attempt).where(
+        and(eq(attempt.chainId, chainId), inArray(attempt.taskId, verdictTaskIds)),
+      ).limit(SUPPLY_EVIDENCE_ROW_LIMIT + 1) as SupplyAttemptRow[];
+
+      const taskIds = [...new Set([
+        ...attempts.map((row) => row.taskId),
+        ...verdictTaskIds,
+      ])];
+      tasks = taskIds.length === 0 ? [] : await db.select({
+        id: task.id,
+        manifestDigest: task.manifestDigest,
+        chainId: task.chainId,
+      }).from(task).where(
+        and(eq(task.chainId, chainId), inArray(task.id, taskIds)),
+      ).limit(SUPPLY_EVIDENCE_ROW_LIMIT + 1) as SupplyTaskRow[];
+
+      activityEvidenceComplete = tasks.length <= SUPPLY_EVIDENCE_ROW_LIMIT
+        && priorAttempts.length <= SUPPLY_EVIDENCE_ROW_LIMIT;
+    }
+  } catch (err) {
+    return c.json({ error: 'supply unavailable', detail: String(err) }, 503);
+  }
+
+  let assembled;
+  try {
+    assembled = assembleCurrentSupply({
+      chainId,
+      asOfMs,
+      manifestEvidenceComplete,
+      activityEvidenceComplete,
+      manifests,
+      tasks,
+      attempts: activityEvidenceComplete ? [...attempts, ...priorAttempts] : [],
+      verdicts: activityEvidenceComplete ? verdicts : [],
+    });
+  } catch {
+    // A defect in the pure assembler is not a transient outage: the client's
+    // `fetchWithRetry` (operator/src/discovery-client/http.ts) transparently
+    // retries 502/503, and retrying a deterministic bug never succeeds. 500
+    // keeps this catch distinct from the query/transport catch above it.
+    return c.json({ error: 'supply unavailable', detail: 'assembler failed' }, 500);
+  }
+
+  if (assembled.unknownBecause) {
+    console.warn(`[indexer] supply unknown chainId=${chainId}: ${assembled.unknownBecause}`);
+  }
+  c.header('Cache-Control', 'public, max-age=30, must-revalidate');
+  return c.json(assembled.response);
+});
 
 // ── Shared ebu7-schema probe ──────────────────────────────────────────────────
 // Routes 3 and 5 join against ebu7's `attemptEnvelopeMeta` + `verdict`

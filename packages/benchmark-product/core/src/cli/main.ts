@@ -1,6 +1,6 @@
 /**
  * The CLI's dispatch table (spec §5.2) is the complete generated agent surface:
- * 42 parity operations over the operations facade, plus the path-oriented
+ * 41 parity operations over the operations facade, plus the path-oriented
  * standalone verifiers, documented exclusions, and `help`.
  * Every verb takes `--json` for a machine-readable envelope; every failure is a
  * typed error envelope with a distinct exit code (§4.3). `runCli` never throws and never touches
@@ -40,12 +40,8 @@ import {
   runBind,
   createDraft,
   getDraft,
-  importBinaryItemBank,
   importRunRecords,
   importSweBenchRows,
-  admitHumanTruth,
-  createHumanReviewPackets,
-  signHumanReviewResponse,
   initWorkspace,
   inspectDraft,
   listDrafts,
@@ -71,21 +67,18 @@ import {
   sampleInit,
   selectMethod,
   exportDerivedBundle,
-  migrateTerminalBenchLegacyTask,
   updateDraft,
   type ArmWarning,
   type AnchorSubject,
   type OperationContext,
   type OperationResult,
   type QuotePresentation,
+  type RunBindResult,
   type RunLaunchDeps,
-  type MigrateTerminalBenchLegacyTaskInput,
-  type AdmitHumanTruthInput,
-  type CreateHumanReviewPacketsInput,
-  type ImportBinaryItemBankInput,
-  type SignHumanReviewResponseInput,
 } from "../operations/index.js";
+import { renderWorkspaceVerifyHuman } from "./verify-human.js";
 import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../operations/run-anchor.js";
+import { formatEntryAnchorLines } from "../operations/source-entry-anchor.js";
 import { dirname } from "node:path";
 import { expectedCellSet, parseBenchmark, parseRun } from "@jinn-network/benchmarking-records";
 import { parseEvaluationSpec } from "@jinn-network/task-execution-profiles";
@@ -93,14 +86,21 @@ import {
   readExternalRunRecords,
   type ExternalRunRecordFormat,
 } from "../intake/external-run-records.js";
+import { readHarborRunImport } from "../intake/harbor-run-records.js";
+import { readInspectRunImport } from "../intake/inspect-run-records.js";
+import { dumpIdentityFromPath } from "../run/external-import.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { disclosureDeclare, disclosureShow } from "../operations/disclosure-declare.js";
-import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationResult, PublicBundleVerificationResult } from "@colophon-claims/verify";
-import { DOMAIN_BINDING_MECHANISM_NAMES, exportFreezeRepo, summarizeVerificationOutcome, verifyFreezeRepo } from "@colophon-claims/verify";
+import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationResult, PublicBundleVerificationResult } from "@colophon-claims/check";
+import {
+  DOMAIN_BINDING_MECHANISM_NAMES,
+  beaconIndexWord,
+  exportFreezeRepo,
+  summarizeVerificationOutcome,
+  verifyFreezeRepo,
+} from "@colophon-claims/check";
 import { verifyPublicBundle } from "../bundle/verify.js";
-import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { formatSampleSizeAdvisory } from "../run/sample-size-advisory.js";
-import { readRunJournalEntries } from "../run/journal.js";
 import { requireRunState } from "../run/state.js";
 import { resolveWorkspacePublicationSourceName } from "../run/publication-source.js";
 import { DEFAULT_PUBLICATION_SERVE_PORT, startPublicationArchiveServer, type PublicationWellKnownOutcome } from "../run/publication-serve.js";
@@ -125,19 +125,6 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    [--name <name>] [--description <text>] [--version <ver>]
                    [--provenance-timestamp <rfc3339>]
                    (homemade instance rows, not official SWE-bench Verified)
-  import item-bank --workspace <dir> --principal <id> --profile binary-judgment@2
-                   --draft <draftId> --items <items.jsonl> --sources <sources.jsonl>
-                   --admissions <admissions.jsonl>
-                   [--name <name>] [--description <text>] [--version <ver>]
-                   [--license <spdx-id>] [--citation <text>]
-                   [--parser-invalid-policy reject|abstain]
-  human-review packet create --workspace <dir> --principal <id> --draft <draftId>
-                   --file <packet-request.json>
-  human-review response sign --workspace <dir> --principal <id> --draft <draftId>
-                   --file <response.json> --signer <configured-signer.json>
-  human-review admit --workspace <dir> --principal <id> --draft <draftId>
-                   --file <admission-manifest.json>
-  runtime terminal-bench migrate --workspace <dir> --principal <id> --file <migration.json>
   method <ref>     --workspace <dir> --principal <id> --draft <draftId>
                    [--slice 1|10|all] [--ids <csv>] [--n <count>] [--host <host.json>]
                    (catalog id or method-document file; omit ref to list)
@@ -184,6 +171,10 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   run import       --workspace <dir> --principal <id> --draft <draftId>
                    --file <records.jsonl|records.csv> --source <harness>
                    [--format jsonl|csv]
+                   --from harbor <jobs-dir> instead of --file reads Harbor 0.21
+                   jobs and trials into the same per-attempt records
+                   --from inspect <eval-log-or-dir> instead of --file reads
+                   Inspect read_eval_log JSON (.eval / EvalLog dump)
                    --template instead of --file/--source prints the sealed
                    slate as a skeleton to fill in
   launch           --workspace <dir> --principal <id> --draft <draftId>
@@ -205,12 +196,10 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   freeze-repo verify --bundle <dir> --repo <dir> [--json]
                    (re-renders from the bundle and compares the published tree byte for byte;
                    a drifted tree exits 1 and names every drifted member)
-  demo1 prereg verify --workspace <dir> --draft <draftId> --witness <witness.json>
-                   --method-summary-sha256 <sha256> --grader-program-sha256 <sha256>
-                   --source-commit <full-git-oid> [--json]
   help                  (also: --help, or no arguments)
 
 Exit codes: 0 success, 2 invalid-invocation, 3 authority-denied, 1 any other typed error.
+The Demo-1 / SkillsBench method is gone, including demo1 prereg verify. Colophon creates no benchmarks.
 `;
 
 function methodHelp(): string {
@@ -259,17 +248,9 @@ const SAMPLE_INIT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const IMPORT_SWEBENCH_FLAGS = [
   "workspace", "principal", "json", "draft", "file", "name", "description", "version", "provenance-timestamp",
 ] as const;
-const IMPORT_ITEM_BANK_FLAGS = [
-  "workspace", "principal", "json", "profile", "draft", "items", "sources", "admissions",
-  "name", "description", "version", "license", "citation", "parser-invalid-policy",
-] as const;
-const HUMAN_REVIEW_PACKET_CREATE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
-const HUMAN_REVIEW_RESPONSE_SIGN_FLAGS = ["workspace", "principal", "json", "draft", "file", "signer"] as const;
-const HUMAN_REVIEW_ADMIT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const METHOD_FLAGS = ["workspace", "principal", "json", "draft", "slice", "ids", "n", "host"] as const;
 const METHOD_LIST_FLAGS = ["json"] as const;
 const EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
-const RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS = ["workspace", "principal", "json", "file"] as const;
 const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "agent", "notes"] as const;
 const ARM_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
 const ARM_REMOVE_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
@@ -301,7 +282,7 @@ const PUBLICATION_STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as 
 const PUBLICATION_SERVE_FLAGS = ["workspace", "principal", "json", "source", "host", "port"] as const;
 const PUBLICATION_ACCOUNTING_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
-const RUN_IMPORT_FLAGS = ["workspace", "principal", "json", "draft", "file", "format", "source", "template"] as const;
+const RUN_IMPORT_FLAGS = ["workspace", "principal", "json", "draft", "file", "format", "source", "template", "from"] as const;
 const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft", "concurrency", PROVIDER_ACK_FLAG] as const;
 const RESUME_FLAGS = ["workspace", "principal", "json", "draft", "concurrency", PROVIDER_ACK_FLAG] as const;
 const CANCEL_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -314,9 +295,6 @@ const PUBLISH_FLAGS = ["workspace", "principal", "json", "draft", "include-nativ
 const BUNDLE_VERIFY_FLAGS = ["bundle", "json"] as const;
 const FREEZE_REPO_EXPORT_FLAGS = ["bundle", "out", "json"] as const;
 const FREEZE_REPO_VERIFY_FLAGS = ["bundle", "repo", "json"] as const;
-const DEMO1_PREREG_VERIFY_FLAGS = [
-  "workspace", "draft", "witness", "method-summary-sha256", "grader-program-sha256", "source-commit", "json",
-] as const;
 
 /** Exit-code table (spec §4.3, §5.2): distinct codes so a caller can branch without parsing stdout. */
 function exitCodeFor(code: ProductErrorCode): number {
@@ -481,6 +459,43 @@ function parseItemsFlag(raw: string): number {
   return value;
 }
 
+/**
+ * Parses `--beacon-round`; refuses `"invalid-invocation"` naming `--beacon-round` unless the text
+ * is decimal digits denoting a positive round (issue #3332). Surrounding whitespace is stripped
+ * first so this check agrees with the web action, whose `field()` helper trims (issue #4133).
+ *
+ * The shape check is on the TEXT, before conversion, because `Number` is a coercion rather than a
+ * parse: it reads `"1e3"`, `"0x10"`, `"+1"` and `"1."` as integers, and `""` as zero.
+ * `Number.isInteger` then passes and the schema's bound admits the result, so the operator who
+ * mistyped a round is not refused by name -- they get a successfully bound run at a round they
+ * never typed. `bind` is write-once by design (a run binds once, because re-binding is re-drawing),
+ * so a coerced round cannot be corrected by rebinding; and a coerced value that happens to land
+ * after the seal binds cleanly to the wrong round. The web action applies the same rule at its own
+ * entry point (`web/src/app/actions.ts`): trim, then decimal digits, then a safe positive integer.
+ *
+ * Leading zeros are admitted: `007` denotes 7 unambiguously, and refusing it would only reject a
+ * spelling the operator meant. `"  1000  "` is the same round after trim, not a refusal.
+ */
+function parseBeaconRoundFlag(raw: string): number {
+  const text = raw.trim();
+  if (!/^[0-9]+$/u.test(text)) {
+    refuse(
+      "invalid-invocation",
+      "--beacon-round",
+      `--beacon-round must be decimal digits denoting a round or block height, got ${JSON.stringify(raw)}`,
+    );
+  }
+  const value = Number(text);
+  if (!Number.isSafeInteger(value) || value < 1) {
+    refuse(
+      "invalid-invocation",
+      "--beacon-round",
+      `--beacon-round must be a positive round or block height, got ${JSON.stringify(raw)}`,
+    );
+  }
+  return value;
+}
+
 function parseConcurrencyFlag(raw: string): number {
   const value = Number(raw);
   if (!Number.isSafeInteger(value) || value < 1 || value > 32) {
@@ -590,140 +605,6 @@ function handleImportSweBench(args: ParsedArgs, context: CliContext, jsonMode: b
   );
 }
 
-function handleImportItemBank(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
-  assertKnownFlags(args, IMPORT_ITEM_BANK_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const profile = required(args, "profile");
-  if (profile !== "binary-judgment@2") {
-    refuse("invalid-invocation", "--profile", "--profile must be binary-judgment@2");
-  }
-  const name = optional(args, "name");
-  const description = optional(args, "description");
-  const version = optional(args, "version");
-  const license = optional(args, "license");
-  if (license !== undefined && !/^[A-Za-z0-9][A-Za-z0-9.+-]*$/u.test(license)) {
-    // The same SPDX 2.3 Annex A short-identifier grammar the freeze-repository export applies when
-    // it renders `SPDX-License-Identifier:`. Refusing here makes free text a one-second failure at
-    // the flag rather than a refusal after the record is sealed and published.
-    refuse(
-      "invalid-invocation",
-      "--license",
-      "--license must be an SPDX short identifier (SPDX 2.3 Annex A grammar), not free text",
-    );
-  }
-  const citation = optional(args, "citation");
-  const parserInvalidPolicy = optional(args, "parser-invalid-policy");
-  if (
-    parserInvalidPolicy !== undefined
-    && parserInvalidPolicy !== "reject"
-    && parserInvalidPolicy !== "abstain"
-  ) {
-    refuse(
-      "invalid-invocation",
-      "--parser-invalid-policy",
-      "--parser-invalid-policy must be reject or abstain",
-    );
-  }
-  const input: ImportBinaryItemBankInput = {
-    profile,
-    draftId: required(args, "draft"),
-    itemBankJsonl: readTextFile(pathFrom(context.cwd, required(args, "items"))),
-    sourceManifestJsonl: readTextFile(pathFrom(context.cwd, required(args, "sources"))),
-    admissionIndexJsonl: readTextFile(pathFrom(context.cwd, required(args, "admissions"))),
-    ...(name === undefined ? {} : { name }),
-    ...(description === undefined ? {} : { description }),
-    ...(version === undefined ? {} : { version }),
-    ...(license === undefined ? {} : { license }),
-    ...(citation === undefined ? {} : { citation }),
-    ...(parserInvalidPolicy === undefined ? {} : { parserInvalidPolicy }),
-  };
-  const operation = importBinaryItemBank(opContext, input);
-  return renderResult(
-    operation,
-    jsonMode,
-    (value) => `imported ${value.taskSha256s.length} admitted binary item(s) as benchmark ${value.benchmarkSha256} into draft ${value.draft.draftId}; excluded ${value.excludedItemSha256s.length}, held back ${value.nonAdmittedItemSha256s.length}\n`,
-  );
-}
-
-function handleHumanReviewPacketCreate(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
-  assertKnownFlags(args, HUMAN_REVIEW_PACKET_CREATE_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const request = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
-    CreateHumanReviewPacketsInput,
-    "draftId"
-  >;
-  const result = createHumanReviewPackets(opContext, {
-    draftId: required(args, "draft"),
-    item: request.item,
-    evaluatorIds: request.evaluatorIds,
-  });
-  return renderResult(
-    result,
-    jsonMode,
-    (value) => `created ${value.packets.length} blind review packets for ${value.itemSha256}\n`,
-  );
-}
-
-async function handleHumanReviewResponseSign(
-  args: ParsedArgs,
-  context: CliContext,
-  jsonMode: boolean,
-): Promise<CliResult> {
-  assertKnownFlags(args, HUMAN_REVIEW_RESPONSE_SIGN_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const response = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
-    SignHumanReviewResponseInput,
-    "draftId" | "configuredEvaluatorIds" | "activeEvaluatorId"
-  >;
-  const signer = readJsonFile(pathFrom(context.cwd, required(args, "signer"))) as Pick<
-    SignHumanReviewResponseInput,
-    "configuredEvaluatorIds" | "activeEvaluatorId"
-  >;
-  const result = await signHumanReviewResponse(opContext, {
-    draftId: required(args, "draft"),
-    configuredEvaluatorIds: signer.configuredEvaluatorIds,
-    activeEvaluatorId: signer.activeEvaluatorId,
-    packetSha256: response.packetSha256,
-    visibilityReceiptSha256: response.visibilityReceiptSha256,
-    label: response.label,
-    complete: response.complete,
-    completedAt: response.completedAt,
-  });
-  return renderResult(
-    result,
-    jsonMode,
-    (value) => `signed human review ${value.verdictSha256} as configured evaluator ${value.evaluatorId}\n`,
-  );
-}
-
-function handleHumanReviewAdmit(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
-  assertKnownFlags(args, HUMAN_REVIEW_ADMIT_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const request = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
-    AdmitHumanTruthInput,
-    "draftId"
-  >;
-  const result = admitHumanTruth(opContext, {
-    draftId: required(args, "draft"),
-    truthAdmission: request.truthAdmission,
-    candidates: request.candidates,
-    ...(request.evidenceEnvelopesBase64 === undefined
-      ? {}
-      : { evidenceEnvelopesBase64: request.evidenceEnvelopesBase64 }),
-    // H-6 (packet P6): a new top-level field on AdmitHumanTruthInput is silently dropped here
-    // unless explicitly forwarded — this handler reads the whole request object from a file but
-    // only ever spreads the fields named below.
-    ...(request.screening === undefined
-      ? {}
-      : { screening: request.screening }),
-  });
-  return renderResult(
-    result,
-    jsonMode,
-    (value) => `admitted ${value.resolutions.length} truth resolution(s); publication-grade=${value.publicationGrade}\n`,
-  );
-}
-
 function renderMethodCatalogTable(
   catalog: ReturnType<typeof listMethodCatalog>,
 ): string {
@@ -762,16 +643,17 @@ async function handleMethodBind(
   return renderResult(
     result,
     jsonMode,
-    (value) => `bound ${value.official ? "official" : "custom"} ${value.documentKind} method ${value.selectionManifestSha256} for draft ${draftId}\n`,
+    (value) => {
+      const kind = value.official ? "official" : "custom";
+      if (value.selectionManifestSha256 !== undefined) {
+        return `bound ${kind} ${value.documentKind} method ${value.selectionManifestSha256} for draft ${draftId}\n`;
+      }
+      if (value.benchmarkSha256 !== undefined) {
+        return `bound ${kind} ${value.documentKind} method ${value.benchmarkSha256} for draft ${draftId}\n`;
+      }
+      return `bound ${kind} ${value.catalogId ?? value.documentKind} catalog identity for draft ${draftId}\n`;
+    },
   );
-}
-
-async function handleTerminalBenchMigration(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
-  assertKnownFlags(args, RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as MigrateTerminalBenchLegacyTaskInput;
-  const result = await migrateTerminalBenchLegacyTask(opContext, configuration);
-  return renderResult(result, jsonMode, (value) => `migrated legacy Terminal-Bench task as ${value.manifestSha256}\n`);
 }
 
 function handleDerivedExport(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
@@ -1076,6 +958,20 @@ function anchorNote(outcome: AnchorAfterLockOutcome, draftId: string): string {
     + `"${PRODUCT_BRANDING.commandName} anchor --draft ${draftId} --subject lock"\n`;
 }
 
+function withEntryAnchorNote(
+  rendered: CliResult,
+  jsonMode: boolean,
+  workspaceDir: string,
+  result: OperationResult<{ readonly source: { readonly agent: string; readonly name: string } }>,
+): CliResult {
+  if (!result.ok) return rendered;
+  const note = formatEntryAnchorLines(workspaceDir, result.result.source.agent, result.result.source.name);
+  if (note.length === 0) return rendered;
+  return jsonMode
+    ? { ...rendered, stderr: `${rendered.stderr}${note}` }
+    : { ...rendered, stdout: `${rendered.stdout}${note}` };
+}
+
 /**
  * `lock`, then the §7.2 anchor hook.
  *
@@ -1135,10 +1031,7 @@ function assertAnchorSubject(value: string): AnchorSubject {
  */
 function handleBind(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
   assertKnownFlags(args, BIND_FLAGS);
-  const round = Number(required(args, "beacon-round"));
-  if (!Number.isInteger(round)) {
-    refuse("invalid-invocation", "bind", "--beacon-round must be an integer round or block height");
-  }
+  const round = parseBeaconRoundFlag(required(args, "beacon-round"));
   const result = runBind(buildOperationContext(args, context), {
     draftId: required(args, "draft"),
     // Source and value are validated by the operation against the beacon registry and the hex
@@ -1149,12 +1042,18 @@ function handleBind(args: ParsedArgs, context: CliContext, jsonMode: boolean): C
       value: required(args, "beacon-value"),
     },
   });
-  return renderResult(
-    result,
-    jsonMode,
-    (value) => `bound run ${value.binding.sealDigest} to ${value.binding.beacon.source} round `
-      + `${value.binding.beacon.round}: ${value.recordSha256}\n${value.statement}\n`,
-  );
+  return renderResult(result, jsonMode, renderBindLine);
+}
+
+/**
+ * The `bind` human line (issue #3871). The index word follows the source's time basis through the
+ * same helper the reader's report face uses, so a height-indexed beacon is never called a round
+ * here while the report calls it a height.
+ */
+export function renderBindLine(value: RunBindResult): string {
+  const { beacon } = value.binding;
+  return `bound run ${value.binding.sealDigest} to ${beacon.source} ${beaconIndexWord(beacon.source)} `
+    + `${beacon.round}: ${value.recordSha256}\n${value.statement}\n`;
 }
 
 async function handleAnchor(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
@@ -1245,7 +1144,7 @@ function handleIdentityBind(args: ParsedArgs, context: CliContext, jsonMode: boo
     + `Publish this at ${value.proof.location}:\n`
     + `  ${value.proof.expectedValue}\n`
     + `Until it is published the binding names a domain that has not answered; a reader who supplies\n`
-    + `the document to colophon-verify is told exactly that.\n`);
+    + `the document to colophon-check is told exactly that.\n`);
 }
 
 /**
@@ -1289,9 +1188,14 @@ async function handlePublicationRegister(args: ParsedArgs, context: CliContext, 
     draftId: required(args, "draft"),
     ...(optional(args, "public-base-url") === undefined ? {} : { publicBaseUrl: optional(args, "public-base-url")! }),
   });
-  return renderResult(result, jsonMode, (value) => value.postHoc
-    ? `registered run ${value.recordSha256} at ${value.source.agent}/${value.source.name}#${value.sourceSequence} post-hoc; this does not rerun completed work\n`
-    : `registered run ${value.recordSha256} at ${value.source.agent}/${value.source.name}#${value.sourceSequence} before dispatch\n`);
+  return withEntryAnchorNote(
+    renderResult(result, jsonMode, (value) => value.postHoc
+      ? `registered run ${value.recordSha256} at ${value.source.agent}/${value.source.name}#${value.sourceSequence} post-hoc; this does not rerun completed work\n`
+      : `registered run ${value.recordSha256} at ${value.source.agent}/${value.source.name}#${value.sourceSequence} before dispatch\n`),
+    jsonMode,
+    opContext.workspaceDir,
+    result,
+  );
 }
 
 function handlePublicationStatus(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
@@ -1305,16 +1209,27 @@ function handlePublicationStatus(args: ParsedArgs, context: CliContext, jsonMode
 
 async function handlePublicationAccounting(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, PUBLICATION_ACCOUNTING_FLAGS);
-  const result = await publicationAccounting(buildOperationContext(args, context), { draftId: required(args, "draft") });
-  return renderResult(result, jsonMode, (value) => `published accounting ${value.accountingSha256} and Matrix v2 ${value.matrixV2Sha256}; accounting does not require a Report and does not rerun work\n`);
+  const opContext = buildOperationContext(args, context);
+  const result = await publicationAccounting(opContext, { draftId: required(args, "draft") });
+  return withEntryAnchorNote(
+    renderResult(result, jsonMode, (value) => `published accounting ${value.accountingSha256} and Matrix v2 ${value.matrixV2Sha256}; accounting does not require a Report and does not rerun work\n`),
+    jsonMode,
+    opContext.workspaceDir,
+    result,
+  );
 }
 
 async function handlePublicationReport(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, PUBLICATION_REPORT_FLAGS);
   const opContext = buildOperationContext(args, context);
   const result = await publicationReport(opContext, { draftId: required(args, "draft") });
-  return renderResult(result, jsonMode, (value) =>
-    `published signed Report v2 ${value.reportRecordSha256} (payload ${value.reportPayloadSha256}) at ${value.source.agent}/${value.source.name}#${value.receipt.sourceSequence}\n`);
+  return withEntryAnchorNote(
+    renderResult(result, jsonMode, (value) =>
+      `published signed Report v2 ${value.reportRecordSha256} (payload ${value.reportPayloadSha256}) at ${value.source.agent}/${value.source.name}#${value.receipt.sourceSequence}\n`),
+    jsonMode,
+    opContext.workspaceDir,
+    result,
+  );
 }
 
 /** How each start-time well-known outcome reads while the server is coming up. */
@@ -1516,14 +1431,14 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
   assertKnownFlags(args, RUN_IMPORT_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
-  const format = importFormat(args);
 
   if (present(args, "template")) {
-    for (const flag of ["file", "source"] as const) {
+    for (const flag of ["file", "source", "from"] as const) {
       if (optional(args, flag) !== undefined) {
         refuse("invalid-invocation", flag, `run import --template prints a skeleton and reads nothing; --${flag} is not accepted with it`);
       }
     }
+    const format = importFormat(args);
     const rendered = renderImportTemplate(opContext.workspaceDir, draftId, format);
     if (jsonMode) {
       return {
@@ -1535,6 +1450,63 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
     return { exitCode: 0, stdout: rendered.template, stderr: "" };
   }
 
+  if (present(args, "from")) {
+    const reader = required(args, "from");
+    if (reader !== "inspect" && reader !== "harbor") {
+      refuse("invalid-invocation", "from", `--from must be "harbor" or "inspect", got "${reader}"`);
+    }
+    for (const flag of ["file", "format", "source"] as const) {
+      if (optional(args, flag) !== undefined) {
+        refuse(
+          "invalid-invocation",
+          flag,
+          reader === "inspect"
+            ? `run import --from inspect reads an eval log or directory; --${flag} is not accepted with it`
+            : `run import --from harbor reads a jobs directory; --${flag} is not accepted with it`,
+        );
+      }
+    }
+    const extra = args.words.slice(2);
+    const pathWord = extra[0];
+    if (extra.length !== 1 || pathWord === undefined || pathWord === "") {
+      refuse(
+        "invalid-invocation",
+        "from",
+        reader === "inspect"
+          ? "run import --from inspect requires <eval-log-or-dir>"
+          : "run import --from harbor requires <jobs-dir>",
+      );
+    }
+    const resolvedPath = pathFrom(context.cwd, pathWord);
+    const dump = reader === "inspect"
+      ? readInspectRunImport({
+        workspaceDir: opContext.workspaceDir,
+        draftId,
+        evalLogOrDir: resolvedPath,
+      })
+      : readHarborRunImport({
+        workspaceDir: opContext.workspaceDir,
+        draftId,
+        jobsDir: resolvedPath,
+      });
+    const imported = await importRunRecords(opContext, {
+      draftId,
+      records: dump.records,
+      source: dump.source,
+      evidenceRoot: dump.evidenceRoot,
+      dump: dumpIdentityFromPath(resolvedPath, dump.records),
+      ...(reader === "inspect" ? { namedReader: "inspect" as const } : {}),
+    });
+    return renderResult(
+      imported,
+      jsonMode,
+      (value) => `imported ${value.importedCellCount} cells into draft ${value.draft.draftId}: `
+        + `${value.written.graded} graded, ${value.written.ungradeable} ungradeable, `
+        + `${value.written.notDelivered} not delivered\n`,
+    );
+  }
+
+  const format = importFormat(args);
   // Relative `evidence[].path` entries resolve against the dump's own directory, so a dump and the
   // artifacts it names move together as one tree.
   const file = pathFrom(context.cwd, required(args, "file"));
@@ -1544,19 +1516,14 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
     records,
     source: { harness: required(args, "source") },
     evidenceRoot: dirname(file),
+    dump: dumpIdentityFromPath(file, records),
   });
   return renderResult(
     result,
     jsonMode,
-    // The second line is not decoration. `publish` refuses an imported run (operator ruling, issue
-    // #3417), and an operator who learns that only after collect and report has spent the whole
-    // chain to find out. The `--json` envelope is unchanged: machine callers branch on the
-    // publication refusal's own typed code and path, not on this prose.
     (value) => `imported ${value.importedCellCount} cells into draft ${value.draft.draftId}: `
       + `${value.written.graded} graded, ${value.written.ungradeable} ungradeable, `
-      + `${value.written.notDelivered} not delivered\n`
-      + "note: publication of an imported run is refused pending issue #3417 — collect and report "
-      + "work, publish does not (see EXTERNAL-RUN-IMPORT.md)\n",
+      + `${value.written.notDelivered} not delivered\n`,
   );
 }
 
@@ -1671,7 +1638,7 @@ async function handleVerify(args: ParsedArgs, context: CliContext, jsonMode: boo
   const draftId = required(args, "draft");
 
   const result = await runVerify(opContext, { draftId });
-  return renderResult(result, jsonMode, (value) => `verified draft ${value.draftId}: ${value.checks.join(", ")}\n`);
+  return renderResult(result, jsonMode, renderWorkspaceVerifyHuman);
 }
 
 async function handlePublish(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
@@ -1704,6 +1671,9 @@ async function handleBundleVerify(args: ParsedArgs, context: CliContext, jsonMod
  *
  * A deferred check is never printed as a bare check name: a metadata-first bundle carries its
  * artifact digests without their bytes (issue #2986).
+ *
+ * The check names print bare, without the glosses `colophon-check` prints beside its own list;
+ * the reader-facing vocabulary spec records why under §4.2 (issue #3918).
  */
 export function renderBundleVerifyLine(value: PublicBundleVerificationResult): string {
   return `recomputed public bundle ${value.identity}: ${summarizeVerificationOutcome(value).outcomes
@@ -1757,51 +1727,28 @@ async function handleFreezeRepoVerify(args: ParsedArgs, context: CliContext, jso
   // A drifted tree must not exit 0. `check && publish` is exactly how this verb gets used, and a
   // zero exit there publishes the drift. The typed envelope still carries every difference, so a
   // machine caller reads WHICH members drifted from `issues`, not from prose.
-  const detail = `freeze repository does not match ${result.bundleIdentity}: ${result.differences
+  // The commit id is reported on this path too, not only on the matching one: a drift report whose
+  // reader is deciding whether the tree they hold is the one an announcement pinned needs the oid
+  // the bundle renders to in order to answer that at all.
+  const detail = `freeze repository does not match ${result.bundleIdentity} (bundle renders commit ${result.commitId}): ${result.differences
     .map((difference) => `${difference.path} (${difference.kind})`)
     .join(", ")}`;
-  return renderResult(
-    {
-      ok: false,
-      error: {
-        code: "record-integrity",
-        detail,
-        issues: result.differences.map((difference) => ({ path: difference.path, message: difference.kind })),
-      },
-    } as OperationResult<never>,
-    jsonMode,
-    () => "",
-  );
-}
-
-function handleDemo1PreregistrationVerify(
-  args: ParsedArgs,
-  context: CliContext,
-  jsonMode: boolean,
-): CliResult {
-  assertKnownFlags(args, DEMO1_PREREG_VERIFY_FLAGS);
-  const workspaceDir = pathFrom(context.cwd, required(args, "workspace"));
-  const draftId = required(args, "draft");
-  const runState = requireRunState(workspaceDir, draftId);
-  if (runState.runSha256 === undefined) {
-    refuse("illegal-transition", `runs.${draftId}`, "Demo-1 preregistration verification requires a sealed Run");
-  }
-  const result = verifyDemo1PreregistrationPreDispatch({
-    commitment: {
-      runSha256: runState.runSha256,
-      methodSummarySha256: required(args, "method-summary-sha256"),
-      graderProgramSha256: required(args, "grader-program-sha256"),
-      sourceCommit: required(args, "source-commit"),
-    },
-    witness: readJsonFile(pathFrom(context.cwd, required(args, "witness"))),
-    runState,
-    journal: readRunJournalEntries(workspaceDir, draftId),
-  });
-  return renderResult(
-    { ok: true, result },
-    jsonMode,
-    (value) => `Demo-1 preregistration ready (${value.stage}): ${value.manifestCid} / ${value.transactionHash}\n`,
-  );
+  const error: ProductErrorEnvelope = {
+    code: "record-integrity",
+    detail,
+    issues: result.differences.map((difference) => ({ path: difference.path, message: difference.kind })),
+  };
+  // The skipped-mode note (issue #3608) and the result it is read from are carried on this path
+  // too, not only on the matching one (issue #3997): a drift report that is silent about whether
+  // the mode dimension was read leaves its reader unable to tell whether a second, mode-only drift
+  // went unlooked-for. The standalone verifier reports both on both paths, and `PUBLIC-BUNDLE.md`
+  // promises the signal without qualifying the path. The envelope is built here rather than through
+  // `renderResult` because `OperationResult`'s failure half has no `result` slot and is not widened
+  // for one verb: `error` is unchanged, `result` is additive, and a machine caller reads
+  // `executableBitChecked` / `executableBitSkipped` from the same key on both paths.
+  const exitCode = exitCodeFor(error.code);
+  if (jsonMode) return { exitCode, stdout: `${JSON.stringify({ ok: false, error, result })}\n`, stderr: "" };
+  return { exitCode, stdout: "", stderr: `${renderHumanError(error)}${skippedModeNote(result)}` };
 }
 
 type VerbHandler = (args: ParsedArgs, context: CliContext, jsonMode: boolean) => CliResult | Promise<CliResult>;
@@ -1815,13 +1762,8 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["inspect", handleInspect],
   ["sample init", handleSampleInit],
   ["import swebench", handleImportSweBench],
-  ["import item-bank", handleImportItemBank],
-  ["human-review packet create", handleHumanReviewPacketCreate],
-  ["human-review response sign", handleHumanReviewResponseSign],
-  ["human-review admit", handleHumanReviewAdmit],
   ["method", handleMethodBind],
   ["export", handleDerivedExport],
-  ["runtime terminal-bench migrate", handleTerminalBenchMigration],
   ["arm add", handleArmAdd],
   ["arm update", handleArmUpdate],
   ["arm remove", handleArmRemove],
@@ -1861,7 +1803,6 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["bundle verify", handleBundleVerify],
   ["freeze-repo export", handleFreezeRepoExport],
   ["freeze-repo verify", handleFreezeRepoVerify],
-  ["demo1 prereg verify", handleDemo1PreregistrationVerify],
 ]);
 
 /** The complete verb surface, derived from `VERBS` — the parity anchor `./parity.test.ts` checks

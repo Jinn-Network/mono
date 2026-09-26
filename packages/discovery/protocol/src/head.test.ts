@@ -43,6 +43,26 @@ describe("parseSourceHead", () => {
     expect(() => parseSourceHead(validHead({ sequence: "00000000000000001" }))).toThrow();
   });
 
+  it("accepts head timestamps that carry an explicit offset (#3482)", () => {
+    expect(parseSourceHead(validHead({ issuedAt: "2026-07-27T14:00:00+02:00" })).issuedAt).toBe(
+      "2026-07-27T14:00:00+02:00",
+    );
+    expect(parseSourceHead(validHead({ refreshBy: "2026-07-28T12:00:00.500Z" })).refreshBy).toBe(
+      "2026-07-28T12:00:00.500Z",
+    );
+  });
+
+  it("rejects an offset-less head timestamp, which one host reads as a different instant than the next (#3482)", () => {
+    expect(() => parseSourceHead(validHead({ issuedAt: "2026-07-27T12:00:00" }))).toThrow();
+    expect(() => parseSourceHead(validHead({ refreshBy: "2026-07-28T12:00:00" }))).toThrow();
+  });
+
+  it("rejects a head timestamp outside the ISO grammar entirely (#3482)", () => {
+    expect(() => parseSourceHead(validHead({ issuedAt: "not-a-timestamp" }))).toThrow();
+    expect(() => parseSourceHead(validHead({ issuedAt: "2026-07-27" }))).toThrow();
+    expect(() => parseSourceHead(validHead({ refreshBy: "Tue Jul 28 2026 12:00:00 GMT+0000" }))).toThrow();
+  });
+
   it("rejects a non sha256 entry digest", () => {
     expect(() => parseSourceHead(validHead({ entry: "not-a-digest" }))).toThrow();
   });

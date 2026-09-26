@@ -8,8 +8,11 @@ import {
   DEFAULT_MAINNET_RPC_URLS,
   loadConfig,
   buildConfigProvenance,
+  getConfigPathFromArgs,
 } from '../src/config.js';
+import { requireConfigPathFromArgs, requireConfigPathFromArgvSources } from '../src/config/path-args.js';
 import { phaseDTransitionUsageSnapshot } from '../src/compatibility/phase-d-transition-usage.js';
+import { isolateEnv } from './_support/env.js';
 
 /**
  * Issue #911 — ≥5 distinct free RPC providers default per supported chain.
@@ -1265,14 +1268,14 @@ describe('hermes config keys', () => {
     'JINN_HERMES_BASE_URL',
     'JINN_HERMES_DOCTOR_TIMEOUT_MS',
   ] as const;
-  const saved: Record<string, string | undefined> = {};
-  for (const k of HERMES_ENV_KEYS) saved[k] = process.env[k];
+
+  // Capture *and clear* inside the hook, not at collection time. A
+  // collection-time capture with no paired beforeEach let the first test in
+  // this block read whatever the contributor had exported, because loadConfig
+  // gives env precedence over the config file (#3112).
+  isolateEnv(HERMES_ENV_KEYS);
 
   afterEach(async () => {
-    for (const k of HERMES_ENV_KEYS) {
-      if (saved[k] === undefined) delete process.env[k];
-      else process.env[k] = saved[k];
-    }
     await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
   });
 
@@ -1421,5 +1424,134 @@ describe('Phase D legacy wiring diagnostics', () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * Issue #2393 — `--config=<path>` (equals form) was silently ignored because the
+ * scan used `indexOf('--config')` only, so callers fell back to the default
+ * config path and boot could load/migrate a different file than intended.
+ */
+describe('getConfigPathFromArgs (#2393)', () => {
+  it('reads the space-separated form', () => {
+    expect(getConfigPathFromArgs(['--config', '/tmp/space.json'])).toBe('/tmp/space.json');
+  });
+
+  it('reads the equals form', () => {
+    expect(getConfigPathFromArgs(['--config=/tmp/equals.json'])).toBe('/tmp/equals.json');
+  });
+
+  it('preserves an equals sign inside the path value', () => {
+    expect(getConfigPathFromArgs(['--config=/tmp/a=b.json'])).toBe('/tmp/a=b.json');
+  });
+
+  it('takes the first occurrence in argv order when the equals form comes first', () => {
+    expect(getConfigPathFromArgs(['--config=/tmp/first.json', '--config', '/tmp/second.json']))
+      .toBe('/tmp/first.json');
+  });
+
+  it('takes the first occurrence in argv order when the space form comes first', () => {
+    expect(getConfigPathFromArgs(['--config', '/tmp/first.json', '--config=/tmp/second.json']))
+      .toBe('/tmp/first.json');
+  });
+
+  it('ignores a trailing bare --config with no value', () => {
+    expect(getConfigPathFromArgs(['run', '--config'])).toBeUndefined();
+  });
+
+  it('ignores an empty equals value', () => {
+    expect(getConfigPathFromArgs(['--config='])).toBeUndefined();
+  });
+
+  // An empty value must not terminate the scan: the old implementation
+  // (`indexOf` + next token) still found the later usable occurrence, and
+  // narrowing to `undefined` here would silently boot against the default
+  // config -- the exact failure mode #2393 exists to eliminate.
+  it('falls through an empty equals value to a later usable occurrence', () => {
+    expect(getConfigPathFromArgs(['--config=', '--config', '/tmp/later.json']))
+      .toBe('/tmp/later.json');
+  });
+
+  it('falls through a bare --config with an empty value to a later usable occurrence', () => {
+    expect(getConfigPathFromArgs(['--config', '', '--config=/tmp/later.json']))
+      .toBe('/tmp/later.json');
+  });
+
+  it('falls through a trailing bare --config with no value at all', () => {
+    expect(getConfigPathFromArgs(['--config=/tmp/first.json', 'run', '--config']))
+      .toBe('/tmp/first.json');
+  });
+
+  it('does not match flags that merely start with --config', () => {
+    expect(getConfigPathFromArgs(['--configfoo', '/tmp/no.json'])).toBeUndefined();
+    expect(getConfigPathFromArgs(['--config-dir=/tmp/no'])).toBeUndefined();
+  });
+
+  it('returns undefined when no --config is present', () => {
+    expect(getConfigPathFromArgs(['run', '--native-config', '/tmp/native.json'])).toBeUndefined();
+  });
+});
+
+/**
+ * Issue #4376 — callers that need a config path could not tell "no --config"
+ * from "--config given with an empty value", because the shared scan returns
+ * undefined for both. The chain-touching native production deployment path
+ * therefore fell silently back to the default state-dir config.
+ */
+describe('requireConfigPathFromArgs (#4376)', () => {
+  it('reads the space-separated form', () => {
+    expect(requireConfigPathFromArgs(['--config', '/tmp/space.json'])).toBe('/tmp/space.json');
+  });
+
+  it('reads the equals form', () => {
+    expect(requireConfigPathFromArgs(['--config=/tmp/equals.json'])).toBe('/tmp/equals.json');
+  });
+
+  it('returns undefined when no --config is present, leaving the default to the caller', () => {
+    expect(requireConfigPathFromArgs(['run'])).toBeUndefined();
+  });
+
+  it('throws on an empty equals value', () => {
+    expect(() => requireConfigPathFromArgs(['--config='])).toThrow(
+      '--config was given with an empty value',
+    );
+  });
+
+  it('throws on a trailing bare --config with no value', () => {
+    expect(() => requireConfigPathFromArgs(['run', '--config'])).toThrow(
+      '--config was given with an empty value',
+    );
+  });
+
+  it('throws on a bare --config with an empty value', () => {
+    expect(() => requireConfigPathFromArgs(['--config', ''])).toThrow(
+      '--config was given with an empty value',
+    );
+  });
+
+  // The documented fall-through is preserved: only an argv where no
+  // occurrence at all was usable is an error.
+  it('falls through an empty value to a later usable occurrence without throwing', () => {
+    expect(requireConfigPathFromArgs(['--config=', '--config', '/tmp/later.json']))
+      .toBe('/tmp/later.json');
+  });
+});
+
+describe('requireConfigPathFromArgvSources (#4673)', () => {
+  it('prefers a usable verb argv over process argv', () => {
+    expect(requireConfigPathFromArgvSources(
+      ['--config', '/tmp/verb.json'],
+      ['--config', '/tmp/process.json'],
+    )).toBe('/tmp/verb.json');
+  });
+
+  it('falls through to process argv when the verb omitted --config', () => {
+    expect(requireConfigPathFromArgvSources(['--json'], ['--config', '/tmp/process.json']))
+      .toBe('/tmp/process.json');
+  });
+
+  it('throws when the verb named --config with an empty value', () => {
+    expect(() => requireConfigPathFromArgvSources(['--config='], ['--config', '/tmp/process.json']))
+      .toThrow('--config was given with an empty value');
   });
 });

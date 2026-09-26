@@ -1,5 +1,7 @@
 # Issue #427 — Promote Identity (§2.2) and Harness Readiness (§2.9) to first-class /overview surfaces
 
+> **Status (2026-09-24): superseded by [log/decisions/2026-08-04-headless-operator-reconciliation.md](../../../log/decisions/2026-08-04-headless-operator-reconciliation.md).** It re-composes `/overview` in the daemon-served dashboard SPA, which decision 2 replaces with a separate operator console; the Identity and Harness Selection components it promotes are modeled for the console in [OPERATOR-APP-SPEC.md](../../../apps/operator-console/OPERATOR-APP-SPEC.md) §2.2 and §2.9. For the current direction read [apps/operator-console/OPERATOR-APP-SPEC.md](../../../apps/operator-console/OPERATOR-APP-SPEC.md).
+
 - **Issue:** [#427](https://github.com/Jinn-Network/mono/issues/427) — operator-app: Identity + Harness Readiness buried under "Advanced details"
 - **Date:** 2026-05-26
 - **Shape:** `refactor`

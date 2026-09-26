@@ -25,7 +25,7 @@
  *    not checked against anything, because it is Ponder's GraphQL API rather
  *    than the project's schema file. It is independently corroborated by a
  *    working client against a live Ponder mount:
- *    `legacy/jinn-cli-agents-reference/frontend/explorer/src/lib/subgraph.ts`
+ *    https://github.com/Jinn-Network/mono/blob/81cbb1b806f7405b65e879277bf25c5f397ef1ae/legacy/jinn-cli-agents-reference/frontend/explorer/src/lib/subgraph.ts
  *    (~L190-240) queries with exactly `limit` / `after` / `before` / `orderBy` /
  *    `orderDirection` and reads back `items` + `pageInfo { hasNextPage,
  *    endCursor }`.

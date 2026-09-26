@@ -100,6 +100,12 @@ export function createDirectSafeBroadcaster(
          * `status: 'reverted'` (issue #3733).
          */
         const decodeInnerRevertError = async (txHash: Hex | null): Promise<SafeInnerRevertError | null> => {
+          // eth_call has no DELEGATECALL mode: re-simulating the target as a plain call reports the
+          // target's own guard (MultiSend's "only via delegatecall") as the inner reason and turns a
+          // retryable stale-nonce race terminal. Classify on the broadcaster's own terms instead: a
+          // deterministic inner revert still fails estimateGas at submission on the next attempt
+          // (#3905).
+          if ((request.operation ?? 0) === 1) return null;
           const inner = await decodeSafeInnerRevert(publicClient, {
             safeAddress,
             to: request.to,

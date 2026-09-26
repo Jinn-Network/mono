@@ -8,7 +8,7 @@ import {
 import { resolveCliPassword as defaultResolveCliPassword } from '../password.js';
 import {
   loadConfig as defaultLoadConfig,
-  getConfigPathFromArgs as defaultGetConfigPathFromArgs,
+  requireConfigPathFromArgs as defaultGetConfigPathFromArgs,
 } from '../../config.js';
 import {
   parseWithdrawArgv as defaultParseWithdrawArgv,
@@ -175,7 +175,26 @@ Examples:
 
       if (!ensureConfirmed(ctx, { yes, dryRun: false })) return;
 
-      const pw = deps.resolveCliPassword(ctx.argv, ctx.env);
+      let configPath: string | undefined;
+      try {
+        configPath =
+          deps.getConfigPathFromArgs(ctx.argv ?? []) ?? deps.getConfigPathFromArgs(process.argv.slice(2));
+      } catch (err) {
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: err instanceof Error ? err.message : String(err),
+            hint: 'Pass a config path or omit --config.',
+            exampleCli: 'jinn withdraw --to 0xDEST --yes --config ~/.jinn-operator/config.json',
+            details: { field: 'config' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+      const config = deps.loadConfig(configPath);
+
+      const pw = deps.resolveCliPassword(ctx.argv, ctx.env, { earningDir: config.earningDir });
       if (!pw.ok) {
         emitEnvelope(
           {
@@ -188,10 +207,6 @@ Examples:
         );
         return;
       }
-
-      const configPath =
-        deps.getConfigPathFromArgs(ctx.argv ?? []) ?? deps.getConfigPathFromArgs(process.argv.slice(2));
-      const config = deps.loadConfig(configPath);
 
       // D0a P3 (#525/#562/#897): below, `runWithdrawPlan` sweeps the master
       // EOA and every agent EOA with no cross-process lock against a

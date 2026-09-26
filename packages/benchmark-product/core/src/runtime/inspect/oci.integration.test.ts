@@ -1,10 +1,11 @@
 import { chmodSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import { parseMatrix, parseReport, sealMatrix } from "@jinn-network/benchmarking-records";
+import type { MatrixCell } from "@jinn-network/benchmarking-records";
 import { createDraft, updateDraft } from "../../operations/drafts.js";
 import { initWorkspace } from "../../operations/init.js";
 import { selectInspectEvaluation } from "../../operations/inspect-runtime.js";
@@ -22,9 +23,11 @@ import type { OperationContext } from "../../operations/context.js";
 import { verifyPublicBundle } from "../../bundle/verify.js";
 import { createDefaultBenchmarkRuntimeHost } from "../host-port.js";
 import { readRunJournalEntries } from "../../run/journal.js";
+import type { RunJournalEntry } from "../../run/journal.js";
 import { readRunState, writeRunState } from "../../run/state.js";
 import { getSealedBytes, putSealedBytes } from "../../workspace/sealed-store.js";
 import { createRuntimeVenue } from "../adapter.js";
+import { expectEvery, expectOk, expectRefused, leakMarkers } from "./testing/assertions.js";
 
 const imageDigest = process.env.JINN_INSPECT_OCI_IMAGE;
 const datasetCacheDir = process.env.JINN_INSPECT_OCI_DATASET_CACHE;
@@ -33,10 +36,19 @@ const dockerPath = process.env.JINN_DOCKER_PATH ?? "/usr/local/bin/docker";
 const fixtureDir = dirname(fileURLToPath(new URL("../../../test/fixtures/inspect-project/hermetic_eval.py", import.meta.url)));
 const workspaces: string[] = [];
 
-function retainedBytes(root: string): Buffer[] {
+type EvaluationEntry = Extract<RunJournalEntry, { kind: "evaluation" }>;
+
+/**
+ * Every retained file paired with its bundle-relative path. The path is what the leak assertion at
+ * the call site needs and a bare `Buffer[]` discards: without it a failure names neither the file
+ * that leaked nor, once both markers are collected together, which marker leaked into it.
+ */
+function retainedBytes(root: string, base: string = root): { path: string; bytes: Buffer }[] {
   return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
     const path = join(root, entry.name);
-    return entry.isDirectory() ? retainedBytes(path) : [readFileSync(path)];
+    return entry.isDirectory()
+      ? retainedBytes(path, base)
+      : [{ path: relative(base, path), bytes: readFileSync(path) }];
   });
 }
 
@@ -75,18 +87,34 @@ async function expectNoInspectContainers(): Promise<void> {
 }
 
 /**
- * Every lifecycle operation returns a typed result whose failure carries a code and a detail. A
- * bare `expect(result.ok).toBe(true)` discards both and reports only `expected false to be true`,
- * which is what #2832's first observation left behind: a `runQuote` refusal in CI with nothing
- * naming what refused or why. Assert through this helper instead, so a failure names the step and
- * prints the result -- the evidence that tells a loaded environment apart from a runtime defect.
+ * Identity plus the asserted fact, not the whole cell: `checksFailed` is what separates the two
+ * hypotheses a failure here has to choose between -- a loaded environment, which reports a
+ * non-judged outcome with the failed check named, and a runtime defect, which reports a judged
+ * cell whose axis is pinned wrong.
  */
-function expectOk<T extends { ok: boolean }>(result: T, step: string): T {
-  // The detail is built only on the failing path. `expect`'s message argument is eager, so
-  // carrying it inline would serialize every passing result in a suite that makes dozens of these
-  // calls per test -- and a serializer that threw on a success would report as the step failing.
-  if (!result.ok) expect.fail(`${step} failed: ${JSON.stringify(result)}`);
-  return result;
+function projectCell(cell: MatrixCell): unknown {
+  return {
+    cellKey: cell.cellKey,
+    armId: cell.armId,
+    replicate: cell.replicate,
+    outcome: cell.outcome,
+    isolation: cell.verification.isolation,
+    checksFailed: cell.verification.checksFailed,
+  };
+}
+
+/**
+ * Presence booleans, not values: the predicate asserts that each provenance digest exists, so the
+ * booleans say which of its conjuncts failed while the 64-char digests would only pad the line.
+ */
+function projectEvaluation(entry: EvaluationEntry, index: number): unknown {
+  return {
+    index,
+    evaluator: entry.evaluator,
+    hasEvalTaskSha256: entry.evalTaskSha256 !== undefined,
+    hasEvalDeliverySha256: entry.evalDeliverySha256 !== undefined,
+    hasEvalAttempt: entry.evalAttempt !== undefined,
+  };
 }
 
 /**
@@ -185,7 +213,12 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       matrix.completeness,
       JSON.stringify({ matrix, journal: readRunJournalEntries(workspaceDir, "inspect-sandbox") }),
     ).toMatchObject({ expected: 2, judged: 2, runOutcome: "complete" });
-    expect(matrix.cells.every((cell) => cell.verification.isolation === "unverifiable")).toBe(true);
+    expectEvery(
+      matrix.cells,
+      (cell) => cell.verification.isolation === "unverifiable",
+      projectCell,
+      "every cell reports unverifiable isolation",
+    );
     const journal = readRunJournalEntries(workspaceDir, "inspect-sandbox");
     const deliveries = journal.filter((entry) => entry.kind === "delivery");
     expect(deliveries).toHaveLength(2);
@@ -217,12 +250,16 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     }
     const evaluations = journal.filter((entry) => entry.kind === "evaluation");
     expect(evaluations).toHaveLength(2);
-    expect(evaluations.every((entry) =>
-      entry.evalTaskSha256 !== undefined
-      && entry.evalDeliverySha256 !== undefined
-      && entry.evalAttempt !== undefined
-      && entry.evaluator !== "urn:jinn:benchmark-product:inspect-runtime:same-execution-scorer"
-    )).toBe(true);
+    expectEvery(
+      evaluations,
+      (entry) =>
+        entry.evalTaskSha256 !== undefined
+        && entry.evalDeliverySha256 !== undefined
+        && entry.evalAttempt !== undefined
+        && entry.evaluator !== "urn:jinn:benchmark-product:inspect-runtime:same-execution-scorer",
+      projectEvaluation,
+      "evaluation entries carry eval provenance from a distinct evaluator",
+    );
     expectOk(await runReport(context, { draftId: "inspect-sandbox" }), "report");
     const verified = await runVerify(context, { draftId: "inspect-sandbox" });
     expect(verified.ok, JSON.stringify(verified)).toBe(true);
@@ -296,7 +333,12 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     if (!collected.ok) throw new Error("unreachable");
     const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
     expect(matrix.completeness).toMatchObject({ expected: 2, judged: 2, runOutcome: "complete" });
-    expect(matrix.cells.every((cell) => cell.outcome === "judged" && cell.verification.isolation === "unverifiable")).toBe(true);
+    expectEvery(
+      matrix.cells,
+      (cell) => cell.outcome === "judged" && cell.verification.isolation === "unverifiable",
+      projectCell,
+      "every cell is judged with unverifiable isolation",
+    );
     expectOk(await runReport(context, { draftId: "inspect-humaneval" }), "report");
     expectOk(await runVerify(context, { draftId: "inspect-humaneval" }), "verify");
     const published = await runPublish(context, { draftId: "inspect-humaneval", includeNativeArtifacts: true });
@@ -380,8 +422,13 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
     expect(matrix.completeness).toMatchObject({ expected: 2, judged: 2, runOutcome: "complete" });
     expect(matrix.cells).toHaveLength(2);
-    expect(matrix.cells.every((cell) => cell.outcome === "judged")).toBe(true);
-    expect(matrix.cells.every((cell) => cell.verification.isolation === "unverifiable")).toBe(true);
+    expectEvery(matrix.cells, (cell) => cell.outcome === "judged", projectCell, "every cell is judged");
+    expectEvery(
+      matrix.cells,
+      (cell) => cell.verification.isolation === "unverifiable",
+      projectCell,
+      "every cell reports unverifiable isolation",
+    );
 
     const runState = readRunState(workspaceDir, "inspect-oci");
     expect(runState?.matrixSha256).toBe(collected.result.matrixSha256);
@@ -399,9 +446,7 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       ...runState,
       matrixSha256: putSealedBytes(workspaceDir, dishonest.bytes),
     });
-    const rejected = await runVerify(context, { draftId: "inspect-oci" });
-    expect(rejected.ok).toBe(false);
-    if (rejected.ok) throw new Error("unreachable");
+    const rejected = expectRefused(await runVerify(context, { draftId: "inspect-oci" }), "verify of a tampered matrix");
     expect(rejected.error).toMatchObject({ code: "record-integrity" });
     expect(rejected.error.issues?.[0]?.path).toBe("matrix-rederivation");
     // The sweeping `afterEach` below removes a leaked container and only warns, so without this
@@ -560,7 +605,12 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
     const journal = readRunJournalEntries(workspaceDir, "inspect-broker");
     expect(matrix.completeness, JSON.stringify({ matrix, journal })).toMatchObject({ expected: 2, judged: 2, runOutcome: "complete" });
-    expect(matrix.cells.every((cell) => cell.verification.isolation === "unverifiable")).toBe(true);
+    expectEvery(
+      matrix.cells,
+      (cell) => cell.verification.isolation === "unverifiable",
+      projectCell,
+      "every broker cell reports unverifiable isolation",
+    );
     const results = runResults(context, { draftId: "inspect-broker" });
     expect(results.ok, JSON.stringify(results)).toBe(true);
     if (!results.ok) throw new Error("unreachable");
@@ -614,7 +664,10 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     workspaces.push(detachedRoot);
     const detachedBundle = join(detachedRoot, "bundle");
     cpSync(join(workspaceDir, published.result.bundleRelativePath), detachedBundle, { recursive: true });
-    expect(JSON.stringify(readRunJournalEntries(workspaceDir, "inspect-broker"))).not.toContain(keySentinel);
+    expect(leakMarkers(
+      Buffer.from(JSON.stringify(readRunJournalEntries(workspaceDir, "inspect-broker"))),
+      { "key-sentinel": keySentinel },
+    )).toEqual([]);
     rmSync(workspaceDir, { recursive: true, force: true });
     expect((await verifyPublicBundle(detachedBundle)).checks).toContain("report-verification");
     const evidenceCatalog = JSON.parse(readFileSync(join(detachedBundle, "evidence.json"), "utf8")) as {
@@ -651,11 +704,10 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       "--entrypoint=inspect", imageDigest!, "view", "bundle", "--log-dir=/logs", "--output-dir=/output/inspect-view-bundle",
     ], { encoding: "utf8" });
     expect(readdirSync(viewerDir).length).toBeGreaterThan(0);
-    for (const bytes of retainedBytes(detachedBundle)) {
-      expect(bytes.includes(Buffer.from(keySentinel))).toBe(false);
-      expect(bytes.includes(Buffer.from(keyPath))).toBe(false);
-    }
-    expect(readFileSync(responsePath, "utf8")).not.toContain(keySentinel);
+    expect(retainedBytes(detachedBundle).flatMap(({ path, bytes }) =>
+      leakMarkers(bytes, { "key-sentinel": keySentinel, "key-file-path": keyPath }).map((marker) => ({ path, marker })),
+    )).toEqual([]);
+    expect(leakMarkers(readFileSync(responsePath), { "key-sentinel": keySentinel })).toEqual([]);
     await expectNoInspectContainers();
     const networks = execFileSync(dockerPath, ["network", "ls", "--filter", "name=jinn-inspect-", "--format", "{{.Name}}"], { encoding: "utf8" }).trim();
     const volumes = execFileSync(dockerPath, ["volume", "ls", "--filter", "name=jinn-inspect-", "--format", "{{.Name}}"], { encoding: "utf8" }).trim();

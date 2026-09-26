@@ -10,11 +10,10 @@
  * sealed slate exists to prevent. A slot the harness could not supply is imported with outcome
  * `error`, `timeout`, or `unrun` and a non-blank reason, and it counts.
  *
- * The refusal follows the shape `admitDeclaredCells` set in
- * `../method/skillsbench-demo1-declaration.ts`: collect EVERY problem in one pass and report them
- * all at once. First-failure reporting is worse than useless here — it turns a broken dump into a
- * repair-and-retry loop where each round shows one more problem and the operator never sees the
- * shape of what went wrong.
+ * The refusal collects EVERY problem in one pass and reports them all at once. First-failure
+ * reporting is worse than useless here — it turns a broken dump into a repair-and-retry loop
+ * where each round shows one more problem and the operator never sees the shape of what went
+ * wrong.
  *
  * This module is validation only. Journal and record synthesis from an accepted plan is a separate
  * concern and lives elsewhere; on refusal nothing at all is written.
@@ -44,6 +43,7 @@ import {
   type VerdictOutcome,
 } from "@jinn-network/task-execution-profiles";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
+import { dumpIdentityFromBytes } from "@colophon-claims/check";
 import { BenchmarkProductError, refuse, type ProductIssue } from "../errors.js";
 import {
   EXTERNAL_RUN_IMPORT_OUTCOMES,
@@ -121,6 +121,36 @@ export const EXTERNAL_RUN_IMPORT_PROBLEMS = [
 
 export type ExternalRunImportProblemCode = (typeof EXTERNAL_RUN_IMPORT_PROBLEMS)[number];
 
+/** DoS bounds on an operator-supplied dump (issue #3417). A 10k-row cap is well above any
+ * sealed slate this product currently runs, and the two byte caps keep one hostile evidence
+ * tree from filling the workspace CAS. */
+export const EXTERNAL_IMPORT_MAX_ROWS = 10_000;
+export const EXTERNAL_IMPORT_MAX_EVIDENCE_FILE_BYTES = 8 * 1024 * 1024;
+export const EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES = 64 * 1024 * 1024;
+
+/** Identity of the dump the operator handed the importer. A file (`--file`, `--from inspect`
+ * pointing at an eval log) hashes those bytes; a directory (`--from harbor`) and in-memory
+ * tests hash the canonical JSON of the normalized records. */
+export function dumpIdentityFromRecords(
+  records: readonly ExternalRunRecord[],
+): { readonly sha256: string; readonly byteLength: number } {
+  return dumpIdentityFromBytes(canonicalJsonBytes(records));
+}
+
+export function dumpIdentityFromPath(
+  path: string,
+  records: readonly ExternalRunRecord[],
+): { readonly sha256: string; readonly byteLength: number } {
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(path);
+  } catch {
+    return dumpIdentityFromRecords(records);
+  }
+  if (!stat.isFile()) return dumpIdentityFromRecords(records);
+  return dumpIdentityFromBytes(new Uint8Array(readFileSync(path)));
+}
+
 /** The closing three lines are load-bearing: they name the ONLY sanctioned way to not have a
  * result for a slot, so an operator reading the refusal cannot conclude that dropping it is one. */
 const REMEDY =
@@ -151,6 +181,21 @@ export function validateExternalRunRecords(
   input: ValidateExternalRunRecordsInput,
 ): ExternalRunImportPlan {
   const { records, benchmark, run, benchmarkSha256, runSha256 } = input;
+  if (records.length > EXTERNAL_IMPORT_MAX_ROWS) {
+    throw new BenchmarkProductError(
+      "validation",
+      [
+        `external run import refused: the dump names ${records.length} rows, above the `,
+        `${EXTERNAL_IMPORT_MAX_ROWS}-row cap.`,
+        "",
+        REMEDY,
+      ].join("\n"),
+      [{
+        path: "too-many-rows",
+        message: `dump has ${records.length} rows; the importer will not accept more than ${EXTERNAL_IMPORT_MAX_ROWS}`,
+      }],
+    );
+  }
   const expected = expectedCellSet(benchmark, run);
   const window = importWindow(input);
   const expectedByKey = new Map(expected.map((coord) => [coord.cellKey, coord]));
@@ -455,6 +500,7 @@ export function preflightExternalRunImport(
   input: PreflightExternalRunImportInput,
 ): ExternalRunImportPreflight {
   const { workspaceDir, plan, runRecord, evidenceRoot } = input;
+  const budget = { used: 0 };
   const cells = plan.cells.map((cell): PreparedImportCell => {
     const { coord, cellKey, outcome } = cell;
     // `unrun` claims no attempt at all, so it needs neither an arm nor evidence.
@@ -466,7 +512,7 @@ export function preflightExternalRunImport(
     }
     if (outcome === "error" || outcome === "timeout") return { cell, arm, evidence: [] };
 
-    const evidence = readImportedEvidence(evidenceRoot, cell);
+    const evidence = readImportedEvidence(evidenceRoot, cell, budget);
     if (outcome === "ungradeable") return { cell, arm, evidence };
     return { cell, arm, evidence, grading: prepareGrading(workspaceDir, cell) };
   });
@@ -494,6 +540,7 @@ export function preflightExternalRunImport(
 function readImportedEvidence(
   evidenceRoot: string,
   cell: ExternalRunImportCell,
+  budget: { used: number },
 ): PreparedEvidence[] {
   const root = resolvePath(evidenceRoot);
   const at = `row ${cell.record.row}`;
@@ -516,7 +563,7 @@ function readImportedEvidence(
           + `("${ref.path}") — evidence paths may not leave the directory the dump file lives in`,
       );
     }
-    return { name: ref.name, bytes: readEvidenceFileNoFollow(path, ref.name, cell, at) };
+    return { name: ref.name, bytes: readEvidenceFileNoFollow(path, ref.name, cell, at, budget) };
   });
 }
 
@@ -527,6 +574,7 @@ function readEvidenceFileNoFollow(
   name: string,
   cell: ExternalRunImportCell,
   at: string,
+  budget: { used: number },
 ): Uint8Array {
   const refuseFile = (why: string): never => refuse(
     "validation",
@@ -543,6 +591,11 @@ function readEvidenceFileNoFollow(
   }
   if (stat.isSymbolicLink()) return refuseFile("is a symbolic link");
   if (!stat.isFile()) return refuseFile("is not a regular file");
+  if (stat.size > EXTERNAL_IMPORT_MAX_EVIDENCE_FILE_BYTES) {
+    return refuseFile(
+      `is ${stat.size} bytes, above the ${EXTERNAL_IMPORT_MAX_EVIDENCE_FILE_BYTES}-byte per-file cap`,
+    );
+  }
 
   let fd: number;
   try {
@@ -563,6 +616,18 @@ function readEvidenceFileNoFollow(
     closeSync(fd);
   }
   if (bytes === undefined) return refuseFile(failure ?? "could not be read");
+  if (bytes.length > EXTERNAL_IMPORT_MAX_EVIDENCE_FILE_BYTES) {
+    return refuseFile(
+      `is ${bytes.length} bytes, above the ${EXTERNAL_IMPORT_MAX_EVIDENCE_FILE_BYTES}-byte per-file cap`,
+    );
+  }
+  budget.used += bytes.length;
+  if (budget.used > EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES) {
+    return refuseFile(
+      `would take the import's evidence aggregate to ${budget.used} bytes, above the `
+        + `${EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES}-byte cap`,
+    );
+  }
   return bytes;
 }
 
@@ -806,6 +871,10 @@ export const ExternalRunImportDeclarationSchema = z.object({
   benchmarkSha256: Sha256HexSchema,
   source: ExternalRunImportSourceSchema,
   importedAt: Rfc3339Schema,
+  dump: z.object({
+    sha256: Sha256HexSchema,
+    byteLength: z.number().int().nonnegative(),
+  }).strict(),
   rows: z.array(z.object({
     cellKey: z.string().min(1),
     outcome: z.enum(EXTERNAL_RUN_IMPORT_OUTCOMES),
@@ -830,6 +899,9 @@ export interface WriteExternalRunImportInput {
   /** `RunState.owner` — the solver identity every synthesized Submission requests under. */
   readonly owner: string;
   readonly source: ExternalRunImportSource;
+  /** Digest of the dump the operator handed the importer (issue #3417). Sealed on the
+   * declaration so the public marker can name it. */
+  readonly dump: { readonly sha256: string; readonly byteLength: number };
   /** Everything fallible, already resolved (`preflightExternalRunImport`). The writer CONSUMES
    * this rather than re-resolving: a second resolution is a second chance to disagree, and a
    * refusal raised from here would land mid-write with no rollback. */
@@ -893,6 +965,7 @@ export async function writeExternalRunImport(
     benchmarkSha256: bareSha256Hex(plan.benchmarkSha256),
     source: input.source,
     importedAt: at,
+    dump: input.dump,
     rows,
   });
   const declarationSha256 = putSealedBytes(workspaceDir, canonicalJsonBytes(declaration));

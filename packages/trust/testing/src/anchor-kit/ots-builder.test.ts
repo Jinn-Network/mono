@@ -13,10 +13,13 @@ import {
   OTS_PENDING_ATTESTATION_TAG,
   applyOtsOperation,
   buildLinearOtsProof,
+  buildOtsCalendarNodeBody,
   buildSyntheticBlockHeader,
   createOpenTimestampsKitFixtures,
   encodeVarbytes,
   encodeVaruint,
+  otsCalendarNodeBody,
+  otsDetachedFileHeaderLength,
   otsBranch,
   otsFork,
   replayOtsOperations,
@@ -107,6 +110,13 @@ describe("serialization", () => {
     expect(bytesToHex(proof.subarray(offset, offset + 32))).toBe(bytesToHex(DIGEST));
     // Then the timestamp: one sha256 op, then the attestation marker.
     expect(bytesToHex(proof.subarray(offset + 32, offset + 34))).toBe("0800");
+    expect(otsDetachedFileHeaderLength()).toBe(OTS_HEADER_MAGIC.length + 1 + 1 + 32);
+    expect(otsCalendarNodeBody(proof)).toEqual(proof.subarray(otsDetachedFileHeaderLength()));
+    expect(buildOtsCalendarNodeBody({
+      fileDigest: DIGEST,
+      operations: [{ kind: "sha256" }],
+      attestations: [{ kind: "pending", uri: KIT_CALENDAR_URI }],
+    })).toEqual(otsCalendarNodeBody(proof));
   });
 
   test("a pending attestation carries its tag and a doubly length-prefixed URI", () => {

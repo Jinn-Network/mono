@@ -847,6 +847,12 @@ owner-controlled. An anchored marketplace can supply a stronger independently ob
 boundary. If the Run and first dispatch have no common ordering authority, public registration is
 `unverifiable`, not `pre-dispatch` merely because wall-clock timestamps look plausible.
 
+The product's self-run disclosure is `LOCAL_VENUE_LIMITS` in
+`packages/benchmark-product/core/src/operations/run-results.ts` (mirrored in
+`packages/benchmark-product/check/src/profile/run-results.ts`), quoted in
+`packages/benchmark-product/EXTERNAL-VERIFICATION.md`; it names owner-controlled
+dispatch, not the publication source.
+
 ## 10. Signed Report v2 publication identity
 
 The agreed public identity is the digest of the signed DSSE envelope. This follows trust-core's

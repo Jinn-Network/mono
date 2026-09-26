@@ -154,11 +154,31 @@ describe("maintainsFreshness (for ServeUnderTest.maintainsFreshness)", () => {
     expect(maintainsFreshness([{ payload: new TextDecoder().decode(stale.bytes) }])).toBe(false);
   });
 
+  // Same shape as the protocol-side regression (#3482): before the fix the
+  // offset-less timestamp was read in the kit runner's own zone, so a single
+  // pair's verdict depended on where the conformance kit ran. A 6h and a 20h
+  // window between them are both plausible pre-fix in every real zone, so at
+  // least one of these assertions fails wherever the suite runs.
+  it("rejects a head whose timestamps are not offset-bearing, rather than reading them host-locally (#3482)", () => {
+    for (const refreshBy of ["2026-07-28T06:00:00.000Z", "2026-07-28T20:00:00.000Z"]) {
+      const head = sealJson({ ...BASE_HEAD, issuedAt: "2026-07-28T00:00:00", refreshBy });
+      expect(maintainsFreshness([{ payload: new TextDecoder().decode(head.bytes) }])).toBe(false);
+    }
+  });
+
   it("also accepts base64-encoded payloads (the real DSSE wire format)", () => {
     const bytes = sealJson({ ...BASE_HEAD, issuedAt: "2026-07-28T00:00:00.000Z", refreshBy: "2026-07-28T06:00:00.000Z" }).bytes;
     let binary = "";
     for (const byte of bytes) binary += String.fromCharCode(byte);
     expect(maintainsFreshness([{ payload: btoa(binary) }])).toBe(true);
+  });
+});
+
+describe("refreshHead: the previous head's instant must be unambiguous (#3482, §5.2)", () => {
+  it("refuses an offset-less prev.issuedAt instead of resolving it in the maintaining host's zone", () => {
+    expect(() =>
+      refreshHead({ ...BASE_HEAD, issuedAt: "2026-07-28T00:00:00", refreshBy: "2026-07-28T06:00:00.000Z" }, makeClock("2026-07-28T01:00:00.000Z")),
+    ).toThrow(/offset-bearing/u);
   });
 });
 

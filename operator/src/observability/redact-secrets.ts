@@ -24,6 +24,7 @@
  */
 
 import { SECRET_NAME_PATTERNS } from '../trajectory/secret-scrub.js';
+import { EMBEDDED_URL_RE } from '../util/embedded-url-pattern.js';
 import { walkStructured } from '../util/structured-walk.js';
 
 /**
@@ -34,8 +35,23 @@ import { walkStructured } from '../util/structured-walk.js';
  * v3 (#3038): a non-plain object (`Map` / `Set` / class instance) is now an
  * `<redacted:unserializable>` marker instead of an empty object, and a `Date`
  * is kept as its ISO string instead of being flattened to `{}`.
+ *
+ * v4 (#3108): `URL_RE` covers `ws://` and `wss://`, so a WebSocket RPC URL
+ * embedded in a free-text string value now has its userinfo, path, query and
+ * fragment stripped. Under v3 it matched nothing and survived intact.
+ *
+ * v5 (#4426): the free-text URL scanner is the shared `EMBEDDED_URL_RE`
+ * (`util/embedded-url-pattern.ts`), the same pattern `rpc/transport.ts`
+ * masks with. A URL with a bracketed-IPv6 host and a URL with an uppercase
+ * scheme are now redacted on the free-text path; under v4 the first was
+ * truncated at `]` (unparseable, credentials kept) and the second never
+ * matched.
+ *
+ * v6 (#4547): a URL that defeats `new URL` now also has its `/v<n>/<key>`
+ * and long-opaque path segments stripped, by the same rule as a parseable
+ * URL. Under v5 those segments survived on the unparseable path.
  */
-export const REDACTION_VERSION = '3';
+export const REDACTION_VERSION = '6';
 
 /** The marker substituted for a redacted value. */
 function marker(label: string): string {
@@ -97,8 +113,6 @@ function isSecretName(key: string): boolean {
 const HEX64_RE = /\b0x[0-9a-fA-F]{64}\b/g;
 /** A JWT-shaped token: three base64url segments separated by dots. */
 const JWT_RE = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g;
-/** Any http(s) URL embedded in free text. */
-const URL_RE = /https?:\/\/[^\s"'<>)\]]+/g;
 
 /**
  * Redact secret-shaped substrings inside a free-text string value.
@@ -106,14 +120,15 @@ const URL_RE = /https?:\/\/[^\s"'<>)\]]+/g;
  * - 64-hex-char (`0x...`) private-key-shaped values -> stripped. Wallet
  *   addresses (`0x` + 40 hex) are NOT 64 chars, so they survive.
  * - JWT-shaped tokens -> stripped.
- * - http(s) URLs -> run through `redactRpcUrl` so an RPC endpoint logged in
- *   an error message keeps its host but loses any embedded credential.
+ * - http(s) and ws(s) URLs -> run through `redactRpcUrl` so an RPC endpoint
+ *   logged in an error message keeps its host but loses any embedded
+ *   credential.
  */
 function redactStringValue(value: string): string {
   return value
     .replace(HEX64_RE, marker('hex64'))
     .replace(JWT_RE, marker('jwt'))
-    .replace(URL_RE, (url) => redactRpcUrl(url));
+    .replace(EMBEDDED_URL_RE, (url) => redactRpcUrl(url));
 }
 
 // ── RPC URL redaction ────────────────────────────────────────────────────────
@@ -132,11 +147,23 @@ export function redactRpcUrl(url: string): string {
   try {
     parsed = new URL(url);
   } catch {
-    // Not a parseable URL. Apply only the non-URL string redactors here —
-    // calling redactStringValue would re-run URL_RE on the same unparseable
-    // string and recurse straight back into redactRpcUrl, overflowing the
-    // stack on a malformed URL (e.g. `http://[bad`) in an error message.
-    return url.replace(HEX64_RE, marker('hex64')).replace(JWT_RE, marker('jwt'));
+    // Not a parseable URL. Fail closed: strip userinfo, query/fragment and
+    // key-shaped path segments textually, so a URL that defeats `new URL`
+    // (e.g. `[https://u:pw@host]/v2/<key>`, where EMBEDDED_URL_RE swallows the
+    // `]` into the host) loses the same credential surfaces as a parseable
+    // one. Then apply only the non-URL string redactors —
+    // calling redactStringValue would re-run EMBEDDED_URL_RE on the same
+    // unparseable string and recurse straight back into redactRpcUrl,
+    // overflowing the stack on a malformed URL (e.g. `http://[bad`) in an
+    // error message.
+    return url
+      .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#]*@/i, '$1')
+      .replace(/[?#][\s\S]*$/, '')
+      .replace(/^([a-z][a-z0-9+.-]*:\/\/[^/]*)(\/.*)$/is, (_, origin: string, path: string) =>
+        origin + redactPathSegments(path),
+      )
+      .replace(HEX64_RE, marker('hex64'))
+      .replace(JWT_RE, marker('jwt'));
   }
 
   // Drop userinfo (user:pass@host).
@@ -151,22 +178,29 @@ export function redactRpcUrl(url: string): string {
   // `#key=...` credential there.
   parsed.hash = '';
 
-  // Strip opaque path segments that look like API keys: a long alphanumeric
-  // run, or a segment following a version-style prefix (v2/v3/...).
-  const segments = parsed.pathname.split('/');
-  const cleaned = segments.map((seg, idx) => {
-    if (!seg) return seg;
-    const prev = segments[idx - 1]?.toLowerCase();
-    if (prev && /^v\d+$/.test(prev)) return marker('rpc-key');
-    // A long opaque token (>= 20 chars, mixed case or digits) is treated as a key.
-    if (seg.length >= 20 && /[A-Za-z]/.test(seg) && /[0-9A-Z]/.test(seg)) {
-      return marker('rpc-key');
-    }
-    return seg;
-  });
-  parsed.pathname = cleaned.join('/');
+  parsed.pathname = redactPathSegments(parsed.pathname);
 
   return parsed.toString();
+}
+
+/**
+ * Strip opaque path segments that look like API keys: a long alphanumeric
+ * run, or a segment following a version-style prefix (v2/v3/...).
+ */
+function redactPathSegments(pathname: string): string {
+  const segments = pathname.split('/');
+  return segments
+    .map((seg, idx) => {
+      if (!seg) return seg;
+      const prev = segments[idx - 1]?.toLowerCase();
+      if (prev && /^v\d+$/.test(prev)) return marker('rpc-key');
+      // A long opaque token (>= 20 chars, mixed case or digits) is treated as a key.
+      if (seg.length >= 20 && /[A-Za-z]/.test(seg) && /[0-9A-Z]/.test(seg)) {
+        return marker('rpc-key');
+      }
+      return seg;
+    })
+    .join('/');
 }
 
 /** True for keys whose values hold an RPC URL (singular or plural array). */
@@ -207,8 +241,9 @@ function redactLeaf(value: unknown): unknown {
   // exactly what JSON.stringify would have produced in the bundle, and it
   // cannot carry a secret.
   if (value instanceof Date) return value.toISOString();
-  // Functions, symbols, Maps, Sets, class instances — nothing JSON-shaped to
-  // walk. Say so rather than emitting a misleading `{}`.
+  // Functions, symbols, bigints, Maps, Sets, class instances — nothing
+  // JSON-shaped to walk. Say so rather than emitting a misleading `{}`.
+  // Counterpart: `sanitizeStructuredLeaf` in `src/rpc/transport.ts`.
   return marker('unserializable');
 }
 
@@ -219,9 +254,9 @@ function redactEntry(key: string, value: unknown): { value: unknown } | undefine
     if (typeof value === 'string') return { value: redactRpcUrl(value) };
     if (Array.isArray(value)) {
       // Plural RPC keys (`rpcUrls`, `archiveRpcUrls`, …) hold the full
-      // fallback chain — strip credentials from each entry directly rather
-      // than relying on the free-text URL_RE pass, which misses non-http(s)
-      // schemes like `wss://`.
+      // fallback chain. A known RPC-URL key gets URL treatment applied to the
+      // whole value rather than a substring scan of free text, which is the
+      // more precise result for a value we already know is a URL.
       return {
         value: value.map((el) => (typeof el === 'string' ? redactRpcUrl(el) : redactValue(el))),
       };

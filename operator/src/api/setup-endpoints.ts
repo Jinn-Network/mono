@@ -17,9 +17,9 @@
  * is `claude auth login` on the CLI (harness `isReady` nextStep.cli).
  */
 import type { Hono } from 'hono';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { z } from 'zod/v3';
 import { stage1MinMasterEth } from '../earning/bootstrap.js';
 import { getChainConfig } from '../earning/contracts.js';
@@ -51,6 +51,12 @@ import { onboardingCompleteIntent } from '../intents/onboarding-complete.js';
 import { maskUrlsInMessage } from '../rpc/transport.js';
 import { markRestartRequired } from './restart-required-state.js';
 import { resolveDefaultStateDir } from '../state-dir.js';
+import {
+  isDefaultOperatorKeystore,
+  writeKeystorePasswordFile,
+  writePrimaryKeystorePassword,
+  legacyKeystorePasswordPath,
+} from '../earning/password-file.js';
 
 const ChangePasswordSchema = z.object({
   current: z.string().min(1),
@@ -758,9 +764,12 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       );
     }
 
-    const earningDir =
-      process.env['JINN_EARNING_DIR'] ??
-      join(resolveDefaultStateDir(), 'earning');
+    // Target the earning dir this daemon itself opens — `config.earningDir`
+    // first (the loaded JinnConfig, which has already applied the
+    // `JINN_EARNING_DIR` override), then the env var, then the default. Reaching
+    // straight into `process.env` here meant a second operator's daemon rotated
+    // whichever keystore the env/default resolved to rather than its own (#4086).
+    const earningDir = resolveEarningDir();
     const store = new FleetStateStore(earningDir);
 
     if (!store.hasMnemonicKeystore() && !store.hasLegacyKeystore()) {
@@ -779,18 +788,51 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       const reencrypted = await encryptMnemonic(mnemonic, parsed.data.next);
       await store.saveMnemonicKeystore(reencrypted);
 
-      // Also update the persisted password file so subsequent `jinn run`
-      // invocations pick up the new password seamlessly.
+      // Always write this daemon's primary password file (via
+      // `writePrimaryKeystorePassword` -> `replacePasswordFileAtomically`: a
+      // failed write never truncates a live file, and a symlink at the path
+      // is replaced rather than written through, #4610). `passwordFileUpdated`
+      // reports the primary write only -- it is what `jinn run` resolves
+      // first, so it is the write that matters to the caller.
+      //
+      // Best-effort mirror into the host-wide legacy file, for existing
+      // single-operator installs that still read it: keystore identity
+      // proves this is the default operator's file whatever it currently
+      // holds, so an existing but drifted legacy file is repaired the same
+      // way as the CLI's rotation (#4116) -- but new auto-generation never
+      // creates that file (module doc, #4087), so an absent one stays
+      // absent here too. A legacy-write failure only warns; it never flips
+      // `passwordFileUpdated` back to false when the primary write already
+      // succeeded.
       const home = process.env['HOME'] ?? homedir();
-      const pwFilePath = join(resolveDefaultStateDir({ home }), 'keystore-password');
-      mkdirSync(dirname(pwFilePath), { recursive: true, mode: 0o700 });
-      writeFileSync(pwFilePath, parsed.data.next + '\n', { mode: 0o600 });
+      const stateDir = resolveDefaultStateDir({ home });
+      const defaultEarningDir = join(stateDir, 'earning');
+      const legacyPath = legacyKeystorePasswordPath({ home, env: process.env });
+      const warn = (message: string): void => { console.warn(message); };
+      // Keystore is already rotated: a password file we cannot write must not
+      // turn this into `change_failed`.
+      let passwordFileUpdated = false;
+      try {
+        writePrimaryKeystorePassword(earningDir, parsed.data.next);
+        passwordFileUpdated = true;
+      } catch (err) {
+        warn(`[warn] Could not update a keystore-password file (${errorMessage(err)}); leaving it in place.`);
+      }
+      if (existsSync(legacyPath) && isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn)) {
+        try {
+          writeKeystorePasswordFile(legacyPath, parsed.data.next);
+        } catch (err) {
+          warn(`[warn] Could not update a keystore-password file (${errorMessage(err)}); leaving it in place.`);
+        }
+      }
 
       // Mirror into env so the running daemon's in-memory PASSWORD stays valid
       // for the rest of this process lifetime (relevant for sub-command spawns).
+      // Correct by construction: `resolveEarningDir()` is the daemon's own
+      // earning dir, so the keystore just rotated is the one this process opened.
       process.env['JINN_PASSWORD'] = parsed.data.next;
 
-      return c.json({ ok: true });
+      return c.json({ ok: true, passwordFileUpdated });
     } catch (err) {
       return c.json(
         {

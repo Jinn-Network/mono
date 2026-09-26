@@ -1,9 +1,0 @@
-[build]
-builder = "DOCKERFILE"
-dockerfilePath = "deploy/x402-gateway/Dockerfile"
-watchPatterns = ["/services/x402-gateway/**", "/scripts/shared/**", "/jinn-node/src/**", "/jinn-node/package.json", "/package.json", "/deploy/x402-gateway/**"]
-
-[deploy]
-healthcheckPath = "/health"
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 10

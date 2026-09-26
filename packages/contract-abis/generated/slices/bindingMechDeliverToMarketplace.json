@@ -1,0 +1,26 @@
+{
+  "export": "MECH_DELIVER_TO_MARKETPLACE_ABI",
+  "items": [
+    {
+      "type": "function",
+      "name": "deliverToMarketplace",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        {
+          "type": "bytes32[]",
+          "name": "requestIds"
+        },
+        {
+          "type": "bytes[]",
+          "name": "datas"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "bool[]",
+          "name": "deliveredRequests"
+        }
+      ]
+    }
+  ]
+}

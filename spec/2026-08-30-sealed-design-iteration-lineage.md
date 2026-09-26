@@ -109,7 +109,7 @@ pre-outcome ordering. In the hand-cut version it is a single self-attesting sent
 cross-checked against nothing.
 
 **The long-tail protocol probe.** The second example is on this checkout and points the
-other way. [`experiments/defi-longtail-probe/PREREGISTRATION-AMENDMENT-1.md`](../experiments/defi-longtail-probe/PREREGISTRATION-AMENDMENT-1.md)
+other way. [`experiments/defi-longtail-probe/PREREGISTRATION-AMENDMENT-1.md`](https://github.com/Jinn-Network/mono/blob/c6e65c5fa442955c022d741a18a1986a5f5283c6/experiments/defi-longtail-probe/PREREGISTRATION-AMENDMENT-1.md)
 is an amendment committed **mid-run**, and it opens with a section headed "Disclosure:
 what was already scored when this was committed" that names exactly which 24 of 42 cells
 had been scored, what they scored, and which of the affected instances were still

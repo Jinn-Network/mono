@@ -15,6 +15,7 @@ interface MakeDepsOpts {
 
 function makeFakeDeps(opts: MakeDepsOpts = {}): FundRequirementsDeps {
   const plan: FundingPlan = {
+    persona: 'operator',
     satisfied: true,
     partial: false,
     reasons: [],
@@ -28,7 +29,7 @@ function makeFakeDeps(opts: MakeDepsOpts = {}): FundRequirementsDeps {
     getConfigPathFromArgs: () => undefined,
     resolveCliPassword: () =>
       passwordOk
-        ? { ok: true as const, password: 'test' }
+        ? { ok: true as const, password: 'test', source: 'env' as const }
         : { ok: false as const, message: 'Set JINN_PASSWORD or pass --password-fd N with a readable file descriptor.' },
     planFleetFunding: planSpy as unknown as FundRequirementsDeps['planFleetFunding'],
   };
@@ -173,6 +174,7 @@ describe('fund-requirements command', () => {
     // dependency. We assert that exactly one read-only call is made and the
     // command does not pull in any other dependency that could mutate state.
     const planSpy = vi.fn(async () => ({
+      persona: 'operator',
       satisfied: true,
       partial: false,
       reasons: [],
@@ -182,7 +184,7 @@ describe('fund-requirements command', () => {
     const deps: FundRequirementsDeps = {
       loadConfig: () => ({ earningDir: '/tmp', network: 'testnet', rpcUrl: 'http://127.0.0.1:8545' } as any),
       getConfigPathFromArgs: () => undefined,
-      resolveCliPassword: () => ({ ok: true as const, password: 'test' }),
+      resolveCliPassword: () => ({ ok: true as const, password: 'test', source: 'env' as const }),
       planFleetFunding: planSpy as unknown as FundRequirementsDeps['planFleetFunding'],
     };
 
@@ -205,6 +207,7 @@ describe('fund-requirements command', () => {
     // surface partial=true with `password_missing` so an agent can poll
     // safely without ever supplying secrets to an inspection verb.
     const planSpy = vi.fn(async () => ({
+      persona: 'operator',
       satisfied: false,
       partial: true,
       reasons: ['no_keystore', 'password_missing'],
@@ -232,5 +235,142 @@ describe('fund-requirements command', () => {
     const args = planSpy.mock.calls[0]?.[0] as { password?: string } | undefined;
     expect(args?.password).toBeUndefined();
     expect(exits).toEqual([0]);
+  });
+
+  it('names the requester persona, its shortfall, and what it blocks', async () => {
+    // B0a (#2446): the row a requester reads must not be the operator's.
+    const deps = makeFakeDeps({
+      plan: {
+        persona: 'requester',
+        satisfied: false,
+        partial: false,
+        reasons: [],
+        master: {
+          master_address: '0xREQUESTER',
+          eth_required: '1500000000000000',
+          eth_balance: '0',
+        },
+        safes: [],
+      },
+    });
+    const fr = createFundRequirementsCommand(deps);
+    const { ctx, writes } = makeCommandCtx({ argv: ['--requester'], env: { JINN_PASSWORD: 'test' } });
+    await fr.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.persona).toBe('requester');
+    expect(parsed.requirements[0]).toMatchObject({
+      role: 'requester',
+      address: '0xREQUESTER',
+      blocks: 'tasks-submit',
+    });
+    expect(parsed.requirements[0].reason).toContain('creator Safe');
+    expect(parsed.requirements[0].reason).not.toContain('bootstrap');
+  });
+
+  it('forwards --requester to the read-only plan, and nothing when it is absent', async () => {
+    const seen: Record<string, unknown>[] = [];
+    const spy = (persona: 'operator' | 'requester') => vi.fn(async (options: Record<string, unknown>) => {
+      seen.push(options);
+      return { persona, satisfied: true, partial: false, reasons: [], safes: [] } as FundingPlan;
+    });
+
+    const fr = createFundRequirementsCommand(makeFakeDeps({ planSpy: spy('requester') }));
+    await fr.run(makeCommandCtx({ argv: ['--requester'], env: { JINN_PASSWORD: 'test' } }).ctx);
+    expect(seen[0]).toMatchObject({ requester: true });
+
+    const fr2 = createFundRequirementsCommand(makeFakeDeps({ planSpy: spy('operator') }));
+    await fr2.run(makeCommandCtx({ env: { JINN_PASSWORD: 'test' } }).ctx);
+    // Absent, not `false` — the plan must stay free to infer the persona.
+    expect('requester' in seen[1]!).toBe(false);
+  });
+
+  // Round-3 finding 2 (#4271): the dual-role window. `jinn bootstrap`'s Stage 1
+  // funding gate persists nothing, so a requester who tries to supply and is
+  // refused still reads as `requester_stage: 'safe_deployed'` + `fleet_stage:
+  // 'none'` + no services on disk — the exact state the inference calls
+  // "requester, creator Safe deployed, nothing needed". `--operator` is the way
+  // to ask the other question, and the bare answer must name which one it gave.
+  it('--operator overrides the inferred requester persona and reports the operator shortfall', async () => {
+    const seen: Record<string, unknown>[] = [];
+    const planSpy = vi.fn(async (options: Record<string, unknown>) => {
+      seen.push(options);
+      return {
+        persona: 'operator',
+        satisfied: false,
+        partial: false,
+        reasons: [],
+        master: {
+          master_address: '0xDUALROLE',
+          eth_required: '19500000000000000',
+          eth_balance: '500000000000000',
+        },
+        safes: [],
+      } as FundingPlan;
+    });
+    const fr = createFundRequirementsCommand(makeFakeDeps({ planSpy }));
+    const { ctx, writes, exits } = makeCommandCtx({ argv: ['--operator'], env: { JINN_PASSWORD: 'test' } });
+    await fr.run(ctx);
+    // Forwarded as an explicit `false`, not omitted — omitting it would leave
+    // the marker's inference in charge, which is the thing being overridden.
+    expect(seen[0]).toMatchObject({ requester: false });
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.persona).toBe('operator');
+    expect(parsed.satisfied).toBe(false);
+    expect(parsed.requirements[0]).toMatchObject({
+      role: 'master',
+      address: '0xDUALROLE',
+      needWei: '19500000000000000',
+      blocks: 'bootstrap',
+    });
+    expect(exits).toEqual([0]);
+  });
+
+  it('names the requester persona in its satisfied line and points at the operator question', async () => {
+    const deps = makeFakeDeps({
+      plan: { persona: 'requester', satisfied: true, partial: false, reasons: [], safes: [] },
+    });
+    const fr = createFundRequirementsCommand(deps);
+    const { ctx, writes } = makeCommandCtx({ argv: ['--human'], env: { JINN_PASSWORD: 'test' } });
+    await fr.run(ctx);
+    const rendered = writes.join('');
+    expect(rendered).toContain('Requester funding satisfied');
+    expect(rendered).toContain('jinn fund-requirements --operator');
+    // The bare operator answer is unchanged.
+    const operatorDeps = makeFakeDeps({
+      plan: { persona: 'operator', satisfied: true, partial: false, reasons: [], safes: [] },
+    });
+    const fr2 = createFundRequirementsCommand(operatorDeps);
+    const second = makeCommandCtx({ argv: ['--human'], env: { JINN_PASSWORD: 'test' } });
+    await fr2.run(second.ctx);
+    expect(second.writes.join('')).toContain('Funding requirements satisfied. Nothing needed right now.');
+  });
+
+  it('refuses --requester and --operator together', async () => {
+    const planSpy = vi.fn(async () => ({ persona: 'operator', satisfied: true, partial: false, reasons: [], safes: [] } as FundingPlan));
+    const fr = createFundRequirementsCommand(makeFakeDeps({ planSpy }));
+    const { ctx, writes, exits } = makeCommandCtx({ argv: ['--requester', '--operator'], env: { JINN_PASSWORD: 'test' } });
+    await fr.run(ctx);
+    expect(JSON.parse(writes[writes.length - 1]).code).toBe('invalid_invocation');
+    expect(planSpy).not.toHaveBeenCalled();
+    expect(exits).toEqual([11]);
+  });
+
+  it('does not send a requester to the operator bootstrap in its partial reasons', async () => {
+    const deps = makeFakeDeps({
+      plan: {
+        persona: 'requester',
+        satisfied: false,
+        partial: true,
+        reasons: ['no_keystore', 'fleet_state_missing'],
+        safes: [],
+      },
+    });
+    const fr = createFundRequirementsCommand(deps);
+    const { ctx, writes } = makeCommandCtx({ argv: ['--requester', '--human'], env: { JINN_PASSWORD: 'test' } });
+    await fr.run(ctx);
+    const rendered = writes.join('');
+    expect(rendered).toContain('jinn requester init');
+    expect(rendered).not.toContain('jinn bootstrap');
+    expect(rendered).not.toContain('jinn run');
   });
 });

@@ -2,7 +2,8 @@ import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.
 import { COMMON_FLAGS, parseCommandArgs } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
-import { loadConfig as defaultLoadConfig, getConfigPathFromArgs as defaultGetConfigPathFromArgs, buildConfigProvenance } from '../../config.js';
+import { loadConfig as defaultLoadConfig, buildConfigProvenance } from '../../config.js';
+import { requireConfigPathFromArgs as defaultGetConfigPathFromArgs } from '../../config/path-args.js';
 import { FleetBootstrapper } from '../../earning/bootstrap.js';
 import { resolveCliPassword as defaultResolveCliPassword } from '../password.js';
 import {
@@ -81,10 +82,6 @@ export function createBootstrapCommand(deps: BootstrapDeps = PRODUCTION_DEPS): C
       const parsed = parseCommandArgs(ctx.argv, { ...COMMON_FLAGS });
       json = Boolean(parsed.values.json);
       human = Boolean(parsed.values.human);
-      configPath =
-        typeof parsed.values.config === 'string' && parsed.values.config.length > 0
-          ? parsed.values.config
-          : undefined;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       emitEnvelope(
@@ -100,7 +97,26 @@ export function createBootstrapCommand(deps: BootstrapDeps = PRODUCTION_DEPS): C
       return;
     }
 
-    const password = deps.resolveCliPassword(ctx.argv, ctx.env);
+    try {
+      configPath =
+        deps.getConfigPathFromArgs(ctx.argv ?? []) ??
+        deps.getConfigPathFromArgs(process.argv.slice(2));
+    } catch (err) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: err instanceof Error ? err.message : String(err),
+          hint: 'Pass a config path or omit --config.',
+          exampleCli: 'jinn bootstrap --config ~/.jinn-operator/config.json',
+          details: { field: 'config' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    const config = deps.loadConfig(configPath);
+    const password = deps.resolveCliPassword(ctx.argv, ctx.env, { earningDir: config.earningDir });
     if (!password.ok) {
       emitEnvelope(
         {
@@ -114,8 +130,6 @@ export function createBootstrapCommand(deps: BootstrapDeps = PRODUCTION_DEPS): C
       );
       return;
     }
-
-    const config = deps.loadConfig(configPath);
     const rpcPreflight = await deps.checkRpcNetwork(config);
     if (!rpcPreflight.ok) {
       emitEnvelope(
@@ -187,7 +201,13 @@ export function createBootstrapCommand(deps: BootstrapDeps = PRODUCTION_DEPS): C
           code: 'funding_required',
           message: result.message,
           hint: 'Fund the listed address and re-run jinn bootstrap.',
-          exampleCli: 'jinn fund-requirements --json',
+          // `--operator` explicitly, not the bare verb: this gate persists
+          // nothing, so a dual-role user who has run `jinn requester init` and
+          // is refused here still reads as the requester persona on disk. The
+          // bare verb would answer the requester question — "creator Safe
+          // deployed, nothing needed" — to a host agent following this
+          // `exampleCli` out of an operator refusal.
+          exampleCli: 'jinn fund-requirements --operator --json',
           details: {
             role: 'master',
             address: result.funding.master_address,

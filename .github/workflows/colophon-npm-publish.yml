@@ -1,14 +1,36 @@
 name: Colophon npm Publish
 
-# Demand-gated Increment 1 publisher for @colophon-claims/verify.
-# The npm trusted-publisher workflow field is this filename. Do not rename it.
+# Demand-gated publisher for @colophon-claims/{check,core,cli} and the permanent passthrough
+# alias @colophon-claims/verify. Both reader names publish from this one workflow, checker first,
+# because the alias pins an exact checker version and npm versions are immutable: an alias released
+# against a checker that does not exist would permanently break `npx @colophon-claims/verify@0.2`.
+# Configure both package names against this filename on npm. Do not rename the file.
+# Setting the registry-wide `npm deprecate` flag on @colophon-claims/verify is deliberately not
+# done here: it needs a credential this trusted-publishing job does not hold. The deprecation note
+# ships in the alias's own `description` and README; the flag is a one-time operator action.
+# So is the checker's platform receipt: the `--apply` step below refuses until
+# product-release-platform-pins.json and PRODUCT_RELEASES in colophon-publish-manifest.mjs carry a
+# receipt keyed `@colophon-claims/check@<version>`. A receipt attests one publish under one name,
+# so the @colophon-claims/verify@0.2.1 receipt is not re-keyed onto the checker.
+# Publish core before cli: cli depends on the published core version.
+# The check dispatch's claim-pin guard admits the checker version that dispatch publishes. core and
+# cli publish no reader, so their guard admits nothing npm does not already serve: the composed /10
+# claim pins the first checker release, so dispatch check before core and cli.
 # Do not run this on push. Do not add a registry token.
 
 on:
   workflow_dispatch:
     inputs:
+      package:
+        description: 'Package to publish (check publishes the verify alias too; core before cli)'
+        required: true
+        type: choice
+        options:
+          - check
+          - core
+          - cli
       confirm:
-        description: 'Type publish-verify to publish @colophon-claims/verify Increment 1'
+        description: 'Type publish-<package> (publish-check, publish-core, or publish-cli)'
         required: true
         type: string
 
@@ -20,8 +42,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish-verify:
-    name: publish-verify
+  publish-colophon:
+    name: publish-colophon
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: npm-publish
@@ -30,9 +52,9 @@ jobs:
       id-token: write
     steps:
       - name: Require explicit confirmation
-        if: ${{ github.event.inputs.confirm != 'publish-verify' }}
+        if: ${{ github.event.inputs.confirm != format('publish-{0}', github.event.inputs.package) }}
         run: |
-          echo "Refusing to publish. Type publish-verify to continue."
+          echo "Refusing to publish. Type publish-${{ github.event.inputs.package }} to continue."
           exit 1
 
       - uses: actions/checkout@v7
@@ -47,13 +69,67 @@ jobs:
         run: npm install -g npm@11.19.0
 
       - name: Refuse a publish the in-tree claim pins do not name
-        run: node .github/scripts/colophon-publish-manifest.mjs --check-claim-pins packages/benchmark-product/verify/package.json
+        if: ${{ github.event.inputs.package == 'check' }}
+        run: node .github/scripts/colophon-publish-manifest.mjs --check-claim-pins packages/benchmark-product/check/package.json
 
       - name: Pin platform dependencies to the recorded product-release receipt
-        run: node .github/scripts/colophon-publish-manifest.mjs --apply packages/benchmark-product/verify/package.json
+        if: ${{ github.event.inputs.package == 'check' }}
+        run: node .github/scripts/colophon-publish-manifest.mjs --apply packages/benchmark-product/check/package.json
+
+      # The alias's guard runs before the checker's publish, not after it: npm versions are immutable,
+      # so a checker released with its alias then refused would leave `npx @colophon-claims/verify@0.2`
+      # resolving to the pre-rename 0.2.1 until a further checker version ships. The alias itself is
+      # source-only: no build, no install, no platform receipt to apply, because it declares no
+      # @jinn-network dependency for --apply to rewrite.
+      - name: Refuse an alias publish the in-tree claim pins do not name
+        if: ${{ github.event.inputs.package == 'check' }}
+        run: node .github/scripts/colophon-publish-manifest.mjs --check-claim-pins packages/benchmark-product/verify/package.json
+
+      # Re-entrant on purpose. Everything after this step (the alias gate, the alias publish) can
+      # fail for reasons that have nothing to do with the checker -- registry replication lag on
+      # `npm view`, a trusted-publisher binding missing for the alias name -- and npm versions are
+      # immutable, so a re-dispatch that unconditionally republished would die here with E403 and
+      # leave the alias unshippable until a checker version bump. A version npm already serves is
+      # skipped, not republished; the run then proceeds to the steps that actually failed.
+      - name: Install, build, and publish from the public registry
+        if: ${{ github.event.inputs.package == 'check' }}
+        working-directory: packages/benchmark-product/check
+        run: |
+          unset NODE_AUTH_TOKEN
+          npm install
+          npm run build
+          version="$(node -p 'require("./package.json").version')"
+          if npm view "@colophon-claims/check@${version}" version >/dev/null 2>&1; then
+            echo "@colophon-claims/check@${version} is already published; skipping the checker publish"
+          else
+            npm publish --access public
+          fi
+
+      - name: Require the pinned checker version to resolve before releasing the alias
+        if: ${{ github.event.inputs.package == 'check' }}
+        working-directory: packages/benchmark-product/verify
+        run: |
+          pinned="$(node -p 'require("./package.json").dependencies["@colophon-claims/check"]')"
+          npm view "@colophon-claims/check@${pinned}" version
+
+      - name: Publish the passthrough alias from the public registry
+        if: ${{ github.event.inputs.package == 'check' }}
+        working-directory: packages/benchmark-product/verify
+        run: |
+          unset NODE_AUTH_TOKEN
+          npm publish --access public
+
+      - name: Refuse a publish whose claim pins name a reader npm does not serve
+        if: ${{ github.event.inputs.package == 'core' || github.event.inputs.package == 'cli' }}
+        run: node .github/scripts/colophon-publish-manifest.mjs --check-claim-pins packages/benchmark-product/${{ github.event.inputs.package }}/package.json
+
+      - name: Pin platform dependencies to the recorded product-release receipt
+        if: ${{ github.event.inputs.package == 'core' || github.event.inputs.package == 'cli' }}
+        run: node .github/scripts/colophon-publish-manifest.mjs --apply packages/benchmark-product/${{ github.event.inputs.package }}/package.json
 
       - name: Install, build, and publish from the public registry
-        working-directory: packages/benchmark-product/verify
+        if: ${{ github.event.inputs.package == 'core' || github.event.inputs.package == 'cli' }}
+        working-directory: packages/benchmark-product/${{ github.event.inputs.package }}
         run: |
           unset NODE_AUTH_TOKEN
           npm install

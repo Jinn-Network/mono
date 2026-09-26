@@ -33,6 +33,7 @@ import type { DurableSourceState } from "@jinn-network/record-discovery-serve";
 import { executePublicationPlan, type PublicationArtifact, type PublicationPlan, type PublicationRecord } from "@jinn-network/record-publication";
 import { resolveAssurance } from "../domain/draft.js";
 import { refuse } from "../errors.js";
+import { timestampAfter } from "./publication-report-timestamp.js";
 import { primaryAnalysisPlanLength } from "../run/compile.js";
 import { buildMethodPorts } from "../report/ports.js";
 import { createReportDsseSigner, loadOrCreateReportSigningKey } from "../report/signing.js";
@@ -41,14 +42,14 @@ import { previewDisclosureLine, readPreviewLog } from "../run/preview-log.js";
 import { recordWorkspaceAuthorship, requireWorkspaceAuthorship, WORKSPACE_AUTHORSHIP_ROLE } from "../run/publication-authority.js";
 import { acquirePublicationLock } from "../run/publication-lock.js";
 import { createWorkspacePublicationJournal, createWorkspacePublicationSource, publicArchiveUrl, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
-import { externalRunImportMarker, importedRunPublicationRefusal } from "../run/imported-run.js";
+import { externalRunImportMarker } from "../run/imported-run.js";
 import { requireRunState, writeRunState, type PublicationStage, type RunState } from "../run/state.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
-import { LOCAL_VENUE_LIMITS } from "./run-results.js";
+import { localVenueLimitsForRun } from "./run-results.js";
 
 export interface PublicationReportInput { readonly draftId: string; }
 export interface PublicationReportDeps {
@@ -121,12 +122,6 @@ function receiptFor(source: Awaited<ReturnType<typeof createWorkspacePublication
     if (receipt === undefined) throw new Error("report publication completed without a durable signed-envelope receipt");
     return receipt;
   });
-}
-
-function timestampAfter(clockAt: string, priorIssuedAt: string | undefined): string {
-  const clockMs = Date.parse(clockAt);
-  const priorMs = priorIssuedAt === undefined ? Number.NEGATIVE_INFINITY : Date.parse(priorIssuedAt) + 1;
-  return new Date(Math.max(clockMs, priorMs)).toISOString();
 }
 
 function requireStageReceipt(input: {
@@ -250,17 +245,6 @@ export function publicationReport(
     const lock = await acquirePublicationLock(context.workspaceDir, input.draftId);
     try {
       let state = requireRunState(context.workspaceDir, input.draftId);
-      // The SECOND surface that seals the local-venue disclosure into a signed, publicly announced
-      // record: `limitations` below is `LOCAL_VENUE_LIMITS` verbatim, admission-gate sentence and
-      // all. Refusing an imported run here for the same reason `operations/publish.ts` refuses one
-      // (operator ruling, issue #3417) keeps the ruling from having exactly one door closed —
-      // a Report v2 announced from an imported run would carry the identical contradiction into a
-      // public archive, without ever materializing a bundle. Checked before any stage is read so
-      // an imported run cannot advance the managed publication chain at all.
-      const imported = externalRunImportMarker(context.workspaceDir, input.draftId, state);
-      if (imported !== undefined) {
-        refuse("conflict", `runs.${input.draftId}.externalImport`, importedRunPublicationRefusal(input.draftId, imported));
-      }
       const publication = state.publication;
       if (publication === undefined || state.runSha256 === undefined || state.accountingSha256 === undefined || state.matrixV2Sha256 === undefined) {
         refuse("conflict", `runs.${input.draftId}`, "a managed Run with complete BenchmarkAccounting and Matrix v2 is required before signed report publication");
@@ -323,6 +307,10 @@ export function publicationReport(
       const document = readDraftDocument(context.workspaceDir, input.draftId);
       if (document.spec.taskSet.kind !== "benchmark") refuse("conflict", `drafts.${input.draftId}.taskSet`, "signed report publication requires a benchmark run");
       const run = parseRun(getSealedBytes(context.workspaceDir, runSha256));
+      const venueLimits = localVenueLimitsForRun(
+        run,
+        externalRunImportMarker(context.workspaceDir, input.draftId, state) !== undefined,
+      );
       // PINNED selection (packet P5, spec §8.3): this operation publishes exactly ONE signed
       // Report v2, always the PRIMARY plan entry — never one of this draft's pre-registered
       // `additionalAnalyses`. Before `additionalAnalyses` existed, `run.analysisPlan.length - 1`
@@ -339,8 +327,8 @@ export function publicationReport(
       const previewLog = readPreviewLog(context.workspaceDir, input.draftId);
       const previewLimitation = previewLog !== undefined && previewLog.count > 0 ? previewDisclosureLine(previewLog) : undefined;
       const limitations = selected.method === BENCHMARKING_METHOD_IDS.pairedDelta
-        ? [...LOCAL_VENUE_LIMITS, PAIRED_ESTIMATE_LIMITATION, ...(previewLimitation === undefined ? [] : [previewLimitation])]
-        : previewLimitation === undefined ? LOCAL_VENUE_LIMITS : [...LOCAL_VENUE_LIMITS, previewLimitation];
+        ? [...venueLimits, PAIRED_ESTIMATE_LIMITATION, ...(previewLimitation === undefined ? [] : [previewLimitation])]
+        : previewLimitation === undefined ? venueLimits : [...venueLimits, previewLimitation];
 
       // Produce and independently verify before writing payload/envelope/authorship bytes or
       // advancing the report stage. An unsupported/partial method leaves accounting honestly complete.

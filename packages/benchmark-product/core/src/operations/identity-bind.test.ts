@@ -8,7 +8,7 @@ import { readFileSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { verifyDomainBinding } from "@colophon-claims/verify";
+import { verifyDomainBinding } from "@colophon-claims/check";
 import { readAuditEntries } from "../audit/journal.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
 import type { OperationContext } from "./context.js";
