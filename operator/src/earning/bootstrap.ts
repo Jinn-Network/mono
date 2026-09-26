@@ -102,7 +102,7 @@ import {
   parseMultisigFromReceipt as parseMultisigFromReceiptImpl,
   parseServiceIdFromReceipt as parseServiceIdFromReceiptImpl,
 } from './steps/receipt-parsing.js';
-import { REQUESTER_SAFE_DEPLOY_ETH, requesterMinMasterEth } from './requester-init.js';
+import { quoteRequesterSafeFunding } from './requester-init.js';
 import { stepFleetSafePredict as stepFleetSafePredictImpl } from './steps/fleet-safe-predict.js';
 import { stepFleetSafeDeploy as stepFleetSafeDeployImpl } from './steps/fleet-safe-deploy.js';
 import { stepFleetIdentityRegister as stepFleetIdentityRegisterImpl } from './steps/fleet-identity-register.js';
@@ -672,7 +672,6 @@ export class FleetBootstrapper {
     try {
       state = await this.ensureMasterWallet(state, password);
       const masterAddress = state.master_address!;
-      const required = requesterMinMasterEth();
 
       // Completion short-circuit, mirroring `ensureStage1`'s. It must precede
       // the funding gate: a first run legitimately spends the master down to
@@ -702,6 +701,9 @@ export class FleetBootstrapper {
           };
         }
       }
+
+      const quote = await this.quoteRequesterSafeFunding();
+      const required = quote.masterWei;
 
       let masterBalance = await this.publicClient.getBalance({
         address: masterAddress as Address,
@@ -736,10 +738,10 @@ export class FleetBootstrapper {
         address: getAddress(state.fleet_safe_address!) as Address,
       });
       if (safeCode === undefined || safeCode === '0x') {
-        // Pass the requester's own agent-funding amount: the default is the
-        // operator's 0.01 ETH, which a master that only cleared the 0.0015 ETH
+        // Pass the quoted agent-funding amount (floor or fee-raised). The
+        // operator default is 0.01 ETH, which a master that only cleared the
         // requester gate cannot afford to send.
-        state = await this.stepFleetSafeDeploy(state, mnemonic, REQUESTER_SAFE_DEPLOY_ETH);
+        state = await this.stepFleetSafeDeploy(state, mnemonic, quote.agentWei);
       }
 
       if (state.requester_stage !== 'safe_deployed') {
@@ -752,10 +754,41 @@ export class FleetBootstrapper {
         message: `Creator Safe ready at ${state.fleet_safe_address}.`,
       };
     } catch (error) {
-      const { summary, hint, rawMessage } = formatBootstrapOperatorMessage(error);
+      const { summary, hint, rawMessage, category } = formatBootstrapOperatorMessage(error);
       const userMessage = hint !== undefined ? `${summary}\nHint: ${hint}` : summary;
       console.error(`[requester-init] ${summary}`);
       if (hint !== undefined) console.error(`Hint: ${hint}`);
+      // A post-faucet deploy that still cannot pay gas is a funding shortfall,
+      // not a fatal bootstrap defect. Surface `funding` so the CLI exits
+      // `funding_required` instead of 50 after the faucet already ran (#4791).
+      if (category === 'insufficient_funds' && state.master_address) {
+        const catchQuote = await this.quoteRequesterSafeFunding();
+        let masterBalance = 0n;
+        try {
+          masterBalance = await this.publicClient.getBalance({
+            address: state.master_address as Address,
+          });
+        } catch {
+          // Keep zero; the envelope still names the target.
+        }
+        const shortfall = masterBalance < catchQuote.masterWei
+          ? catchQuote.masterWei - masterBalance
+          : catchQuote.masterWei;
+        return {
+          ok: false,
+          fleet_state: state,
+          message:
+            `Your wallet needs ${formatEther(shortfall)} ETH more to deploy your creator Safe ` +
+            `(currently ${formatEther(masterBalance)} ETH, need ${formatEther(catchQuote.masterWei)} ETH). ` +
+            `Send ${this.chain === 'base-sepolia' ? 'Base Sepolia' : 'Base'} ETH to: ${state.master_address}`,
+          funding: {
+            master_address: state.master_address,
+            eth_required: shortfall.toString(),
+            eth_balance: masterBalance.toString(),
+          },
+          rawErrorMessage: rawMessage,
+        };
+      }
       return {
         ok: false,
         fleet_state: state,
@@ -796,9 +829,11 @@ export class FleetBootstrapper {
       `Draining CDP faucet on ${this.chain} (up to ${maxIters} drips or ` +
       `${Math.round(this.faucetLoopTimeoutMs / 1000)}s).`,
     );
+    let dripsAttempted = 0;
     for (let i = 0; i < maxIters; i++) {
       if (this.now() >= deadline) break;
       const result = await this.requestFunding(address, 'base-sepolia');
+      dripsAttempted = i + 1;
       if (!result.ok) {
         if (result.rateLimited && rateLimitRetries < FAUCET_RATE_LIMIT_MAX_RETRIES) {
           rateLimitRetries++;
@@ -812,7 +847,45 @@ export class FleetBootstrapper {
       balance = await this.publicClient.getBalance({ address: address as Address });
       if (balance >= targetWei) break;
     }
+    if (balance >= targetWei) {
+      console.error(
+        `[requester-init] CDP faucet reached target after ${dripsAttempted} drips`,
+      );
+    }
     return balance;
+  }
+
+  /**
+   * Fee-aware requester funding. Only quotes against live Base Sepolia so
+   * unit tests on `base` keep the static floor (their publicClient may
+   * otherwise hit a local Anvil at 1 gwei and raise the gate).
+   */
+  private async quoteRequesterSafeFunding(): Promise<{ agentWei: bigint; masterWei: bigint }> {
+    if (this.chain !== 'base-sepolia') {
+      return quoteRequesterSafeFunding(0n);
+    }
+    const feePerGas = await this.readRequesterFeePerGas();
+    return quoteRequesterSafeFunding(feePerGas);
+  }
+
+  private async readRequesterFeePerGas(): Promise<bigint> {
+    const timeoutMs = 2_000;
+    const timed = <T>(work: Promise<T>): Promise<T | undefined> =>
+      Promise.race([
+        work.then((value) => value, () => undefined),
+        new Promise<undefined>((resolve) => {
+          setTimeout(() => resolve(undefined), timeoutMs);
+        }),
+      ]);
+    const fees = await timed(this.publicClient.estimateFeesPerGas());
+    if (fees?.maxFeePerGas !== undefined && fees.maxFeePerGas > 0n) {
+      return fees.maxFeePerGas;
+    }
+    const gasPrice = await timed(this.publicClient.getGasPrice());
+    if (gasPrice !== undefined && gasPrice > 0n) {
+      return gasPrice;
+    }
+    return 0n;
   }
 
   /**
