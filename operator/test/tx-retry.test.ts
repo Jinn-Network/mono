@@ -14,6 +14,7 @@ import {
   withNonceLedger,
   viemFeeOverridesForAttempt,
   waitForContractCode,
+  waitForNativeBalanceAtLeast,
 } from '../src/tx-retry.js';
 import { SafeInnerRevertError } from '../src/adapters/mech/safe-revert.js';
 
@@ -280,6 +281,52 @@ describe('tx-retry', () => {
         }),
       ).rejects.toThrow(/no contract code/i);
       expect(getCode).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('waitForNativeBalanceAtLeast', () => {
+    const ADDR = '0x17397Dc17f2630EC603B1AC5F62F3A84B2fe3C8e' as const;
+    const NEED = 1_000_000_000_000_000n;
+
+    it('returns immediately when the balance already covers the minimum', async () => {
+      const getBalance = vi.fn().mockResolvedValue(NEED);
+      const publicClient = { getBalance };
+      const got = await waitForNativeBalanceAtLeast(publicClient as never, ADDR, NEED, {
+        maxAttempts: 5,
+        baseDelayMs: 1,
+        maxDelayMs: 2,
+      });
+      expect(got).toBe(NEED);
+      expect(getBalance).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries while getBalance reads 0 and resolves once the transfer is visible (RPC propagation race)', async () => {
+      const getBalance = vi
+        .fn()
+        .mockResolvedValueOnce(0n)
+        .mockResolvedValueOnce(0n)
+        .mockResolvedValueOnce(NEED);
+      const publicClient = { getBalance };
+      const got = await waitForNativeBalanceAtLeast(publicClient as never, ADDR, NEED, {
+        maxAttempts: 5,
+        baseDelayMs: 1,
+        maxDelayMs: 2,
+      });
+      expect(got).toBe(NEED);
+      expect(getBalance).toHaveBeenCalledTimes(3);
+    });
+
+    it('throws after maxAttempts when getBalance stays below the minimum', async () => {
+      const getBalance = vi.fn().mockResolvedValue(0n);
+      const publicClient = { getBalance };
+      await expect(
+        waitForNativeBalanceAtLeast(publicClient as never, ADDR, NEED, {
+          maxAttempts: 3,
+          baseDelayMs: 1,
+          maxDelayMs: 2,
+        }),
+      ).rejects.toThrow(/need 1000000000000000 wei/i);
+      expect(getBalance).toHaveBeenCalledTimes(3);
     });
   });
 
