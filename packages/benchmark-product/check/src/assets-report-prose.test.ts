@@ -57,7 +57,7 @@ describe("no already-published format's presentation bytes move", () => {
     }
   });
 
-  test("/10 changes the report page and README, and nothing else", async () => {
+  test("/10 changes the report page and the README, and nothing else", async () => {
     const baseline = buildPublicAssets(await goldenInput(BUNDLE_FORMAT));
     const composed = buildPublicAssets(await goldenInput(BUNDLE_V10_FORMAT));
     const changed = Object.entries(baseline)
@@ -66,8 +66,11 @@ describe("no already-published format's presentation bytes move", () => {
       .sort();
     // Pinned exactly, in both directions: an empty set would mean the allocation renders nothing
     // new, and a larger one would mean a ruling reached an asset no ruling names (design §6).
-    // Issue #2981 aliases protocol identifiers on HTML and README together: both are reader
-    // surfaces, and leaving README on the sealed spelling would re-invite the unhosted origin.
+    // Two rulings reach the README, so it is listed alongside the page. Issue #3698 restates the
+    // same wilson table there, and issue #2981 aliases protocol identifiers on HTML and README
+    // together -- leaving README on the sealed spelling would re-invite the unhosted origin.
+    // Sorted, not insertion order, so neither ruling's assertion depends on the other's position.
+    // Badge, social card, and share text stay byte-identical.
     expect(changed).toEqual(["README.md", "index.html"]);
   });
 });
