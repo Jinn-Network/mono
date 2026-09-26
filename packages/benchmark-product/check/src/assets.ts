@@ -632,12 +632,15 @@ function pageDenominators(
   };
 }
 
-/** Operator-results copy (`web/.../results/page.tsx` `ExcludedFromDeclared`). A negative value is
- * a disagreement between two sealed records, not a count, and is stated fail-loud. */
+/** Negative leftover is a disagreement between two sealed numbers, not a count, and is stated
+ * fail-loud. Wording is source-neutral: this helper feeds both the Report table (Matrix
+ * accounting) and the Claim table (`claimPlannedSlots`). Naming the Matrix here would lie on the
+ * claim side — the one thing a mirrored pair is for (#3698; review-finding #4784). The operator
+ * results route still names the Matrix because that page has one table and one accounting. */
 function excludedFromDeclaredText(value: number | undefined): string {
   if (value === undefined) return "Not stated";
   if (value >= 0) return String(value);
-  return `${value} — inconsistent: the declared denominator exceeds the planned slots the sealed Matrix counted for this arm.`;
+  return `${value} — inconsistent: the declared denominator exceeds the planned slots this table's sealed accounting counted for this arm.`;
 }
 
 function excludedFromDeclaredMarkup(value: number | undefined): string {

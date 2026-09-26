@@ -24,13 +24,31 @@ async function reportArmTable(format: (typeof SUPPORTED_BUNDLE_FORMATS)[number])
 }
 
 function reportArmTableFrom(assets: Readonly<Record<string, Uint8Array>>): string {
+  return htmlArmTable(assets, "Exact wilson@1 values from the sealed Report");
+}
+
+function claimArmTableFrom(assets: Readonly<Record<string, Uint8Array>>): string {
+  return htmlArmTable(assets, "Exact arm values stored in the Claim package");
+}
+
+function htmlArmTable(assets: Readonly<Record<string, Uint8Array>>, caption: string): string {
   const html = decode(assets["index.html"]!);
-  const caption = "Exact wilson@1 values from the sealed Report";
   const start = html.indexOf(caption);
-  expect(start, "the page renders a wilson arm table").toBeGreaterThan(-1);
+  expect(start, `the page renders ${caption}`).toBeGreaterThan(-1);
   const end = html.indexOf("</table>", start);
   return html.slice(start, end);
 }
+
+function claimReadmeTable(readme: string): string {
+  const start = readme.indexOf("## Stored Claim facts");
+  expect(start, "README has a Stored Claim facts section").toBeGreaterThan(-1);
+  const end = readme.indexOf("### Claim method and preregistration", start);
+  return readme.slice(start, end);
+}
+
+const leftoverReading =
+  "-2 — inconsistent: the declared denominator exceeds the planned slots this table's sealed accounting counted for this arm.";
+const leftoverHtmlAlert = leftoverReading.replaceAll("'", "&#39;");
 
 describe("the denominator pair renders on /10 and on no format before it", () => {
   test("every format allocated before /10 keeps the declared denominator alone", async () => {
@@ -87,23 +105,46 @@ describe("what /10 does when the two sealed records do not line up", () => {
   test("a declared denominator larger than the planned slots is stated, with its reading", async () => {
     const table = reportArmTableFrom(buildPublicAssets(await withPlannedSlots(1)));
     expect(table).toContain(
-      '<th scope="row">baseline</th><td>3</td><td>1</td>'
-        + '<td><span role="alert">-2 — inconsistent: the declared denominator exceeds the planned'
-        + " slots the sealed Matrix counted for this arm.</span></td>",
+      `<th scope="row">baseline</th><td>3</td><td>1</td><td><span role="alert">${leftoverHtmlAlert}</span></td>`,
     );
+    expect(table).not.toContain("Matrix");
   });
 
   test("the claim mirror reads the claim's own accounting, not the Matrix's", async () => {
     const input = await goldenInput(BUNDLE_V10_FORMAT);
-    const html = decode(buildPublicAssets({
+    const assets = buildPublicAssets({
       ...input,
       claim: { ...input.claim, attrition: { perArm: {} } } as PublicAssetInput["claim"],
-    })["index.html"]!);
-    const claimStart = html.indexOf("Exact arm values stored in the Claim package");
-    const claimTable = html.slice(claimStart, html.indexOf("</table>", claimStart));
-    expect(claimTable).toContain('<th scope="row">baseline</th><td>3</td><td>Not stated</td><td>Not stated</td>');
+    });
+    expect(claimArmTableFrom(assets)).toContain(
+      '<th scope="row">baseline</th><td>3</td><td>Not stated</td><td>Not stated</td>',
+    );
     expect(reportArmTableFrom(buildPublicAssets(input))).toContain(
       '<th scope="row">baseline</th><td>3</td><td>3</td><td>0</td>',
     );
+  });
+
+  test("a claim-table leftover names this table's accounting, not the Matrix", async () => {
+    const input = await goldenInput(BUNDLE_V10_FORMAT);
+    const assets = buildPublicAssets({
+      ...input,
+      claim: {
+        ...input.claim,
+        attrition: { perArm: { baseline: { expected: 1 } } },
+      } as PublicAssetInput["claim"],
+    });
+    const claimTable = claimArmTableFrom(assets);
+    expect(claimTable).toContain(
+      `<th scope="row">baseline</th><td>3</td><td>1</td><td><span role="alert">${leftoverHtmlAlert}</span></td>`,
+    );
+    expect(claimTable).not.toContain("Matrix");
+    // The report table still reads Matrix accounting: the pair is allowed to disagree.
+    expect(reportArmTableFrom(assets)).toContain(
+      '<th scope="row">baseline</th><td>3</td><td>3</td><td>0</td>',
+    );
+
+    const claimReadme = claimReadmeTable(decode(assets["README.md"]!));
+    expect(claimReadme).toContain(`| baseline | 3 | 1 | ${leftoverReading} |`);
+    expect(claimReadme).not.toContain("Matrix");
   });
 });
