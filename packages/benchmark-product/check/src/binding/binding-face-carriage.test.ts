@@ -151,6 +151,7 @@ const EXPECTED_JUSTIFIED_SITES = [
   "check/src/binding/report-face.ts:runBindingSentence",
   "check/src/profile/run-results.ts:runBoundVenueLimits",
   "core/src/operations/run-results.ts:runBoundVenueLimits",
+  "check/src/profile/claim-consistency.ts:buildLocalVenueHonesty",
 ];
 
 const CONSTRAINT = [

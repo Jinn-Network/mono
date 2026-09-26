@@ -24,9 +24,9 @@ import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { buildPublicAssets } from "./assets.js";
 import { BUNDLE_FORMAT, PUBLIC_BUNDLE_VERIFICATION_CHECKS } from "./legacy-closures.js";
 import { BUNDLE_V10_FORMAT, buildBundleManifest } from "./manifest.js";
-import { summarizeVerificationOutcome } from "./outcome.js";
+import { describeRecomputedChecks, summarizeVerificationOutcome } from "./outcome.js";
 import { COMPOSED_CLAIM_PACKAGE_SCHEMA_ID } from "./profile/claim.js";
-import { readerInstructions } from "./capabilities.js";
+import { expectedChecks, readerInstructions } from "./capabilities.js";
 import { GOLDEN_BUNDLE_DIR, goldenInput } from "./testing/golden-asset-input.js";
 import { verifyPublicBundle } from "./verify.js";
 
@@ -165,6 +165,31 @@ describe("declaration is authoritative", () => {
       path: "qualification.json",
       message: expect.stringContaining("is missing"),
     });
+  });
+
+  test("declared without members: beacon-binding with no binding record is a missing member", async () => {
+    // Issue #3370. The member is mandatory under the declaration, so stripping it while declaring
+    // the capability is a closure failure rather than a quieter bundle -- the same rule
+    // `capability-lattice.test.ts` proves over every subset, here on a real signed bundle.
+    const bundleDir = await composedGolden();
+    reseal(bundleDir, ["beacon-binding"]);
+    expect(await refusal(bundleDir)).toEqual({
+      path: "beacon-binding.json",
+      message: expect.stringContaining("is missing"),
+    });
+  });
+
+  test("the declared vector's check list ends in beacon-binding, and the caveat names it", () => {
+    expect(expectedChecks(["beacon-binding"]))
+      .toEqual([...PUBLIC_BUNDLE_VERIFICATION_CHECKS, "beacon-binding"]);
+    // The reader's caveat enumerates what was recomputed, so a check that reached the `of N` total
+    // without a subject would print the word "undefined" at a reader.
+    expect(describeRecomputedChecks({
+      outcomes: [{ check: "beacon-binding", state: "passed" }],
+      passed: 1,
+      notFetched: 0,
+      total: 1,
+    })).toBe("the beacon binding");
   });
 
   test("declared without members: anchoring over an unanchored claim is refused at the section", async () => {

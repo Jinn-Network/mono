@@ -16,8 +16,10 @@ import {
   parseMatrix,
   parseReport,
   parseRun,
+  readBeaconSource,
   readReportDisclosureExtension,
   readRunAnchorIntentExtension,
+  readRunDeclaredSealInstant,
   readRunPublicationExtension,
 } from "@jinn-network/benchmarking-records";
 import { verifyMatrix, type InScopeCell, type InScopeVerdict } from "@jinn-network/benchmarking-run";
@@ -88,6 +90,12 @@ import {
 } from "./profile/inspect-assurance.js";
 import { assertClaimConsistency } from "./profile/claim-consistency.js";
 import {
+  BEACON_BINDING_BUNDLE_MEMBER,
+  assertRunBindingLinkage,
+  verifyRunBindingMember,
+} from "./binding/bundle-carriage.js";
+import { RunBindingError } from "./binding/beacon-binding.js";
+import {
   EXTERNAL_IMPORT_BUNDLE_MEMBER,
   assertExternalImport,
   deriveClaimExternalImport,
@@ -111,6 +119,7 @@ import {
 } from "./legacy-closures.js";
 import {
   ANCHORING_CAPABILITY,
+  BEACON_BINDING_CAPABILITY,
   BINARY_QUALIFICATION_CAPABILITY,
   DISCLOSURE_SPECIFICATION_CAPABILITY,
   EXTERNAL_IMPORT_CAPABILITY,
@@ -835,6 +844,15 @@ export async function verifyPublicBundleSnapshot(
   if (composed !== undefined && composed.capabilities.includes(EXTERNAL_IMPORT_CAPABILITY)) {
     claimExternalImport = deriveClaimExternalImport(parseExternalImportMarker(read(EXTERNAL_IMPORT_BUNDLE_MEMBER)));
   }
+
+  // Issue #3370: the sealed `beacon-binding/1` record, verbatim, as the declared capability's
+  // mandatory member — so the snapshot has already authenticated it against `bundle.json`. Read
+  // ONCE and handed on as bytes: the claim's `binding` section and the `venueHonesty` sentence are
+  // both rebuilt from this record, and one buffer is what makes it impossible for them to disagree.
+  // The linkage check itself runs below, after `claim-consistency`, where its check name is pushed.
+  const bindingRecordBytes = composed !== undefined && composed.capabilities.includes(BEACON_BINDING_CAPABILITY)
+    ? read(BEACON_BINDING_BUNDLE_MEMBER)
+    : undefined;
 
   const assembly = parseAssembly(read("verification/assembly.jsonl"));
   const expectedNativePaths = new Set(
@@ -2034,6 +2052,7 @@ export async function verifyPublicBundleSnapshot(
     ...(composed === undefined ? {} : { composedCapabilities: composed.capabilities }),
     ...(claimDisclosure === undefined ? {} : { disclosure: claimDisclosure }),
     ...(claimExternalImport === undefined ? {} : { externalImport: claimExternalImport }),
+    ...(bindingRecordBytes === undefined ? {} : { bindingRecordBytes }),
   });
   checks.push("claim-consistency");
   // Always present for the anchored closure versions, and never for any earlier one: an anchored
@@ -2086,6 +2105,37 @@ export async function verifyPublicBundleSnapshot(
       matrixCellKeys: matrix.cells.map((cell) => cell.cellKey),
     });
     checks.push("external-import");
+  }
+
+  // ── beacon-binding (issue #3370) ───────────────────────────────────────────────────────────
+  //
+  // Runs after `claim-consistency` for the reason `disclosure-specification` does: the claim's
+  // `binding` section has already been byte-compared against the projection of these exact bytes,
+  // so what is left for this block is the record itself and its linkage to this bundle's Run.
+  //
+  // `verifyRunBinding` proves the record is internally consistent -- its order derives from the
+  // `sealDigest` it carries, its beacon postdates the `sealedAt` it carries. It never sees the Run,
+  // so a foreign record filed under its own true digest passes it. `assertRunBindingLinkage` is the
+  // check that closes that, against the AUTHENTICATED `run.json` this bundle carries, and it is the
+  // same function the workspace producer applies to its own sealed store -- one rule, not two
+  // guesses. `sealedAt` is `undefined` for a run sealed before `beacon-source/v1` carried a seal
+  // instant, and the comparison is skipped for exactly that case; step 2d of
+  // EXTERNAL-VERIFICATION.md names that gap to the reader rather than leaving it implied.
+  if (bindingRecordBytes !== undefined) {
+    try {
+      assertRunBindingLinkage({
+        binding: verifyRunBindingMember(bindingRecordBytes),
+        runSha256: identities.runSha256,
+        sealedAt: readRunDeclaredSealInstant(run as unknown as Record<string, unknown>),
+        declaredSource: readBeaconSource(run as unknown as Record<string, unknown>),
+      });
+    } catch (cause) {
+      if (cause instanceof RunBindingError) {
+        refuse("record-integrity", BEACON_BINDING_BUNDLE_MEMBER, cause.message);
+      }
+      throw cause;
+    }
+    checks.push("beacon-binding");
   }
   // Design §6 step 4: the checks that actually ran are compared for exact equality against the
   // list the declared vector derives. A mismatch is a refusal, not a shorter list — it is what
