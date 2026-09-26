@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,12 +11,18 @@ import { Label } from '@/components/ui/label';
 import { daemonJson, readUiToken, writeUiToken } from '@/lib/daemon';
 import { classifySurface, SurfaceStatus } from '@/lib/use-daemon';
 
+type ChangePasswordResponse = {
+  ok?: boolean;
+  passwordFileUpdated?: boolean;
+};
+
 export default function SecurityPage() {
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [token, setToken] = useState(readUiToken() ?? '');
   const [status, setStatus] = useState<'idle' | 'rotating'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [passwordFileLeftAlone, setPasswordFileLeftAlone] = useState(false);
 
   const surface = classifySurface({
     loading: false,
@@ -26,14 +33,16 @@ export default function SecurityPage() {
   async function rotatePassword(): Promise<void> {
     setStatus('rotating');
     setError(null);
+    setPasswordFileLeftAlone(false);
     try {
-      await daemonJson('/v1/setup/change-password', {
+      const result = await daemonJson<ChangePasswordResponse>('/v1/setup/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ current, next }),
       });
       setCurrent('');
       setNext('');
+      setPasswordFileLeftAlone(result.passwordFileUpdated === false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -83,6 +92,12 @@ export default function SecurityPage() {
             <Button type="submit" variant="destructive" disabled={status === 'rotating'} className="self-start">
               {status === 'rotating' ? 'Rotating…' : 'Rotate password'}
             </Button>
+            {passwordFileLeftAlone ? (
+              <Alert variant="warning" data-testid="security-password-file-not-updated">
+                Host-wide keystore-password file was not updated: it does not belong to this
+                daemon&apos;s keystore. Set JINN_PASSWORD on every daemon start.
+              </Alert>
+            ) : null}
           </form>
         </CardContent>
       </Card>

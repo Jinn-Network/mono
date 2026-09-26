@@ -326,6 +326,8 @@ Operator-tunable configuration.
 
 **Harness auth status (#564).** Settings → Security also hosts a read-only **Harness auth status** table — per-harness auth source, masked key suffix, credential mtime, and a `loaded`/`missing`/`unknown` state — sourced from `GET /v1/harnesses/auth-status` (suffix + metadata only, never full keys). See §2.9's "State (per harness, auth source)" sub-group and `docs/runbooks/rotating-harness-keys.md`.
 
+**Keystore password (#4117).** Settings → Security (`/operator/security`) hosts **rotate password**. Action states: `idle → rotating → idle | failed`. `POST /v1/setup/change-password` with `{ current, next }` returns `{ ok: true, passwordFileUpdated: boolean }`. `passwordFileUpdated: true` is the existing silent success (form clears; no extra copy). `passwordFileUpdated: false` is not a failed rotation: the keystore was re-encrypted, but the host-wide `<default state dir>/keystore-password` file was left alone because it is not the file this daemon's keystore opens.
+
 - **State** (read-only)
   - task posts (last 1h / 6h / 24h) — chain-wide count of on-chain `TaskCreated` events on the active chain's TaskCoordinator / JinnRouter, the protocol-observable task-post rate for this network (#918). Computed backend-side as a **block-window approximation** (Base ~2s blocktime → 1h≈1800, 6h≈10800, 24h≈43200 blocks back from head); the windows nest (1h ⊆ 6h ⊆ 24h) and counts are approximate (a per-call scan cap makes the 24h figure a lower bound on a very high-volume chain). Sourced through the daemon's `DiscoveryAPI.getTaskPostCounts`; polled every 30s.
   - current chain — read-only chain identity (`base` chain id 8453 / `base-sepolia` chain id 84532). Switching chains is a separate fleet-reset flow, not editable here.
@@ -339,11 +341,13 @@ Operator-tunable configuration.
 - **Collections**
   - RPC slots — the ordered `rpcUrls` chain. Item shape: `{ slot: number; host: string (masked); health: 'healthy' | 'degraded' | 'unreachable'; latencyMs?: number; code?: number }`. Ordering: by slot index (0 = primary). No pagination (capped at 4 slots). Read-only.
 - **Actions**
+  - rotate password — Settings → Security. Re-encrypts the keystore. Action states: `idle → rotating → idle | failed`. See **Keystore password (#4117)** above.
   - edit setting
   - reset to default
   - Set Primary — write a single Primary RPC URL via the labeled input. Prepends to the runtime chain: persisted shape becomes `[primary, ...publicDefaults]`. Lifecycle: `idle → saving → saved (restart pending)`; terminal `failed` on write error. Restart-required to apply.
   - Clear Primary — clear the Primary RPC input. Persisted shape reverts to `[...publicDefaults]` (the bundled public backup chain). Same lifecycle and restart semantics as Set Primary.
 - **State messages**
+  - host-wide keystore-password file not updated — **warning**. Raised on Settings → Security after a successful rotate whose response has `passwordFileUpdated: false`. States that the host-wide file was left alone because it does not belong to this daemon's keystore, and names `JINN_PASSWORD` as what this operator must set on every daemon start. Distinct from a rotation failure (which stays on the existing error surface). Maps to no local action on the form.
   - invalid value
   - restart required to apply
   - Primary RPC missing — informational: no operator-provided primary is configured; the node is on the shared public chain (fine for setup, not reliable under load). Maps to the optional Set Primary action; links to free-key providers.
