@@ -59,7 +59,8 @@ Sequence:
   (0.001 to the agent EOA + 0.0005 master gas reserve). Live Base Sepolia then
   refused the Safe deploy for insufficient gas/value. Treating that as
   `fatal` (exit 50) rather than `funding_required` is the current CLI mapping
-  for a catch during deploy, not the funding-gate envelope.
+  for a catch during deploy, not the funding-gate envelope. Follow-up:
+  [#4791](https://github.com/Jinn-Network/mono/issues/4791).
 - Spawn used `NODE_OPTIONS=--preserve-symlinks` (Yarn portal packages).
   Workspace `dist/` trees were built with the same prefix `yarn test` uses
   (`build:sdk`, `build:stack`, `build:plugin`, `build:core`).
