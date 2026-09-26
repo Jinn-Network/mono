@@ -66,8 +66,8 @@
  * task/attempt binding and verdict-output digest join, the `solution-delivery-noncanonical` reseal
  * check, `solution-evidence-graph-invalid`, and `canonical-verdict-code-mismatch`. So is everything
  * downstream — derivation, claim, grading, publication, marketplace delivery, settlement, activity
- * credit — on a real chain. Restoring the ingestion half hermetically is the native G-loop's own
- * program, not this gate's.
+ * credit — on a real chain. LEG 8/9 stay deploy-time / seeded for this gate
+ * (`spec/2026-09-26-native-evaluator-ingestion-legs-deploy-time.md`, issue #3346).
  *
  * SKIP-CLEAN when the committed fixture is absent (the gate asserts its presence separately).
  */
@@ -78,6 +78,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { NATIVE_EVALUATOR_ACTIVITY_LEGS } from './native-evaluator-activity-legs.js';
 import { describe, it, expect } from 'vitest';
 import { createWalletClient, http, type Address, type Hex } from 'viem';
 import { base } from 'viem/chains';
@@ -220,22 +221,7 @@ function describeRow(row: unknown): string {
 function printLegTable(): void {
   // eslint-disable-next-line no-console
   console.log('\nNative-evaluator activity rig — leg status:');
-  const rows: Array<[string, string]> = [
-    ['LEG 0  snapshot Anvil + locally-deployed V3 stack', 'PROVEN-hermetic'],
-    ['LEG 1  two staked operators (real FleetBootstrapper)', 'PROVEN-hermetic'],
-    ['LEG 2  solution leg via the production Daemon (claim -> deliver -> settle)', 'PROVEN-hermetic'],
-    ['LEG 3  native evaluator identity stores (openRoleIdentitySet)', 'PROVEN-hermetic'],
-    ['LEG 4  committed prediction-evaluator deployment registration, loaded + digest-pinned', 'PROVEN-hermetic'],
-    ['LEG 5  real local backend: spawned evaluation-harness child produces the verdict', 'PROVEN-hermetic'],
-    ['LEG 5b signed-source publisher announces the six evaluation records', 'PROVEN-hermetic'],
-    ['LEG 5c NativeEvaluatorCoordinator + EvaluatorLoop settlement state machine', 'PROVEN-hermetic'],
-    ['LEG 6  real VerdictPorts: claimEvaluation -> deliver -> claimVerdictDelivery', 'PROVEN-hermetic'],
-    ['LEG 7  eligibleActivityWeight credit for solver + evaluator Safes', 'PROVEN-hermetic'],
-    ['LEG 8  signed .well-known record-source ingestion (opportunity discovery)', 'SEEDED (deploy-time serves it live)'],
-    ['LEG 9  DSSE subject-authority + verdict gate over a live trust catalog', 'SEEDED (deploy-time verifies it)'],
-    ['LEG 10 container-graded evaluation (swe-rebench-v2)', 'DEPLOY-TIME (Docker; DR decision 3a)'],
-  ];
-  for (const [leg, status] of rows) {
+  for (const [leg, status] of NATIVE_EVALUATOR_ACTIVITY_LEGS) {
     // eslint-disable-next-line no-console
     console.log(`  - ${leg}: ${status}`);
   }

@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { type Abi, decodeFunctionResult, encodeAbiParameters, getAbiItem, type Hex } from 'viem';
+import { type Abi, decodeAbiParameters, decodeFunctionResult, encodeAbiParameters, getAbiItem, type Hex } from 'viem';
 import { TASK_COORDINATOR_ABI } from '@jinn-network/marketplace-binding';
 
 const RECORD = {
@@ -98,9 +98,18 @@ describe('TaskCoordinator.getTask decode (#4286)', () => {
     expect(encodeAbiParameters(getTaskOutputs, [RECORD])).toBe(PAYLOAD);
   });
 
+  it('decodes an over-range uint8 as the full 32-byte word, not a truncated byte (#4383)', () => {
+    // viem's decode does not range-mask: `hexToNumber` on a uint8 word of 300 is 300, not 44.
+    const word = `0x${(300).toString(16).padStart(64, '0')}` as Hex;
+    expect(decodeAbiParameters([{ type: 'uint8' }], word)).toEqual([300]);
+  });
+
   it('misreads the fixed payload through the old policy-as-uint8 literal', () => {
-    // Known-bad control: the one-word `policy` shifts every later field one word early, which is
-    // #4286's failure scenario. If this stops diverging, the payload no longer proves the offsets.
+    // Known-bad control: `policy` as `uint8` occupies one head word, so every later field
+    // reads one word early. viem does not truncate that word into a byte (#4383) — `policy`
+    // would decode as the full `maxClaims` integer. This fixture is caught by the trailing
+    // `creatorCredited` bool reading `finalizedAttemptCount`'s word (truthy 1), not by a
+    // truncated count. If this stops diverging, the payload no longer proves the offsets.
     const old = decodeRecord(OLD_GET_TASK_VIEW_ABI);
     expect(old.creatorCredited).toBe(true);
     expect(old.finalizedAttemptCount).toBe(3);

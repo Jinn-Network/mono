@@ -480,6 +480,11 @@ async function main(): Promise<void> {
       repo: REPO,
       problem_statement: 'Marketplace e2e fixture: fix value() to return 1.',
       base_commit: 'a'.repeat(40),
+      image_name: 'swe-rebench-v2-e2e-fixture',
+      install_config: { test_cmd: 'true', log_parser: 'pytest' },
+      FAIL_TO_PASS: [],
+      PASS_TO_PASS: [],
+      test_patch: '',
     };
     const provenance: MintedProvenance = {
       synthetic: true,
