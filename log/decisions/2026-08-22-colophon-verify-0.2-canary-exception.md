@@ -67,3 +67,32 @@ PR #3285 never merged; the rename is re-filed as #4188. This amendment does
 not introduce `@colophon-claims/check` and does not turn
 `@colophon-claims/verify@0.2` into an alias. The published verify 0.2 line
 remains the checker itself.
+
+## Amendment (2026-09-24): check 0.2.1 receipt
+
+Issue #4733. `@colophon-claims/check@0.2.1`, the checker under the name
+#4188 gave it, is released under the operator's authorization in that issue.
+Only that product version, in addition to the receipts already named above,
+MAY pin `@jinn-network/*` to the exact already-attested platform version
+`0.1.0-canary.sha.0533a224cf99f06d7facf0c23455f2781a5b9e62` (run 33517790412
+attempt 2). Its receipt lives in
+`packages/benchmark-product/product-release-platform-pins.json` under
+decision `operator-authorization-2026-09-23-issue-4733`, with the same
+15-package closure as the verify 0.2.1 receipt; that receipt is not
+re-keyed. This supersedes the 2026-09-18 statement that this record does not
+introduce `@colophon-claims/check`.
+
+The `check` dispatch of the demand-gated workflow also publishes
+`@colophon-claims/verify@0.2.2`, a passthrough alias that depends on
+`@colophon-claims/check@0.2.1` exactly and declares no `@jinn-network/*`
+dependency, so it carries no receipt. From then on
+`@colophon-claims/verify@0.2` resolves to that alias. This supersedes the
+2026-09-18 statement that the published verify 0.2 line remains the checker
+itself; the published verify 0.2.0 and 0.2.1 are unchanged.
+
+This does not permit a floating `@canary`, a mixed SHA closure, another
+product or product version, an implicit future exception, or a stable-stack
+claim. The pinned closure predates platform changes merged to `next` after
+0533a22, including trust-core fixes, and the published checker does not
+carry them. `npm publish` remains a human act after the recording change
+merges.
