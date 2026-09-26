@@ -141,3 +141,100 @@ test("fix-child documents no flag its roster verbs lack, in prose or in the fenc
     }
   }
 });
+
+// Issue #4178 (D3): review-pr had no skill-text pins. Single-surface §7
+// requires them in the same change as any review-pr skill edit: required
+// verbs present, forbidden operations absent, and the rename-trigger
+// classification item that is this issue's payload.
+const reviewPrPath = join(root, ".claude/skills/review-pr/SKILL.md");
+const reviewPr = readFileSync(reviewPrPath, "utf8");
+const reviewPrFlow = reviewPr.replace(/\s+/gu, " ");
+const reviewPrJoined = reviewPr.replace(/\\\n\s*/gu, " ");
+
+const REVIEW_PR_VERB_FLAGS = new Map([
+  ["review-verdict", new Set(["--state", "--body-file", "--follow-ups-file"])],
+  ["review-findings", new Set(["--file"])],
+  ["human", new Set(["--reason-file"])],
+]);
+
+const REVIEW_PR_VERBS = new Set(["review-verdict", "review-findings", "human"]);
+
+function reviewPrInvocations() {
+  const invocations = reviewPrJoined.matchAll(
+    /autopilot session ([a-z-]+)([^\n]*)/gu,
+  );
+  return [...invocations].map((m) => ({
+    verb: m[1],
+    flags: [...m[2].matchAll(/--[a-z][a-z-]*/gu)].map((f) => f[0]),
+  }));
+}
+
+test("review-pr invokes only its three roster verbs", () => {
+  const invoked = new Set(reviewPrInvocations().map((i) => i.verb));
+  for (const verb of invoked) {
+    assert.ok(
+      REVIEW_PR_VERBS.has(verb),
+      `review-pr must not invoke 'autopilot session ${verb}'`,
+    );
+  }
+  for (const verb of REVIEW_PR_VERBS) {
+    assert.ok(
+      invoked.has(verb),
+      `review-pr must document 'autopilot session ${verb}'`,
+    );
+  }
+});
+
+test("review-pr invents no verb flag", () => {
+  for (const { verb, flags } of reviewPrInvocations()) {
+    const allowed = REVIEW_PR_VERB_FLAGS.get(verb) ?? new Set();
+    for (const flag of flags) {
+      assert.ok(
+        allowed.has(flag),
+        `\`session ${verb}\` takes no ${flag}; do not document one`,
+      );
+    }
+  }
+});
+
+test("review-pr contains no push instruction", () => {
+  assert.match(
+    reviewPrFlow,
+    /Never push to the PR branch\./,
+    "review-pr must forbid pushing the PR branch",
+  );
+  assert.doesNotMatch(
+    reviewPr,
+    /\bgit push\b/,
+    "review-pr must not instruct git push",
+  );
+  assert.doesNotMatch(
+    reviewPrJoined,
+    /autopilot session (checkpoint|review-fix-publish|child-complete|implementation-complete)\b/,
+    "review-pr must not invoke a mutation verb that publishes branch commits",
+  );
+});
+
+test("review-pr classifies the D3 rename trigger under Review pass", () => {
+  const start = reviewPr.indexOf("## Review pass");
+  assert.notEqual(start, -1, "review-pr must carry the Review pass section");
+  const rest = reviewPr.slice(start + 1);
+  const end = rest.indexOf("\n## ");
+  const section = end === -1 ? rest : rest.slice(0, end);
+  const sectionFlow = section.replace(/\s+/gu, " ");
+  assert.match(
+    sectionFlow,
+    /renames an identifier, origin, namespace, or record kind/,
+    "Review pass must name the D3 rename event",
+  );
+  assert.match(
+    sectionFlow,
+    /re-ground every negative assertion naming the old spelling/,
+    "Review pass must require re-grounding negative assertions on rename",
+  );
+  assert.match(
+    sectionFlow,
+    /merge-blocking/,
+    "a missed re-ground must classify as merge-blocking",
+  );
+});
