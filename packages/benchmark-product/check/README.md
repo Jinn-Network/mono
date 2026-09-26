@@ -80,11 +80,12 @@ and the licence scaffolding are specified in `../PUBLIC-BUNDLE.md`.
 The rendered tree's format is `colophon-freeze-repo/2`. The `/1` renderer stated a source
 `downloadLocation` and a `supplier` its record did not support, and refused an ordinary
 dual licence such as `Apache-2.0 OR MIT` outright. The bump is carried by the first of
-those: dropping the unsupported `downloadLocation` and `supplier` changes the rendered
-bytes for bundles `/1` already accepted. Opening the dual licence would not have bumped
-the format on its own — it only admits a closure the renderer previously refused, and
-there is no prior tree for that output to differ from. A tree published under `/1`
-therefore reports drift against this version. Regenerate and republish it.
+those: replacing the unsupported `downloadLocation` and `supplier` values with SPDX's
+`NOASSERTION` changes the rendered bytes for bundles `/1` already accepted. Opening the
+dual licence would not have bumped the format on its own — it only admits a closure the
+renderer previously refused, and there is no prior tree for that output to differ from. A
+tree published under `/1` therefore reports drift against this version. Regenerate and
+republish it.
 
 Three API notes for anyone embedding this package rather than running its binary. `runVerifierCli`'s
 `deps.verify` test seam now returns `VerifiedPublicBundleSnapshot` (the verification **and** the
