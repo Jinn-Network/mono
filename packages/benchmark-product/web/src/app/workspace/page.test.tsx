@@ -23,7 +23,7 @@ vi.mock("@/lib/server/gui-action-registry", () => ({
   },
 }));
 vi.mock("@/components/action-form", () => ({
-  ActionForm: ({ submitLabel, children, disabled }: { readonly submitLabel: string; readonly children?: ReactNode; readonly disabled?: boolean }) => <form><button disabled={disabled}>{submitLabel}</button>{children}</form>,
+  ActionForm: ({ submitLabel, children, disabled, successMessage }: { readonly submitLabel: string; readonly children?: ReactNode; readonly disabled?: boolean; readonly successMessage?: string }) => <form><button disabled={disabled}>{submitLabel}</button>{successMessage}<div>{children}</div></form>,
 }));
 
 import WorkspacePage from "./page";
@@ -53,7 +53,11 @@ describe("workspace anchoring control", () => {
     expect(markup).toContain("Apply the configured anchor providers");
     expect(markup).toContain("Turn anchoring off");
     expect(markup).toContain('name="clear" value="clear-anchoring"');
-    expect(markup).toContain("https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1");
+    expect(markup).toContain("rfc3161-tsa/v1");
+    expect(markup).toContain("Configured third-party time providers are applied.");
+    expect(markup).toContain("Third-party time is off.");
+    expect(markup).not.toContain("spec.jinn.network");
+    expect(markup).not.toContain("https://");
     expect(markup).not.toContain('name="endpoint"');
     expect(markup).not.toContain('name="providerProfile"');
     expect(markup).not.toContain('<button disabled="">Apply the configured anchor providers');

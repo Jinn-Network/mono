@@ -24,6 +24,7 @@ import type { PublicBundleSigner, PublicBundleSignerRole } from "./signers.js";
 import { refuse } from "./profile/errors.js";
 import { verifyDomainBinding, type VerifiedDomainBinding } from "./identity/domain-binding.js";
 import { publisherIdentityLines, publisherIdentitySentence } from "./identity/report-face.js";
+import { rewriteInternalProtocolIdentifiers } from "./identifier-presentation.js";
 import { VERIFIER_VERSION } from "./version.js";
 
 export { VERIFIER_VERSION } from "./version.js";
@@ -58,15 +59,6 @@ export interface VerifierCliDeps {
   ) => FreezeRepoVerificationResult | Promise<FreezeRepoVerificationResult>;
 }
 
-/**
- * Protocol namespaces that do not resolve for this reader. URL candidates are classified in the
- * replacer so an actionable third-party URL remains intact, while scheme-prefixed Jinn names and
- * the bare extension/method namespaces are treated the same way.
- */
-const PROTOCOL_IDENTIFIER_CANDIDATE =
-  /https?:\/\/[^\s,;)"']*|jinn\.(?:network|benchmarking)[^\s,;)"']*/gu;
-const INTERNAL_PROTOCOL_URL =
-  /^https?:\/\/(?:[^/?#]*\.)?jinn\.(?:network|benchmarking)(?::[0-9]+)?(?:[/?#]|$)/u;
 const RAW_IDENTIFIER = /urn:[^\s,;)"']+|did:key:z[1-9A-HJ-NP-Za-km-z]+/gu;
 const IDENTIFIER_ALIAS = "<identifier: see --json>";
 
@@ -98,10 +90,7 @@ function aliasIdentifier(match: string): string {
 
 /** Removes only Jinn's unresolvable protocol namespaces, preserving actionable outside URLs. */
 function withoutInternalProtocolIdentifiers(message: string): string {
-  return message.replace(PROTOCOL_IDENTIFIER_CANDIDATE, (match) => {
-    if (match.startsWith("http") && !INTERNAL_PROTOCOL_URL.test(match)) return match;
-    return aliasIdentifier(match);
-  });
+  return rewriteInternalProtocolIdentifiers(message, aliasIdentifier);
 }
 
 /** Refusal details keep raw identifiers in `--json`; the human error surface aliases them. */

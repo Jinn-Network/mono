@@ -65,6 +65,29 @@ describe("verification action presentation", () => {
     expect(markup).toContain("unresolved pending anchor evidence exists and `report` closes the anchoring window.");
   });
 
+  test("names declared anchor profiles without the unhosted origin", () => {
+    actionState.current = {
+      status: "success",
+      result: {
+        checks: ["integrity-anchors"],
+        matrixSha256: "a".repeat(64),
+        anchors: {
+          anchors: [],
+          subjects: [{
+            subject: "lock",
+            outcome: "anchored",
+            declaredProfiles: ["https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1"],
+          }],
+          invalid: [],
+        },
+      },
+    };
+    const markup = renderToStaticMarkup(<VerificationForm action={action} draftId="draft-1" />);
+    expect(markup).toContain("rfc3161-tsa/v1");
+    expect(markup).not.toContain("spec.jinn.network");
+    expect(markup).not.toContain("https://");
+  });
+
   test("renders a typed recomputation or integrity failure loudly and never claims success", () => {
     actionState.current = {
       status: "error",

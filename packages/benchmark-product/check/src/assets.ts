@@ -12,6 +12,7 @@ import type { ClaimPackage } from "./profile/claim.js";
 import type { PublicComparisonCell, PublicComparisonView } from "./comparison.js";
 import type { SupportedBundleFormat } from "./manifest.js";
 import { BUNDLE_V10_FORMAT } from "./manifest.js";
+import { presentInternalProtocolIdentifiers } from "./identifier-presentation.js";
 
 /**
  * One presentation feature a bundle format's report page renders (issue #4191).
@@ -25,8 +26,11 @@ import { BUNDLE_V10_FORMAT } from "./manifest.js";
  *
  * `report-prose-singularity` is the four rulings of issue #3016: each of the page's statements is
  * made once, in the highest-priority slot that carries it, and the narrated control is cut.
+ *
+ * `origin-free-identifiers` is issue #2981: reader-facing HTML and README print protocol names
+ * without the unhosted origin, while sealed records keep the raw identifiers.
  */
-export type PresentationCapability = "report-prose-singularity";
+export type PresentationCapability = "report-prose-singularity" | "origin-free-identifiers";
 
 /**
  * Which presentation capabilities each format's page renders.
@@ -48,7 +52,7 @@ export const FORMAT_PRESENTATION_CAPABILITIES: {
   "benchmark-product-public-bundle/6": [],
   "benchmark-product-public-bundle/7": [],
   "benchmark-product-public-bundle/8": [],
-  [BUNDLE_V10_FORMAT]: ["report-prose-singularity"],
+  [BUNDLE_V10_FORMAT]: ["report-prose-singularity", "origin-free-identifiers"],
 };
 
 export interface PublicAssetInput {
@@ -245,6 +249,10 @@ function plainText(value: string): string {
 
 function canonicalText(value: unknown): string {
   return decoder.decode(canonicalJsonBytes(value));
+}
+
+function presentReaderText(text: string, capabilities: ReadonlySet<PresentationCapability>): string {
+  return capabilities.has("origin-free-identifiers") ? presentInternalProtocolIdentifiers(text) : text;
 }
 
 function boundedVisual(value: string, maximumCodePoints: number): string {
@@ -1398,10 +1406,10 @@ export function buildPublicAssets(input: PublicAssetInput): Readonly<Record<stri
     );
   }
   return {
-    "index.html": encoder.encode(buildIndex(input, reportFacts, claimFacts, capabilities)),
+    "index.html": encoder.encode(presentReaderText(buildIndex(input, reportFacts, claimFacts, capabilities), capabilities)),
     "badge.svg": encoder.encode(buildBadge(input, reportFacts)),
     "social-card.svg": encoder.encode(buildSocialCard(input, reportFacts)),
-    "README.md": encoder.encode(buildReadme(input, reportFacts, claimFacts)),
+    "README.md": encoder.encode(presentReaderText(buildReadme(input, reportFacts, claimFacts), capabilities)),
     "share.txt": encoder.encode(buildShareText(input, reportFacts)),
   };
 }

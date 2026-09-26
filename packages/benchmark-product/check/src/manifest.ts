@@ -56,7 +56,7 @@ export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
  * this format was when issue #4191 first allocated it for the report page the four operator
  * rulings on report prose direct (#3016 AC1/AC3). That page is unchanged and still belongs to this
  * format: `FORMAT_PRESENTATION_CAPABILITIES` in `assets.ts` seeds it with
- * `report-prose-singularity`. It took a format number rather than an edit because the page is
+ * `report-prose-singularity` and `origin-free-identifiers`. It took a format number rather than an edit because the page is
  * byte-pinned -- `verifyPublicBundleSnapshot` rebuilds every presentation asset and byte-compares
  * it, so changing a rendered string in place would break every already-published bundle under the
  * command printed on its own page.

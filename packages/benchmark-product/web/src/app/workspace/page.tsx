@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GUI_SERVER_ACTIONS } from "@/lib/server/gui-action-registry";
 import { loadWorkspaceView } from "@/lib/server/view-models";
+import { presentAnchorProfile } from "@/lib/present-protocol-profile";
 
 export const dynamic = "force-dynamic";
 
@@ -29,10 +30,10 @@ export default function WorkspacePage() {
           )}
           <Card><CardHeader><CardTitle>Third-party time</CardTitle></CardHeader><CardContent className="grid gap-5">
             <p className="text-sm text-muted-foreground">Anchoring is off until configured. Once a provider is configured, every later lock obtains an anchor on its own and a failure never blocks the lock. The server owns the endpoint; this form never accepts one.</p>
-            <p className="text-sm" role="status">Server-configured anchor providers: {view.anchoringConfiguration.available ? view.anchoringConfiguration.providerProfiles.join(", ") : "Unavailable — set the anchor providers on the server."}</p>
+            <p className="text-sm" role="status">Server-configured anchor providers: {view.anchoringConfiguration.available ? view.anchoringConfiguration.providerProfiles.map(presentAnchorProfile).join(", ") : "Unavailable — set the anchor providers on the server."}</p>
             <div className="grid gap-5 md:grid-cols-2">
-              <ActionForm action={GUI_SERVER_ACTIONS["anchoring.configure"]} submitLabel="Apply the configured anchor providers" gated disabled={!view.anchoringConfiguration.available} />
-              <ActionForm action={GUI_SERVER_ACTIONS["anchoring.configure"]} submitLabel="Turn anchoring off" gated><input type="hidden" name="clear" value="clear-anchoring" /></ActionForm>
+              <ActionForm action={GUI_SERVER_ACTIONS["anchoring.configure"]} submitLabel="Apply the configured anchor providers" successMessage="Configured third-party time providers are applied." gated disabled={!view.anchoringConfiguration.available} />
+              <ActionForm action={GUI_SERVER_ACTIONS["anchoring.configure"]} submitLabel="Turn anchoring off" successMessage="Third-party time is off." gated><input type="hidden" name="clear" value="clear-anchoring" /></ActionForm>
             </div>
           </CardContent></Card>
           <Card><CardHeader><CardTitle>Agent authority</CardTitle></CardHeader><CardContent className="grid gap-6 lg:grid-cols-2">

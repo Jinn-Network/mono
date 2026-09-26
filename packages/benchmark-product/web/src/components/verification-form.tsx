@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { IDLE_ACTION_STATE, type GuiActionState } from "@/lib/action-state";
+import { presentProtocolText } from "@/lib/present-protocol-profile";
 
 interface VerificationFormProps {
   readonly action: (state: GuiActionState, formData: FormData) => Promise<GuiActionState>;
@@ -74,7 +75,7 @@ export function VerificationForm({ action, draftId }: VerificationFormProps) {
             ))}</ul>}
           <p className="mt-3 font-medium">Anchor subjects</p>
           <ul className="list-disc pl-5">{result.anchors.subjects.map((subject) => (
-            <li key={subject.subject}>{subject.subject}: {subject.outcome}{subject.declaredProfiles !== undefined ? ` (${subject.declaredProfiles.join(", ")})` : ""}</li>
+            <li key={subject.subject}>{subject.subject}: {subject.outcome}{subject.declaredProfiles !== undefined ? ` (${subject.declaredProfiles.map(presentProtocolText).join(", ")})` : ""}</li>
           ))}</ul>
         </> : null}
         {result.anchoringWindow !== undefined
