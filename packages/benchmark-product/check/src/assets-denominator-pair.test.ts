@@ -48,6 +48,7 @@ function claimReadmeTable(readme: string): string {
 
 const leftoverReading =
   "-2 — inconsistent: the declared denominator exceeds the planned slots this table's sealed accounting counted for this arm.";
+/** `escapeMarkup` encodes the apostrophe; README markdown does not. Pin both. */
 const leftoverHtmlAlert = leftoverReading.replaceAll("'", "&#39;");
 
 describe("the denominator pair renders on /10 and on no format before it", () => {
