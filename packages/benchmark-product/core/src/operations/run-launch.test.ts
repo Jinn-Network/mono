@@ -21,7 +21,7 @@ import { readRunJournalEntries, type RunJournalEntry } from "../run/journal.js";
 import { readRunState, writeRunState } from "../run/state.js";
 import { createWorkspacePublicationHttpHandler, createWorkspacePublicationSource } from "../run/publication-source.js";
 import { runJournalPath } from "../workspace/layout.js";
-import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
+import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import type { LocalVenue } from "../venue/venue.js";
 import { armAdd } from "./arms.js";
 import { authorityGrant } from "./authority-ops.js";
@@ -1073,9 +1073,81 @@ describe("runResume — re-dispatches only outstanding cells", () => {
       ok: false,
       error: {
         code: "record-integrity",
-        detail: expect.stringContaining("backend recovery contradicted"),
+        detail: "backend recovery contradicted the captured Submission: durable attempt differs from captured bytes",
+        issues: [{
+          path: `runs.draft-1.${cellKey}.${delivered.event.dispatch}`,
+          message: "backend recovery contradicted the captured Submission: durable attempt differs from captured bytes",
+        }],
       },
     });
+    expect(submits).toHaveLength(0);
+  });
+
+  test("fails closed when a captured outstanding Submission names no valid Submission URI", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend: launchBackend } = makeStatefulFakeBackend();
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(launchBackend),
+    });
+    expect(launched.ok).toBe(true);
+
+    const fullEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    const delivered = fullEntries.find(
+      (entry) => entry.kind === "cell-event" && entry.event.kind === "delivered",
+    );
+    if (delivered?.kind !== "cell-event") throw new Error("fixture produced no delivered cell");
+    const cellKey = delivered.event.cellKey;
+    const captured = fullEntries.find(
+      (entry) => entry.kind === "submission-captured" && entry.cellKey === cellKey,
+    );
+    if (captured?.kind !== "submission-captured") throw new Error("fixture produced no captured Submission");
+
+    const invalidBytes = new TextEncoder().encode(JSON.stringify({
+      submission: "not-a-urn",
+      deadline: "2030-01-01T00:00:00.000Z",
+    }));
+    const invalidSha256 = putSealedBytes(workspaceDir, invalidBytes);
+
+    // `journaledSubmissions` last-wins: a later `submission-accepted` would otherwise keep the
+    // original digest and the invalid-URI branch would never run.
+    overwriteRunJournal("draft-1", fullEntries.filter((entry) => {
+      if (entry.kind === "cell-event" && entry.event.cellKey === cellKey) {
+        return entry.event.kind === "dispatch";
+      }
+      if (
+        (entry.kind === "observation-accepted"
+          || entry.kind === "delivery"
+          || entry.kind === "evaluation")
+        && entry.cellKey === cellKey
+      ) return false;
+      return true;
+    }).map((entry) => (
+      (
+        (entry.kind === "submission-captured"
+          || (entry.kind === "submission-accepted" && entry.leg !== "evaluation"))
+        && entry.cellKey === cellKey
+      )
+        ? { ...entry, submissionSha256: invalidSha256 }
+        : entry
+    )));
+
+    const { backend: resumeBackend, recoveries, submits } = makeStatefulFakeBackend();
+    const outcome = await runResume(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(resumeBackend),
+    });
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: {
+        code: "record-integrity",
+        detail: "captured outstanding Submission carries no valid Submission URI",
+        issues: [{
+          path: `runs.draft-1.${cellKey}.${captured.dispatch}`,
+          message: "captured outstanding Submission carries no valid Submission URI",
+        }],
+      },
+    });
+    expect(recoveries).not.toContain("not-a-urn");
     expect(submits).toHaveLength(0);
   });
 
