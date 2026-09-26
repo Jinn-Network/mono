@@ -57,6 +57,8 @@ import { importSweBenchRows } from "../../operations/import.js";
 import { runAnchor } from "../../operations/run-anchor.js";
 import { runCollect } from "../../operations/run-collect.js";
 import { runLaunch } from "../../operations/run-launch.js";
+import { requiredBeaconRound } from "@colophon-claims/check";
+import { runBind } from "../../operations/run-bind.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
 import { runReport } from "../../operations/report.js";
@@ -76,6 +78,10 @@ const DRAFT_ID = "anchored-publication";
 const FIXTURE_HARNESS_A = "anchored-fixture-harness-a";
 const FIXTURE_HARNESS_B = "anchored-fixture-harness-b";
 const FIXTURE_ENDPOINT = "https://timestamp.invalid/anchor-fixture";
+/** Issue #3370. A scheduled source, so the seal derives exactly one admissible round. */
+const FIXTURE_BEACON_SOURCE = "drand/quicknet";
+/** Synthetic, like every other digest here: repeated hex, never a real drand round's value. */
+const FIXTURE_BEACON_VALUE = "7".repeat(64);
 
 /** Earlier than any instant a run in this fixture can close at, so the splice-catch passes by
  * construction. Inside the kit certificate's 2026-01-01 .. 2036-01-01 validity window. */
@@ -123,6 +129,9 @@ export interface SyntheticV6BundleFixture {
   /** The OpenTimestamps kit fixtures over the sealed Run digest, and their synthetic headers. */
   readonly lockOts: OpenTimestampsKitFixtures;
   readonly matrixOts: OpenTimestampsKitFixtures;
+  /** sha256 hex of the sealed `beacon-binding/1` record, present exactly when `bind` was asked for
+   * — so a test can name the member's digest without re-deriving it. */
+  readonly bindingRecordSha256?: string;
 }
 
 const utf8 = (value: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(value));
@@ -514,6 +523,18 @@ export async function createSyntheticV6BundleFixture<Skip extends true | undefin
   /** #2980 task-selection provenance, sealed into the Run at lock time. */
   readonly taskSelection?: "claimant-chosen" | "fixed-public-set" | "drawn-post-lock";
   /**
+   * Issue #3370: declares `drand/quicknet` before the lock and binds to it after, so the fixture is
+   * a bound run. OPTIONS-ONLY and defaults off, which is what makes the bound/unbound byte-difference
+   * testable against one fixture the way the anchored/unanchored one already is.
+   *
+   * No network and no injected source: `runBind` does no I/O — the `(round, value)` pair is
+   * operator-supplied — so the round is derived from the lock instant the real clock produced and
+   * the binding is deterministic GIVEN that lock. The fixture keeps its real clock deliberately:
+   * `V6_FIXTURE_GEN_TIME` must precede `closeAt` for the anchor splice-catch, so pinning the clock
+   * to make the round constant would break an unrelated guard.
+   */
+  readonly bind?: true;
+  /**
    * Asks `report` for the composed generation (issue #3403 / #3405). OPTIONS-ONLY and defaults
    * off **in this fixture**, so every existing caller still materializes the enumerated cell it
    * always did. The production `report` default is the other way: omitted means `/10`. This
@@ -576,10 +597,34 @@ export async function createSyntheticV6BundleFixture<Skip extends true | undefin
     );
   }
 
+  if (input.bind === true) {
+    requireOk(
+      updateDraft(context, { draftId: DRAFT_ID, patch: { beaconSource: FIXTURE_BEACON_SOURCE } }),
+      "draft beacon source",
+    );
+  }
+
   const venue = fixtureVenue(input.workspaceDir);
   const createVenue = () => venue;
   requireOk(await runQuote(context, { draftId: DRAFT_ID }, { createVenue }), "quote");
   requireOk(runLock(context, { draftId: DRAFT_ID }), "lock");
+  // The only window `bind` admits: after the seal it binds TO, and before launch. The round is the
+  // one the seal derives, so the fixture exercises the strongest sentence the face can print --
+  // `roundBasis: "seal-derived"`, `sourceBasis: "seal-declared"`, `postSeal: "proven-offline"`.
+  let bindingRecordSha256: string | undefined;
+  if (input.bind === true) {
+    const locked = readRunState(input.workspaceDir, DRAFT_ID);
+    if (locked?.lockedAt === undefined) throw new Error("anchored fixture: lock recorded no instant to bind against");
+    const required = requiredBeaconRound(FIXTURE_BEACON_SOURCE, locked.lockedAt);
+    if (required === undefined) throw new Error("anchored fixture: the declared beacon source derives no round");
+    bindingRecordSha256 = requireOk(
+      runBind(context, {
+        draftId: DRAFT_ID,
+        beacon: { source: FIXTURE_BEACON_SOURCE, round: required.round, value: FIXTURE_BEACON_VALUE },
+      }),
+      "bind",
+    ).recordSha256;
+  }
   for (const plan of plans.filter((entry) => LOCK_PLANS.has(entry.kind))) {
     await applyPlan(context, plan, anchors);
   }
@@ -603,6 +648,7 @@ export async function createSyntheticV6BundleFixture<Skip extends true | undefin
     authority: anchors.authority,
     lockOts: anchors.otsFixturesFor(collectedState.runSha256),
     matrixOts: anchors.otsFixturesFor(collectedState.matrixSha256),
+    ...(bindingRecordSha256 === undefined ? {} : { bindingRecordSha256 }),
   };
   if (input.skipReport === true) {
     return collected as unknown as [Skip] extends [true] ? Omit<SyntheticV6BundleFixture, "bundle"> : SyntheticV6BundleFixture;

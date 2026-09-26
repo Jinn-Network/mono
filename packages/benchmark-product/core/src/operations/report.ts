@@ -66,7 +66,7 @@ import {
   DISCLOSURE_SPECIFICATION_EXTENSION,
   DISCLOSURE_SPECIFICATION_MEDIA_TYPE,
 } from "@jinn-network/benchmarking-records";
-import { DISCLOSURE_SPECIFICATION_CAPABILITY, EXTERNAL_IMPORT_CAPABILITY, activeCapabilityVector } from "@colophon-claims/check";
+import { BEACON_BINDING_CAPABILITY, DISCLOSURE_SPECIFICATION_CAPABILITY, EXTERNAL_IMPORT_CAPABILITY, activeCapabilityVector } from "@colophon-claims/check";
 import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { buildClaimPackage, writeClaimPackage, type ClaimPackage } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
@@ -81,6 +81,7 @@ import {
 import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
 import { createReportDsseSigner, loadOrCreateReportSigningKey } from "../report/signing.js";
 import { previewDisclosureLine, readPreviewLog } from "../run/preview-log.js";
+import { loadPublicRunBinding } from "../run/binding-carriage-public.js";
 import { loadPublicExternalImport } from "../run/imported-run.js";
 import { primaryAnalysisPlanLength } from "../run/compile.js";
 import { requireRunState, writeRunState } from "../run/state.js";
@@ -346,11 +347,24 @@ export function runReport(
       // so rather than silently reprojecting a document the operator already read. Computed once —
       // method-independent, so every entry's claim package shares it.
       const carriage = readRunAnchorCarriage(clockedContext.workspaceDir, runState);
+      // issue #3370: the run's beacon binding, if it has one. Read once for the same reason the
+      // anchors are -- a binding is a RUN-level fact, so every entry of this report shares it.
+      //
+      // This block is hoisted above `sealReportEntry` while `composedCapabilities` is computed PER
+      // ENTRY, and the two agree only because `beacon-binding` activates on a run-level fact: every
+      // entry of a composed report declares it, or none does. A future capability that affected
+      // `venueHonesty` on a PER-ENTRY activation would have to move this block inside the loop, or
+      // the hoisted block would seal one entry's prose into every entry's Report.
+      const bindingCarriage = loadPublicRunBinding(clockedContext.workspaceDir, runState);
+      // binding-carriage: `loadPublicRunBinding` goes through `readRunBindingCarriage`, where
+      // `assertRunBindingLinkage` compares the record against this run's own sealed Run -- the same
+      // function a reader applies to the published member. Pinned in
+      // `binding-face-carriage.test.ts`.
       const venueHonesty = buildLocalVenueHonesty(
         matrixRecord.cells,
         runRecord,
         carriage.anchors,
-        undefined,
+        composedFormat ? bindingCarriage?.binding : undefined,
         importedRun,
       );
       // issue #2839: the sealed disclosure declaration, if this run has one. Read once for the same
@@ -429,7 +443,7 @@ export function runReport(
             projectsBinaryQualification: entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument,
             declaresDisclosure: disclosureCarriage !== undefined,
             importedRun,
-            boundRun: false,
+            boundRun: bindingCarriage !== undefined,
           })
           : undefined;
         const entryIsDisclosed = composedCapabilities !== undefined
@@ -439,6 +453,8 @@ export function runReport(
             && entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument;
         const entryIsImported = composedCapabilities !== undefined
           && composedCapabilities.includes(EXTERNAL_IMPORT_CAPABILITY);
+        const entryIsBound = composedCapabilities !== undefined
+          && composedCapabilities.includes(BEACON_BINDING_CAPABILITY);
         let produced: ProducedReport;
         try {
           produced = await produceReport(
@@ -507,6 +523,7 @@ export function runReport(
           ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
           ...(entryIsDisclosed ? { disclosure: disclosureCarriage!.disclosure } : {}),
           ...(entryIsImported ? { externalImport: importedCarriage!.claim } : {}),
+          ...(entryIsBound ? { binding: bindingCarriage!.claim } : {}),
           ...(composedCapabilities === undefined ? {} : { composedCapabilities }),
           ...(previewLog !== undefined && previewLog.count > 0
             ? { previewDisclosure: { previewCount: previewLog.count, timestamps: previewLog.previews.map((preview) => preview.at) } }

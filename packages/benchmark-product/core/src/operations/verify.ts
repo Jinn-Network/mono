@@ -43,6 +43,7 @@ import {
 } from "@jinn-network/benchmarking-records";
 import {
   DISCLOSURE_SPECIFICATION_CAPABILITY,
+  BEACON_BINDING_CAPABILITY,
   EXTERNAL_IMPORT_CAPABILITY,
   activeCapabilityVector,
   evaluateIntegrityAnchors,
@@ -84,6 +85,7 @@ import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receip
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
 import { foldRunJournal, readRunJournalEntries } from "../run/journal.js";
 import { readPreviewLog } from "../run/preview-log.js";
+import { loadPublicRunBinding } from "../run/binding-carriage-public.js";
 import { loadPublicExternalImport } from "../run/imported-run.js";
 import { requireRunState } from "../run/state.js";
 import { artifactsDir, claimPackageArtifactPath } from "../workspace/layout.js";
@@ -277,6 +279,9 @@ export async function verifyRunWorkspace(
          * this workspace-side rebuild compares the same projection the portable reader does. */
         readonly disclosureCarriage: ReturnType<typeof readRunDisclosureCarriage>;
         readonly importedCarriage: ReturnType<typeof loadPublicExternalImport>;
+        /** issue #3370: the run's verified binding and the sealed record's exact bytes, so this
+         * workspace-side rebuild projects the claim section from the same bytes the reader does. */
+        readonly bindingCarriage: ReturnType<typeof loadPublicRunBinding>;
         readonly additionalLimitations: readonly string[];
         readonly suiteComparability?: {
           readonly executionConformance: boolean;
@@ -344,6 +349,7 @@ export async function verifyRunWorkspace(
           // Report.
           const disclosureCarriage = readRunDisclosureCarriage(context.workspaceDir, runState);
           const importedCarriage = loadPublicExternalImport(context.workspaceDir, input.draftId, runState);
+          const bindingCarriage = loadPublicRunBinding(context.workspaceDir, runState);
           const inspectAdditional = document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
             && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
             ? [...INSPECT_SEPARATE_ASSURANCE_LIMITATIONS]
@@ -415,6 +421,7 @@ export async function verifyRunWorkspace(
             anchorCarriage,
             disclosureCarriage,
             importedCarriage,
+            bindingCarriage,
             additionalLimitations: [
               ...inspectAdditional,
               ...(suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation]),
@@ -428,7 +435,7 @@ export async function verifyRunWorkspace(
             }),
           };
         }
-        const { previewLog, disclosureCarriage, importedCarriage, additionalLimitations, suiteComparability } = sharedContext;
+        const { previewLog, disclosureCarriage, importedCarriage, bindingCarriage, additionalLimitations, suiteComparability } = sharedContext;
         // Which generation `report` was asked for is the one fact taken from the stored claim: it is
         // the operator's choice, recorded nowhere else, and no record could contradict it.
         // Everything the choice implies -- the vector, and through it the id, the sections, the
@@ -439,7 +446,7 @@ export async function verifyRunWorkspace(
             projectsBinaryQualification: reportRecord.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument,
             declaresDisclosure: disclosureCarriage !== undefined,
             importedRun: importedCarriage !== undefined,
-            boundRun: false,
+            boundRun: bindingCarriage !== undefined,
           })
           : undefined;
 
@@ -479,6 +486,11 @@ export async function verifyRunWorkspace(
             || !composedCapabilities.includes(EXTERNAL_IMPORT_CAPABILITY)
             ? {}
             : { externalImport: importedCarriage.claim }),
+          ...(bindingCarriage === undefined
+            || composedCapabilities === undefined
+            || !composedCapabilities.includes(BEACON_BINDING_CAPABILITY)
+            ? {}
+            : { binding: { binding: bindingCarriage.binding, bytes: bindingCarriage.bytes } }),
           ...(composedCapabilities === undefined ? {} : { composedCapabilities }),
           ...(previewLog === undefined
             ? {}

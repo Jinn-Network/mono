@@ -31,6 +31,7 @@ import { canonicalJsonBytes, dssePreAuthEncoding, parseDsseEnvelope } from "@jin
 import { refuse } from "../errors.js";
 import { parseDraftDocument } from "../domain/draft.js";
 import { atomicWriteFileSync, fsyncDirectorySync } from "../fs/atomic.js";
+import { loadPublicRunBinding } from "../run/binding-carriage-public.js";
 import { loadPublicExternalImport } from "../run/imported-run.js";
 import {
   additionalClaimPackagePath,
@@ -98,7 +99,7 @@ import {
 } from "../runtime/inspect/binary-judge-manifest.js";
 import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
-import { activeCapabilityVector, derivePublicComparison, EXTERNAL_IMPORT_BUNDLE_MEMBER } from "@colophon-claims/check";
+import { activeCapabilityVector, derivePublicComparison, BEACON_BINDING_BUNDLE_MEMBER, EXTERNAL_IMPORT_BUNDLE_MEMBER } from "@colophon-claims/check";
 
 const ROLE_ORDER: readonly BundleV4EvidenceRole[] = BUNDLE_V4_EVIDENCE_ROLES;
 
@@ -397,6 +398,9 @@ function recordClosure(input: MaterializeBundleInput): {
   // closure is exactly as wrong as a disclosed claim whose section drifted.
   const disclosureCarriage = readRunDisclosureCarriage(workspaceDir, runState);
   const importedCarriage = loadPublicExternalImport(workspaceDir, draftId, runState);
+  // issue #3370: the sealed `beacon-binding/1` record this run bound to, or `undefined` for an
+  // unbound run -- which is every run that publishes exactly as it did before this feature existed.
+  const bindingCarriage = loadPublicRunBinding(workspaceDir, runState);
   // A run publishes one bundle per analysis. Only the QUALIFICATION bundle can be disclosed, because
   // `/8` is the one disclosed cell; a sibling headline or comparison analysis publishes on its own
   // closure without the section, exactly as it did before this feature existed.
@@ -1085,6 +1089,12 @@ function recordClosure(input: MaterializeBundleInput): {
   if (composedGeneration && importedCarriage !== undefined) {
     files.set(EXTERNAL_IMPORT_BUNDLE_MEMBER, importedCarriage.bytes);
   }
+  // The sealed record's EXACT bytes, so the manifest digest this line produces, the claim's
+  // `recordSha256`, and the sealed store's own digest are one value. A legacy-format bundle declares
+  // no capabilities and therefore never carries the member.
+  if (composedGeneration && bindingCarriage !== undefined) {
+    files.set(BEACON_BINDING_BUNDLE_MEMBER, bindingCarriage.bytes);
+  }
   const dissentCellKeys = assemblyCells
     .filter((cell) => new Set(cell.verdicts.map((verdict) => verdict.verdict)).size > 1)
     .map((cell) => cell.cellKey)
@@ -1149,7 +1159,7 @@ function recordClosure(input: MaterializeBundleInput): {
           projectsBinaryQualification: binaryQualification,
           declaresDisclosure: disclosureCarriage !== undefined,
           importedRun: importedCarriage !== undefined,
-          boundRun: false,
+          boundRun: bindingCarriage !== undefined,
         }),
       }
       : { format: legacyFormat }),

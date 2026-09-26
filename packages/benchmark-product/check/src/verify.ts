@@ -845,14 +845,46 @@ export async function verifyPublicBundleSnapshot(
     claimExternalImport = deriveClaimExternalImport(parseExternalImportMarker(read(EXTERNAL_IMPORT_BUNDLE_MEMBER)));
   }
 
-  // Issue #3370: the sealed `beacon-binding/1` record, verbatim, as the declared capability's
-  // mandatory member — so the snapshot has already authenticated it against `bundle.json`. Read
-  // ONCE and handed on as bytes: the claim's `binding` section and the `venueHonesty` sentence are
-  // both rebuilt from this record, and one buffer is what makes it impossible for them to disagree.
-  // The linkage check itself runs below, after `claim-consistency`, where its check name is pushed.
+  // ── beacon-binding (issue #3370) ───────────────────────────────────────────────────────────
+  //
+  // The sealed `beacon-binding/1` record, verbatim, as the declared capability's mandatory member —
+  // so the snapshot has already authenticated it against `bundle.json`. Read ONCE and handed on as
+  // bytes: the claim's `binding` section and the `venueHonesty` sentence are both rebuilt from this
+  // record, and one buffer is what makes it impossible for them to disagree.
+  //
+  // `verifyRunBinding` proves the record is internally consistent — its order derives from the
+  // `sealDigest` it carries, its beacon postdates the `sealedAt` it carries. It never sees the Run,
+  // so a foreign record filed under its own true digest passes it. `assertRunBindingLinkage` is what
+  // closes that, against the AUTHENTICATED `run.json` this bundle carries, and it is the same
+  // function the workspace producer applies to its own sealed store — one rule, not two guesses.
+  // `sealedAt` is `undefined` for a run sealed before `beacon-source/v1` carried a seal instant, and
+  // the comparison is skipped for exactly that case; step 2d of EXTERNAL-VERIFICATION.md names that
+  // gap to the reader rather than leaving it implied.
+  //
+  // Both run HERE, before the claim rebuild, even though the check NAME is pushed after
+  // `claim-consistency` in the derived order. That is not cosmetic: the rebuild re-derives the
+  // section and the sentence from these bytes, so a record the procedure refuses would otherwise
+  // raise `RunBindingError` from inside `assertClaimConsistency` — a raw error class crossing the
+  // verifier's boundary instead of the typed refusal every other path produces. Verifying first
+  // means the rebuild only ever sees a record this function has already vouched for.
   const bindingRecordBytes = composed !== undefined && composed.capabilities.includes(BEACON_BINDING_CAPABILITY)
     ? read(BEACON_BINDING_BUNDLE_MEMBER)
     : undefined;
+  if (bindingRecordBytes !== undefined) {
+    try {
+      assertRunBindingLinkage({
+        binding: verifyRunBindingMember(bindingRecordBytes),
+        runSha256: identities.runSha256,
+        sealedAt: readRunDeclaredSealInstant(run as unknown as Record<string, unknown>),
+        declaredSource: readBeaconSource(run as unknown as Record<string, unknown>),
+      });
+    } catch (cause) {
+      if (cause instanceof RunBindingError) {
+        refuse("record-integrity", BEACON_BINDING_BUNDLE_MEMBER, cause.message);
+      }
+      throw cause;
+    }
+  }
 
   const assembly = parseAssembly(read("verification/assembly.jsonl"));
   const expectedNativePaths = new Set(
@@ -2107,36 +2139,12 @@ export async function verifyPublicBundleSnapshot(
     checks.push("external-import");
   }
 
-  // ── beacon-binding (issue #3370) ───────────────────────────────────────────────────────────
-  //
-  // Runs after `claim-consistency` for the reason `disclosure-specification` does: the claim's
-  // `binding` section has already been byte-compared against the projection of these exact bytes,
-  // so what is left for this block is the record itself and its linkage to this bundle's Run.
-  //
-  // `verifyRunBinding` proves the record is internally consistent -- its order derives from the
-  // `sealDigest` it carries, its beacon postdates the `sealedAt` it carries. It never sees the Run,
-  // so a foreign record filed under its own true digest passes it. `assertRunBindingLinkage` is the
-  // check that closes that, against the AUTHENTICATED `run.json` this bundle carries, and it is the
-  // same function the workspace producer applies to its own sealed store -- one rule, not two
-  // guesses. `sealedAt` is `undefined` for a run sealed before `beacon-source/v1` carried a seal
-  // instant, and the comparison is skipped for exactly that case; step 2d of
-  // EXTERNAL-VERIFICATION.md names that gap to the reader rather than leaving it implied.
-  if (bindingRecordBytes !== undefined) {
-    try {
-      assertRunBindingLinkage({
-        binding: verifyRunBindingMember(bindingRecordBytes),
-        runSha256: identities.runSha256,
-        sealedAt: readRunDeclaredSealInstant(run as unknown as Record<string, unknown>),
-        declaredSource: readBeaconSource(run as unknown as Record<string, unknown>),
-      });
-    } catch (cause) {
-      if (cause instanceof RunBindingError) {
-        refuse("record-integrity", BEACON_BINDING_BUNDLE_MEMBER, cause.message);
-      }
-      throw cause;
-    }
-    checks.push("beacon-binding");
-  }
+  // Issue #3370. The record and its linkage were established above, where the bytes are read, so
+  // that the claim rebuild could not meet a record nobody had vouched for. What is left here is the
+  // name, pushed in the position the declared vector derives — after `claim-consistency`, whose
+  // whole-claim byte-compare has by then covered the `binding` section against the projection of
+  // these same bytes.
+  if (bindingRecordBytes !== undefined) checks.push("beacon-binding");
   // Design §6 step 4: the checks that actually ran are compared for exact equality against the
   // list the declared vector derives. A mismatch is a refusal, not a shorter list — it is what
   // makes registering a capability without implementing it here impossible to pass.

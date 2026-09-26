@@ -1,5 +1,5 @@
 import { BENCHMARKING_METHOD_IDS, type BenchmarkRecord, type MatrixRecord, type ReportRecord, type RunRecord } from "@jinn-network/benchmarking-records";
-import { firstDifference, type ClaimAnchor, type ClaimDisclosureSection, type ClaimExternalImportSection } from "@colophon-claims/check";
+import { firstDifference, type ClaimAnchor, type ClaimDisclosureSection, type ClaimExternalImportSection, type VerifiedRunBinding } from "@colophon-claims/check";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "../operations/run-results.js";
@@ -7,7 +7,7 @@ import { buildClaimPackage, type BuildClaimPackageInput, type ClaimPackage } fro
 import { binaryInstrumentReportLimitations } from "../run/binary-instrument-profile.js";
 import { previewDisclosureSummaryLine } from "../run/preview-log.js";
 import { venueIsolationPostureForPolicy } from "../venue/isolation.js";
-import { EXTERNAL_IMPORT_CAPABILITY } from "@colophon-claims/check";
+import { BEACON_BINDING_CAPABILITY, EXTERNAL_IMPORT_CAPABILITY, deriveClaimRunBinding } from "@colophon-claims/check";
 
 /** Mirrors `operations/report.ts`'s own (unexported) copy of this exact string -- see the comment
  * at its use below. Not shared via export: `operations/publication-report.ts` already carries its
@@ -59,6 +59,11 @@ export function assertClaimConsistency(input: {
   /** issue #3417: the external-import section re-derived from the authenticated marker, never
    * read from the claim under test. */
   readonly externalImport?: ClaimExternalImportSection;
+  /** issue #3370: this run's verified binding and the sealed record's exact bytes, as
+   * `loadPublicRunBinding` returns them — the same pair the producer sealed from. The section is
+   * re-derived from those bytes here rather than accepted ready-made, so the rebuild owns the
+   * projection exactly as the reader's does. */
+  readonly binding?: { readonly binding: VerifiedRunBinding; readonly bytes: Uint8Array };
   readonly suiteComparability?: {
     readonly executionConformance: boolean;
     readonly coverage: "one_task" | "ten_task" | "full" | "custom";
@@ -84,6 +89,15 @@ export function assertClaimConsistency(input: {
     refuse("record-integrity", "claim-consistency", "sealed Run carries no complete evaluation-assurance primitives");
   }
   const imported = input.composedCapabilities?.includes(EXTERNAL_IMPORT_CAPABILITY) === true;
+  // Gated on the DECLARED VECTOR, never on "this run has a binding": that is what makes a section
+  // the vector does not declare a difference rather than a tautology, as `imported` above is.
+  //
+  // binding-carriage: the pair comes from `loadPublicRunBinding`, whose `readRunBindingCarriage` is
+  // where `assertRunBindingLinkage` compares the record against this run's own sealed Run.
+  // `binding-face-carriage.test.ts` pins this site.
+  const bound = input.composedCapabilities?.includes(BEACON_BINDING_CAPABILITY) === true
+    ? input.binding
+    : undefined;
   const expected = buildClaimPackage({
     draftId: input.draftId,
     benchmarkSha256: identities.benchmarkSha256,
@@ -94,7 +108,9 @@ export function assertClaimConsistency(input: {
     reportRecord,
     reportSha256: identities.reportSha256,
     reportEnvelopeSha256: identities.reportEnvelopeSha256,
-    venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, input.anchors ?? [], undefined, imported),
+    // binding-carriage: `bound` is `loadPublicRunBinding`'s pair, gated on the declared vector above;
+    // `assertRunBindingLinkage` ran inside `readRunBindingCarriage` before it reached this rebuild.
+    venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, input.anchors ?? [], bound?.binding, imported),
     verificationCommandVerb: "bundle verify",
     assurance: {
       preset: input.assurancePreset,
@@ -110,6 +126,7 @@ export function assertClaimConsistency(input: {
     ...(input.composedCapabilities === undefined ? {} : { composedCapabilities: input.composedCapabilities }),
     ...(input.disclosure === undefined ? {} : { disclosure: input.disclosure }),
     ...(input.externalImport === undefined ? {} : { externalImport: input.externalImport }),
+    ...(bound === undefined ? {} : { binding: deriveClaimRunBinding(bound.bytes) }),
     ...(input.suiteComparability === undefined ? {} : { suiteComparability: input.suiteComparability }),
   });
   if (!bytesEqual(canonicalJsonBytes(claim), canonicalJsonBytes(expected))) {
