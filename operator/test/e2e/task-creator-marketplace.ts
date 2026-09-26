@@ -37,8 +37,8 @@
  *     marketplace delivery through a live Daemon's legacy composition `WorkLoop`.
  *   - DIRECT/in-process: the minter guard is exercised through
  *     `LearnerHarness.canAttempt`; no minter daemon runs. The verdict leg invokes
- *     Safe-mediated production ports, but currently fails at `openVerdictAttempt`
- *     before a verdict is delivered or claimed.
+ *     Safe-mediated production ports after the router has claimed the solution
+ *     (`waitForSolutionSettlement`); Mech `Deliver` alone is not enough.
  *   - FAKED (per controller resolution #3, matching
  *     task-creator-harvest-e2e.test.ts): the solver is the launcher-shaped stub
  *     returning a canned patch (no Claude); the evaluator grade is a deterministic
@@ -58,18 +58,16 @@
  * `VerdictSafeBroadcaster` (`Pick<..., 'execute'>`) — the surface it actually consumes; it
  * never calls `classify()`. Assertions 4 and 5 therefore reach the chain.
  *
- * Remaining blocker (issue #3715): assertions 4 and 5 do not yet pass. This is a
- * legacy-lane E2E gap, not a gap in the explicitly selected native composition.
- * The first full run (CI `workflow_dispatch`, 2026-09-04) cleared assertions 1-3 and then
- * reverted on `TCAttemptNotSubmitted(1, 0)`: this helper explicitly builds
- * `buildOperatorComposition({ mode: 'legacy' })` and runs its `WorkLoop` with
- * `acceptLegacyCards: true`, but that legacy loop lacks router solution settlement. When
- * `compositionMode: "native"` is explicitly configured, production `main.ts` selects
- * `mode: 'native'`, passes `nativeClaimRuntime`, threads
- * `composition.nativeSolutionCoordinator` into `WorkLoop`, and constructs the coordinator with
- * `buildNativeSolutionSettlementPort`; the coordinator persistently begins, broadcasts, and
- * records settlement. The old optional `MechAdapter.submitSolutionDelivery` is not the native
- * mechanism. Issue #3715 owns the legacy-lane repair; this E2E remains unchanged until then.
+ * Issue #3715: assertions 4 and 5 used to race Mech `Deliver` (`waitForDelivery`) against
+ * `openVerdictAttempt`. The composition `WorkLoop` delivers to the mech first, then the
+ * pipeline claims the solution on the router; opening a verdict before
+ * `SolutionDeliveryClaimed` reverts `TCAttemptNotSubmitted`. This script still uses the
+ * explicit legacy helper (`buildOperatorComposition({ mode: 'legacy' })`,
+ * `acceptLegacyCards: true`) and does not call `MechAdapter.submitSolutionDelivery` — that
+ * optional adapter method is not the native settlement mechanism. Native production
+ * (`compositionMode: "native"`) still threads `nativeSolutionCoordinator` /
+ * `buildNativeSolutionSettlementPort`. The repair here is sequencing: wait for
+ * `waitForSolutionSettlement` on the exact claim before the verdict leg.
  *
  * Public command: `yarn e2e:task-creator`.
  */
@@ -97,6 +95,7 @@ import {
   startSweRebenchSolverDaemon,
   waitForDaemonClaim,
   waitForDelivery,
+  waitForSolutionSettlement,
   ANVIL_PRIVATE_KEYS,
   type DaemonHarnessFixture,
   type BootstrappedOperator,
@@ -622,6 +621,8 @@ async function main(): Promise<void> {
     const solutionPayload1 = SweRebenchV2SolutionPayloadSchema.parse(delivered1.envelope.payload);
     assert(solutionPayload1.patch === GOLD_PATCH, 'ASSERTION 3 FAILED: delivered solution 1 did not carry the gold patch');
     console.log(`  [OK] operator B delivered the GOLD patch on-chain: tx=${delivered1.deliveryTxHash}`);
+    const settled1 = await waitForSolutionSettlement(fixture, claim1, operatorB, v3Env);
+    console.log(`  [OK] gold solution settled on the router: tx=${settled1.txHash}`);
 
     const attemptIndex1 = await attemptIndexFromClaimTx(fixture, claim1.txHash);
     const verdict1 = await submitSelfEvaluation({
@@ -652,6 +653,8 @@ async function main(): Promise<void> {
     const solutionPayload2 = SweRebenchV2SolutionPayloadSchema.parse(delivered2.envelope.payload);
     assert(solutionPayload2.patch === GARBAGE_PATCH, 'ASSERTION 3 FAILED: delivered solution 2 did not carry the garbage patch');
     console.log(`  [OK] operator B delivered the GARBAGE patch on-chain: tx=${delivered2.deliveryTxHash}`);
+    const settled2 = await waitForSolutionSettlement(fixture, claim2, operatorB, v3Env);
+    console.log(`  [OK] garbage solution settled on the router: tx=${settled2.txHash}`);
 
     const attemptIndex2 = await attemptIndexFromClaimTx(fixture, claim2.txHash);
     const verdict2 = await submitSelfEvaluation({
