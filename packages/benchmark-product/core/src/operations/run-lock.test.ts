@@ -9,6 +9,7 @@ import {
   parseRun,
   readBeaconSource,
   readRunAnchorIntentExtension,
+  readRunDeclaredSealInstant,
   readRunSampleSizeAdvisory,
   sealRun,
   withRunSampleSizeAdvisoryExtension,
@@ -331,6 +332,28 @@ describe("runLock — declared beacon source", () => {
     await runQuote(contextFor(clock), { draftId: "draft-1" });
     expect(runLock(contextFor(clock), { draftId: "draft-1" }).ok).toBe(true);
     expect(readBeaconSource(sealedRun())).toBe("drand/quicknet");
+  });
+
+  test("seals its own lock instant beside the declaration, from the same clock reading", async () => {
+    // Issue #3370. The seal instant is the other half of the `(source, sealedAt)` pair this
+    // extension exists to fix, and it must be the SAME instant the workspace records as its lock:
+    // a published bundle checks a binding's claimed seal time against this field, so two readings
+    // of the clock would let the two disagree by however long the lock took.
+    const clock = makeClock();
+    await setUpQuotedDraft(clock);
+    updateDraft(contextFor(clock), { draftId: "draft-1", patch: { beaconSource: "drand/quicknet" } });
+    await runQuote(contextFor(clock), { draftId: "draft-1" });
+    expect(runLock(contextFor(clock), { draftId: "draft-1" }).ok).toBe(true);
+    const lockedAt = readRunState(workspaceDir, "draft-1")?.lockedAt;
+    expect(lockedAt).toBeDefined();
+    expect(readRunDeclaredSealInstant(sealedRun())).toBe(lockedAt);
+  });
+
+  test("seals no instant when the draft declares no source, so an undeclared run is untouched", async () => {
+    const clock = makeClock();
+    await setUpQuotedDraft(clock);
+    expect(runLock(contextFor(clock), { draftId: "draft-1" }).ok).toBe(true);
+    expect(readRunDeclaredSealInstant(sealedRun())).toBeUndefined();
   });
 
   test("touches the record at all only when the draft declares one", async () => {

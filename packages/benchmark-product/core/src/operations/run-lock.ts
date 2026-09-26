@@ -276,10 +276,15 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
       // choose: with the round already determined by `(source, sealedAt)` (#3322), a sealed source
       // determines the beacon outright. Declaring nothing stays legal and seals byte-identical
       // bytes; it just leaves the choice where PR #3375 found it, and the report face says so.
+      // `sealedAt` is `at` — the single clock reading this whole operation is pinned to, and the
+      // same value written as `lockedAt` below, so the sealed instant and the workspace's own lock
+      // instant cannot diverge. Sealing it (#3370) is what lets a published bundle check that the
+      // seal time a binding names is the seal time the run actually had, rather than take the
+      // publisher's word for the very field the postdating and round derivations both turn on.
       const declaredBeaconSource = document.spec.beaconSource;
       const runWithBeaconSource = declaredBeaconSource === undefined
         ? runWithTaskSelection
-        : withRunBeaconSourceExtension(runWithTaskSelection, { source: declaredBeaconSource });
+        : withRunBeaconSourceExtension(runWithTaskSelection, { source: declaredBeaconSource, sealedAt: at });
       // Check the declaration against the records BEFORE the irreversible seal, using the exact
       // rule the cold verifier applies afterwards. Left to publish time, a contradiction would
       // surface only once the run had been locked, executed, reported, and materialized -- a
