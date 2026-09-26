@@ -156,23 +156,23 @@ describe("public surface", () => {
   });
 
   test("the chain-verification vocabulary is reachable through the mirror options (#4581)", () => {
-    // The recorded posture (`plugin/runtime/README.md`, Chain verification) is that this
-    // vocabulary is public *by construction*: `ChainVerification` is a required field of
-    // the root-exported `CreateCorpusMirrorOptions`, so a consumer that calls
-    // `createCorpusMirror` must name it and everything reachable through it. This pins
-    // that reachability, which is the reason the posture cannot be reversed to "internal"
-    // without also withdrawing the factory. The type references are proven by `tsc`.
+    // The recorded posture (`plugin/runtime/README.md`, Chain verification) is that
+    // `ChainVerification` is public *by construction*: it is a required field of the
+    // root-exported `CreateCorpusMirrorOptions`, so a consumer must be able to write an
+    // implementation naming every type its two methods take. `tsc` proves that; the one
+    // runtime assertion below just keeps the block executable.
     const verification: runtime.CreateCorpusMirrorOptions["chainVerification"] = {
       mode: "unverified",
       async verify(
         input: runtime.ChainVerificationInput,
       ): Promise<runtime.ChainVerificationOutcome> {
-        const truncation: runtime.WalkTruncation = input.truncation;
-        return truncation === "none"
+        return input.truncation === "none"
           ? { status: "ok" }
           : { status: "rejected", reason: runtime.SYNC_TRUNCATED_REASON };
       },
-      async revalidateHead(): Promise<runtime.ChainVerificationOutcome> {
+      async revalidateHead(
+        _input: runtime.HeadRevalidationInput,
+      ): Promise<runtime.ChainVerificationOutcome> {
         return { status: "rejected", reason: runtime.SYNC_ABORTED_REASON };
       },
     };
