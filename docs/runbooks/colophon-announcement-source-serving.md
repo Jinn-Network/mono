@@ -397,11 +397,14 @@ The post carries four things and nothing else that is load-bearing:
 
 1. **The lock digest, inline in the post body.** `result.runSha256` from
    `lock --json`. Inline because a link alone can point at mutable content.
-2. **The provider and time of each anchor over that digest.** Name the provider
-   profile URI and the time the proof's own bytes carry — `genTime` for an
-   RFC 3161 token, the attested Bitcoin block height for OpenTimestamps. A
-   calendar proof that is still `pending` has no time to quote: say `pending`
-   rather than quoting the acquisition moment, which proves nothing.
+2. **The provider and the dating fact each anchor's proof bytes carry.** Name
+   the provider profile URI and that fact, and nothing the bytes do not hold: an
+   RFC 3161 token carries `genTime`, which is a time; an OpenTimestamps proof
+   carries only the attested Bitcoin block height, an index whose time a reader
+   derives from block headers the proof does not supply. Quote the height, never
+   a timestamp. A calendar proof still `pending` has no dating fact to quote at
+   all: say `pending` rather than quoting the acquisition moment, which proves
+   nothing.
 3. **The archive URL of the sealed Run record and of each anchor record.** The
    Run record is the registration pointer; the anchor records are what a stranger
    re-verifies against it. Take each URL from the served path the index gives —
@@ -410,20 +413,33 @@ The post carries four things and nothing else that is load-bearing:
 4. **The standing immutability clause**, one sentence:
    `Nothing in the sealed freeze moves once judging starts.`
 
-Read all four off `/lock-index.json` in the served archive, which the product
-regenerates after every `publication register` and at `publication serve`
-start: the row for a lock names its `runPath`, the announcing `entryPath`, and
-every carried anchor's `subject`, `provider`, `recordSha256`, and served `path`.
-A `null` path means those exact bytes are not served here, so quote the digest
-and do not invent a URL for it. `anchor --subject lock --json` reports the same
-provider and `recordSha256` at acquisition time; the anchor's time lives in the
-proof bytes, which the sealed record carries unchanged — for an RFC 3161 token
-obtained out of band, `openssl ts -reply -in <token> -token_in -text` prints
-it (`-token_in` because the anchor path carries a bare token, not a response).
+Items 1 and 3 come off `/lock-index.json` in the served archive, which the
+product regenerates after every `publication register` and at `publication
+serve` start: the row for a lock names its `lockSha256`, its `runPath`, the
+announcing `entryPath`, and every carried anchor's `subject`, `provider`,
+`recordSha256`, and served `path`. The row carries no anchor time and no proof
+status, so item 2 is read off the anchor itself; item 4 is the standing
+sentence. A `null` path means those exact bytes are not served here, so quote
+the digest and do not invent a URL for it. `anchor --subject lock --json`
+reports the same `provider` and `recordSha256` plus the `proofStatus` item 2
+asks for — `pending`, `present`, or `verified` — so no one parses sealed proof
+bytes to learn it. The dating fact itself does live in those bytes, which
+the sealed record carries unchanged: print an RFC 3161 one with
+`openssl ts -reply -in <file> -text`, adding `-token_in` only when `<file>` is
+a bare DER `TimeStampToken`. An ordinary out-of-band TSA exchange hands back a
+full `TimeStampResp`, on which `-token_in` fails; the product's own anchor path
+stores the bare token, because it extracts one from the response before sealing.
 
-Expect every anchor `path` to be `null` today: this archive does not serve
-AnchorEvidence records, so item 3 currently resolves to the Run record's URL
-plus each anchor's digest quoted inline.
+Expect every anchor `path` to be `null` for an anchor this run acquired through
+`anchor`: that verb seals its `AnchorEvidence` into the workspace store and
+records only `subject`, `provider`, and `recordSha256` on run state. It never
+announces the record, so those bytes never reach the serving root and the index
+has no URL to give, and item 3 resolves to the Run record's URL plus each
+anchor's digest quoted inline. The archive does serve `AnchorEvidence` records
+as a kind: the entry-anchor path announces each one together with its bytes at
+`/records/<sha256>`, which is exactly what the anchor-coverage walk above
+fetches. So a `/records/<sha256>` fetch that fails for an *announced* anchor is
+the hosting fault that walk defines, not expected behavior.
 
 What does not belong in the post:
 
@@ -441,8 +457,10 @@ The judge-report program runs this format with item 2 out of band:
 [its freeze step](./judge-report-official-run.md) posts the archive URL, the
 inline lock digest, and the immutability clause, and keeps the OpenTimestamps
 stamp in the operator notes rather than in the post. Its stamp is taken outside
-the product's anchor path, so there is no announced anchor record to cite; when
-a run acquires its anchor through `anchor`, item 2 is in the post.
+the product's records entirely, so no `AnchorEvidence` record exists for it at
+all, neither sealed nor announced, and there is no `provider` or `proofStatus`
+surface to read item 2 off; when a run acquires its anchor through `anchor`,
+item 2 is in the post.
 
 ## Disclosure: why this producer has no disclosure gate
 
