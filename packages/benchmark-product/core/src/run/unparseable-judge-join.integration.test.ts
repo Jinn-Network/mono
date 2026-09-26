@@ -95,6 +95,7 @@ import {
   type MeasurementMap,
 } from "@jinn-network/task-execution-profiles";
 import {
+  deriveAttemptUri,
   documentDigest,
   sealDelivery,
   sealTask,
@@ -109,6 +110,9 @@ const VERDICT_PAYLOAD_TYPE = "application/vnd.in-toto+json";
 const RUN_OWNER = "urn:uuid:77777777-7777-5777-8777-777777777777";
 const CLOSE_AT = "2026-08-15T01:00:00Z";
 const K = 3;
+
+/** This test's attempt-URI binding name: the frozen first component of every derived attempt. */
+const ATTEMPT_BINDING_NAME = "jinn.network/benchmarking/unparseable-judge-join";
 
 /**
  * The exact bytes preserved from the live cell-535 response, re-derived here as an inline literal
@@ -501,9 +505,11 @@ async function buildJoinFixture(): Promise<JoinFixture> {
         put(observation.bytes);
 
         const key = cellKey(material.taskDigestHex, armId, replicate);
-        const attemptUri = `urn:uuid:33333333-3333-4333-8333-${
-          Buffer.from(key).toString("hex").slice(0, 12).padEnd(12, "0")
-        }`;
+        // The production derivation, not a hand-rolled slice: `cellKey` carries the task digest,
+        // arm id and replicate, so every cell gets a distinct deterministic v5 UUID. The previous
+        // hex slice kept six ASCII characters, all inside the task digest, so all six cells of an
+        // item collided on one attempt URI.
+        const attemptUri = deriveAttemptUri(ATTEMPT_BINDING_NAME, [key]);
         const { paths, deliveryDigest } = await buildHarnessWorkspace({
           material,
           responseBytes,
