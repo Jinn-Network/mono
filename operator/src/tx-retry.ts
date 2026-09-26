@@ -630,6 +630,38 @@ export async function waitForContractCode(
   throw new Error(`No contract code at ${address} after ${maxAttempts} getCode attempts`);
 }
 
+/**
+ * Poll publicClient.getBalance until `address` holds at least `minWei`.
+ *
+ * Absorbs the sibling of the post-deploy getCode race: a funding-tx receipt
+ * can return success on one RPC while a later `eth_fillTransaction` /
+ * getBalance against another slot of the fallback chain still sees 0. The
+ * live B0a walk (#2446) hit that as `gas required exceeds allowance (0)` on
+ * the Safe factory call immediately after waiting for the master → agent
+ * transfer receipt.
+ */
+export async function waitForNativeBalanceAtLeast(
+  publicClient: PublicClient,
+  address: Address,
+  minWei: bigint,
+  options: { maxAttempts?: number; baseDelayMs?: number; maxDelayMs?: number } = {},
+): Promise<bigint> {
+  const maxAttempts = options.maxAttempts ?? 6;
+  const baseDelayMs = options.baseDelayMs ?? 400;
+  const maxDelayMs = options.maxDelayMs ?? 4_000;
+
+  let last = 0n;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    last = await publicClient.getBalance({ address });
+    if (last >= minWei) return last;
+    if (attempt === maxAttempts - 1) break;
+    await backoffDelay(attempt, baseDelayMs, maxDelayMs);
+  }
+  throw new Error(
+    `Balance at ${address} is ${last.toString()} wei after ${maxAttempts} getBalance attempts; need ${minWei.toString()} wei`,
+  );
+}
+
 function mulDivCeil(value: bigint, numerator: bigint, denominator: bigint): bigint {
   return (value * numerator + denominator - 1n) / denominator;
 }
