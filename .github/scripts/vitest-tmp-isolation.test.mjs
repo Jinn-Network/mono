@@ -171,16 +171,17 @@ function enclosedLiterals(source, key, open, close) {
  * this direction fails closed — a false red, never a false green — and nothing in the tree carries
  * a stray `projects:` key today.
  *
- * It under-matches in the same breath, and that twin fails open (issue #3153). `\bprojects\s*:\s*\[`
- * sees only the bare identifier key written out in the file: a quoted `'projects': [`, a computed
- * `['projects']: [`, a key held in a variable (`[KEY]: [`), and a key reaching the config only
- * through a spread of an object declared elsewhere all miss it, yield no ranges, and drop every
- * allowance and seam path back to root scope — the same collapse the variable-held entry above
- * causes, reading green on
- * the very shape #3123 closes. Unanchoring the key is what bounds the false red; it is not what
- * bounds this. Like the variable-held case it is inherent to a text scanner, no worse than the
- * pre-#3123 behavior, and recorded rather than closed: anchoring or widening the regex would trade
- * one of these directions for the other, not remove both.
+ * It under-matches in the same breath, and that twin fails open (issue #3153). The match reads only
+ * a bare identifier key written out in the file, so a quoted `'projects': [`, a computed
+ * `['projects']: [`, and a key held in a variable (`[KEY]: [`) all miss it, yield no ranges, and
+ * drop every allowance and seam path back to root scope — the same collapse the variable-held entry
+ * above causes, reading green on the very shape #3123 closes. A spread is not one of these: an
+ * object spread into the config still writes `projects:` out somewhere in the file, and the scan is
+ * over the whole source, so those entries are scoped normally. The fail-closed argument above is
+ * what bounds the over-matching direction to a false red; it says nothing about this one. Like the
+ * variable-held case this is inherent to a text scanner, no worse than the pre-#3123 behavior, and
+ * recorded rather than closed: anchoring or widening the key would trade one of these directions for
+ * the other, not remove both.
  */
 export function projectEntryRanges(source) {
   const ranges = [];
@@ -1074,7 +1075,7 @@ test('fs.allow in one projects entry does not cover a seam path in another', () 
 // every entry back into root scope: the allowance in the sibling entry credits the seam path it
 // should not reach. Pinned because it is a false green, the one direction the doc block's
 // fail-closed argument does not cover, and a reader who finds it in the wild should find it here.
-test('a quoted projects key yields no entry ranges, collapsing scope to root', () => {
+test('a projects key the match does not see yields no entry ranges, collapsing scope to root', () => {
   const config = 'packages/x/vitest.config.ts';
   const seam = '../../test-support/tmp-isolation/isolate-tmp.ts';
   const entries = `{ server: { fs: { allow: ['../..'] } } }, { test: { setupFiles: ['${seam}'] } }`;
@@ -1096,6 +1097,14 @@ test('a quoted projects key yields no entry ranges, collapsing scope to root', (
   const held = `const KEY = 'projects'\n${withKey('[KEY]')}`;
   assert.deepEqual(projectEntryRanges(held), []);
   assert.deepEqual(unreachableWirings(held, config), []);
+
+  // A spread is not one of these, and the doc block says so: the key is still written out, and the
+  // scan is over the whole source, so the entries are scoped exactly as the bare key's are.
+  const spread = `const P = { projects: [${entries}] }\nexport default { test: { ...P } }`;
+  assert.equal(projectEntryRanges(spread).length, 2);
+  assert.deepEqual(unreachableWirings(spread, config), [
+    { key: 'setupFiles', resolved: 'test-support/tmp-isolation/isolate-tmp.ts' },
+  ]);
 });
 
 // Vitest does not fold the root config into a `projects` entry; an entry opts in with
