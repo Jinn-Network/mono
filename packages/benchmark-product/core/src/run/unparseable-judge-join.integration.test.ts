@@ -673,6 +673,11 @@ function unparseableCells(): readonly HarnessCellResult[] {
   return fixture.cells.filter((cell) => cell.itemKey === "alpha" && cell.armId === "arm-alpha");
 }
 
+/** The three cells where the judge accepts a WRONG item (item gamma, arm arm-alpha). */
+function falseAcceptCells(): readonly HarnessCellResult[] {
+  return fixture.cells.filter((cell) => cell.itemKey === "gamma" && cell.armId === "arm-alpha");
+}
+
 function firstUnparseableCell(): HarnessCellResult {
   return unparseableCells().find((cell) => cell.replicate === 1)!;
 }
@@ -770,6 +775,17 @@ describe("unparseable judge response, delivery joined to aggregate consumption",
     }
   });
 
+  test("the harness delivers a failing verdict when the judge accepts a WRONG item", () => {
+    const falseAccepts = falseAcceptCells();
+    expect(falseAccepts).toHaveLength(3);
+    for (const cell of falseAccepts) {
+      expect(cell.predicate["verdict"]).toBe("fail");
+      expect(cell.predicate["measurements"]).toContainEqual({ name: "judgeDecision", value: "ACCEPT" });
+      expect(cell.predicate["measurements"]).toContainEqual({ name: "parseValid", value: true });
+      expect(cell.predicate["measurements"]).toContainEqual({ name: "agreement", value: false });
+    }
+  });
+
   test("assemble classifies every unparseable cell as judged, never could-not-grade", () => {
     for (const cell of fixture.cells) {
       const matrixCell = fixture.matrix.cells.find((candidate) => candidate.cellKey === cell.cellKey)!;
@@ -822,7 +838,12 @@ describe("unparseable judge response, delivery joined to aggregate consumption",
           wrongAccepted: number;
           wrongRejected: number;
         };
-        falseAccept: { numerator: number; denominator: number; estimate: string | null };
+        falseAccept: {
+          numerator: number;
+          denominator: number;
+          estimate: string | null;
+          wilsonInterval: { low: string; high: string } | null;
+        };
         byCandidateClass: Record<string, { item: { complete: number } }>;
         byStratum: Record<string, { item: { complete: number } }>;
       }>;
@@ -845,10 +866,20 @@ describe("unparseable judge response, delivery joined to aggregate consumption",
     // zero-denominator branch: arm-alpha accepted it, arm-beta correctly rejected it.
     expect(result.arms["arm-alpha"]!.confusion)
       .toEqual({ correctAccepted: 1, correctRejected: 0, wrongAccepted: 1, wrongRejected: 0 });
-    expect(result.arms["arm-alpha"]!.falseAccept)
-      .toMatchObject({ numerator: 1, denominator: 1, estimate: "1.0000" });
-    expect(result.arms["arm-beta"]!.falseAccept)
-      .toMatchObject({ numerator: 0, denominator: 1, estimate: "0.0000" });
+    // Exact, so the Wilson bounds and the ABSENCE of `withheldReason` are both pinned here rather
+    // than left to the closing validator, which re-derives them with `rateProjection` itself.
+    expect(result.arms["arm-alpha"]!.falseAccept).toEqual({
+      numerator: 1,
+      denominator: 1,
+      estimate: "1.0000",
+      wilsonInterval: { low: "0.2065", high: "1.0000" },
+    });
+    expect(result.arms["arm-beta"]!.falseAccept).toEqual({
+      numerator: 0,
+      denominator: 1,
+      estimate: "0.0000",
+      wilsonInterval: { low: "0.0000", high: "0.7935" },
+    });
     // gamma is the only contradiction/stress item, so those declared slices are no longer all-zero.
     expect(result.arms["arm-alpha"]!.byCandidateClass["contradiction"]!.item.complete).toBe(1);
     expect(result.arms["arm-alpha"]!.byStratum["stress"]!.item.complete).toBe(1);
