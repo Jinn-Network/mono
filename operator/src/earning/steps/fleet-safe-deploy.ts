@@ -14,6 +14,7 @@ import { createJinnWalletClient } from '../viem-clients.js';
 import {
   viemSendTransactionWithRetry,
   waitForContractCode,
+  waitForNativeBalanceAtLeast,
   waitForTransactionReceiptWithRetry,
 } from '../../tx-retry.js';
 import { STAGE1_AGENT_ETH } from '../bootstrap.js';
@@ -65,6 +66,15 @@ export async function stepFleetSafeDeploy(
       },
     );
     await waitForTransactionReceiptWithRetry(ctx.publicClient, fundHash);
+    // Receipt success is not enough: the fallback RPC used for the next
+    // `eth_fillTransaction` can still see the agent as empty. Wait until
+    // getBalance agrees the transfer is visible before asking that EOA to
+    // pay for the Safe factory call.
+    await waitForNativeBalanceAtLeast(
+      ctx.publicClient,
+      getAddress(agentAddress) as Address,
+      agentFundingWei,
+    );
   }
 
   console.error(`[fleet-bootstrap] Stage 1: deploying fleet Safe at ${fleetSafe}`);
