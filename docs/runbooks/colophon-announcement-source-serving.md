@@ -381,6 +381,62 @@ already yields every entry oldest-first. Then:
   you which sequences you *could* record. It protects you only from the moment you
   record `(origin, sequence, entry)` and check a later chain against it.
 
+## The freeze post: a pointer, not an announcement
+
+A freeze post is the venue comment that tells an audience a lock exists. It is a
+distribution act and nothing else. Once the lock carries a proof-carrying time
+anchor, **the post carries no evidentiary weight at all**: its timestamp is not
+load-bearing, its edit history is not load-bearing, and the venue deleting it
+destroys no evidence. A reader who distrusts the venue entirely loses the
+pointer, which the archive and the bundle both reproduce, and loses nothing
+else. Format is settled here so it stops being re-derived per run
+([neutral freeze-announcement design](../superpowers/specs/2026-08-29-neutral-freeze-announcement-surface.md)
+§6, ratifying the closing ruling on #2866).
+
+The post carries four things and nothing else that is load-bearing:
+
+1. **The lock digest, inline in the post body.** `result.runSha256` from
+   `lock --json`. Inline because a link alone can point at mutable content.
+2. **The provider and time of each anchor over that digest.** Name the provider
+   profile URI and the time the proof's own bytes carry — `genTime` for an
+   RFC 3161 token, the attested Bitcoin block height for OpenTimestamps. A
+   calendar proof that is still `pending` has no time to quote: say `pending`
+   rather than quoting the acquisition moment, which proves nothing.
+3. **The archive URL of the sealed Run record and of each anchor record.**
+   `<base>/records/<sha256>`, one per record. The Run record is the registration
+   pointer; the anchor records are what a stranger re-verifies against it.
+4. **The standing immutability clause**, one sentence:
+   `Nothing in the sealed freeze moves once judging starts.`
+
+Read all four off `/lock-index.json` in the served archive, which the product
+regenerates after every `publication register` and at `publication serve`
+start: the row for a lock names its `runPath`, the announcing `entryPath`, and
+every carried anchor's `subject`, `provider`, `recordSha256`, and served `path`.
+A `null` path means those exact bytes are not served here, so quote the digest
+and do not invent a URL for it. `anchor --subject lock --json` reports the same
+provider and `recordSha256` at acquisition time; the anchor's time lives in the
+proof bytes, which the sealed record carries unchanged — for an RFC 3161 token
+obtained out of band, `openssl ts -reply -in <token> -text` prints it.
+
+What does not belong in the post:
+
+- **Results, findings, or any interpretation.** The freeze post is written
+  before judging starts; there is nothing to say yet.
+- **The anchor's raw proof bytes or an out-of-band stamp file.** Keep those with
+  the operator freeze notes. The archive path is the pointer.
+- **A rendered announcement.** There is no freeze-announcement renderer and none
+  is planned; the post is prose around four values.
+- **Any of the prohibited words above** — "witnessed", "transparency log",
+  "append-only proven", "tamper-proof". An anchored lock is dated bytes, not a
+  witnessed stream, and the post is the surface most likely to overstate it.
+
+The judge-report program runs this format with item 2 out of band:
+[its freeze step](./judge-report-official-run.md) posts the archive URL, the
+inline lock digest, and the immutability clause, and keeps the OpenTimestamps
+stamp in the operator notes rather than in the post. Its stamp is taken outside
+the product's anchor path, so there is no announced anchor record to cite; when
+a run acquires its anchor through `anchor`, item 2 is in the post.
+
 ## Disclosure: why this producer has no disclosure gate
 
 Colophon routes around `packages/evidence/contribution` — the disclosure
