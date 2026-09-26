@@ -234,7 +234,7 @@ test("review-pr classifies the D3 rename trigger under Review pass", () => {
   );
   assert.match(
     sectionFlow,
-    /merge-blocking/,
+    /A missed re-ground is merge-blocking\./,
     "a missed re-ground must classify as merge-blocking",
   );
 });
