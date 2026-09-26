@@ -1,8 +1,8 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.8
+- **Version:** 1.9
 - **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-12; v1.4: 2026-09-16;
-  v1.5: 2026-09-17; v1.6: 2026-09-18; v1.7: 2026-09-19; v1.8: 2026-09-24)
+  v1.5: 2026-09-17; v1.6: 2026-09-18; v1.7: 2026-09-19; v1.8: 2026-09-24; v1.9: 2026-09-26)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
@@ -62,6 +62,12 @@
   inventory of surfaces still carrying the reserved word, held pending that allocation. Also
   corrects the row's emission-site pointer from the pre-rename `verify/src/assets.ts` to
   `check/src/assets.ts`. No disposition changes.
+- **v1.9** (#4775, remaining #4318 follow-ups after #4529): GitHub issue #4270 was auto-closed after
+  PR #4318 by the post-merge member closer, contrary to #4419's instruction to leave it open because
+  the ruling is held, not applied. Reopening it would be closed again by the same closer, so the
+  hold is carried by the emission-site comment above `buildBadge` and by this document's v4-badge
+  row — not by an open GitHub issue. Adds regression pins for that record, for #4418's deletion, and
+  for #4420's §4.2 discharges. No disposition changes.
 
 ## 1. Scope
 
@@ -240,7 +246,7 @@ spelling is the untouched other side of the line (§2), not a second ruling.
 | Independence clusters | rename + gloss | Groups that do not share a source | The counted quantity is kept; only the noun changes. |
 | Benchmark and configuration scope | rename | What was tested, and how each configuration was pinned | The `<h2 id="scope-heading">` in `buildIndex` (`assets.ts`); its `Arms and pinned configuration` sub-heading becomes **Each configuration, pinned**, following the `arm` → *Configuration* rename above. |
 | Evidence signpost (social card) | rename | Benchmark report | The v4 card's phrase; the current card already says "Benchmark report". Retire the older wording with the v4 assets. |
-| Colophon · verified qualification (v4 badge) | rename (held) | Colophon · binary qualification | Ruled in #4270: the reserved word is retired from the badge, social card, share text, index prose, and the report README's status line: the five sites the emission-site comment enumerates. The two that are not SVG or share builders are named here because they are easy to miss: the index prose is `neutralClaimHtml`'s binary sentence, `Verified binary-instrument qualification. Facts are presented per instrument without comparative conclusions.`, and the README status line is `buildReadme`'s `documentStatus`, `<run outcome>. Verified binary-instrument qualification.` (both `assets.ts`). A further string, `pairedCompactFragment`'s `Verified qualification signpost · full evidence at index.html`, was never a sixth site: `buildBadge`, `buildSocialCard`, and `buildShareText` all return on `binary` before they call it, so no surface ever printed it. It never reached a presentation byte `verify.ts` byte-compares, so its removal did not need the #4270 allocation. #4418 deleted the unreachable string outright (`check/src/assets.ts`); the five rendered sites, `neutralClaimHtml`, `buildBadge`, `buildSocialCard`, `buildReadme`'s `documentStatus`, and `buildShareText`, are the whole inventory of surfaces still carrying the reserved word. A badge carries no room for the caveats the CLI prints under its verdict, so it names the scope instead. **Held pending a bundle-format allocation**, not yet applied: `verify.ts` byte-compares every presentation asset against the reader's own rebuild, and every qualifying format pins a published reader, so moving these bytes without an allocation makes each side refuse the other. The hold is recorded at the emission site (`check/src/assets.ts`, above `buildBadge`), beside the #2980 and #2977 holds. |
+| Colophon · verified qualification (v4 badge) | rename (held) | Colophon · binary qualification | Ruled in #4270: the reserved word is retired from the badge, social card, share text, index prose, and the report README's status line: the five sites the emission-site comment enumerates. The two that are not SVG or share builders are named here because they are easy to miss: the index prose is `neutralClaimHtml`'s binary sentence, `Verified binary-instrument qualification. Facts are presented per instrument without comparative conclusions.`, and the README status line is `buildReadme`'s `documentStatus`, `<run outcome>. Verified binary-instrument qualification.` (both `assets.ts`). A further string, `pairedCompactFragment`'s `Verified qualification signpost · full evidence at index.html`, was never a sixth site: `buildBadge`, `buildSocialCard`, and `buildShareText` all return on `binary` before they call it, so no surface ever printed it. It never reached a presentation byte `verify.ts` byte-compares, so its removal did not need the #4270 allocation. #4418 deleted the unreachable string outright (`check/src/assets.ts`); the five rendered sites, `neutralClaimHtml`, `buildBadge`, `buildSocialCard`, `buildReadme`'s `documentStatus`, and `buildShareText`, are the whole inventory of surfaces still carrying the reserved word. A badge carries no room for the caveats the CLI prints under its verdict, so it names the scope instead. **Held pending a bundle-format allocation**, not yet applied: `verify.ts` byte-compares every presentation asset against the reader's own rebuild, and every qualifying format pins a published reader, so moving these bytes without an allocation makes each side refuse the other. The hold is recorded at the emission site (`check/src/assets.ts`, above `buildBadge`), beside the #2980 and #2977 holds. GitHub issue #4270 was auto-closed after PR #4318; this row and that comment are the remaining record of the hold (#4419). |
 | No comparative winner stated | keep | — | Load-bearing and already plain. |
 
 #### Binary-qualification report surface (binary reports only)
