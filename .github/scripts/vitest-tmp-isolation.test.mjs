@@ -170,6 +170,17 @@ function enclosedLiterals(source, key, open, close) {
  * allowance away and red a config that loads fine. Narrowing a scope can only remove coverage, so
  * this direction fails closed — a false red, never a false green — and nothing in the tree carries
  * a stray `projects:` key today.
+ *
+ * It under-matches in the same breath, and that twin fails open (issue #3153). `\bprojects\s*:\s*\[`
+ * sees only the bare identifier key written out in the file: a quoted `'projects': [`, a computed
+ * `['projects']: [`, a key held in a variable (`[KEY]: [`), and a key reaching the config only
+ * through a spread of an object declared elsewhere all miss it, yield no ranges, and drop every
+ * allowance and seam path back to root scope — the same collapse the variable-held entry above
+ * causes, reading green on
+ * the very shape #3123 closes. Unanchoring the key is what bounds the false red; it is not what
+ * bounds this. Like the variable-held case it is inherent to a text scanner, no worse than the
+ * pre-#3123 behavior, and recorded rather than closed: anchoring or widening the regex would trade
+ * one of these directions for the other, not remove both.
  */
 export function projectEntryRanges(source) {
   const ranges = [];
@@ -1056,6 +1067,35 @@ test('fs.allow in one projects entry does not cover a seam path in another', () 
     ),
     [],
   );
+});
+
+// The under-matching twin of the unanchored `projects:` key, under its own name (issue #3153).
+// Quoting the key is the whole difference between these two configs, and it is enough to collapse
+// every entry back into root scope: the allowance in the sibling entry credits the seam path it
+// should not reach. Pinned because it is a false green, the one direction the doc block's
+// fail-closed argument does not cover, and a reader who finds it in the wild should find it here.
+test('a quoted projects key yields no entry ranges, collapsing scope to root', () => {
+  const config = 'packages/x/vitest.config.ts';
+  const seam = '../../test-support/tmp-isolation/isolate-tmp.ts';
+  const entries = `{ server: { fs: { allow: ['../..'] } } }, { test: { setupFiles: ['${seam}'] } }`;
+  const withKey = (key) => `export default { test: { environment: 'jsdom', ${key}: [${entries}] } }`;
+
+  // The bare identifier key scopes the entries apart, so the seam path is unreachable.
+  assert.equal(projectEntryRanges(withKey('projects')).length, 2);
+  assert.deepEqual(unreachableWirings(withKey('projects'), config), [
+    { key: 'setupFiles', resolved: 'test-support/tmp-isolation/isolate-tmp.ts' },
+  ]);
+
+  // A quoted or computed key misses the match and reads green on the same config.
+  for (const key of ["'projects'", '"projects"', "['projects']"]) {
+    assert.deepEqual(projectEntryRanges(withKey(key)), []);
+    assert.deepEqual(unreachableWirings(withKey(key), config), []);
+  }
+
+  // So does a key held in a variable, with the entries and the seam path still written out inline.
+  const held = `const KEY = 'projects'\n${withKey('[KEY]')}`;
+  assert.deepEqual(projectEntryRanges(held), []);
+  assert.deepEqual(unreachableWirings(held, config), []);
 });
 
 // Vitest does not fold the root config into a `projects` entry; an entry opts in with
