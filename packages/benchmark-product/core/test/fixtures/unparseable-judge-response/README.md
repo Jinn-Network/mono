@@ -10,5 +10,4 @@ files are bytes, not text: they carry no trailing newline, and any edit changes 
 silently change whether a shape parses. Keep them byte-exact.
 
 Two files here do parse, despite the directory's name: `parseable-correct.txt` is the ACCEPT
-control and `parseable-wrong.txt` is the REJECT control. The same test replays both as the decided
-arms against which the unparseable shapes are measured.
+control and `parseable-wrong.txt` is the REJECT control.
