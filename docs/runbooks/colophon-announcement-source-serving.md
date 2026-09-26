@@ -423,8 +423,7 @@ it (`-token_in` because the anchor path carries a bare token, not a response).
 
 Expect every anchor `path` to be `null` today: this archive does not serve
 AnchorEvidence records, so item 3 currently resolves to the Run record's URL
-plus each anchor's digest quoted inline. That is the honest form of item 3, not
-a gap in it.
+plus each anchor's digest quoted inline.
 
 What does not belong in the post:
 
