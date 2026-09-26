@@ -432,14 +432,15 @@ stores the bare token, because it extracts one from the response before sealing.
 
 Expect every anchor `path` to be `null` for an anchor this run acquired through
 `anchor`: that verb seals its `AnchorEvidence` into the workspace store and
-records only `subject`, `provider`, and `recordSha256` on run state. It never
-announces the record, so those bytes never reach the serving root and the index
-has no URL to give, and item 3 resolves to the Run record's URL plus each
-anchor's digest quoted inline. The archive does serve `AnchorEvidence` records
-as a kind: the entry-anchor path announces each one together with its bytes at
-`/records/<sha256>`, which is exactly what the anchor-coverage walk above
-fetches. So a `/records/<sha256>` fetch that fails for an *announced* anchor is
-the hosting fault that walk defines, not expected behavior.
+records a run-state entry naming `subject`, `provider`, and `recordSha256`, with
+no served path among its fields. It never announces the record, so those bytes
+never reach the serving root and the index has no URL to give, and item 3
+resolves to the Run record's URL plus each anchor's digest quoted inline. The
+archive does serve `AnchorEvidence` records as a kind: the entry-anchor path
+announces each one together with its bytes at `/records/<sha256>`, which is
+exactly what the anchor-coverage walk above fetches. So a `/records/<sha256>`
+fetch that fails for an *announced* anchor is the hosting fault that walk
+defines, not expected behavior.
 
 What does not belong in the post:
 
