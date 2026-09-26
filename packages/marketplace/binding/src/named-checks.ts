@@ -32,6 +32,7 @@ import {
 import {
   authenticateRequester,
   parseExactDsseEnvelope,
+  resolveBindingForAgent,
   settlementJoinCheck,
   verifyEnvelopeBinding,
   type BindingResolver,
@@ -657,7 +658,12 @@ export async function gateVerdictObservation(
         `solver declaration effective time "${input.verdict.solver.effectiveTime}" is not RFC 3339`;
     } else {
       try {
-        const solverBinding = await ports.bindingResolver.resolveBinding(
+        // `resolveBindingForAgent` asserts the resolved binding names the
+        // queried agent before this site's relationship guard runs, so a
+        // key-only resolver's foreign binding is refused as unresolved rather
+        // than reported as that binding's relationship failing (issue #3702).
+        const solverBinding = await resolveBindingForAgent(
+          ports.bindingResolver,
           {
             key: input.verdict.solver.declarationKey,
             agent: input.verdict.solver.claimedAgent,
@@ -673,9 +679,6 @@ export async function gateVerdictObservation(
         ) {
           distinctnessFailure =
             `solver declaration relationship "${solverBinding.binding.relationship}" is not authority-bearing`;
-        } else if (solverBinding.binding.agent !== input.verdict.solver.claimedAgent) {
-          distinctnessFailure =
-            "solver declaration resolved to a different Agent IRI";
         } else {
           resolvedSolverAgent = solverBinding.binding.agent;
         }

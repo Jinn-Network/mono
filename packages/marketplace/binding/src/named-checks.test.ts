@@ -92,7 +92,7 @@ function resolvedBinding(
   key: string,
   agent: string,
   scope: string[],
-  relationship: "controls" | "signs-for" = "controls",
+  relationship: "controls" | "operates" | "signs-for" = "controls",
   revocations: readonly ResolvedRevocation[] = [],
 ): ResolvedBinding {
   return {
@@ -594,6 +594,34 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
     await expect(gateVerdictObservation(fixture.input, makePorts())).resolves.toEqual({
       decisionGrade: true,
       failures: [],
+    });
+  });
+
+  /**
+   * A key-only resolver: it matches on `keyid` and ignores `query.agent`, so
+   * the solver key resolves to another agent's binding. The refusal must name
+   * the unresolved agent, not that foreign binding's relationship (#3702).
+   */
+  test("names the agent mismatch, not the relationship, for a key-only resolver", async () => {
+    const fixture = makeFixture();
+    const base = makePorts();
+    const foreign = resolvedBinding(SOLVER_KEY, EVALUATOR_AGENT, ["deliveries"], "operates");
+    const ports: VerdictObservationGatePorts = {
+      ...base,
+      bindingResolver: {
+        async resolveBinding(query, atTime) {
+          if (query.key === SOLVER_KEY) return foreign;
+          return base.bindingResolver.resolveBinding(query, atTime);
+        },
+      },
+    };
+
+    await expect(gateVerdictObservation(fixture.input, ports)).resolves.toEqual({
+      decisionGrade: false,
+      failures: [{
+        check: "evaluator-distinctness",
+        detail: "solver declaration does not resolve to the claimed solver Agent IRI",
+      }],
     });
   });
 
