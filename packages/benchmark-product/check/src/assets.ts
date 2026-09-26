@@ -93,7 +93,7 @@ export interface PublicAssetBinaryQualification {
  * (and a third-party `as` cast) can still construct one.
  *
  * Version implication: this is a breaking change to the published TypeScript surface of
- * `@colophon-claims/check` (and the `@colophon-claims/verify` passthrough alias). The 0.2.1
+ * `@colophon-claims/check` (and its published passthrough alias). The 0.2.1
  * `.d.ts` allowed both-absent and both-present objects; a caller that compiled against 0.2.1
  * with neither field will fail typecheck against this shape. Runtime bytes are unchanged. The
  * next npm line that ships this `.d.ts` is 0.3.0 — this PR does not retag 0.2.1.

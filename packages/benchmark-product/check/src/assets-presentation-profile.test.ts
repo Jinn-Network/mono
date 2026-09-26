@@ -77,7 +77,7 @@ function copyGolden(): string {
  * Every digest is read from the bundle's own stored claim, so nothing here is a hand-copied
  * constant that could drift from the fixture.
  */
-function legacyAssetInput(bundleDir: string): Omit<PublicAssetInput, "comparison" | "binaryQualification"> {
+function legacyAssetInput(bundleDir: string): PublicAssetFacts {
   const read = (name: string): Uint8Array => new Uint8Array(readFileSync(join(bundleDir, name)));
   const claim = JSON.parse(readFileSync(join(bundleDir, "claim-package.json"), "utf8")) as PublicAssetInput["claim"] & {
     readonly records: { readonly matrixSha256: string; readonly reportSha256: string };

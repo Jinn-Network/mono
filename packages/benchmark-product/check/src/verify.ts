@@ -2128,6 +2128,9 @@ export async function verifyPublicBundleSnapshot(
   let expectedAssets: ReturnType<typeof buildPublicAssets>;
   if (qualification !== undefined) {
     if (binaryAssetQualification === undefined) {
+      // Unreachable: `binaryAssetQualification` is assigned unconditionally under this same
+      // `qualification !== undefined` branch. Kept as a type narrowing for the one-profile
+      // union, not a new runtime branch.
       refuse(
         "record-integrity",
         "bundle.presentation",
@@ -2138,6 +2141,9 @@ export async function verifyPublicBundleSnapshot(
   } else if (comparison !== undefined) {
     expectedAssets = buildPublicAssets({ ...assetFacts, comparison });
   } else {
+    // Unreachable: `comparison` is defined exactly when `qualification === undefined`, so this
+    // arm cannot be entered. Kept as a type narrowing for the one-profile union, not a new
+    // runtime branch.
     refuse(
       "record-integrity",
       "bundle.presentation",

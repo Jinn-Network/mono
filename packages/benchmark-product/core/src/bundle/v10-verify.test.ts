@@ -78,6 +78,9 @@ function convertToComposed(
   comparison: PublicAssetInput["comparison"],
   options: { readonly keepLegacyClaim?: boolean; readonly capabilities?: readonly string[] } = {},
 ): void {
+  // Not liftable to a compile-time fact: every call site reads this from
+  // `VerifiedPublicBundleSnapshot.comparison`, which is an undiscriminated optional, so a
+  // non-optional parameter would move this one discharge out to each caller rather than remove it.
   if (comparison === undefined) {
     throw new Error("convertToComposed requires the verifier's comparison projection");
   }

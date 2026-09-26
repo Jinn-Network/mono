@@ -1136,10 +1136,13 @@ function recordClosure(input: MaterializeBundleInput): {
   } else if (comparison !== undefined) {
     publicAssets = buildPublicAssets({ ...assetFacts, comparison });
   } else {
+    // Unreachable: `binaryAssetQualification` is assigned unconditionally on the qualification
+    // path and `comparison` on every other one, so both-absent is unsatisfiable. Kept as a type
+    // narrowing for the one-profile union, not a new runtime branch.
     refuse(
       "record-integrity",
       "bundle.presentation",
-      "comparison public assets require the verifier-derived comparison projection",
+      "comparison public assets require the producer-derived comparison projection",
     );
   }
   for (const [path, bytes] of Object.entries(publicAssets)) {
