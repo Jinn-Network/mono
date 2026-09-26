@@ -11,7 +11,8 @@
  * harness refused the evaluator's `inconclusive` delivery, and the cell terminaled
  * `could-not-grade` and was permanently lost. Every unparseable response lost its cell.
  *
- * `@colophon-claims/core` is the only package that depends on both halves, so the join lives here.
+ * `@colophon-claims/core` depends on both halves and owns the product's own run path across them
+ * (`src/run/drive.ts` drives, `src/run/assembly-ports.ts` assembles), so the join lives here.
  * The bytes are checked-in fixtures under `test/fixtures/unparseable-judge-response/`; the live
  * shape is among them, byte-exact.
  *
@@ -19,12 +20,14 @@
  * evaluator registration writes the ResultEvaluation, `assembleMatrix` over `localAssemblyPorts`
  * classifies the cells, and the registered `binary-instrument@1` method reduces and projects them.
  *
- * The join declares two limits, and nothing outside them is hand-authored:
+ * The join's only substantive seams are these two declared limits:
  * 1. Signing is stubbed. The harness writes an unsigned `out/verdict`; this test wraps it with
- *    `sealDsseEnvelope` under a placeholder signature. No verification is being skipped —
- *    `MethodComputeInput` has no signature-verifier port and `localAssemblyPorts` is called
- *    without `trust`, so nothing on this path verifies a signature at all. The production signer
- *    and attestation issuer are simply outside the join.
+ *    `sealDsseEnvelope` under a placeholder signature. No verification is being skipped — no port
+ *    on `MethodComputeInput` verifies a verdict envelope's signature (its one verifier port,
+ *    `verifyAnchoredBenchmarkAnnouncement`, authenticates anchored announcements and is not
+ *    consulted by `binary-instrument@1`), the aggregate only ever `parseDsseEnvelope`s the bytes,
+ *    and `localAssemblyPorts` is called without `trust`, so nothing on this path verifies a
+ *    verdict signature. The production signer and attestation issuer are simply outside the join.
  * 2. Assemble is fed `InScopeCell`/`InScopeVerdict` literals, not the product's own
  *    `buildRunAssemblyPorts` projector, which is what sets `evaluationTerminal` from the folded
  *    run journal. Absent it, `deriveOutcome` can never reach `"unscorable"` — so the
