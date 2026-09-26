@@ -791,9 +791,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       // Always write this daemon's primary password file (via
       // `writePrimaryKeystorePassword` -> `replacePasswordFileAtomically`: a
       // failed write never truncates a live file, and a symlink at the path
-      // is replaced rather than written through, #4610). `passwordFileUpdated`
-      // reports the primary write only -- it is what `jinn run` resolves
-      // first, so it is the write that matters to the caller.
+      // is replaced rather than written through, #4610).
       //
       // Best-effort mirror into the host-wide legacy file, for existing
       // single-operator installs that still read it: keystore identity
@@ -801,9 +799,13 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       // holds, so an existing but drifted legacy file is repaired the same
       // way as the CLI's rotation (#4116) -- but new auto-generation never
       // creates that file (module doc, #4087), so an absent one stays
-      // absent here too. A legacy-write failure only warns; it never flips
-      // `passwordFileUpdated` back to false when the primary write already
-      // succeeded.
+      // absent here too. A legacy-write failure only warns; it never turns
+      // the rotation into `change_failed`.
+      //
+      // `passwordFileUpdated: false` is reserved for a deliberate skip of
+      // that host-wide file because it does not belong to this daemon
+      // (#4117). Primary-write success alone stays `true` so a default
+      // operator whose legacy mirror fails is not told to set JINN_PASSWORD.
       const home = process.env['HOME'] ?? homedir();
       const stateDir = resolveDefaultStateDir({ home });
       const defaultEarningDir = join(stateDir, 'earning');
@@ -818,12 +820,16 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       } catch (err) {
         warn(`[warn] Could not update a keystore-password file (${errorMessage(err)}); leaving it in place.`);
       }
-      if (existsSync(legacyPath) && isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn)) {
+      const hostWideExists = existsSync(legacyPath);
+      const ownsHostWideFile = isDefaultOperatorKeystore(defaultEarningDir, earningDir, warn);
+      if (hostWideExists && ownsHostWideFile) {
         try {
           writeKeystorePasswordFile(legacyPath, parsed.data.next);
         } catch (err) {
           warn(`[warn] Could not update a keystore-password file (${errorMessage(err)}); leaving it in place.`);
         }
+      } else if (hostWideExists && !ownsHostWideFile) {
+        passwordFileUpdated = false;
       }
 
       // Mirror into env so the running daemon's in-memory PASSWORD stays valid
