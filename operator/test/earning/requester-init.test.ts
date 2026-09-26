@@ -234,6 +234,7 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
 
     // Still short after every drip: the loop must terminate on its cap, not spin.
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(0n);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const result = await bootstrapper.ensureRequesterSafe('test-password');
 
@@ -242,6 +243,50 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
     expect(requestFunding.mock.calls.length).toBeLessThan(60);
     expect(result.ok).toBe(false);
     expect(result.funding).toBeDefined();
+    const logged = errorSpy.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(logged.some((line) => line.includes('CDP faucet reached target'))).toBe(false);
+  });
+
+  it('logs when the CDP faucet reaches the requester target', async () => {
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-b0a-'));
+    dirs.push(earningDir);
+    const store = await seedKeystore(earningDir);
+
+    const requestFunding = vi.fn(async () => ({ ok: true as const, txHash: '0xabc' }));
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base-sepolia',
+      rpcUrl: 'http://127.0.0.1:8545',
+      stakingMode: 'standard',
+      requestFunding,
+      autoTestnetFaucet: true,
+    });
+
+    let getBalanceCalls = 0;
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockImplementation(async () => {
+      getBalanceCalls += 1;
+      return getBalanceCalls === 1 ? 0n : requesterMinMasterEth();
+    });
+    let safeDeployed = false;
+    vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockImplementation(async () =>
+      safeDeployed ? '0xdeadbeef' : '0x',
+    );
+    vi.spyOn(bootstrapper as any, 'stepFleetSafePredict').mockImplementation(async () => {
+      await store.patchFleet({ fleet_safe_address: PREDICTED_SAFE });
+      return store.load('base-sepolia');
+    });
+    vi.spyOn(bootstrapper as any, 'stepFleetSafeDeploy').mockImplementation(async () => {
+      safeDeployed = true;
+      return store.load('base-sepolia');
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await bootstrapper.ensureRequesterSafe('test-password');
+
+    const logged = errorSpy.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(logged).toContain('[requester-init] CDP faucet reached target after 5 drips');
+    expect(logged.some((line) => line.includes('CDP faucet stopped after'))).toBe(false);
+    expect(result.ok).toBe(true);
   });
 
   it('funds the deploying EOA with an amount the requester gate can actually cover', async () => {

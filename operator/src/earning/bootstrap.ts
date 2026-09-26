@@ -796,9 +796,11 @@ export class FleetBootstrapper {
       `Draining CDP faucet on ${this.chain} (up to ${maxIters} drips or ` +
       `${Math.round(this.faucetLoopTimeoutMs / 1000)}s).`,
     );
+    let dripsAttempted = 0;
     for (let i = 0; i < maxIters; i++) {
       if (this.now() >= deadline) break;
       const result = await this.requestFunding(address, 'base-sepolia');
+      dripsAttempted = i + 1;
       if (!result.ok) {
         if (result.rateLimited && rateLimitRetries < FAUCET_RATE_LIMIT_MAX_RETRIES) {
           rateLimitRetries++;
@@ -811,6 +813,11 @@ export class FleetBootstrapper {
       if ((i + 1) % 5 !== 0 && i !== maxIters - 1) continue;
       balance = await this.publicClient.getBalance({ address: address as Address });
       if (balance >= targetWei) break;
+    }
+    if (balance >= targetWei) {
+      console.error(
+        `[requester-init] CDP faucet reached target after ${dripsAttempted} drips`,
+      );
     }
     return balance;
   }
