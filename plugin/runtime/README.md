@@ -38,6 +38,23 @@ postures, and the `corpus-chain-verification` health check reports which one is 
   posture. Record-digest validation and producer admission still apply.
 - `rejecting` — verify nothing, admit nothing.
 
+**The chain-verification vocabulary is part of the package's public surface (#4581).**
+`ChainVerification` is a required field of `CreateCorpusMirrorOptions` and
+`CreateCorpusCapabilityOptions`, both exported from the package root, so a consumer that
+calls `createCorpusMirror` or `createCorpusCapability` must name it — and, through it,
+`ChainVerificationInput`, `ChainVerificationOutcome`, `WalkTruncation`,
+`UnverifiedChainAcknowledgement`, and the `SYNC_TRUNCATED_REASON` / `SYNC_ABORTED_REASON` /
+`UNVERIFIED_CHAIN_ACKNOWLEDGEMENT` constants. The vocabulary is therefore public by
+construction: it cannot be made internal without also withdrawing the mirror and capability
+factories. The three constructors — `createDriverChainVerification`,
+`createRejectingChainVerification`, `createUnverifiedChainVerification` — stay public with
+it, so a composition root able to name the interface can build the standard implementation
+instead of reimplementing posture logic it has no way to get right from the outside.
+Consequence: a signature change here is a breaking change to this package and is versioned
+as one. PR #4430 added a required `log` parameter to `createDriverChainVerification` and
+broke nothing only because every caller was in-repo; the next such change must be carried by
+a version bump and a note here, not discovered downstream.
+
 **Binary wiring.** `bin.ts` registers MCP on `serve` and wires corpus, relevance, and
 capture capabilities when the composition root supplies the required ports and signer.
 The `health` command reports capture checks only when `captureSigner` is injected on

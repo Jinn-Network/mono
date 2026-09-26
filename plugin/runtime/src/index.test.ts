@@ -155,6 +155,30 @@ describe("public surface", () => {
     expect(runtime.SYNC_ABORTED_REASON).toBe("sync-aborted");
   });
 
+  test("the chain-verification vocabulary is reachable through the mirror options (#4581)", () => {
+    // The recorded posture (`plugin/runtime/README.md`, Chain verification) is that this
+    // vocabulary is public *by construction*: `ChainVerification` is a required field of
+    // the root-exported `CreateCorpusMirrorOptions`, so a consumer that calls
+    // `createCorpusMirror` must name it and everything reachable through it. This pins
+    // that reachability, which is the reason the posture cannot be reversed to "internal"
+    // without also withdrawing the factory. The type references are proven by `tsc`.
+    const verification: runtime.CreateCorpusMirrorOptions["chainVerification"] = {
+      mode: "unverified",
+      async verify(
+        input: runtime.ChainVerificationInput,
+      ): Promise<runtime.ChainVerificationOutcome> {
+        const truncation: runtime.WalkTruncation = input.truncation;
+        return truncation === "none"
+          ? { status: "ok" }
+          : { status: "rejected", reason: runtime.SYNC_TRUNCATED_REASON };
+      },
+      async revalidateHead(): Promise<runtime.ChainVerificationOutcome> {
+        return { status: "rejected", reason: runtime.SYNC_ABORTED_REASON };
+      },
+    };
+    expect(verification.mode).toBe("unverified");
+  });
+
   test("a consumer can build and run a runtime from the public surface alone", async () => {
     const config = runtime.resolveRuntimeConfig({ env: {}, homeDirectory: "/srv/consumer" });
     const instance = runtime.createPluginRuntime({ config });
