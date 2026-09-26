@@ -2125,9 +2125,25 @@ export async function verifyPublicBundleSnapshot(
   // instrument-qualification graph; every other one renders the human comparison, which
   // `derivePublicComparison` above always produces. The comparison-absent rendering a
   // pre-comparison producer would have written is therefore no bundle's profile.
-  const expectedAssets = qualification !== undefined
-    ? buildPublicAssets({ ...assetFacts, binaryQualification: binaryAssetQualification })
-    : buildPublicAssets({ ...assetFacts, comparison });
+  let expectedAssets: ReturnType<typeof buildPublicAssets>;
+  if (qualification !== undefined) {
+    if (binaryAssetQualification === undefined) {
+      refuse(
+        "record-integrity",
+        "bundle.presentation",
+        "binary public assets require exactly one producer-verified admission/instrument projection",
+      );
+    }
+    expectedAssets = buildPublicAssets({ ...assetFacts, binaryQualification: binaryAssetQualification });
+  } else if (comparison !== undefined) {
+    expectedAssets = buildPublicAssets({ ...assetFacts, comparison });
+  } else {
+    refuse(
+      "record-integrity",
+      "bundle.presentation",
+      "comparison public assets require the verifier-derived comparison projection",
+    );
+  }
   for (const [path, bytes] of Object.entries(expectedAssets)) {
     if (!equalBytes(read(path), bytes)) refuse("record-integrity", path, `${path} is not the exact projection of verified public facts`);
   }

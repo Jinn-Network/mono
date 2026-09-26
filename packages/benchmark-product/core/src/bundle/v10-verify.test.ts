@@ -78,6 +78,9 @@ function convertToComposed(
   comparison: PublicAssetInput["comparison"],
   options: { readonly keepLegacyClaim?: boolean; readonly capabilities?: readonly string[] } = {},
 ): void {
+  if (comparison === undefined) {
+    throw new Error("convertToComposed requires the verifier's comparison projection");
+  }
   const claim = json(bundleDir, "claim-package.json");
   if (options.keepLegacyClaim !== true) {
     claim["claimSchema"] = COMPOSED_CLAIM_PACKAGE_SCHEMA_ID;
@@ -110,7 +113,7 @@ function convertToComposed(
       .filter((cell) => new Set(cell.verdicts.map((verdict) => verdict.verdict)).size > 1)
       .map((cell) => cell.cellKey)
       .sort(),
-    ...(comparison === undefined ? {} : { comparison }),
+    comparison,
   });
   for (const [path, bytes] of Object.entries(assets)) writeFileSync(join(bundleDir, path), bytes);
 
