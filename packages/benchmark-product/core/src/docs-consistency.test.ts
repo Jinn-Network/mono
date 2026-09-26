@@ -322,6 +322,31 @@ describe("product documentation consistency", () => {
     expect([...new Set(stated)].sort()).toEqual(["@0.2"]);
   });
 
+  it("files the domain-publication lookup under tools the reader can run (issue #3692)", () => {
+    const doc = read(externalVerificationPath);
+    const heading = "## What verification proves, and what it does not";
+    const headingAt = doc.indexOf(heading);
+    expect(headingAt, heading).toBeGreaterThanOrEqual(0);
+    const afterHeading = doc.slice(headingAt);
+    const nextHeading = afterHeading.slice(heading.length).search(/^## /mu);
+    const section = nextHeading === -1
+      ? afterHeading
+      : afterHeading.slice(0, heading.length + nextHeading);
+    const cells = (claim: string): string[] => {
+      const line = section.split("\n").find((row) => row.includes(`| ${claim} |`));
+      expect(line, claim).toBeDefined();
+      return line!.split("|").map((cell) => cell.trim());
+    };
+    const lookup = cells("The bound domain actually publishes that binding");
+    // Column 1: the reader can settle this with dig/curl. Column 3 is for claims no procedure settles.
+    expect(lookup[2]).toMatch(/DNS|HTTPS|lookup/i);
+    expect(lookup[3]).toBe("");
+    expect(lookup[4]).toBe("");
+    const zone = cells("The party controlling the bound domain's zone is the party it appears to be");
+    expect(zone[2]).toBe("");
+    expect(zone[4]).toMatch(/no tool/i);
+  });
+
   it("scopes the portable-verification pointer so /5 does not inherit the /2 kit (#4679)", () => {
     const guide = read(bundleReadmePath);
     const tableStart = guide.indexOf("\n## Portable verification\n");
