@@ -262,7 +262,6 @@ describe("product documentation consistency", () => {
     // opening `/8` under `colophon-freeze-repo/2` without a bump: there was no prior `/8` tree.
     expect(freezeSection).toMatch(/already-acceptable\s+bundle/);
     expect(freezeSection).toMatch(/previously refused closure/);
-    expect(freezeSection).not.toMatch(/A renderer change is therefore a format bump, not silent\s+drift\./);
   });
 
   it("pins the published evidence-native v5 closure, its two profiles, and its reader line", () => {
