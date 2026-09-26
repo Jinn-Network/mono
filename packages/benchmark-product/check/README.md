@@ -55,7 +55,9 @@ or that the compared identities are independent parties.
 
 ## Freeze-artifact repositories
 
-A qualification bundle (v4, v7, or v8, or a composed v10 bundle that declares
+A qualification bundle (`benchmark-product-public-bundle/4`,
+`benchmark-product-public-bundle/7`, or `benchmark-product-public-bundle/8`,
+or a composed `benchmark-product-public-bundle/10` bundle that declares
 `binary-qualification`) can be projected into a public repository of its freeze artifacts —
 item bank, sources, admission decisions, labels, judge instruments, and the screening
 material. That repository is a **derived artifact, never the claim of record**:

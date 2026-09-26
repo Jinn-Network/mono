@@ -257,6 +257,12 @@ describe("product documentation consistency", () => {
       expect(freezeSection.includes(`\`${format}\``), `${format} accepted=${accepted}`).toBe(accepted);
     }
     expect(freezeSection).toContain(`\`${BINARY_QUALIFICATION_CAPABILITY}\``);
+    // The bump obligation is scoped to a tree an already-acceptable bundle already rendered
+    // (issue #3631). An unconditional "renderer change is a format bump" sentence contradicted
+    // opening `/8` under `colophon-freeze-repo/2` without a bump: there was no prior `/8` tree.
+    expect(freezeSection).toMatch(/already-acceptable\s+bundle/);
+    expect(freezeSection).toMatch(/previously refused closure/);
+    expect(freezeSection).not.toMatch(/A renderer change is therefore a format bump, not silent\s+drift\./);
   });
 
   it("pins the published evidence-native v5 closure, its two profiles, and its reader line", () => {

@@ -954,8 +954,10 @@ without the check saying so.
 The format is `colophon-freeze-repo/2`, and the determinism claim is stated for
 it exactly: for a given format version the rendered tree is a pure function of the
 bundle bytes. No clock, no locale, no filesystem enumeration order, and no tool
-version reaches the tree. A renderer change is therefore a format bump, not silent
-drift.
+version reaches the tree. A renderer change that alters the tree an already-acceptable
+bundle renders is therefore a format bump, not silent drift. Opening the projection
+to a previously refused closure does not bump the format: there is no prior tree
+for the new output to differ from.
 
 The layout:
 

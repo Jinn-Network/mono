@@ -464,22 +464,26 @@ describe("the verifier README's accepted-format list", () => {
     // enumerated the accepted versions by hand -- the same shape that let `/8` be refused for its
     // version alone (issue #3540). `PUBLIC-BUNDLE.md` is pinned to the support table by the
     // product's docs-consistency suite; this pins the copy that ships in the npm tarball.
+    // Whole backticked format strings, not two-character `v8` substrings: a pin on `v2` flips
+    // when the section mentions a refused closure, a pinned `@0.2` line, or any incidental `v`
+    // plus a digit (issue #3632). The product-side docs-consistency pin uses the same token.
     const readme = readFileSync(join(import.meta.dirname, "..", "README.md"), "utf8");
     const start = readme.indexOf("\n## Freeze-artifact repositories\n");
     expect(start, "the freeze-artifact section must exist").toBeGreaterThan(-1);
     const rest = readme.indexOf("\n## ", start + 1);
     const section = readme.slice(start, rest === -1 ? undefined : rest);
 
-    for (const format of ENUMERATED_FORMATS) {
-      // The section speaks in short names (`v8`), not whole format strings.
-      const shortName = `v${format.slice(format.lastIndexOf("/") + 1)}`;
-      const accepted = FREEZE_REPO_BUNDLE_SUPPORT[format].qualification;
-      expect(section.includes(shortName), `${format} accepted=${accepted}`).toBe(accepted);
+    for (const format of SUPPORTED_BUNDLE_FORMATS) {
+      const accepted = format === BUNDLE_V10_FORMAT || FREEZE_REPO_BUNDLE_SUPPORT[format].qualification;
+      expect(section.includes(`\`${format}\``), `${format} accepted=${accepted}`).toBe(accepted);
     }
     // A composed bundle is accepted exactly when it declares the capability, so the section names
     // both the format and the token that decides it.
-    expect(section).toContain("v10");
     expect(section).toContain("`binary-qualification`");
+    // Prose that is not a format token must not satisfy the pin. The command line in this
+    // section names a major (`@0.2`); that is not `benchmark-product-public-bundle/2`.
+    expect(section).toContain("@0.2");
+    expect(section.includes("`benchmark-product-public-bundle/2`")).toBe(false);
   });
 });
 

@@ -12,8 +12,9 @@
  *
  * Determinism claim, stated exactly: FOR A GIVEN FORMAT VERSION the rendered tree is a pure
  * function of the bundle bytes. No clock, no locale, no filesystem enumeration order, and no tool
- * version reaches the tree. `FREEZE_REPO_FORMAT` is recorded in `freeze.json`, so a change to this
- * renderer is a visible format bump rather than silent drift.
+ * version reaches the tree. `FREEZE_REPO_FORMAT` is recorded in `freeze.json`. A renderer change
+ * that alters the tree an already-acceptable bundle renders is a visible format bump rather than
+ * silent drift. Opening the projection to a previously refused closure does not bump the format.
  *
  * Nothing here writes remotely, uploads, hosts, or registers. `exportFreezeRepo` writes one local
  * directory; `verifyFreezeRepo` reads one.
