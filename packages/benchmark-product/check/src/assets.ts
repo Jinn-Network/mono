@@ -51,7 +51,7 @@ export const FORMAT_PRESENTATION_CAPABILITIES: {
   [BUNDLE_V10_FORMAT]: ["report-prose-singularity"],
 };
 
-export interface PublicAssetInput {
+interface PublicAssetInputBase {
   /**
    * The bundle format whose page to render. REQUIRED, and never defaulted: a caller that omitted
    * it would silently get some other format's page, and because the page is byte-pinned the
@@ -69,27 +69,44 @@ export interface PublicAssetInput {
   /** Canonically sorted identities for every authenticated `records/<sha>.bin` closure member. */
   readonly recordSha256s: readonly string[];
   readonly dissentCellKeys: readonly string[];
-  /**
-   * Verifier-derived, authenticated human projection. Absent only for the
-   * qualification-projecting profile (`benchmark-product-public-bundle/4`, `/7`, and `/8`), which
-   * carries `binaryQualification` instead. There is no third, comparison-free profile: a
-   * bundle rendered with neither field is refused at verification (issue #2984).
-   */
-  readonly comparison?: PublicComparisonView;
-  /** Producer-verified binary admission/instrument facts. Required for claim-package/2 only. */
-  readonly binaryQualification?: {
-    readonly publicationGrade: boolean;
-    readonly truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
-    readonly sourceManifestSha256: string;
-    readonly admissionManifestSha256: string;
-    readonly exclusions: readonly unknown[];
-    readonly instruments: readonly {
-      armId: string;
-      instrumentSha256: string;
-      promptTemplateSha256: string;
-    }[];
-  };
 }
+
+/** Producer-verified binary admission/instrument facts. Required for the qualification profile. */
+export interface PublicAssetBinaryQualification {
+  readonly publicationGrade: boolean;
+  readonly truthAdmission: "two-human-unanimous" | "operator-only" | "screened-operator-sampled";
+  readonly sourceManifestSha256: string;
+  readonly admissionManifestSha256: string;
+  readonly exclusions: readonly unknown[];
+  readonly instruments: readonly {
+    armId: string;
+    instrumentSha256: string;
+    promptTemplateSha256: string;
+  }[];
+}
+
+/**
+ * Exactly one presentation profile (issue #3331, completing #2984).
+ *
+ * `comparison` and `binaryQualification` are mutually exclusive: a typed caller cannot omit both
+ * or supply both. The verifier still refuses a mixed or missing profile at runtime because tests
+ * (and a third-party `as` cast) can still construct one.
+ *
+ * Version implication: this is a breaking change to the published TypeScript surface of
+ * `@colophon-claims/check` (and the `@colophon-claims/verify` passthrough alias). The 0.2.1
+ * `.d.ts` allowed both-absent and both-present objects; a caller that compiled against 0.2.1
+ * with neither field will fail typecheck against this shape. Runtime bytes are unchanged. The
+ * next npm line that ships this `.d.ts` is 0.3.0 — this PR does not retag 0.2.1.
+ */
+export type PublicAssetInput =
+  | (PublicAssetInputBase & {
+      readonly comparison: PublicComparisonView;
+      readonly binaryQualification?: never;
+    })
+  | (PublicAssetInputBase & {
+      readonly binaryQualification: PublicAssetBinaryQualification;
+      readonly comparison?: never;
+    });
 
 interface WilsonArmFact {
   readonly armId: string;

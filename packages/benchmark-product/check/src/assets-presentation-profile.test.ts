@@ -23,8 +23,38 @@ import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { parseMatrix, parseReport } from "@jinn-network/benchmarking-records";
 import { buildPublicAssets, type PublicAssetInput } from "./assets.js";
+import type { PublicComparisonView } from "./comparison.js";
 import { buildBundleManifest } from "./manifest.js";
 import { verifyPublicBundle } from "./verify.js";
+
+/**
+ * Issue #3331: the one-profile rule is a compile-time property of `PublicAssetInput`, not only a
+ * verifier refusal. Tuple-wrapped `extends` so a union member cannot distribute the check away.
+ *
+ * These consts are the regression: `yarn typecheck` in this package fails if both-absent or
+ * both-present become assignable again, and it fails if either legitimate profile stops assigning.
+ */
+type PublicAssetFacts = Omit<PublicAssetInput, "comparison" | "binaryQualification">;
+type AssignsToPublicAssetInput<T> = [T] extends [PublicAssetInput] ? true : false;
+type BinaryQualification = NonNullable<PublicAssetInput["binaryQualification"]>;
+
+const neitherPresentationProfileAssigns: AssignsToPublicAssetInput<PublicAssetFacts> = false;
+const comparisonPresentationProfileAssigns: AssignsToPublicAssetInput<
+  PublicAssetFacts & { readonly comparison: PublicComparisonView }
+> = true;
+const binaryPresentationProfileAssigns: AssignsToPublicAssetInput<
+  PublicAssetFacts & { readonly binaryQualification: BinaryQualification }
+> = true;
+const bothPresentationProfilesAssign: AssignsToPublicAssetInput<
+  PublicAssetFacts & {
+    readonly comparison: PublicComparisonView;
+    readonly binaryQualification: BinaryQualification;
+  }
+> = false;
+void neitherPresentationProfileAssigns;
+void comparisonPresentationProfileAssigns;
+void binaryPresentationProfileAssigns;
+void bothPresentationProfilesAssign;
 
 const GOLDEN = new URL("../fixtures/public-bundle-conformance-v1/golden/", import.meta.url);
 
@@ -47,7 +77,7 @@ function copyGolden(): string {
  * Every digest is read from the bundle's own stored claim, so nothing here is a hand-copied
  * constant that could drift from the fixture.
  */
-function legacyAssetInput(bundleDir: string): PublicAssetInput {
+function legacyAssetInput(bundleDir: string): Omit<PublicAssetInput, "comparison" | "binaryQualification"> {
   const read = (name: string): Uint8Array => new Uint8Array(readFileSync(join(bundleDir, name)));
   const claim = JSON.parse(readFileSync(join(bundleDir, "claim-package.json"), "utf8")) as PublicAssetInput["claim"] & {
     readonly records: { readonly matrixSha256: string; readonly reportSha256: string };
@@ -80,7 +110,9 @@ function legacyAssetInput(bundleDir: string): PublicAssetInput {
 function rewriteAsLegacyPresentation(bundleDir: string): void {
   const input = legacyAssetInput(bundleDir);
   expect(input.dissentCellKeys, "golden fixture dissent projection").toEqual([]);
-  const legacy = buildPublicAssets(input);
+  // The third profile is unrepresentable on `PublicAssetInput` (#3331). This suite still has to
+  // render it so the verifier can refuse those bytes; the assertion is the fence.
+  const legacy = buildPublicAssets(input as PublicAssetInput);
   const changed = Object.entries(legacy).filter(([name, bytes]) =>
     createHash("sha256").update(bytes).digest("hex")
       !== createHash("sha256").update(readFileSync(join(bundleDir, name))).digest("hex"));

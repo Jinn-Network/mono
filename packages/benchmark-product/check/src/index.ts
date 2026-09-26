@@ -21,7 +21,7 @@ export type {
 } from "./comparison.js";
 export { buildPublicAssets } from "./assets.js";
 export { assertTaskSelectionConsistency, taskSelectionContradiction } from "./profile/task-selection.js";
-export type { PublicAssetInput } from "./assets.js";
+export type { PublicAssetBinaryQualification, PublicAssetInput } from "./assets.js";
 // The three node:crypto ports the RFC 3161 anchor rule engine injects
 // (anchor-evidence design §6.1 "Placement"). They live here, in the standalone
 // verifier, and are reused by the product core -- which already depends on this
