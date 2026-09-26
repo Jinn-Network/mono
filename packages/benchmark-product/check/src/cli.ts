@@ -339,20 +339,8 @@ function renderSigners(
  * so it is wrapped here rather than in the shared sentence -- the words are the shared module's, the
  * column width is this surface's.
  */
-function wrapParagraph(text: string | undefined, width = 76): string | undefined {
-  if (text === undefined) return undefined;
-  const lines: string[] = [];
-  let line = "";
-  for (const word of text.split(" ")) {
-    if (line === "") line = word;
-    else if (line.length + 1 + word.length <= width) line += ` ${word}`;
-    else {
-      lines.push(line);
-      line = word;
-    }
-  }
-  if (line !== "") lines.push(line);
-  return lines.join("\n");
+function wrapParagraph(text: string | undefined): string | undefined {
+  return text === undefined ? undefined : wrap(text);
 }
 
 /**
