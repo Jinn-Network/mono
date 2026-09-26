@@ -40,10 +40,16 @@ import { validateBinaryInstrumentQualificationProjection } from "@jinn-network/b
 import { BENCHMARKING_METHOD_IDS, BENCHMARKING_METHOD_VERSION, compareCodeUnitStrings } from "@jinn-network/benchmarking-records";
 import type { MatrixRecord, ReportRecord, RunRecord } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
-import type { ClaimAnchor, ClaimDisclosureSection, ClaimExternalImportSection } from "@colophon-claims/check";
+import type {
+  ClaimAnchor,
+  ClaimBindingSection,
+  ClaimDisclosureSection,
+  ClaimExternalImportSection,
+} from "@colophon-claims/check";
 import {
   CAPABILITY_REGISTRY,
   ClaimAnchorSchema,
+  ClaimBindingSectionSchema,
   ClaimDisclosureSectionSchema,
   ClaimExternalImportSectionSchema,
   PROMPTED_SCREENING_PROFILE,
@@ -359,6 +365,10 @@ const ClaimPackageWireSchema = z.object({
    * below refuses it on every earlier allocation. Contents are the marker's projection, never a
    * second opinion. */
   externalImport: ClaimExternalImportSectionSchema.optional(),
+  /** issue #3370: present exactly when the composed vector declares `beacon-binding`. The refine
+   * below refuses it on every earlier allocation. Contents are `deriveClaimRunBinding`'s projection
+   * of the carried record's own bytes, never a second opinion about what that record says. */
+  binding: ClaimBindingSectionSchema.optional(),
   /** Optional Colophon suite-protocol bits. Not Report v2 required fields. */
   suiteComparability: z.object({
     executionConformance: z.boolean(),
@@ -399,6 +409,13 @@ const ClaimPackageWireSchema = z.object({
       code: "custom",
       message: "only the composed claim-package/7 allocation carries an externalImport section",
       path: ["externalImport"],
+    });
+  }
+  if (!composedClosure && claim.binding !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "only the composed claim-package/7 allocation carries a binding section",
+      path: ["binding"],
     });
   }
   const anchoredClosure = claim.claimSchema === ANCHORED_CLAIM_PACKAGE_SCHEMA_ID
@@ -667,7 +684,7 @@ function exactBinaryClaimControls(input: Record<string, unknown>): boolean {
   // generic control-shape failure. Neither field is ever set on an actual binary-instrument claim
   // (`methodProjection`'s dispatch is exclusive), so admitting them here is defense in depth, not
   // a widening any real claim exercises.
-  return exactKeys(input, ["claimSchema", "scope", "records", "method", "results", "completeness", "attrition", "conflicted", "assurance", "disclosures", "limitations", "venueHonesty", "verification", "rehearsal", "qualification", "anchors", "disclosure", "externalImport", "pairwiseDisagreement", "pairedMajorityDelta"])
+  return exactKeys(input, ["claimSchema", "scope", "records", "method", "results", "completeness", "attrition", "conflicted", "assurance", "disclosures", "limitations", "venueHonesty", "verification", "rehearsal", "qualification", "anchors", "disclosure", "externalImport", "binding", "pairwiseDisagreement", "pairedMajorityDelta"])
     && exactKeys(scope, ["draftId", "benchmarkSha256", "taskCount", "arms", "replicates", "venue"])
     && Array.isArray((scope as { arms?: unknown }).arms)
     && ((scope as { arms: unknown[] }).arms).every((arm) => exactKeys(arm, ["armId", "pinning"]))
@@ -767,6 +784,10 @@ export interface BuildClaimPackageInput {
   /** issue #3417: the projected external-import section, already derived from the authenticated
    * marker. Absent for every driven run, which is what keeps every existing claim byte-identical. */
   readonly externalImport?: ClaimExternalImportSection;
+  /** issue #3370: the projected binding section, already derived from the carried record's exact
+   * bytes by the shared `deriveClaimRunBinding`. Absent for every unbound run, which is what keeps
+   * every existing claim byte-identical. */
+  readonly binding?: ClaimBindingSection;
   /** Optional two-axis official-suite comparability. Absent unless a suite protocol is bound. */
   readonly suiteComparability?: {
     readonly executionConformance: boolean;
@@ -1278,6 +1299,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     // about what that record says (issue #2839, design §6.6).
     ...(disclosure === undefined ? {} : { disclosure }),
     ...(input.externalImport === undefined ? {} : { externalImport: input.externalImport }),
+    ...(input.binding === undefined ? {} : { binding: input.binding }),
     ...(input.previewDisclosure !== undefined
       ? {
           rehearsal: {

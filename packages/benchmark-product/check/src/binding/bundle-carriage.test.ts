@@ -12,6 +12,7 @@
  * Every digest, beacon value and item id below is synthetic.
  */
 
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import {
   BEACON_BINDING_PROCEDURE,
@@ -21,7 +22,16 @@ import {
   verifyRunBinding,
   type VerifiedRunBinding,
 } from "./beacon-binding.js";
-import { assertRunBindingLinkage } from "./bundle-carriage.js";
+import {
+  BEACON_BINDING_BUNDLE_MEMBER,
+  ClaimBindingSectionSchema,
+  assertRunBindingLinkage,
+  deriveClaimRunBinding,
+  verifyRunBindingMember,
+} from "./bundle-carriage.js";
+import { BenchmarkProductError } from "../profile/errors.js";
+
+const sha256Hex = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 
 const RUN_SHA256 = "a".repeat(64);
 const SEAL_DIGEST = `sha256:${RUN_SHA256}`;
@@ -134,5 +144,71 @@ describe("assertRunBindingLinkage", () => {
       expect(error).toBeInstanceOf(RunBindingError);
       expect((error as RunBindingError).path).toBe("sealDigest");
     }
+  });
+});
+
+/** The record as it travels: the sealed bytes, verbatim, exactly as `getSealedBytes` returns them. */
+function recordBytes(overrides: Record<string, unknown> = {}): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify({
+    procedure: BEACON_BINDING_PROCEDURE,
+    mode: "census",
+    sealDigest: SEAL_DIGEST,
+    sealedAt: SEALED_AT,
+    beacon: { source: "drand/quicknet", round: SEAL_DERIVED_ROUND, value: VALUE },
+    itemSha256s: POOL,
+    order: computeBeaconOrder({ sealDigest: SEAL_DIGEST, beaconValue: VALUE, itemSha256s: POOL }).order,
+    ...overrides,
+  }));
+}
+
+describe("verifyRunBindingMember", () => {
+  test("verifies the member's exact bytes, never a re-encoding of them", () => {
+    // Deliberately NOT canonical: two spaces of indent, and keys in the order above rather than
+    // sorted. A canonicalizing reader would have to re-encode, and then the manifest digest, the
+    // claim's `recordSha256`, and the sealed store's digest would be three values that can disagree.
+    const pretty = new TextEncoder().encode(
+      JSON.stringify(JSON.parse(new TextDecoder().decode(recordBytes())), null, 2),
+    );
+    expect(verifyRunBindingMember(pretty).sealDigest).toBe(SEAL_DIGEST);
+    expect(sha256Hex(pretty)).not.toBe(sha256Hex(recordBytes()));
+    expect(deriveClaimRunBinding(pretty).recordSha256).toBe(sha256Hex(pretty));
+  });
+
+  test("raises the verifier's own refusal on bytes that are not a valid record", () => {
+    expect(() => verifyRunBindingMember(new TextEncoder().encode("{"))).toThrow(BenchmarkProductError);
+    expect(() => verifyRunBindingMember(recordBytes({ order: [POOL[0]!] }))).toThrow(RunBindingError);
+  });
+});
+
+describe("deriveClaimRunBinding", () => {
+  test("computes recordSha256 from the bytes it was handed, not from a supplied digest", () => {
+    const bytes = recordBytes();
+    expect(deriveClaimRunBinding(bytes).recordSha256).toBe(sha256Hex(bytes));
+  });
+
+  test("carries only facts embedded in the record, and satisfies its own schema", () => {
+    const section = deriveClaimRunBinding(recordBytes({ declaredSource: "drand/quicknet" }));
+    expect(ClaimBindingSectionSchema.safeParse(section).success).toBe(true);
+    expect(section).toEqual({
+      recordSha256: sha256Hex(recordBytes({ declaredSource: "drand/quicknet" })),
+      sealDigest: SEAL_DIGEST,
+      sealedAt: SEALED_AT,
+      mode: "census",
+      beacon: { source: "drand/quicknet", round: SEAL_DERIVED_ROUND, value: VALUE },
+      postSeal: "proven-offline",
+      roundBasis: "seal-derived",
+      sourceBasis: "seal-declared",
+      declaredSource: "drand/quicknet",
+    });
+  });
+
+  test("omits declaredSource exactly when the record declares none", () => {
+    const section = deriveClaimRunBinding(recordBytes());
+    expect(section).not.toHaveProperty("declaredSource");
+    expect(section.sourceBasis).toBe("operator-chosen");
+  });
+
+  test("names the member the capability makes mandatory", () => {
+    expect(BEACON_BINDING_BUNDLE_MEMBER).toBe("beacon-binding.json");
   });
 });

@@ -30,6 +30,8 @@ import {
 } from "@jinn-network/benchmarking-records";
 import { assertClaimConsistency, firstDifference, type ClaimRecordIdentities } from "./claim-consistency.js";
 import { buildClaimPackage, ClaimPackageSchema, COMPOSED_CLAIM_PACKAGE_SCHEMA_ID, type ClaimPackage } from "./claim.js";
+import { computeBeaconOrder, requiredBeaconRound } from "../binding/beacon-binding.js";
+import { deriveClaimRunBinding } from "../binding/bundle-carriage.js";
 import {
   ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
   CLAIM_PACKAGE_SCHEMA_ID,
@@ -176,6 +178,26 @@ function refusalFor(tamper: (claim: Record<string, unknown>) => void): Benchmark
  * `/10` shared `claim-package/4` and that id admitted a second reader pair. `claim-package/4` is
  * carried by `/6` alone again, and admits the one pair it always did.
  */
+/**
+ * A minimal census binding record's exact bytes, for the claim-section shape tests below. Synthetic
+ * throughout: repeated-hex digests and beacon value, never a real drand round.
+ */
+const BINDING_RECORD_BYTES = (() => {
+  const sealDigest = `sha256:${"a".repeat(64)}`;
+  const sealedAt = "2026-08-01T00:00:00.000Z";
+  const value = "b".repeat(64);
+  const itemSha256s = [`sha256:${"1".repeat(64)}`, `sha256:${"2".repeat(64)}`];
+  return new TextEncoder().encode(JSON.stringify({
+    procedure: "beacon-binding/1",
+    mode: "census",
+    sealDigest,
+    sealedAt,
+    beacon: { source: "drand/quicknet", round: requiredBeaconRound("drand/quicknet", sealedAt)!.round, value },
+    itemSha256s,
+    order: computeBeaconOrder({ sealDigest, beaconValue: value, itemSha256s }).order,
+  }));
+})();
+
 describe("issue #3403: the composed claim package", () => {
   function claimFor(input: { readonly composedCapabilities?: readonly string[]; readonly anchors?: readonly never[] }): ClaimPackage {
     return buildClaimPackage({
@@ -246,6 +268,19 @@ describe("issue #3403: the composed claim package", () => {
     expect({ ...anchored, claimSchema: undefined, verification: undefined })
       .toEqual({ ...claimFor({ anchors: [] }), claimSchema: undefined, verification: undefined });
     for (const claim of [base, anchored]) expect(ClaimPackageSchema.safeParse(claim).success).toBe(true);
+  });
+
+  test("issue #3370: a binding section is legal on the composed allocation and nowhere else", () => {
+    // The composed allocation carries each capability section exactly when its vector declares it,
+    // so no section is illegal on it by id alone; WHICH sections a given bundle must carry is
+    // settled by `claim-consistency` against the bundle's own manifest. Every earlier allocation
+    // declares no capabilities at all, so a binding section on one is refused BY NAME.
+    const binding = deriveClaimRunBinding(BINDING_RECORD_BYTES);
+    expect(ClaimPackageSchema.safeParse({ ...claimFor({ composedCapabilities: [] }), binding }).success).toBe(true);
+    const refused = ClaimPackageSchema.safeParse({ ...claimFor({ anchors: [] }), binding });
+    expect(refused.success).toBe(false);
+    if (refused.success) return;
+    expect(refused.error.issues.some((issue) => issue.path.join(".") === "binding")).toBe(true);
   });
 
   test("the builder refuses a section and a declaration that do not arrive together", () => {

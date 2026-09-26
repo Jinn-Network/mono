@@ -67,6 +67,8 @@ import { ClaimDisclosureSectionSchema } from "./disclosure.js";
 import type { ClaimDisclosureSection } from "./disclosure.js";
 import { ClaimExternalImportSectionSchema } from "./external-import.js";
 import type { ClaimExternalImportSection } from "./external-import.js";
+import { ClaimBindingSectionSchema } from "../binding/bundle-carriage.js";
+import type { ClaimBindingSection } from "../binding/bundle-carriage.js";
 import { PROMPTED_SCREENING_PROFILE } from "../admission/contracts.js";
 import { ClaimAnchorSchema, SELF_RUN_TRUST_ROOT, anchoredTrustRoot } from "./anchor-claims.js";
 import type { ClaimAnchor } from "./anchor-claims.js";
@@ -352,6 +354,10 @@ const ClaimPackageWireSchema = z.object({
    * below refuses it on every earlier allocation. Contents are the marker's projection, never a
    * second opinion. */
   externalImport: ClaimExternalImportSectionSchema.optional(),
+  /** issue #3370: present exactly when the composed vector declares `beacon-binding`. The refine
+   * below refuses it on every earlier allocation. Contents are `deriveClaimRunBinding`'s projection
+   * of the carried record's own bytes, never a second opinion about what that record says. */
+  binding: ClaimBindingSectionSchema.optional(),
 }).superRefine((claim, ctx) => {
   // The two anchored allocations differ only in which method projection they carry: /4 takes the
   // headline/comparison family, /5 (issue #3205) the binary qualification. Both carry the section.
@@ -386,6 +392,13 @@ const ClaimPackageWireSchema = z.object({
       code: "custom",
       message: "only the composed claim-package/7 allocation carries an externalImport section",
       path: ["externalImport"],
+    });
+  }
+  if (!composedClosure && claim.binding !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "only the composed claim-package/7 allocation carries a binding section",
+      path: ["binding"],
     });
   }
   const anchoredClosure = claim.claimSchema === ANCHORED_CLAIM_PACKAGE_SCHEMA_ID
@@ -654,7 +667,7 @@ function exactBinaryClaimControls(input: Record<string, unknown>): boolean {
   // control-shape failure. Neither judge field is ever set on an actual binary-instrument claim
   // (`methodProjection`'s dispatch is exclusive), so admitting them here is defense in depth, not
   // a widening any real claim exercises.
-  return exactKeys(input, ["claimSchema", "scope", "records", "method", "results", "completeness", "attrition", "conflicted", "assurance", "disclosures", "limitations", "venueHonesty", "verification", "rehearsal", "qualification", "anchors", "disclosure", "externalImport", "pairwiseDisagreement", "pairedMajorityDelta"])
+  return exactKeys(input, ["claimSchema", "scope", "records", "method", "results", "completeness", "attrition", "conflicted", "assurance", "disclosures", "limitations", "venueHonesty", "verification", "rehearsal", "qualification", "anchors", "disclosure", "externalImport", "binding", "pairwiseDisagreement", "pairedMajorityDelta"])
     && exactKeys(scope, ["draftId", "benchmarkSha256", "taskCount", "arms", "replicates", "venue"])
     && Array.isArray((scope as { arms?: unknown }).arms)
     && ((scope as { arms: unknown[] }).arms).every((arm) => exactKeys(arm, ["armId", "pinning"]))
@@ -754,6 +767,10 @@ export interface BuildClaimPackageInput {
   /** issue #3417: the projected external-import section, already derived from the authenticated
    * marker. Absent for every driven run, which is what keeps every existing claim byte-identical. */
   readonly externalImport?: ClaimExternalImportSection;
+  /** issue #3370: the projected binding section, already derived from the carried record's exact
+   * bytes by the shared `deriveClaimRunBinding`. Absent for every unbound run, which is what keeps
+   * every existing claim byte-identical. */
+  readonly binding?: ClaimBindingSection;
 }
 
 type Comparison = z.infer<typeof ComparisonSchema>;
@@ -1239,6 +1256,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     // about what that record says (issue #2839, design §6.6).
     ...(disclosure === undefined ? {} : { disclosure }),
     ...(input.externalImport === undefined ? {} : { externalImport: input.externalImport }),
+    ...(input.binding === undefined ? {} : { binding: input.binding }),
     ...(input.previewDisclosure !== undefined
       ? {
           rehearsal: {

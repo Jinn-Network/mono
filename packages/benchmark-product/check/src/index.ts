@@ -264,8 +264,12 @@ export type {
 } from "./binding/beacon-binding.js";
 export {
   BEACON_BINDING_BUNDLE_MEMBER,
+  ClaimBindingSectionSchema,
   assertRunBindingLinkage,
+  deriveClaimRunBinding,
+  verifyRunBindingMember,
 } from "./binding/bundle-carriage.js";
+export type { ClaimBindingSection } from "./binding/bundle-carriage.js";
 export { runBindingClass, runBindingSentence, runBoundVenueLimits } from "./binding/report-face.js";
 export type { RunBindingClass } from "./binding/report-face.js";
 // Reader-legible publisher identity (issue #2983): a signing key bound to a domain by a proof the

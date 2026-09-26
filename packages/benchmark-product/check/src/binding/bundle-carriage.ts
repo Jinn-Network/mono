@@ -20,7 +20,16 @@
  * authenticated `run.json` member the bundle carries.
  */
 
-import { RunBindingError, type VerifiedRunBinding } from "./beacon-binding.js";
+import { createHash } from "node:crypto";
+import { z } from "zod";
+import {
+  BeaconReferenceSchema,
+  BeaconSourceIdSchema,
+  RunBindingError,
+  verifyRunBinding,
+  type VerifiedRunBinding,
+} from "./beacon-binding.js";
+import { refuse } from "../profile/errors.js";
 
 /**
  * The bundle member carrying the sealed `beacon-binding/1` record, verbatim.
@@ -83,4 +92,82 @@ export function assertRunBindingLinkage(input: {
       : `its sealed Run declares ${input.declaredSource}`;
     throw new RunBindingError("declaredSource", `${carried}, but ${sealed}`);
   }
+}
+
+/**
+ * The claim's `binding` section: the record's own digest plus the facts embedded in its bytes.
+ *
+ * The recomputed products — `poolDigest`, `poolSize`, `order`, and a sampled binding's `sample` —
+ * are deliberately absent. The member is authenticated by `bundle.json`, so a reader already holds
+ * the bytes those derive from and `verifyRunBinding` recomputes them from those bytes on every read;
+ * restating them here would duplicate what the reader has and would grow the claim with the run's
+ * item count. What the section is for is the reader of `claim-package.json` ALONE: which beacon,
+ * which seal, and on what basis each of the three claims the face makes rests.
+ *
+ * It is a convenience surface rather than the primary one. `assertClaimConsistency`'s whole-claim
+ * byte-compare against the rebuilt claim is what actually proves the section is this record's
+ * projection, which is why there is no second bespoke comparison for it anywhere.
+ */
+export const ClaimBindingSectionSchema = z.strictObject({
+  recordSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  sealDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+  sealedAt: z.string().min(1),
+  mode: z.enum(["census", "sampled"]),
+  beacon: BeaconReferenceSchema,
+  postSeal: z.enum(["proven-offline", "attributive"]),
+  roundBasis: z.enum(["seal-derived", "operator-chosen"]),
+  sourceBasis: z.enum(["seal-declared", "operator-chosen"]),
+  /** The source the sealed Run named, present exactly when the record restates one. */
+  declaredSource: BeaconSourceIdSchema.optional(),
+});
+
+export type ClaimBindingSection = z.infer<typeof ClaimBindingSectionSchema>;
+
+function sha256Hex(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/**
+ * Verifies one carried binding member's EXACT bytes.
+ *
+ * Exact is the whole point, and it is where this differs from `parseExternalImportMarker`, which
+ * requires the canonical encoding: the member carries the sealed record verbatim out of the
+ * producer's sealed store, so the manifest's `files[].sha256`, the claim's `recordSha256`, and that
+ * store's own digest are one value. A reader that canonicalized before hashing would hold a second
+ * digest free to disagree with the one `bundle.json` pins.
+ *
+ * Throws `RunBindingError` on a record the procedure refuses, for the caller to translate into its
+ * own typed refusal — the same contract `assertRunBindingLinkage` has.
+ */
+export function verifyRunBindingMember(recordBytes: Uint8Array): VerifiedRunBinding {
+  let candidate: unknown;
+  try {
+    candidate = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(recordBytes));
+  } catch {
+    refuse("record-integrity", BEACON_BINDING_BUNDLE_MEMBER, `${BEACON_BINDING_BUNDLE_MEMBER} is not valid UTF-8 JSON`);
+  }
+  return verifyRunBinding(candidate);
+}
+
+/**
+ * The one shared projection, called by BOTH the workspace producer and the standalone verifier.
+ *
+ * It takes the record's own bytes and computes `recordSha256` from THOSE bytes, rather than
+ * accepting a separately supplied digest: a caller-supplied digest is a second answer free to
+ * disagree with the bytes, and admitting one is exactly what would turn the whole-claim byte-compare
+ * into a comparison of two derivations.
+ */
+export function deriveClaimRunBinding(recordBytes: Uint8Array): ClaimBindingSection {
+  const binding = verifyRunBindingMember(recordBytes);
+  return {
+    recordSha256: sha256Hex(recordBytes),
+    sealDigest: binding.sealDigest,
+    sealedAt: binding.sealedAt,
+    mode: binding.mode,
+    beacon: { ...binding.beacon },
+    postSeal: binding.postSeal,
+    roundBasis: binding.roundBasis,
+    sourceBasis: binding.sourceBasis,
+    ...(binding.declaredSource === undefined ? {} : { declaredSource: binding.declaredSource }),
+  };
 }
