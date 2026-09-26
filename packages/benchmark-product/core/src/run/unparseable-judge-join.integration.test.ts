@@ -18,7 +18,18 @@
  * The whole chain is production code: `runEvaluationHarness` over the real binary-judgment
  * evaluator registration writes the ResultEvaluation, `assembleMatrix` over `localAssemblyPorts`
  * classifies the cells, and the registered `binary-instrument@1` method reduces and projects them.
- * Nothing between the fixture bytes and the published projection is hand-authored.
+ *
+ * The join declares two limits, and nothing outside them is hand-authored:
+ * 1. Signing is stubbed. The harness writes an unsigned `out/verdict`; this test wraps it with
+ *    `sealDsseEnvelope` under a placeholder signature. No verification is being skipped —
+ *    `MethodComputeInput` has no signature-verifier port and `localAssemblyPorts` is called
+ *    without `trust`, so nothing on this path verifies a signature at all. The production signer
+ *    and attestation issuer are simply outside the join.
+ * 2. Assemble is fed `InScopeCell`/`InScopeVerdict` literals, not the product's own
+ *    `buildRunAssemblyPorts` projector, which is what sets `evaluationTerminal` from the folded
+ *    run journal. Absent it, `deriveOutcome` can never reach `"unscorable"` — so the
+ *    "never could-not-grade" claim below is guaranteed upstream by `expect(exitCode).toBe(0)`
+ *    rather than re-derived by assemble.
  */
 
 import { Buffer } from "node:buffer";
