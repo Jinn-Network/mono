@@ -558,13 +558,24 @@ export async function settlementJoinCheck(
 
   // "not revoked at claim time" -- a distinct, later check from the
   // envelope-time resolution above (divergent-times protection).
-  const settlementLegAtClaimTime = await resolveBindingForAgent(
-    deps.bindingResolver,
+  // Resolved through the plain resolver rather than `resolveBindingForAgent`
+  // so the two ways this leg can fail to stand for the claimed agent report
+  // distinctly: a genuine miss (revoked or expired) and a resolution that
+  // drifted to a different Agent IRI. The inline assertion mirrors
+  // `verifyEnvelopeBinding` step 2.
+  const settlementLegAtClaimTime = await deps.bindingResolver.resolveBinding(
     { key: input.settlementDeclarationKey, agent: input.claimedEvaluatorAgent },
     input.claimTime,
   );
   if (settlementLegAtClaimTime === null) {
     return { ok: false, reason: "settlement leg is not valid (revoked or expired) at claim time." };
+  }
+  if (settlementLegAtClaimTime.binding.agent !== input.claimedEvaluatorAgent) {
+    return {
+      ok: false,
+      reason: `settlement leg resolves to Agent IRI "${settlementLegAtClaimTime.binding.agent}" at claim time, `
+        + `not the claimed "${input.claimedEvaluatorAgent}".`,
+    };
   }
   if (!settlementLegAtClaimTime.binding.scope.includes("settlements")) {
     return { ok: false, reason: "settlement leg lost scope:settlements at claim time." };

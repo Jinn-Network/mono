@@ -816,6 +816,30 @@ describe("settlementJoinCheck (§7.5a)", () => {
     expect(outcome.reason).toMatch(/settlement leg does not resolve/);
   });
 
+  test("(e) a settlement leg that no longer resolves at claim time fails as revoked or expired", async () => {
+    const expiringResolver: BindingResolver = {
+      async resolveBinding(query, atTime) {
+        if (query.key === VERDICT_KEY) return resolvedBinding({ binding: verdictBinding() });
+        if (atTime === "2026-03-01T00:00:00Z") return resolvedBinding({ binding: settlementBinding() });
+        return null;
+      },
+    };
+
+    const outcome = await settlementJoinCheck(
+      {
+        verdictKey: VERDICT_KEY,
+        settlementDeclarationKey: SETTLEMENT_KEY,
+        claimedEvaluatorAgent: AGENT,
+        family: "verdicts",
+        envelopeEffectiveTime: "2026-03-01T00:00:00Z",
+        claimTime: "2026-03-05T00:00:00Z",
+      },
+      { bindingResolver: expiringResolver },
+    );
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(false);
+    expect(outcome.reason).toMatch(/not valid \(revoked or expired\) at claim time/);
+  });
+
   test("(e) a settlement leg that drifts to a different Agent IRI by claim time fails the join", async () => {
     const keyOnlyResolver: BindingResolver = {
       async resolveBinding(query, atTime) {
@@ -837,7 +861,11 @@ describe("settlementJoinCheck (§7.5a)", () => {
       { bindingResolver: keyOnlyResolver },
     );
     expect(outcome.ok, JSON.stringify(outcome)).toBe(false);
-    expect(outcome.reason).toMatch(/not valid \(revoked or expired\) at claim time/);
+    // Agent drift is not revocation: the reason names the drifted IRI rather
+    // than sending an operator looking for a revocation that does not exist.
+    expect(outcome.reason).toMatch(/resolves to Agent IRI/);
+    expect(outcome.reason).toContain(OTHER_AGENT);
+    expect(outcome.reason).not.toMatch(/revoked or expired/);
   });
 
   // The join's `ok: true` should carry the agent it PROVED, not the one it was
