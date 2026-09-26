@@ -19,6 +19,7 @@ export const RUNS_DIRNAME = "runs";
 export const PREVIEWS_DIRNAME = "previews";
 export const RUNTIME_HOSTS_DIRNAME = "runtime-hosts";
 export const PUBLICATION_DIRNAME = "publication";
+export const EVIDENCE_SESSIONS_DIRNAME = "evidence-sessions";
 
 export function workspaceMetadataPath(workspaceDir: string): string {
   return join(workspaceDir, WORKSPACE_METADATA_FILENAME);
@@ -151,6 +152,48 @@ export function previewJournalPath(workspaceDir: string, draftId: string, previe
  * rehearses against; never the official venue root under the workspace directly. */
 export function previewScratchDir(workspaceDir: string, draftId: string, previewId: string): string {
   return join(previewDir(workspaceDir, draftId, previewId), "scratch");
+}
+
+/**
+ * `evidence-sessions/` (#3340) — the evidence-native production path's own working area, one
+ * directory per session. It sits beside `runs/` rather than inside it because an evidence session
+ * is not a run: it has no draft, no lifecycle state, and no cell dispatch. What it holds is the
+ * pre-registered analysis policy, the native capture's sealed records and artifacts, and the
+ * issued evaluations — everything `evidence publish` needs to assemble a bundle, and nothing else.
+ *
+ * Created lazily, the same precedent `runsDir` and `previewsDir` already set.
+ */
+export function evidenceSessionsDir(workspaceDir: string): string {
+  return join(workspaceDir, EVIDENCE_SESSIONS_DIRNAME);
+}
+
+/** `<ws>/evidence-sessions/<sessionId>` — one session's own directory. */
+export function evidenceSessionDir(workspaceDir: string, sessionId: string): string {
+  return join(evidenceSessionsDir(workspaceDir), sessionId);
+}
+
+/** `<ws>/evidence-sessions/<sessionId>/session.json` — the product's own phase document. */
+export function evidenceSessionStatePath(workspaceDir: string, sessionId: string): string {
+  return join(evidenceSessionDir(workspaceDir, sessionId), "session.json");
+}
+
+/**
+ * `<ws>/evidence-sessions/<sessionId>/capture-session.json` — the native-capture coordinator's
+ * OWN session document. Deliberately a second file: that one is `NativeCaptureStore`'s, written
+ * under its revision compare-and-set, and the two must never contend for one path.
+ */
+export function evidenceCaptureSessionPath(workspaceDir: string, sessionId: string): string {
+  return join(evidenceSessionDir(workspaceDir, sessionId), "capture-session.json");
+}
+
+/** `<ws>/evidence-sessions/<sessionId>/records` — sealed record bytes, addressed by digest. */
+export function evidenceSessionRecordsDir(workspaceDir: string, sessionId: string): string {
+  return join(evidenceSessionDir(workspaceDir, sessionId), "records");
+}
+
+/** `<ws>/evidence-sessions/<sessionId>/artifacts` — artifact bytes, addressed by digest. */
+export function evidenceSessionArtifactsDir(workspaceDir: string, sessionId: string): string {
+  return join(evidenceSessionDir(workspaceDir, sessionId), "artifacts");
 }
 
 /** Private connection state for optional runtime workers. Never part of sealed records/bundles. */
