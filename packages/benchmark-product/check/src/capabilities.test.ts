@@ -66,12 +66,13 @@ function entry(token: string, order: number, overrides: Partial<CapabilityEntry>
 }
 
 describe("the registered capabilities", () => {
-  test("exactly four, under their stable wire tokens", () => {
+  test("exactly five, under their stable wire tokens", () => {
     expect(CAPABILITY_REGISTRY.map((capability) => capability.token)).toEqual([
       "binary-qualification",
       "anchoring",
       "disclosure-specification",
       "external-import",
+      "beacon-binding",
     ]);
   });
 
@@ -132,6 +133,25 @@ describe("the registered capabilities", () => {
     expect(imported.refines).toEqual([]);
     expect(imported.checks).toEqual(["external-import"]);
     expect(imported.claimSection).toBe("externalImport");
+  });
+
+  test("beacon-binding adds a mandatory record member, a check, and no grammar", () => {
+    const binding = CAPABILITY_REGISTRY[4]!;
+    // A fixed path, not a `records/` pattern: the records tree is allowlisted only because the
+    // evidence catalog enumerates it, and the only edge that could name a binding there is a new
+    // Report extension -- which would force the token into the `/2` catalog vocabulary
+    // `PRE_APPEND_V2_ROLES_SHA256` freezes.
+    expect(binding.mandatoryFiles).toEqual(["beacon-binding.json"]);
+    expect(binding.memberPatterns).toEqual([]);
+    // `requires: []` is the deliberate divergence from `disclosure-specification`: binding is a
+    // RUN-level fact, so a census-bound headline run is as bound as a qualified one, and requiring
+    // the qualification grammar would tie it to an unrelated analysis shape.
+    expect(binding.requires).toEqual([]);
+    expect(binding.conflicts).toEqual([]);
+    expect(binding.refines).toEqual([]);
+    expect(binding.roleDerivations).toEqual([]);
+    expect(binding.checks).toEqual(["beacon-binding"]);
+    expect(binding.claimSection).toBe("binding");
   });
 });
 
@@ -390,8 +410,9 @@ describe("reader instructions", () => {
       "binary-qualification": "verify@0.1.0",
       anchoring: "verify@0.1.0",
       "disclosure-specification": "verify@0.2.1",
-      // New with the composed generation: no verify release implements it.
+      // New with the composed generation: no verify release implements them.
       "external-import": "check@0.2.1",
+      "beacon-binding": "check@0.2.1",
     });
   });
 
@@ -409,6 +430,7 @@ describe("producer-side activation", () => {
     projectsBinaryQualification: false,
     declaresDisclosure: false,
     importedRun: false,
+    boundRun: false,
   };
 
   test("each predicate turns on exactly its own token, in canonical wire order", () => {
@@ -417,18 +439,29 @@ describe("producer-side activation", () => {
     expect(activeCapabilityVector({ ...NONE, projectsBinaryQualification: true }))
       .toEqual(["binary-qualification"]);
     expect(activeCapabilityVector({ ...NONE, importedRun: true })).toEqual(["external-import"]);
+    // A run-level fact, so it turns on alone: an unanchored, unqualified, driven run that bound to
+    // a beacon declares exactly this and nothing else.
+    expect(activeCapabilityVector({ ...NONE, boundRun: true })).toEqual(["beacon-binding"]);
     expect(activeCapabilityVector({
       anchoredClosure: true,
       projectsBinaryQualification: true,
       declaresDisclosure: true,
       importedRun: false,
+      boundRun: false,
     })).toEqual(["anchoring", "binary-qualification", "disclosure-specification"]);
     expect(activeCapabilityVector({
       anchoredClosure: true,
       projectsBinaryQualification: true,
       declaresDisclosure: true,
       importedRun: true,
-    })).toEqual(["anchoring", "binary-qualification", "disclosure-specification", "external-import"]);
+      boundRun: true,
+    })).toEqual([
+      "anchoring",
+      "beacon-binding",
+      "binary-qualification",
+      "disclosure-specification",
+      "external-import",
+    ]);
   });
 
   test("a declaration rides the qualification analysis alone, and needs no anchor", () => {
@@ -447,8 +480,16 @@ describe("producer-side activation", () => {
       for (const projectsBinaryQualification of [false, true]) {
         for (const declaresDisclosure of [false, true]) {
           for (const importedRun of [false, true]) {
-            const facts = { anchoredClosure, projectsBinaryQualification, declaresDisclosure, importedRun };
-            expect(() => composeClosure(activeCapabilityVector(facts)), JSON.stringify(facts)).not.toThrow();
+            for (const boundRun of [false, true]) {
+              const facts = {
+                anchoredClosure,
+                projectsBinaryQualification,
+                declaresDisclosure,
+                importedRun,
+                boundRun,
+              };
+              expect(() => composeClosure(activeCapabilityVector(facts)), JSON.stringify(facts)).not.toThrow();
+            }
           }
         }
       }

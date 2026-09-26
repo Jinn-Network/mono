@@ -95,6 +95,7 @@ export {
 // come from one registry rather than from two lists that must be kept in step.
 export {
   ANCHORING_CAPABILITY,
+  BEACON_BINDING_CAPABILITY,
   BINARY_QUALIFICATION_CAPABILITY,
   CAPABILITY_REGISTRY,
   CapabilityVectorSchema,

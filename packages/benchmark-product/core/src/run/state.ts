@@ -186,6 +186,8 @@ export const AdditionalBundleIdentitySchema = z.object({
     "disclosure-specification",
     /** Recorded only by an imported-run publication (issue #3417). Additive in the same way. */
     "external-import",
+    /** Recorded only by a bound-run publication (issue #3370). Additive in the same way. */
+    "beacon-binding",
   ])),
 });
 
@@ -252,6 +254,8 @@ export const RunStateSchema = z.object({
     "disclosure-specification",
     /** Recorded only by an imported-run publication (issue #3417). Additive in the same way. */
     "external-import",
+    /** Recorded only by a bound-run publication (issue #3370). Additive in the same way. */
+    "beacon-binding",
   ])).optional(),
   /** N-1 additional public bundle identities, one per additional Report, set at `publish` in the
    * SAME invocation as the canonical `bundleIdentity`/`bundleRelativePath`/`bundleChecks` triple

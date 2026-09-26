@@ -1149,6 +1149,7 @@ function recordClosure(input: MaterializeBundleInput): {
           projectsBinaryQualification: binaryQualification,
           declaresDisclosure: disclosureCarriage !== undefined,
           importedRun: importedCarriage !== undefined,
+          boundRun: false,
         }),
       }
       : { format: legacyFormat }),

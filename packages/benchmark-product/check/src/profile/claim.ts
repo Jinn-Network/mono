@@ -1155,6 +1155,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
       anchors: anchored,
       disclosure: disclosure !== undefined,
       externalImport: input.externalImport !== undefined,
+      binding: input.binding !== undefined,
     };
     for (const capability of CAPABILITY_REGISTRY) {
       if (supplied[capability.claimSection] !== input.composedCapabilities!.includes(capability.token)) {

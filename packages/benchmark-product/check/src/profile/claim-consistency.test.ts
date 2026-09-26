@@ -31,7 +31,7 @@ import {
 import { assertClaimConsistency, firstDifference, type ClaimRecordIdentities } from "./claim-consistency.js";
 import { buildClaimPackage, ClaimPackageSchema, COMPOSED_CLAIM_PACKAGE_SCHEMA_ID, type ClaimPackage } from "./claim.js";
 import { computeBeaconOrder, requiredBeaconRound } from "../binding/beacon-binding.js";
-import { deriveClaimRunBinding } from "../binding/bundle-carriage.js";
+import { deriveClaimRunBinding, type ClaimBindingSection } from "../binding/bundle-carriage.js";
 import {
   ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
   CLAIM_PACKAGE_SCHEMA_ID,
@@ -199,7 +199,11 @@ const BINDING_RECORD_BYTES = (() => {
 })();
 
 describe("issue #3403: the composed claim package", () => {
-  function claimFor(input: { readonly composedCapabilities?: readonly string[]; readonly anchors?: readonly never[] }): ClaimPackage {
+  function claimFor(input: {
+    readonly composedCapabilities?: readonly string[];
+    readonly anchors?: readonly never[];
+    readonly binding?: ClaimBindingSection;
+  }): ClaimPackage {
     return buildClaimPackage({
       draftId: DRAFT_ID,
       benchmarkSha256: identities.benchmarkSha256,
@@ -271,16 +275,26 @@ describe("issue #3403: the composed claim package", () => {
   });
 
   test("issue #3370: a binding section is legal on the composed allocation and nowhere else", () => {
-    // The composed allocation carries each capability section exactly when its vector declares it,
-    // so no section is illegal on it by id alone; WHICH sections a given bundle must carry is
-    // settled by `claim-consistency` against the bundle's own manifest. Every earlier allocation
-    // declares no capabilities at all, so a binding section on one is refused BY NAME.
     const binding = deriveClaimRunBinding(BINDING_RECORD_BYTES);
-    expect(ClaimPackageSchema.safeParse({ ...claimFor({ composedCapabilities: [] }), binding }).success).toBe(true);
+    const composed = claimFor({ composedCapabilities: ["beacon-binding"], binding });
+    expect(composed.binding).toEqual(binding);
+    expect(composed.verification.checks).toEqual(expectedChecks(["beacon-binding"]));
+    expect(ClaimPackageSchema.safeParse(composed).success).toBe(true);
+
+    // Every earlier allocation declares no capabilities at all, so a binding section on one is
+    // refused BY NAME rather than collapsing into the generic control-shape failure.
     const refused = ClaimPackageSchema.safeParse({ ...claimFor({ anchors: [] }), binding });
     expect(refused.success).toBe(false);
     if (refused.success) return;
     expect(refused.error.issues.some((issue) => issue.path.join(".") === "binding")).toBe(true);
+  });
+
+  test("issue #3370: the builder refuses a binding section and its declaration apart", () => {
+    const binding = deriveClaimRunBinding(BINDING_RECORD_BYTES);
+    expect(() => claimFor({ composedCapabilities: ["beacon-binding"] }))
+      .toThrow(/"beacon-binding" and its "binding" section/u);
+    expect(() => claimFor({ composedCapabilities: [], binding }))
+      .toThrow(/"beacon-binding" and its "binding" section/u);
   });
 
   test("the builder refuses a section and a declaration that do not arrive together", () => {

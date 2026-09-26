@@ -33,6 +33,7 @@ import {
   PUBLIC_BUNDLE_VERIFICATION_CHECKS,
   PUBLIC_BUNDLE_VERIFICATION_COMMAND,
 } from "./legacy-closures.js";
+import { BEACON_BINDING_BUNDLE_MEMBER } from "./binding/bundle-carriage.js";
 import { DISCLOSURE_SPECIFICATION_BUNDLE_ROLE } from "./profile/disclosure.js";
 import { refuse } from "./profile/errors.js";
 import type { PublicBundleVerificationCheck } from "./verify.js";
@@ -111,6 +112,16 @@ export interface CapabilityActivationFacts {
   readonly declaresDisclosure: boolean;
   /** The run's evidence was imported (`run import`) rather than dispatched on a venue. */
   readonly importedRun: boolean;
+  /**
+   * The run carries a verified `beacon-binding/1` record (issue #3370).
+   *
+   * Nothing about the SEALED Run gates this. A run sealed before `beacon-source/v1` carried a seal
+   * instant is as bound as one sealed after, and its record is carried on the same terms; what
+   * differs is only which of the linkage checks its bytes support, which the reader is told rather
+   * than silently spared. Gating carriage on the newer declaration instead would have meant no run
+   * sealed to date published its binding at all.
+   */
+  readonly boundRun: boolean;
 }
 
 /** The uniform per-entry contract (design §4). */
@@ -147,6 +158,7 @@ export const BINARY_QUALIFICATION_CAPABILITY = "binary-qualification" as const;
 export const ANCHORING_CAPABILITY = "anchoring" as const;
 export const DISCLOSURE_SPECIFICATION_CAPABILITY = "disclosure-specification" as const;
 export const EXTERNAL_IMPORT_CAPABILITY = "external-import" as const;
+export const BEACON_BINDING_CAPABILITY = "beacon-binding" as const;
 
 /**
  * Every capability this build implements, in `order`.
@@ -233,6 +245,42 @@ export const CAPABILITY_REGISTRY = [
     checks: ["external-import"],
     minimumReaderRelease: "check@0.2.1",
     activation: (facts) => facts.importedRun,
+  },
+  {
+    // Issue #3370. Additive: the sealed `beacon-binding/1` record as a mandatory member, verbatim,
+    // plus a claim section and a check.
+    //
+    // `requires: []` is where this diverges from `disclosure-specification`, deliberately. Binding
+    // is a RUN-level fact -- a census-bound headline run is as bound as a qualified one -- so
+    // requiring `binary-qualification` would tie a run-level fact to an unrelated analysis shape
+    // and silently drop the binding from every headline and comparison bundle.
+    //
+    // A FIXED member path, not a `records/<sha256>.bin` pattern, and that is forced rather than
+    // chosen. The records tree is allowlisted only because the evidence catalog enumerates it, so a
+    // record there needs an evidence role, and a role needs an edge naming it -- the only edge
+    // available would be a new Report extension, since the binding is created after the Run is
+    // sealed and only the Report is sealed later. That would append `beacon-binding` to the `/2`
+    // catalog vocabulary `profile/disclosure.test.ts`'s `PRE_APPEND_V2_ROLES_SHA256` freezes.
+    // `anchoring` is the precedent instead: a carried record with its own member shape, no evidence
+    // role, no Report extension, belonging to this bundle because its own subject field names this
+    // bundle's Run. Cardinality is structural too -- a run binds to one beacon or to none -- and a
+    // fixed path states that where `assertMemberClosure` has no singleton knob.
+    //
+    // New with the composed generation, so no `verify` release implements it, and naming the
+    // checker line that is already `COMPOSED_FORMAT_MINIMUM_READER_RELEASE` leaves every vector's
+    // derived reader instructions unchanged.
+    token: BEACON_BINDING_CAPABILITY,
+    order: 5,
+    requires: [],
+    conflicts: [],
+    mandatoryFiles: [BEACON_BINDING_BUNDLE_MEMBER],
+    memberPatterns: [],
+    refines: [],
+    roleDerivations: [],
+    claimSection: "binding",
+    checks: ["beacon-binding"],
+    minimumReaderRelease: "check@0.2.1",
+    activation: (facts) => facts.boundRun,
   },
 ] as const satisfies readonly CapabilityEntry[];
 

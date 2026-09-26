@@ -187,7 +187,13 @@ export type PublicBundleVerificationCheck =
    * bundle-visible marker, its dump digest, and the claim section projected from it. Runs after
    * `claim-consistency` so the section byte-compare has already run; this check authenticates the
    * marker and pairs it with the sealed Matrix's cell keys. */
-  | "external-import";
+  | "external-import"
+  /** Present exactly when the declared vector names `beacon-binding` (issue #3370): the carried
+   * `beacon-binding/1` record is verified by `verifyRunBinding` and its three restated fields are
+   * checked against the authenticated `run.json`, so a record that verifies clean but belongs to
+   * another run is refused. Runs after `claim-consistency`, so the claim's `binding` section has
+   * already been byte-compared against the projection of these same bytes. */
+  | "beacon-binding";
 
 interface ClassicPublicBundleVerificationFacts extends PublicBundleSignerDisclosure {
   readonly identity: string;

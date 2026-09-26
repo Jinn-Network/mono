@@ -380,6 +380,7 @@ const CHECK_GLOSSES: { readonly [C in VerificationCheckName]: string } = {
   "integrity-anchors": "the timestamp proofs are well formed",
   "disclosure-specification": "what was pinned is recorded and matches",
   "external-import": "the import marker matches the claim",
+  "beacon-binding": "the beacon binding belongs to this run",
   "artifact-integrity": "each artifact matches its fingerprint",
   "signature-validity": "each signature matches its key",
 };
