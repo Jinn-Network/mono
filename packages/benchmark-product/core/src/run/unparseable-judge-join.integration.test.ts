@@ -90,6 +90,7 @@ import {
   sealBinaryJudgmentObservation,
   sealEvaluationSpec,
   type BinaryJudgmentInstrument,
+  type BinaryJudgmentPayload,
   type EvaluationSpec,
   type MeasurementMap,
 } from "@jinn-network/task-execution-profiles";
@@ -173,7 +174,7 @@ interface ItemMaterial {
   readonly taskDigestHex: string;
   readonly specification: EvaluationSpec;
   readonly specificationDigest: `sha256:${string}`;
-  readonly payload: Record<string, unknown>;
+  readonly payload: BinaryJudgmentPayload;
   readonly analysisContext: { readonly digest: `sha256:${string}`; readonly bytes: Uint8Array };
   readonly labelResolution: { readonly digest: `sha256:${string}`; readonly bytes: Uint8Array };
 }
@@ -250,7 +251,7 @@ function buildItemMaterial(
     candidateAnswer: "London.",
     provenance: { sourceCommitment: sha("4"), timestamp: "2026-08-14T22:00:00Z" },
     sources: [{ digest: { sha256: "4".repeat(64) } }],
-  };
+  } satisfies BinaryJudgmentPayload;
   const itemSha256 = recordDigest(canonicalJsonBytes(payload));
   const labelResolution = sealBinaryJudgmentLabelResolution({
     protocol: BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
@@ -482,7 +483,7 @@ async function buildJoinFixture(): Promise<JoinFixture> {
           replicate,
           instrumentSha256: instruments[armId].digest,
           requestSha256: binaryJudgmentSemanticRequestDigest(
-            material.payload as never,
+            material.payload,
             buildInstrument(armId),
           ),
           response: { digest: responseDigest, mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE },
