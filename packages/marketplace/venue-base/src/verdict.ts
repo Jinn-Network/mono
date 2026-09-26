@@ -18,7 +18,6 @@ import {
   type Address,
   type Hex,
   type Log,
-  type PublicClient,
 } from "viem";
 import type { BaseVenueSafeBroadcaster, SafeBroadcastReceipt } from "./broadcast/safe-broadcaster.js";
 
@@ -131,8 +130,25 @@ export interface VerdictPorts {
  */
 export type VerdictSafeBroadcaster = Pick<BaseVenueSafeBroadcaster, "execute">;
 
+/**
+ * RPC methods this port actually calls. Not `viem.PublicClient`: operator and this
+ * package each install their own copy of viem (portal layout), and TypeScript treats
+ * those as unrelated identities (TS2719) even at the same version (issue #3735).
+ * A bivariant callable bag accepts either copy without a cast at the call site.
+ */
+export type VerdictRpcClient = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readonly readContract: (...args: any[]) => Promise<any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readonly getContractEvents: (...args: any[]) => Promise<any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readonly getTransaction: (...args: any[]) => Promise<any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readonly simulateContract: (...args: any[]) => Promise<any>;
+};
+
 export interface VerdictPortDeps {
-  readonly publicClient: PublicClient;
+  readonly publicClient: VerdictRpcClient;
   readonly broadcaster: VerdictSafeBroadcaster;
   readonly safeAddress: Address;
   readonly routerAddress: Address;

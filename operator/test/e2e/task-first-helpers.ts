@@ -51,7 +51,7 @@ import { hashImplStateDir } from '../../src/harnesses/freeze.js';
 import { Store } from '../../src/store/store.js';
 import { TaskPostingService } from '../../src/tasks/posting-service.js';
 import { SignedEnvelopeSchema, type SignedEnvelope } from '../../src/types/envelope.js';
-import type { DeliveredResult, Task, TaskRequest } from '../../src/types/index.js';
+import { parseTask, type DeliveredResult, type Task, type TaskRequest } from '../../src/types/index.js';
 import { PredictionV1TaskSchema } from '../../src/types/prediction-v1.js';
 import { validatePayload } from '../../src/types/payloads/index.js';
 import { TrajectoryCollector } from '../../src/trajectory/index.js';
@@ -475,7 +475,7 @@ export function makePredictionV1Task(now = Date.now()): Task {
     },
   };
   PredictionV1TaskSchema.parse(core);
-  return core;
+  return parseTask(core);
 }
 
 export function makePredictionV1SolutionPayload(
@@ -837,7 +837,7 @@ export function decodeFirstEvent(receipt: TransactionReceipt, abi: Abi, eventNam
     try {
       const decoded = decodeEventLog({ abi, data: log.data, topics: log.topics });
       if (decoded.eventName === eventName) {
-        return decoded.args as Record<string, unknown>;
+        return decoded.args as unknown as Record<string, unknown>;
       }
     } catch {
       // Not this ABI/event.
@@ -1745,6 +1745,7 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
         workingDir: evaluationTmp,
         implStateDir: join(evaluationTmp, 'state'),
         log: () => {},
+        mode: 'train',
         abort: new AbortController().signal,
         msUntilEndTs: () => 0,
         trajectory: new TrajectoryCollector({ taskCid, runId: requestId }),
@@ -2031,18 +2032,11 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
       identityRegistryAddress: BASE_SEPOLIA_IDENTITY_REGISTRY,
       agentEoaPrivateKey: launcher.agentPrivateKey,
     });
-    const spawnedRecords: Array<{ solverNetId: string }> = [];
     const launchAction = new LaunchAction({
       store: solverNetStore,
       ipfs,
       publisher,
       subgraph,
-      spawnGenerator: async (record) => {
-        // The new launched-record generator factory is unit-tested
-        // separately. The e2e value here is the launch action + on-chain
-        // setMetadata + lifecycle wiring; we only assert spawn was called.
-        spawnedRecords.push({ solverNetId: record.solverNetId });
-      },
       awaitTxConfirmation: async (txHash) => {
         const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
         return { blockNumber: Number(receipt.blockNumber) };
@@ -2062,7 +2056,6 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
     assert(launched.launchProgress === undefined, 'launchProgress should be cleared after launch');
     assert(launched.manifestCid.length > 0, 'launched record missing manifestCid');
     assert(launched.registry.metadataTxHash !== undefined, 'launched record missing metadataTxHash');
-    assert(spawnedRecords.length === 1, `spawnGenerator called ${spawnedRecords.length}× (expected 1)`);
     assert(publisher.calls.length === 1, `expected 1 setMetadata call after launch, got ${publisher.calls.length}`);
     assert(
       publisher.calls[0]!.key === `solvernet-manifest:${launched.manifestCid}`,
@@ -2237,6 +2230,7 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
         workingDir: evaluationTmp,
         implStateDir: join(evaluationTmp, 'state'),
         log: () => {},
+        mode: 'train',
         abort: new AbortController().signal,
         msUntilEndTs: () => 0,
         trajectory: new TrajectoryCollector({ taskCid, runId: requestId }),
@@ -2487,6 +2481,7 @@ export async function runAnvilTaskFirstFullLoop(): Promise<AnvilTaskFirstFullLoo
         workingDir: evaluationTmp,
         implStateDir: join(evaluationTmp, 'state'),
         log: () => {},
+        mode: 'train',
         abort: new AbortController().signal,
         msUntilEndTs: () => 0,
         trajectory: new TrajectoryCollector({ taskCid, runId: requestIdA }),

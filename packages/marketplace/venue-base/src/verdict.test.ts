@@ -10,7 +10,7 @@ import {
 import { describe, expect, test, vi } from "vitest";
 import { decodeFunctionData, encodeFunctionData, type Address, type Hex } from "viem";
 import type { BaseVenueSafeBroadcaster, SafeBroadcastReceipt } from "./broadcast/safe-broadcaster.js";
-import { createVerdictPorts } from "./verdict.js";
+import { createVerdictPorts, type VerdictRpcClient } from "./verdict.js";
 
 const ROUTER = "0x00000000000000000000000000000000000000a1" as Address;
 const MECH = "0x00000000000000000000000000000000000000b2" as Address;
@@ -108,6 +108,23 @@ function deps(overrides: Partial<Parameters<typeof createVerdictPorts>[0]> = {})
 }
 
 describe("verdict ports", () => {
+  test("accepts a publicClient that is not viem.PublicClient (#3735)", () => {
+    const publicClient: VerdictRpcClient = {
+      readContract: async () => false,
+      getContractEvents: async () => [],
+      getTransaction: async () => ({ from: SAFE }),
+      simulateContract: async () => ({}),
+    };
+    const ports = createVerdictPorts({
+      publicClient,
+      broadcaster: mockBroadcaster(async () => successReceipt()),
+      safeAddress: SAFE,
+      routerAddress: ROUTER,
+      mechAddress: MECH,
+    });
+    expect(typeof ports.openVerdictAttempt).toBe("function");
+  });
+
   test("claimVerdictDelivery refuses a missing verdict code rather than defaulting to Pass", async () => {
     const ports = createVerdictPorts(deps());
     await expect(
