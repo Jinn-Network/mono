@@ -154,14 +154,17 @@ function resolveReportIdentity(
 }
 
 export interface MaterializeBundleDeps {
-  /** Fault-injection hooks used only by crash-safety tests. */
+  /** Fault-injection hook used only by crash-safety tests. */
   readonly beforeRename?: () => void;
+  /** Fault-injection hook used only by crash-safety tests. Fires on both the created and adopted
+   * paths after the digest-addressed target is in place. */
   readonly afterRename?: () => void;
   /** Called with the digest-addressed target the moment `renameSync` succeeds — before the parent
    * fsync and before this function returns. A caller that cleans up after a refusal learns the path
    * of a directory this invocation created even when the throw lands in that window, instead of
    * only on the success path (issue #3195). Never called for an adopted target: that directory
-   * belongs to whoever published it first. */
+   * belongs to whoever published it first. Cleanup therefore keys off this callback, not a return
+   * field. */
   readonly onRenamed?: (bundleDir: string) => void;
 }
 
@@ -169,10 +172,6 @@ export interface MaterializedBundle {
   readonly bundleDir: string;
   readonly identity: string;
   readonly files: readonly string[];
-  /** True when the digest-addressed target already held these exact bytes and was adopted rather
-   * than created by this call. A caller that cleans up after a refused publication must remove only
-   * what it created — an adopted directory belongs to whoever published it first. */
-  readonly adopted: boolean;
 }
 
 function addRole(
@@ -1199,10 +1198,10 @@ export function materializePublicBundle(
         refuse("conflict", "bundle.target", "the digest-addressed publication target is occupied by different bytes; refusing to overwrite it");
       }
       deps.afterRename?.();
-      return { bundleDir: target, identity: existing.identity, files: existing.manifest.files.map((file) => file.path), adopted: true };
+      return { bundleDir: target, identity: existing.identity, files: existing.manifest.files.map((file) => file.path) };
     }
     deps.afterRename?.();
-    return { bundleDir: target, identity: built.identity, files: built.manifest.files.map((file) => file.path), adopted: false };
+    return { bundleDir: target, identity: built.identity, files: built.manifest.files.map((file) => file.path) };
   } finally {
     if (!renamed && existsSync(stage)) rmSync(stage, { recursive: true, force: true });
   }
