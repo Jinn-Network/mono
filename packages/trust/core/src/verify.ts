@@ -198,7 +198,9 @@ async function verifyCeremonyLeg(
  *
  * `verifyEnvelopeBinding`'s step 2 asserts the same pair inline instead,
  * where it can name the mismatch in its own `detail` and still return the
- * offending `resolvedBinding` (issue #3385).
+ * offending `resolvedBinding` (issue #3385). `settlementJoinCheck`'s
+ * claim-time settlement leg does the same, so that a leg which drifted to
+ * another agent is not reported as a revocation (issue #3630).
  *
  * Exported for the direct `resolveBinding` consumers outside this package,
  * which have the same shape and the same exposure (issue #3629).
