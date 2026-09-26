@@ -57,7 +57,7 @@ const PRODUCTION_DEPS: BootstrapDeps = {
   bootstrapperFactory: (config) => new FleetBootstrapper({
     earningDir: config.earningDir,
     chain: config.network === 'testnet' ? 'base-sepolia' : 'base',
-    rpcUrl: config.rpcUrl,
+    rpcUrl: config.rpcUrls,
     env: (config as any).env,
     stakingMode: config.stakingMode,
     targetServices: config.targetServices,

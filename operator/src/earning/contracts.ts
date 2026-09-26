@@ -18,6 +18,7 @@ import {
   STAKING_CONTRACT,
   STOLAS_DISTRIBUTOR as STOLAS_DISTRIBUTOR_ADDRESS,
 } from '../contracts/addresses.js';
+import { parseRpcUrls } from '../rpc/transport.js';
 
 // Package root, resolved from this file's location. Works identically from
 // src/earning/ (tsx) and dist/earning/ (tsc output) — both are 2 dirs below operator/.
@@ -123,6 +124,12 @@ export function cidToBytes32(cid: string): string {
 export interface ChainConfig {
   chainId: number;
   rpcUrl: string;
+  /**
+   * Full #592 provider chain. Optional: absent means "the chain is just
+   * `rpcUrl`", which keeps both static literals and every other ChainConfig
+   * producer correct without head/list drift. Read through `chainRpcUrls()`.
+   */
+  rpcUrls?: readonly string[];
   serviceRegistry: string;
   serviceRegistryTokenUtility: string;
   serviceManager: string;
@@ -435,6 +442,14 @@ function applyRouterClaimDeliveryEnvOverride(config: ChainConfig): ChainConfig {
     return { ...config, routerClaimDeliveryVersion: raw };
   }
   return config;
+}
+
+/**
+ * The provider chain to build viem clients from. `rpcUrl` stays the head (slot
+ * 0) for display and for the Safe SDK, which takes a single URL string.
+ */
+export function chainRpcUrls(config: ChainConfig): readonly string[] {
+  return config.rpcUrls ?? parseRpcUrls(config.rpcUrl);
 }
 
 export function getChainConfig(

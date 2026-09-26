@@ -11,6 +11,7 @@ import {
 } from '../wallet.js';
 import { initPredictedSafe } from '../safe-adapter.js';
 import { createJinnWalletClient } from '../viem-clients.js';
+import { chainRpcUrls } from '../contracts.js';
 import {
   viemSendTransactionWithRetry,
   waitForContractCode,
@@ -47,7 +48,7 @@ export async function stepFleetSafeDeploy(
   // `stage1MinMasterEth` so the gate and the transfer agree (jinn-mono-u34i);
   // `agentFundingWei` lets a caller with a smaller gate keep that agreement.
   const masterAccount = deriveMasterSigner(mnemonic);
-  const masterWallet = createJinnWalletClient(ctx.config.rpcUrl, ctx.chain, masterAccount);
+  const masterWallet = createJinnWalletClient(chainRpcUrls(ctx.config), ctx.chain, masterAccount);
   const agentBalance = await ctx.publicClient.getBalance({
     address: getAddress(agentAddress) as Address,
   });
@@ -85,7 +86,7 @@ export async function stepFleetSafeDeploy(
     threshold: 1,
   });
   const deployTx = await safe.createSafeDeploymentTransaction();
-  const agentWallet = createJinnWalletClient(ctx.config.rpcUrl, ctx.chain, agentSigner);
+  const agentWallet = createJinnWalletClient(chainRpcUrls(ctx.config), ctx.chain, agentSigner);
   const deployHash = await viemSendTransactionWithRetry(
     agentWallet,
     ctx.publicClient,

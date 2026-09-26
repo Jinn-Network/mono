@@ -189,7 +189,7 @@ export const PRODUCTION_DEPS: SolverPluginsDeps = {
     new FleetBootstrapper({
       earningDir: config.earningDir,
       chain: config.network === 'testnet' ? 'base-sepolia' : 'base',
-      rpcUrl: config.rpcUrl,
+      rpcUrl: config.rpcUrls,
       stakingMode: config.stakingMode,
     }),
   pinFileToIpfs: defaultPinFileToIpfs,

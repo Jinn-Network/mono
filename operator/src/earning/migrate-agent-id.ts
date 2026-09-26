@@ -40,6 +40,7 @@ import {
   EVENT_TOPICS,
   IDENTITY_REGISTRY_ABI,
   IDENTITY_REGISTRY_ADDRESSES,
+  chainRpcUrls,
   getChainConfig,
   type ChainConfig,
 } from './contracts.js';
@@ -48,7 +49,9 @@ import {
   createJinnPublicClient,
   createJinnWalletClient,
   type JinnOnchainNetwork,
+  type RpcUrlInput,
 } from './viem-clients.js';
+import { parseRpcUrls } from '../rpc/transport.js';
 import {
   decryptMnemonic,
   deriveAgentSigner,
@@ -71,7 +74,7 @@ export interface MigrateAgentIdsDeps {
   mnemonic: string;
   /**
    * Optional override for the public client (tests). Defaults to a fresh
-   * client built from `config.rpcUrl` + `network`.
+   * client built from `chainRpcUrls(config)` + `network`.
    */
   publicClient?: PublicClient;
   /**
@@ -274,7 +277,7 @@ export async function migrateAgentIds(
   const registryAddr = getAddress(identityRegistry) as Address;
 
   const publicClient =
-    deps.publicClient ?? createJinnPublicClient(config.rpcUrl, network);
+    deps.publicClient ?? createJinnPublicClient(chainRpcUrls(config), network);
 
   const state = await stateStore.load(network);
 
@@ -321,7 +324,7 @@ export async function migrateAgentIds(
         );
         const walletClient =
           deps.walletClientFactory?.(agentSigner)
-          ?? createJinnWalletClient(config.rpcUrl, network, agentSigner);
+          ?? createJinnWalletClient(chainRpcUrls(config), network, agentSigner);
         const minted = await mintAgentNftForOwner(
           publicClient,
           walletClient,
@@ -373,7 +376,7 @@ export async function migrateAgentIds(
 export interface RunLegacyAgentIdMigrationOptions {
   earningDir: string;
   network: JinnOnchainNetwork;
-  rpcUrl: string;
+  rpcUrl: RpcUrlInput;
   password: string;
   testnetL2DeploymentPath?: string;
   testnetL2TokenDeploymentPath?: string;
@@ -391,7 +394,9 @@ export async function runLegacyAgentIdMigration(
     testnetMechDeploymentPath: options.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: options.testnetStolasDeploymentPath,
   });
-  config.rpcUrl = options.rpcUrl;
+  const rpcUrls = parseRpcUrls(options.rpcUrl);
+  config.rpcUrls = rpcUrls;
+  config.rpcUrl = rpcUrls[0]!;
   const mnemonic = await decryptMnemonic(
     await stateStore.loadMnemonicKeystore(),
     options.password,

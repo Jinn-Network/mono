@@ -141,7 +141,7 @@ export async function runFleetBootstrap(deps: {
   const bootstrapper = new FleetBootstrapper({
     earningDir: config.earningDir,
     chain: NETWORK_CHAIN,
-    rpcUrl: config.rpcUrl,
+    rpcUrl: config.rpcUrls,
     stakingMode: config.stakingMode,
     targetServices: config.targetServices,
     testnetL2DeploymentPath: config.testnetL2DeploymentPath,
@@ -303,7 +303,7 @@ export async function runFleetBootstrap(deps: {
       const migration = await runLegacyAgentIdMigration({
         earningDir: config.earningDir,
         network: NETWORK_CHAIN,
-        rpcUrl: config.rpcUrl,
+        rpcUrl: config.rpcUrls,
         password: PASSWORD,
         testnetL2DeploymentPath: config.testnetL2DeploymentPath,
         testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,

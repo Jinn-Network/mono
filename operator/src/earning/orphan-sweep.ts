@@ -16,6 +16,7 @@ import {
   waitForTransactionReceiptWithRetry,
 } from '../tx-retry.js';
 import { ERC20_ABI } from './contracts.js';
+import { parseRpcUrls } from '../rpc/transport.js';
 
 function isZeroishAddress(addr: string | null | undefined): boolean {
   if (!addr) return true;
@@ -66,7 +67,14 @@ export interface Erc20SweepToken {
 }
 
 export interface SweepOrphanedServiceFundsParams {
+  /** Head of the provider chain — the Safe SDK takes a single URL. */
   rpcUrl: string;
+  /**
+   * Full provider chain, for the viem clients built here. Optional for the
+   * same reason as `ChainConfig.rpcUrls`: absent means "the chain is just
+   * `rpcUrl`", so existing callers stay correct without head/list drift.
+   */
+  rpcUrls?: readonly string[];
   network: JinnOnchainNetwork;
   publicClient: PublicClient;
   masterAddress: string;
@@ -134,6 +142,7 @@ async function runOrphanSweepBody(params: OrphanSweepBodyParams): Promise<void> 
     abandonedSafeAddress,
     minAgentReserveWei,
   } = params;
+  const clientRpcUrls = params.rpcUrls ?? parseRpcUrls(rpcUrl);
 
   const code = await publicClient.getCode({ address: getAddress(abandonedSafeAddress) as Address });
   const safeBal = await publicClient.getBalance({ address: getAddress(abandonedSafeAddress) as Address });
@@ -148,7 +157,7 @@ async function runOrphanSweepBody(params: OrphanSweepBodyParams): Promise<void> 
           console.error(
             `[jinn-earning] Service ${serviceIndex}: funding agent ${agentAddress} with ${need} wei so the Safe owner can exec orphan sweep from ${abandonedSafeAddress}.`,
           );
-          const masterWallet = createJinnWalletClient(rpcUrl, network, masterAccount);
+          const masterWallet = createJinnWalletClient(clientRpcUrls, network, masterAccount);
           const fundHash = await viemSendTransactionWithRetry(masterWallet, publicClient, {
             account: masterAccount,
             to: getAddress(agentAddress) as Address,
@@ -275,7 +284,7 @@ async function runOrphanSweepBody(params: OrphanSweepBodyParams): Promise<void> 
   }
 
   const agentAccount = privateKeyToAccount(agentPrivateKey);
-  const agentWallet = createJinnWalletClient(rpcUrl, network, agentAccount);
+  const agentWallet = createJinnWalletClient(clientRpcUrls, network, agentAccount);
   const finalAgentBal = await publicClient.getBalance({ address: getAddress(agentAddress) as Address });
   const transferable =
     finalAgentBal > minAgentReserveWei ? finalAgentBal - minAgentReserveWei : 0n;

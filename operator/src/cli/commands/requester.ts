@@ -23,6 +23,7 @@ import {
 } from '../../config.js';
 import { resolveCliPassword as defaultResolveCliPassword } from '../password.js';
 import { FleetBootstrapper } from '../../earning/bootstrap.js';
+import type { RpcUrlInput } from '../../earning/viem-clients.js';
 import type { FleetBootstrapResult } from '../../earning/types.js';
 import {
   checkRpcNetwork as defaultCheckRpcNetwork,
@@ -75,7 +76,7 @@ export interface RequesterCommandDeps {
   ensureRequesterSafe(input: {
     readonly earningDir: string;
     readonly chain: 'base' | 'base-sepolia';
-    readonly rpcUrl: string;
+    readonly rpcUrl: RpcUrlInput;
     readonly password: string;
   }): Promise<FleetBootstrapResult>;
 }
@@ -193,7 +194,7 @@ export function createRequesterCommand(deps: RequesterCommandDeps = PRODUCTION_D
       result = await deps.ensureRequesterSafe({
         earningDir: config.earningDir,
         chain,
-        rpcUrl: config.rpcUrl,
+        rpcUrl: config.rpcUrls,
         password: password.password,
       });
     } catch (err) {

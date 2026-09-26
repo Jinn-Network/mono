@@ -799,7 +799,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           const bs = new FleetBootstrapper({
             earningDir: config.earningDir,
             chain: NETWORK_CHAIN,
-            rpcUrl: config.rpcUrl,
+            rpcUrl: config.rpcUrls,
             stakingMode: config.stakingMode,
             targetServices: config.targetServices,
           });
@@ -812,7 +812,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           const bs = new FleetBootstrapper({
             earningDir: config.earningDir,
             chain: NETWORK_CHAIN,
-            rpcUrl: config.rpcUrl,
+            rpcUrl: config.rpcUrls,
             stakingMode: config.stakingMode,
             targetServices: config.targetServices,
             testnetL2DeploymentPath: config.testnetL2DeploymentPath,
@@ -2371,7 +2371,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
                 serviceId: svc.service_id,
                 stakingAddress: svc.staking_address,
                 distributorAddress: CHAIN_CONFIG.distributorAddress!,
-                rpcUrl: config.rpcUrl,
+                rpcUrl: config.rpcUrls,
                 chain: NETWORK_CHAIN,
                 mnemonic: mnemonicForMaster,
               });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   IDENTITY_REGISTRY_ADDRESSES,
+  chainRpcUrls,
   getChainConfig,
 } from '../../src/earning/contracts.js';
 
@@ -48,5 +49,25 @@ describe('getChainConfig', () => {
     expect(IDENTITY_REGISTRY_ADDRESSES[84532]).toBe(
       '0x8004A818BFB912233c491871b3d84c89A494BD9e',
     );
+  });
+});
+
+describe('chainRpcUrls', () => {
+  it('returns the resolved provider list verbatim when present', () => {
+    const cfg = { ...getChainConfig('base-sepolia'), rpcUrls: ['https://a.example', 'https://b.example'] };
+
+    expect(chainRpcUrls(cfg)).toEqual(['https://a.example', 'https://b.example']);
+  });
+
+  it('falls back to the head URL when no list is present', () => {
+    const cfg = getChainConfig('base-sepolia');
+
+    expect(chainRpcUrls(cfg)).toEqual([cfg.rpcUrl]);
+  });
+
+  it('splits a comma-separated head URL when no list is present', () => {
+    const cfg = { ...getChainConfig('base-sepolia'), rpcUrl: 'https://a.example,https://b.example' };
+
+    expect(chainRpcUrls(cfg)).toEqual(['https://a.example', 'https://b.example']);
   });
 });

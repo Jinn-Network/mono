@@ -28,6 +28,7 @@ import {
   STOLAS_DISTRIBUTOR_ABI,
   STOLAS_STAKING_SLOTS_ABI,
   applyChainGasOverrides,
+  chainRpcUrls,
   cidToBytes32,
   getChainConfig,
 } from './contracts.js';
@@ -85,7 +86,13 @@ import {
 } from '../tx-retry.js';
 import { isUnauthorizedAccountError } from '../errors/unauthorized-account.js';
 import { formatKnownRevert } from '../adapters/mech/safe-revert.js';
-import { createJinnPublicClient, createJinnWalletClient, type JinnOnchainNetwork } from './viem-clients.js';
+import {
+  createJinnPublicClient,
+  createJinnWalletClient,
+  type JinnOnchainNetwork,
+  type RpcUrlInput,
+} from './viem-clients.js';
+import { parseRpcUrls } from '../rpc/transport.js';
 import { isTransientEthReadError } from '../chain-read-errors.js';
 import { nextFleetServiceIndex } from './next-service-index.js';
 import { displayFleetServiceIndex } from './fleet-display-index.js';
@@ -292,7 +299,7 @@ const DEFAULT_FAUCET_RATE_LIMIT_BACKOFF_MS = 15_000;
 export interface FleetBootstrapperOptions {
   earningDir?: string;
   chain?: 'base' | 'base-sepolia';
-  rpcUrl?: string;
+  rpcUrl?: RpcUrlInput;
   env?: NodeJS.ProcessEnv;
   stakingMode?: 'standard' | 'self-bond';
   targetServices?: number;
@@ -397,11 +404,16 @@ export class FleetBootstrapper {
       minSafeEthWei: options.minSafeEthWei ?? this.env['JINN_MIN_SAFE_ETH_WEI'],
     });
 
-    if (options.rpcUrl) {
-      this.config.rpcUrl = options.rpcUrl;
-    }
+    const rpcUrlOption = options.rpcUrl;
+    const optionHasUrl =
+      typeof rpcUrlOption === 'string'
+        ? rpcUrlOption.trim().length > 0
+        : (rpcUrlOption?.some((u) => u.trim().length > 0) ?? false);
+    const rpcUrls = parseRpcUrls(optionHasUrl ? rpcUrlOption! : this.config.rpcUrl);
+    this.config.rpcUrls = rpcUrls;
+    this.config.rpcUrl = rpcUrls[0]!;
 
-    this.publicClient = createJinnPublicClient(this.config.rpcUrl, this.chain);
+    this.publicClient = createJinnPublicClient(rpcUrls, this.chain);
   }
 
   async getStatus(): Promise<FleetState> {
@@ -1010,7 +1022,7 @@ export class FleetBootstrapper {
 
       if (pendingSetupMigration) {
         const masterAccount = deriveMasterSigner(mnemonic);
-        const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
+        const masterWallet = createJinnWalletClient(chainRpcUrls(this.config), this.chain, masterAccount);
         const migration = await migrateDeprecatedTestnetSetup({
           stateStore: this.store,
           state,
@@ -1270,6 +1282,7 @@ export class FleetBootstrapper {
     const agentSigner = deriveAgentSigner(mnemonic, serviceIndex);
     await sweepOrphanedServiceFunds({
       rpcUrl: this.config.rpcUrl,
+      rpcUrls: chainRpcUrls(this.config),
       network: this.chain,
       publicClient: this.publicClient,
       masterAddress: state.master_address,
@@ -1599,7 +1612,7 @@ export class FleetBootstrapper {
 
     // Master EOA signs the stake() call
     const masterAccount = deriveMasterSigner(mnemonic);
-    const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
+    const masterWallet = createJinnWalletClient(chainRpcUrls(this.config), this.chain, masterAccount);
     const agentAddress = svc.agent_address as Address;
 
     const configHashBytes = cidToBytes32(this.config.serviceHash) as Hex;
@@ -1677,7 +1690,7 @@ export class FleetBootstrapper {
       serviceId,
       stakingAddress: stakingAddress,
       distributorAddress: this.config.distributorAddress,
-      rpcUrl: this.config.rpcUrl,
+      rpcUrl: chainRpcUrls(this.config),
       chain: this.chain,
       mnemonic,
     });
@@ -1709,7 +1722,7 @@ export class FleetBootstrapper {
 
     // Fund agent with gas from master
     const masterAccount = deriveMasterSigner(mnemonic);
-    const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
+    const masterWallet = createJinnWalletClient(chainRpcUrls(this.config), this.chain, masterAccount);
     const agentBalance = await this.publicClient.getBalance({
       address: getAddress(svc.agent_address) as Address,
     });
@@ -1827,7 +1840,7 @@ export class FleetBootstrapper {
     }
 
     const agentSigner = deriveAgentSigner(mnemonic, index);
-    const agentWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, agentSigner);
+    const agentWallet = createJinnWalletClient(chainRpcUrls(this.config), this.chain, agentSigner);
 
     // ── Sub-step A: mint NFT (skip if agent_id is already set OR fleet identity exists). ─
     let agentId: string;
@@ -2069,7 +2082,7 @@ export class FleetBootstrapper {
     const SELF_BOND_AGENT_ETH = 25_000_000_000_000_000n; // 0.025 ETH
     const requiredAgentEth = SELF_BOND_AGENT_ETH;
     const masterAccount = deriveMasterSigner(mnemonic);
-    const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
+    const masterWallet = createJinnWalletClient(chainRpcUrls(this.config), this.chain, masterAccount);
     const agentBalance = await this.publicClient.getBalance({ address: getAddress(agentAddress) as Address });
 
     if (agentBalance < requiredAgentEth) {
@@ -2103,7 +2116,7 @@ export class FleetBootstrapper {
       const shortfall = this.config.minSafeEth - safeEthBalance;
       if (eoaAvailable >= shortfall) {
         console.error(`[fleet-bootstrap] Service ${index}: auto-topping Safe with ${shortfall} wei ETH`);
-        const agentWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, agentSigner);
+        const agentWallet = createJinnWalletClient(chainRpcUrls(this.config), this.chain, agentSigner);
         const topHash = await viemSendTransactionWithRetry(agentWallet, this.publicClient, {
           account: agentSigner as Account,
           to: addr(safeAddress),
@@ -2142,7 +2155,7 @@ export class FleetBootstrapper {
       });
 
       const deployTx = await safe.createSafeDeploymentTransaction();
-      const agentWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, agentSigner);
+      const agentWallet = createJinnWalletClient(chainRpcUrls(this.config), this.chain, agentSigner);
       const deployHash = await viemSendTransactionWithRetry(agentWallet, this.publicClient, {
         account: agentSigner as Account,
         to: deployTx.to as Address,
@@ -2628,7 +2641,7 @@ export interface RecoverEvictedServiceOptions {
   serviceId: number;
   stakingAddress: string;
   distributorAddress: string;
-  rpcUrl: string;
+  rpcUrl: RpcUrlInput;
   chain: JinnOnchainNetwork;
   mnemonic: string;
 }

@@ -9,7 +9,7 @@ import {
   viemSendTransactionWithRetry,
   waitForTransactionReceiptWithRetry,
 } from '../../tx-retry.js';
-import { IDENTITY_REGISTRY_ABI, IDENTITY_REGISTRY_ADDRESSES } from '../contracts.js';
+import { IDENTITY_REGISTRY_ABI, IDENTITY_REGISTRY_ADDRESSES, chainRpcUrls } from '../contracts.js';
 
 /** Mint the fleet agentId + bind Safe via setAgentWallet (ERC-1271). */
 export async function stepFleetIdentityRegister(
@@ -27,7 +27,7 @@ export async function stepFleetIdentityRegister(
 
   const fleetSafe = state.fleet_safe_address!;
   const agentSigner = deriveAgentSigner(mnemonic, 1);
-  const agentWallet = createJinnWalletClient(ctx.config.rpcUrl, ctx.chain, agentSigner);
+  const agentWallet = createJinnWalletClient(chainRpcUrls(ctx.config), ctx.chain, agentSigner);
 
   // Mint agentId — empty agent URI for v0 (matches stepRegisterAgent §6.1 in spec).
   const registerData = encodeFunctionData({
