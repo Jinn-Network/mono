@@ -53,8 +53,9 @@ const ADMITTED_VECTORS: readonly string[][] = Array.from({ length: 2 ** CAPABILI
 describe("the composed generation's allocation", () => {
   test("the format literal, and the reserved /9 hole beside it", () => {
     expect(BUNDLE_V10_FORMAT).toBe("benchmark-product-public-bundle/10");
-    // `/9` belongs to an open branch (PR #4090, issue #3698) that has not landed here. The hole is
-    // the assertion: this package must not claim to read a format it does not implement.
+    // `/9` is unused: issue #3698 registered the pair as a `/10` presentation capability
+    // (operator ruling 2026-09-24). The hole is the assertion: this package must not claim to
+    // read a format it does not implement.
     expect(SUPPORTED_BUNDLE_FORMATS).toEqual([
       "benchmark-product-public-bundle/2",
       "benchmark-product-public-bundle/4",
