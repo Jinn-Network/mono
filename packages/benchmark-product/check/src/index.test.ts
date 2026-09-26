@@ -19,9 +19,11 @@ const publicFormats: readonly SupportedBundleFormat[] = SUPPORTED_BUNDLE_FORMATS
 
 describe("public entry", () => {
   test("re-exports SupportedBundleFormat beside SUPPORTED_BUNDLE_FORMATS", () => {
-    // The exported name only: the public entry is the subject, not the internal module it
-    // happens to re-export from today.
+    // Any re-export source: the public entry is the subject, not the internal module it happens
+    // to re-export from today. The `from` clause stays required, because a bare
+    // `export type { SupportedBundleFormat }` over a local alias is exactly the evasion this
+    // pin exists to catch.
     const index = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
-    expect(index).toMatch(/export type \{[^}]*SupportedBundleFormat/);
+    expect(index).toMatch(/export type \{[^}]*SupportedBundleFormat[^}]*\} from "/);
   });
 });
