@@ -706,7 +706,13 @@ describe('buildOperatorComposition', () => {
     const store = new Store(':memory:');
     const composition = await buildOperatorComposition({
       mode: 'native',
-      config: { claimPolicy: { mode: 'claim-nothing' }, executionWiring: WIRING } as never,
+      config: {
+        ipfsRegistryUrl: 'https://registry.example',
+        rpcUrl: 'http://127.0.0.1:8545',
+        claudePath: 'claude',
+        executionWiring: WIRING,
+        claimPolicy: { mode: 'claim-nothing' },
+      } as never,
       publicClient: { getBlock: async () => ({ number: 0n, hash: `0x${'0'.repeat(64)}` }) } as never,
       walletClient: { account: { address: '0x1111111111111111111111111111111111111111' } } as never,
       safeAddress: '0x1111111111111111111111111111111111111111',
