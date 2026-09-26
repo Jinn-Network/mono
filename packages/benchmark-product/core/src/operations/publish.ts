@@ -22,6 +22,8 @@ export interface RunPublishInput {
   readonly includeNativeArtifacts?: boolean;
 }
 
+/** Publication seams. `runPublish` owns inherited `onRenamed`: it records created directories for
+ * refusal cleanup and overrides any caller-supplied hook — the cleanup list is this operation's. */
 export interface RunPublishDeps extends MaterializeBundleDeps {
   /** Fault-injection boundary after the final directory is durable, before RunState. */
   readonly beforeRunState?: () => void | Promise<void>;
