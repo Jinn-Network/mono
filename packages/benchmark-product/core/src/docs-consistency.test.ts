@@ -667,12 +667,22 @@ describe("product documentation consistency", () => {
     // auxiliary verb.
     const reader = /@colophon-claims\/(?:verify|check|cli|core)|`@?\d+\.\d+(?:\.\d+)?`/u;
     const registryState =
-      /`latest`|\bregistry\b|\bunpublished\b|\b(?:is|are|was|were|been)\s+published\b|\bpublication\s+pending\b|\bpending\s+publication\b|\bnot\s+yet\s+published\b|\bsince\s+been\s+cut\b|\bresolves?\s+to\s+`\d/iu;
+      /`latest`|\bregistry\b|\bunpublished\b|\b(?:is|are|was|were|been|stays?|stayed|remains?|remained|keeps?|kept)\s+(?:\w+\s+)?published\b|\bpublication\s+pending\b|\bpending\s+publication\b|\bnot\s+yet\s+published\b|\bsince\s+been\s+cut\b|\bresolves?\s+to\s+`\d/iu;
     // The guard's own negative: a literal offending sentence must trip both halves, and an
     // emission-sense sentence beside a version token must not, or an edit to either regex that
     // matches nothing passes silently.
-    const offending = "`@colophon-claims/verify@0.2.1` is published as `latest`.";
-    expect(reader.test(offending) && registryState.test(offending)).toBe(true);
+    // The last two entries are the literal sentences that survived this guard in
+    // `PUBLIC-BUNDLE.md` and `EXTERNAL-VERIFICATION.md` until #4847: the copular form admits an
+    // intervening adverb ("is now published"), and `stays/remains/keeps` are auxiliaries the
+    // first version of this alternative did not list. Keep them so that gap cannot reopen.
+    const offending = [
+      "`@colophon-claims/verify@0.2.1` is published as `latest`.",
+      "The checker is now published as `@colophon-claims/check`.",
+      "`@colophon-claims/verify` stays published permanently as a passthrough alias onto it.",
+    ];
+    for (const sentence of offending) {
+      expect(reader.test(sentence) && registryState.test(sentence), sentence).toBe(true);
+    }
     const emission = "a bundle published before `0.2.1` existed pins `@0.2.0`";
     expect(reader.test(emission)).toBe(true);
     expect(registryState.test(emission)).toBe(false);

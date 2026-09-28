@@ -402,8 +402,8 @@ npx @colophon-claims/check@0.2 <bundle-dir>
 ```
 
 A bundle sealed before the checker was renamed names `@colophon-claims/verify`
-there. That name stays published permanently as a passthrough alias onto
-`@colophon-claims/check`, so the command the bundle itself pins keeps resolving.
+there. Run the line that bundle itself pins in `claim-package.json`
+`verification.command` — the producer named it for that exact bundle.
 
 Exit 0 with `Recomputed: 6 of 6 checks passed` (`manifest`, `evidence-closure`,
 `trust`, `matrix-rederivation`, `report-verification`, `claim-consistency`);
