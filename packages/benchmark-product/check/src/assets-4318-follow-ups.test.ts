@@ -60,6 +60,8 @@ describe("PR #4318 follow-ups (#4418, #4419, #4420)", () => {
     expect(holdComment).toContain("bundle-format allocation");
     expect(holdComment).toContain("auto-closed after PR #4318");
     expect(holdComment).toContain("#4419");
+    // #4836 ruled that split deliberately; the comment must keep pointing at that ruling.
+    expect(holdComment).toContain("#4836");
     expect(hold, "buildBadge remains the emission site").toContain("function buildBadge");
 
     const spec = readFileSync(VOCABULARY_SPEC_PATH, "utf8");
@@ -83,7 +85,7 @@ describe("PR #4318 follow-ups (#4418, #4419, #4420)", () => {
     // rather than the absence of an option.
     expect(v110).toContain("parseDeferredMembers");
     expect(v110).toContain("`Deferred` heading");
-    expect(v110).toContain("is **declined**");
+    expect(v110).toContain("**declined**");
   });
 
   test("#4420: vocabulary spec §4.2 no longer defers the three rows to #2982", () => {

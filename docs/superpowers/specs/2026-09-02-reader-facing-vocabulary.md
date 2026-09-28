@@ -69,16 +69,18 @@
   from a fresh snapshot each cycle and closes any still-open member of a merged sweep. So the hold is
   carried by the emission-site comment above `buildBadge` and by this document's v4-badge row — not
   by an open GitHub issue. Adds regression pins for that record, for #4418's deletion, and for
-  #4420's §4.2 discharges. No disposition changes. (**Corrected by v1.10**: as first written, this entry said
-  flatly that reopening the issue would be closed again by the same closer, which read as though no
-  reopen could ever hold. One can — the closer honors a `Deferred` heading on the merged sweep PR
-  body — so the reopen was a declined option, not an unavailable one.)
-
+  #4420's §4.2 discharges. No disposition changes. (**Corrected by v1.10**: as first written, this
+  entry said flatly that reopening the issue would be closed again by the same closer, which read as
+  though no reopen could ever hold. One can — the closer honors a `Deferred` heading on the merged
+  sweep PR body — so the reopen was a declined option, not an unavailable one.)
 - **v1.10** (#4836): rules the #4270 record deliberately, having found the escape hatch v1.9 did not
   know about. Autopilot's post-merge member closer (`fileDebtSweep` and `fileResidueSweep` in
   `src/lifecycle/debt-sweep.ts`) calls `parseDeferredMembers` on the merged sweep PR's body and skips
-  every member named under a `Deferred` heading. A durable reopen of #4270 was therefore available —
-  add such a heading to PR #4318's body, then reopen — and is **declined**. Three reasons. An open
+  every member named under a `Deferred` heading. A reopen of #4270 that survives the debt-sweep
+  closer was therefore available — add such a heading to PR #4318's body, then reopen — and is
+  **declined**. (Only that path: `fileResidueSweep` reads the heading off its own merged residue
+  sweep's PR, so a reopened #4270 could still be drawn into a future residue sweep and closed
+  there.) Three reasons. An open
   issue adds no information over either existing record, and the condition that unblocks the hold is
   a bundle-format allocation, which whoever allocates the format meets at the emission site rather
   than in a triage list; an issue unclaimable until an unrelated allocation exists is a permanent

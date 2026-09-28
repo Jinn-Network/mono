@@ -1149,8 +1149,9 @@ function pairedCompactFragment(facts: Exclude<MethodFacts, BinaryFacts>): string
 // for these bytes -- or a reader line that is not yet pinned -- unblocks it. The GitHub issue was
 // auto-closed after PR #4318; this comment and the vocabulary spec row are the remaining record of
 // the hold, by ruling and not by default (#4419; #4836 found that the member closer honors a
-// `Deferred` heading on the merged sweep PR body, so a durable reopen was available, and declined it
-// -- the vocabulary spec's v1.10 entry carries the reasons). The local viewer (`cli/src/viewer.ts`) took the same ruling immediately, because
+// `Deferred` heading on the merged sweep PR body, so a reopen surviving that closer was available,
+// and declined it -- the vocabulary spec's v1.10 entry carries the reasons).
+// The local viewer (`cli/src/viewer.ts`) took the same ruling immediately, because
 // nothing byte-compares a live reader page; only the mechanism differs there, not the ruling.
 
 function buildBadge(input: PublicAssetInput, reportFacts: MethodFacts): string {
