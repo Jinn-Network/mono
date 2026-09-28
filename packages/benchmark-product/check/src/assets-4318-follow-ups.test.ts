@@ -7,6 +7,10 @@
  * the stale `deferred to #2982` rows in vocabulary spec §4.2. #4419's stay-open instruction
  * for #4270 was lost to the post-merge member closer; the hold is carried at the emission
  * site and in the spec row, not by an open GitHub issue.
+ *
+ * #4836 then ruled that split deliberately, after finding the closer's `Deferred` escape
+ * hatch: a durable reopen was available and was declined. The pin below guards the ruling
+ * and the corrected v1.9 sentence, which had read as though no reopen could ever hold.
  */
 
 import { readFileSync } from "node:fs";
@@ -61,6 +65,25 @@ describe("PR #4318 follow-ups (#4418, #4419, #4420)", () => {
     const spec = readFileSync(VOCABULARY_SPEC_PATH, "utf8");
     expect(spec).toContain("auto-closed after PR #4318");
     expect(spec).toMatch(/\*\*v1\.9\*\* \(#4775/);
+  });
+
+  test("#4836: the two records are the registry by decision, and v1.9 no longer reads as unconditional", () => {
+    const spec = readFileSync(VOCABULARY_SPEC_PATH, "utf8");
+    // The v1.9 sentence claimed reopening #4270 could not hold. It can: the member closer in
+    // Autopilot's `fileDebtSweep`/`fileResidueSweep` skips any member named under a `Deferred`
+    // heading on the merged sweep PR body (`parseDeferredMembers`).
+    expect(spec).not.toContain("Reopening it would be closed again by the same closer");
+
+    const start = spec.indexOf("- **v1.10** (#4836");
+    expect(start, `${VOCABULARY_SPEC} v1.10 changelog entry`).toBeGreaterThanOrEqual(0);
+    const end = spec.indexOf("\n## 1. Scope", start);
+    expect(end, `${VOCABULARY_SPEC} §1 heading after the v1.10 entry`).toBeGreaterThan(start);
+    const v110 = spec.slice(start, end);
+    // The ruling itself, the mechanism that made the option real, and that it was a choice
+    // rather than the absence of an option.
+    expect(v110).toContain("parseDeferredMembers");
+    expect(v110).toContain("`Deferred` heading");
+    expect(v110).toContain("is **declined**");
   });
 
   test("#4420: vocabulary spec §4.2 no longer defers the three rows to #2982", () => {
