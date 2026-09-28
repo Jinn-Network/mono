@@ -2,8 +2,8 @@
  * Pins the agent-EOA balance fence at its call site (#4827).
  *
  * `operator/test/tx-retry.test.ts` covers `waitForNativeBalanceAtLeast` in
- * isolation, and every other `stepFleetSafeDeploy` test stubs the step out
- * entirely. That leaves two things a later edit could silently break: the one
+ * isolation, and every other `stepFleetSafeDeploy` test either stubs the
+ * step out or asserts it is never called. That leaves two things a later edit could silently break: the one
  * arithmetic choice — the wait targets `agentFundingWei`, the *post-transfer*
  * balance, not `fundAmount`, the delta — and the ordering, which only helps if
  * the fence sits between the funding receipt and the Safe factory call.
@@ -104,7 +104,6 @@ describe('stepFleetSafeDeploy — agent-EOA balance fence (#4827)', () => {
   }
 
   beforeEach(() => {
-    vi.restoreAllMocks();
     seams.events.length = 0;
     seams.sendTx.mockReset();
     seams.waitReceipt.mockReset();
@@ -173,8 +172,11 @@ describe('stepFleetSafeDeploy — agent-EOA balance fence (#4827)', () => {
     const { bootstrapper, agentAddress } = await buildScenario();
     seams.waitBalance.mockImplementation(async () => {
       seams.events.push('wait-balance');
+      // Shape-alike, not a copy: the helper owns its exact wording and
+      // `test/tx-retry.test.ts` owns that assertion. What is pinned here is
+      // that a thrown fence reaches the caller as an envelope.
       throw new Error(
-        `Balance at ${agentAddress} is 0 wei after 6 getBalance attempts; ` +
+        `Balance at ${agentAddress} is 0 wei after N getBalance attempts; ` +
           `need ${REQUESTER_SAFE_DEPLOY_ETH.toString()} wei`,
       );
     });
