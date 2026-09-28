@@ -837,6 +837,10 @@ export function decodeFirstEvent(receipt: TransactionReceipt, abi: Abi, eventNam
     try {
       const decoded = decodeEventLog({ abi, data: log.data, topics: log.topics });
       if (decoded.eventName === eventName) {
+        // Knowing exception, tracked by issue #4858: the double step widens through `unknown`,
+        // which is the remedy #3735 excluded. It is recorded rather than removed because this
+        // file reaching 0 in `operator/test-typecheck-baseline.json` partly rests on it, and
+        // the typed replacement belongs with that issue, not with this helper.
         return decoded.args as unknown as Record<string, unknown>;
       }
     } catch {
