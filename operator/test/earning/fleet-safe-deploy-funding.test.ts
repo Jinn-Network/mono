@@ -26,6 +26,11 @@ const seams = vi.hoisted(() => ({
   events: [] as string[],
 }));
 
+// MOCK_JUSTIFICATION: these four helpers are the step's only chain-touching
+// boundary, and `stepFleetSafeDeploy` imports them directly with no DI seam.
+// Mocking them is what makes the fence's arguments and ordering observable —
+// the subject under test here. The helpers' own behaviour is covered in
+// `test/tx-retry.test.ts`.
 vi.mock('../../src/tx-retry.js', async (importActual) => ({
   ...(await importActual<typeof import('../../src/tx-retry.js')>()),
   viemSendTransactionWithRetry: seams.sendTx,
@@ -34,11 +39,17 @@ vi.mock('../../src/tx-retry.js', async (importActual) => ({
   waitForContractCode: seams.waitCode,
 }));
 
+// MOCK_JUSTIFICATION: `initPredictedSafe` drives the Safe SDK against a live
+// RPC. It stands in as the Safe-factory boundary whose ordering relative to
+// the fence is being pinned.
 vi.mock('../../src/earning/safe-adapter.js', async (importActual) => ({
   ...(await importActual<typeof import('../../src/earning/safe-adapter.js')>()),
   initPredictedSafe: seams.initSafe,
 }));
 
+// MOCK_JUSTIFICATION: `createJinnWalletClient` opens an RPC transport. The
+// returned client is only ever handed to the mocked send helper above, so a
+// bare object suffices; `createJinnPublicClient` is left real and spied.
 vi.mock('../../src/earning/viem-clients.js', async (importActual) => ({
   ...(await importActual<typeof import('../../src/earning/viem-clients.js')>()),
   createJinnWalletClient: vi.fn(() => ({})),
