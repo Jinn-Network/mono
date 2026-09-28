@@ -60,6 +60,23 @@ function json(bundleDir: string, path: string): Record<string, any> {
 /** The vector an anchored, non-qualifying run declares: exactly what `/6` implied by its number. */
 const ANCHORED = ["anchoring"] as const;
 
+type ComparisonProjection = NonNullable<PublicAssetInput["comparison"]>;
+
+/**
+ * The snapshot's comparison projection, narrowed once per snapshot.
+ *
+ * `verifyPublicBundleSnapshot` types `comparison` as an undiscriminated optional, so one
+ * caller-side discharge is unavoidable; taking it here lets `convertToComposed` state the
+ * projection as a non-optional parameter, and keeps the discharge to one per snapshot rather than
+ * one per re-render.
+ */
+function sixComparison(comparison: PublicAssetInput["comparison"]): ComparisonProjection {
+  if (comparison === undefined) {
+    throw new Error("a /6 snapshot always carries the verifier's comparison projection");
+  }
+  return comparison;
+}
+
 /**
  * Converts a materialized `/6` bundle in place into the composed bundle the same facts produce.
  *
@@ -75,15 +92,9 @@ const ANCHORED = ["anchoring"] as const;
  */
 function convertToComposed(
   bundleDir: string,
-  comparison: PublicAssetInput["comparison"],
+  comparison: ComparisonProjection,
   options: { readonly keepLegacyClaim?: boolean; readonly capabilities?: readonly string[] } = {},
 ): void {
-  // Not liftable to a compile-time fact: every call site reads this from
-  // `VerifiedPublicBundleSnapshot.comparison`, which is an undiscriminated optional, so a
-  // non-optional parameter would move this one discharge out to each caller rather than remove it.
-  if (comparison === undefined) {
-    throw new Error("convertToComposed requires the verifier's comparison projection");
-  }
   const claim = json(bundleDir, "claim-package.json");
   if (options.keepLegacyClaim !== true) {
     claim["claimSchema"] = COMPOSED_CLAIM_PACKAGE_SCHEMA_ID;
@@ -152,8 +163,9 @@ describe("composed bundle v10 — portable verification", () => {
     // page nobody verifies.
     const asSix = await verifyPublicBundleSnapshot(bundleDir);
     expect(asSix.verification.format).toBe(BUNDLE_V6_FORMAT);
+    const comparison = sixComparison(asSix.comparison);
 
-    convertToComposed(bundleDir, asSix.comparison);
+    convertToComposed(bundleDir, comparison);
     // The originating workspace is gone before a single byte is verified.
     rmSync(built.workspaceDir, { recursive: true, force: true });
 
@@ -188,13 +200,13 @@ describe("composed bundle v10 — portable verification", () => {
     // Members without declaration: the anchor record is still in the tree, and nothing allowlists
     // it once the vector stops declaring `anchoring`. Stripping the declaration is never a quieter
     // bundle (P2, P3).
-    convertToComposed(bundleDir, asSix.comparison, { capabilities: [] });
+    convertToComposed(bundleDir, comparison, { capabilities: [] });
     expect(await refusal(bundleDir)).toEqual({
       path: expect.stringMatching(/^anchors\/[a-f0-9]{64}\.bin$/u),
       message: expect.stringContaining("non-allowlisted"),
     });
     // Declared without members: nothing in this bundle is a qualification document.
-    convertToComposed(bundleDir, asSix.comparison, { capabilities: ["anchoring", "binary-qualification"] });
+    convertToComposed(bundleDir, comparison, { capabilities: ["anchoring", "binary-qualification"] });
     expect(await refusal(bundleDir)).toEqual({
       path: "qualification.json",
       message: expect.stringContaining("is missing"),
@@ -220,7 +232,7 @@ describe("composed bundle v10 — portable verification", () => {
 
     const asSix = await verifyPublicBundleSnapshot(bundleDir);
     // Relabelled and re-rendered as `/10`, but the claim is still `/6`'s.
-    convertToComposed(bundleDir, asSix.comparison, { keepLegacyClaim: true });
+    convertToComposed(bundleDir, sixComparison(asSix.comparison), { keepLegacyClaim: true });
 
     expect(await refusal(bundleDir)).toEqual({
       path: "claim-consistency",
