@@ -133,18 +133,29 @@ export type VerdictSafeBroadcaster = Pick<BaseVenueSafeBroadcaster, "execute">;
 /**
  * RPC methods this port actually calls. Not `viem.PublicClient`: operator and this
  * package each install their own copy of viem (portal layout), and TypeScript treats
- * those as unrelated identities (TS2719) even at the same version (issue #3735).
- * A bivariant callable bag accepts either copy without a cast at the call site.
+ * those as unrelated identities (TS2719) even at the same version (issue #3735; the
+ * residual dedup at the dependency level is tracked by issue #4858).
+ *
+ * Each member is declared in *method shorthand*, which is the whole mechanism: under
+ * `strictFunctionTypes` (on here) parameters of method declarations are still checked
+ * bivariantly, while parameters of arrow-typed properties are checked contravariantly.
+ * So `readContract(args: unknown)` accepts viem's `readContract(args:
+ * ReadContractParameters<...>)` from *either* copy -- the bivariant direction
+ * (`ReadContractParameters` -> `unknown`) holds without ever comparing the two viem
+ * identities. Writing the same members as `readonly readContract: (args: unknown) =>
+ * ...` does not compile; that is the check this shape is buying.
+ *
+ * Return positions are covariant, so they are not part of that problem and are not
+ * widened: the three ABI-generic reads return `unknown` (every call site here narrows
+ * or discards the result anyway), and `getTransaction` -- non-generic, and the one
+ * member whose result is consumed structurally -- keeps the `input: Hex` its caller
+ * feeds to `decodeFunctionData`.
  */
 export type VerdictRpcClient = {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readonly readContract: (...args: any[]) => Promise<any>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readonly getContractEvents: (...args: any[]) => Promise<any>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readonly getTransaction: (...args: any[]) => Promise<any>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readonly simulateContract: (...args: any[]) => Promise<any>;
+  readContract(args: unknown): Promise<unknown>;
+  getContractEvents(args: unknown): Promise<unknown>;
+  simulateContract(args: unknown): Promise<unknown>;
+  getTransaction(args: { readonly hash: Hex }): Promise<{ readonly input: Hex }>;
 };
 
 export interface VerdictPortDeps {
@@ -241,7 +252,7 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
       args: { taskId: input.taskId, attemptIndex: input.attemptIndex },
       fromBlock: input.fromBlock,
       toBlock: "latest",
-    } as never) as readonly unknown[];
+    }) as readonly unknown[];
     const event = events
       .map((raw) => raw as {
         readonly args?: {
@@ -302,7 +313,7 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
       args: { requestId: input.requestId },
       fromBlock: input.fromBlock,
       toBlock: "latest",
-    } as never) as readonly unknown[];
+    }) as readonly unknown[];
     const event = events
       .map((raw) => raw as {
         readonly args?: {
@@ -385,7 +396,7 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
       eventName: "Deliver",
       fromBlock: input.fromBlock,
       toBlock: "latest",
-    } as never) as readonly unknown[];
+    }) as readonly unknown[];
     const event = events
       .map((raw) => raw as {
         readonly args?: { readonly requestId?: Hex; readonly data?: Hex };
@@ -478,7 +489,7 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
             deps.mechAddress,
             `0x${"11".repeat(32)}` as Hex,
           ],
-        } as never);
+        });
         return { ok: true } as const;
       } catch (error) {
         const detail = formatKnownRevertDetail(error);

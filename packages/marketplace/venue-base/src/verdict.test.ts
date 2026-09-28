@@ -112,7 +112,7 @@ describe("verdict ports", () => {
     const publicClient: VerdictRpcClient = {
       readContract: async () => false,
       getContractEvents: async () => [],
-      getTransaction: async () => ({ from: SAFE }),
+      getTransaction: async () => ({ input: "0x" as Hex }),
       simulateContract: async () => ({}),
     };
     const ports = createVerdictPorts({
