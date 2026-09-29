@@ -81,6 +81,7 @@ import {
   sleep,
   viemSendTransactionWithRetry,
   waitForContractCode,
+  waitForNativeBalanceAtLeast,
   waitForTransactionReceiptWithRetry,
 } from '../tx-retry.js';
 import { isUnauthorizedAccountError } from '../errors/unauthorized-account.js';
@@ -1724,7 +1725,19 @@ export class FleetBootstrapper {
         to: addr(svc.agent_address),
         value: fundAmount,
       });
-      await waitForTransactionReceiptWithRetry(this.publicClient, fundHash);
+      const fundReceipt = await waitForTransactionReceiptWithRetry(this.publicClient, fundHash);
+      if (fundReceipt.status !== 'success') {
+        throw new Error(`Service ${index}: agent funding tx failed: ${fundHash}`);
+      }
+      // Receipt success is not enough — see the comment on
+      // `waitForNativeBalanceAtLeast`. Wait on the TARGET balance, not the
+      // delta: `fundAmount` is what master sent, `minAgentGas` is what the
+      // next spend needs.
+      await waitForNativeBalanceAtLeast(
+        this.publicClient,
+        addr(svc.agent_address),
+        minAgentGas,
+      );
     }
 
     // Deploy mech via the service Safe (agent is Safe owner)
@@ -2083,16 +2096,23 @@ export class FleetBootstrapper {
       await waitForTransactionReceiptWithRetry(this.publicClient, fundHash);
     }
 
-    // 3. Check agent ETH balance (retry — public RPCs can lag after a write)
-    let agentBalanceAfter = 0n;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      agentBalanceAfter = await this.publicClient.getBalance({ address: getAddress(agentAddress) as Address });
-      if (agentBalanceAfter >= requiredAgentEth) break;
-      if (attempt < 4) await new Promise(r => setTimeout(r, 2000));
-    }
-    if (agentBalanceAfter < requiredAgentEth) {
+    // 3. Check agent ETH balance (public RPCs can lag after a write). Runs
+    // unconditionally, not inside the funding `if`, so an already-funded agent
+    // is still gated; the helper's first getBalance returns immediately then.
+    let agentBalanceAfter: bigint;
+    try {
+      agentBalanceAfter = await waitForNativeBalanceAtLeast(
+        this.publicClient,
+        addr(agentAddress),
+        requiredAgentEth,
+      );
+    } catch {
+      // The helper's own message names only the address. In a fleet, "which
+      // service" is the first question an operator asks, so re-throw with the
+      // index rather than letting the helper's text stand.
       throw new Error(
-        `Service ${index}: agent ${agentAddress} needs ${requiredAgentEth} wei ETH but has ${agentBalanceAfter}`,
+        `Service ${index}: agent ${agentAddress} needs ${requiredAgentEth} wei ETH ` +
+        `but the balance did not reach it`,
       );
     }
 

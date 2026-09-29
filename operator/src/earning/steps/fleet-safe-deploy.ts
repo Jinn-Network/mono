@@ -65,7 +65,10 @@ export async function stepFleetSafeDeploy(
         value: fundAmount,
       },
     );
-    await waitForTransactionReceiptWithRetry(ctx.publicClient, fundHash);
+    const fundReceipt = await waitForTransactionReceiptWithRetry(ctx.publicClient, fundHash);
+    if (fundReceipt.status !== 'success') {
+      throw new Error(`Fleet agent funding tx failed: ${fundHash}`);
+    }
     // Receipt success is not enough: the fallback RPC used for the next
     // `eth_fillTransaction` can still see the agent as empty. Wait until
     // getBalance agrees the transfer is visible before asking that EOA to
