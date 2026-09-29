@@ -170,6 +170,20 @@ function enclosedLiterals(source, key, open, close) {
  * allowance away and red a config that loads fine. Narrowing a scope can only remove coverage, so
  * this direction fails closed — a false red, never a false green — and nothing in the tree carries
  * a stray `projects:` key today.
+ *
+ * It under-matches in the same breath, and that twin fails open (issue #3153). The match reads only
+ * a bare identifier key written out in the file, so a quoted `'projects': [`, a computed
+ * `['projects']: [` in any of the three quote forms, and a key held in a variable (`[KEY]: [`) all
+ * miss it, yield no ranges, and drop every allowance and seam path back to root scope — the same
+ * collapse the variable-held entry above causes, reading green on the very shape #3123 closes. A
+ * spread of an object declared in the same file is not one of these: it still writes `projects:`
+ * out somewhere in the file, and the scan is over the whole file, so those entries are scoped
+ * normally. A spread of an object that reaches the config from another module does miss, for the
+ * reason the rule above already gives: the key is written nowhere in this file. The fail-closed
+ * argument above is what bounds the over-matching direction to a false red; it says nothing about
+ * this one. Like the variable-held case this is inherent to a text scanner, no worse than the
+ * pre-#3123 behavior, and recorded rather than closed: anchoring or widening the key would trade one
+ * of these directions for the other, not remove both.
  */
 export function projectEntryRanges(source) {
   const ranges = [];
@@ -1056,6 +1070,60 @@ test('fs.allow in one projects entry does not cover a seam path in another', () 
     ),
     [],
   );
+});
+
+// The under-matching twin of the unanchored `projects:` key, under its own name (issue #3153).
+// Quoting the key is the whole difference between these two configs, and it is enough to collapse
+// every entry back into root scope: the allowance in the sibling entry credits the seam path it
+// should not reach. Pinned because it is a false green, the one direction the doc block's
+// fail-closed argument does not cover, and a reader who finds it in the wild should find it here.
+test('which projects key forms the match sees decides whether scope collapses to root', () => {
+  const config = 'packages/x/vitest.config.ts';
+  const seam = '../../test-support/tmp-isolation/isolate-tmp.ts';
+  const entries = `{ server: { fs: { allow: ['../..'] } } }, { test: { setupFiles: ['${seam}'] } }`;
+  const withKey = (key) => `export default { test: { environment: 'jsdom', ${key}: [${entries}] } }`;
+
+  // The bare identifier key scopes the entries apart, so the seam path is unreachable.
+  assert.equal(projectEntryRanges(withKey('projects')).length, 2);
+  assert.deepEqual(unreachableWirings(withKey('projects'), config), [
+    { key: 'setupFiles', resolved: 'test-support/tmp-isolation/isolate-tmp.ts' },
+  ]);
+
+  // A quoted or computed key misses the match and reads green on the same config.
+  for (const key of [
+    "'projects'",
+    '"projects"',
+    "['projects']",
+    '["projects"]',
+    '[`projects`]',
+  ]) {
+    assert.deepEqual(projectEntryRanges(withKey(key)), []);
+    assert.deepEqual(unreachableWirings(withKey(key), config), []);
+  }
+
+  // So does a key held in a variable, with the entries and the seam path still written out inline.
+  const held = `const KEY = 'projects'\n${withKey('[KEY]')}`;
+  assert.deepEqual(projectEntryRanges(held), []);
+  assert.deepEqual(unreachableWirings(held, config), []);
+
+  // A spread of an object declared in the same file is not one of these, and the doc block says so:
+  // the key is still written out, and the scan is over the whole file, so the entries are scoped
+  // exactly as the bare key's are.
+  const spread = `const P = { projects: [${entries}] }\nexport default { test: { ...P } }`;
+  assert.equal(projectEntryRanges(spread).length, 2);
+  assert.deepEqual(unreachableWirings(spread, config), [
+    { key: 'setupFiles', resolved: 'test-support/tmp-isolation/isolate-tmp.ts' },
+  ]);
+
+  // A spread of an object that reaches the config from another module writes the key nowhere in this
+  // file, so it misses like the quoted and computed keys above. The qualifier in the doc block is
+  // this shape. The entries are the same braces the bare-key control asserts `2` on, written out
+  // inline here too, so the missing key is the only difference and the only thing `[]` can come from.
+  const imported =
+    `import { asProjects } from '../../vitest.shared.mjs'\n` +
+    `export default { test: { ...asProjects(${entries}) } }`;
+  assert.deepEqual(projectEntryRanges(imported), []);
+  assert.deepEqual(unreachableWirings(imported, config), []);
 });
 
 // Vitest does not fold the root config into a `projects` entry; an entry opts in with
