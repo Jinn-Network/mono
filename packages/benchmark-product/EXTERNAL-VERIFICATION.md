@@ -19,9 +19,12 @@ states; `external-verify.py` does not read those layouts.
 ## Reader vocabulary
 
 This document quotes contract spellings. The table maps each contract term to the
-reader-facing name from
+reader-facing name that
 [`docs/superpowers/specs/2026-09-02-reader-facing-vocabulary.md`](../../docs/superpowers/specs/2026-09-02-reader-facing-vocabulary.md)
-§5. Body text below keeps the contract spellings.
+§5 rules for reader surfaces. That is the ruled vocabulary, not a record of what every
+surface prints today: the checker's verdict line and per-check lines already use several of
+these names, and a generated report page or other checker output may still print an older
+label until its rename lands. Body text below keeps the contract spellings.
 
 | Contract spelling | Reader-facing name |
 | --- | --- |
