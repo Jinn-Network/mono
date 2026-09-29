@@ -15,7 +15,13 @@ import {
   REQUESTER_SAFE_DEPLOY_ETH,
   requesterMinMasterEth,
 } from '../../src/earning/requester-init.js';
-import { encryptMnemonic, generateMnemonic } from '../../src/earning/wallet.js';
+import {
+  deriveAgentAddress,
+  deriveMasterAddress,
+  encryptMnemonic,
+  generateMnemonic,
+} from '../../src/earning/wallet.js';
+import { startFakeRpc, type FakeRpc } from '../_support/chain/fake-rpc.js';
 
 const PREDICTED_SAFE = '0xBBBB000000000000000000000000000000000002';
 
@@ -34,6 +40,18 @@ async function seedKeystore(earningDir: string): Promise<FleetStateStore> {
   return store;
 }
 
+/** As `seedKeystore`, but hands back the mnemonic so a caller can derive the
+ * addresses whose balances it needs to script. Real mnemonic, real signing
+ * path — never assert a hardcoded address against it. */
+async function seedKeystoreWithMnemonic(
+  earningDir: string,
+): Promise<{ store: FleetStateStore; mnemonic: string }> {
+  const store = new FleetStateStore(earningDir);
+  const mnemonic = generateMnemonic();
+  await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'test-password'));
+  return { store, mnemonic };
+}
+
 describe('requesterMinMasterEth', () => {
   it('is far below the operator bootstrap target', () => {
     // The §4.2 defect in one assertion: a requester was being asked for the
@@ -47,9 +65,12 @@ describe('requesterMinMasterEth', () => {
 describe('FleetBootstrapper.ensureRequesterSafe', () => {
   const dirs: string[] = [];
 
+  const servers: FakeRpc[] = [];
+
   beforeEach(() => { vi.restoreAllMocks(); });
   afterEach(async () => {
     vi.restoreAllMocks();
+    await Promise.all(servers.splice(0).map((s) => s.close()));
     await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
   });
 
@@ -269,4 +290,45 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
     expect(agentFundingWei).toBe(REQUESTER_SAFE_DEPLOY_ETH);
     expect(agentFundingWei).toBeLessThan(requesterMinMasterEth());
   });
+  it('returns an ok:false envelope when the agent balance never reaches the target', async () => {
+    // #4827 AC 2. Every other case in this file stubs `stepFleetSafeDeploy`,
+    // so nothing covered the wait exhausting and the catch at the bottom of
+    // `ensureRequesterSafe` turning that throw into the envelope the requester
+    // CLI prints. Left unstubbed here on purpose, and pointed at the fake RPC
+    // so the funding send succeeds and the *wait* is the thing that fails.
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-b0a-'));
+    dirs.push(earningDir);
+    const { store, mnemonic } = await seedKeystoreWithMnemonic(earningDir);
+    await store.patchFleet({ fleet_safe_address: PREDICTED_SAFE });
+
+    const master = deriveMasterAddress(mnemonic).toLowerCase();
+    const fake = await startFakeRpc({
+      // Master clears its gate; the agent never reaches the deploy target.
+      eth_getBalance: (params: unknown[]) =>
+        String(params[0]).toLowerCase() === master
+          ? `0x${requesterMinMasterEth().toString(16)}`
+          : '0x0',
+      // Predicted Safe has no code, so the deploy step runs.
+      eth_getCode: () => '0x',
+    });
+    servers.push(fake);
+
+    const bootstrapper = new FleetBootstrapper({
+      earningDir,
+      chain: 'base-sepolia',
+      rpcUrl: fake.url,
+      stakingMode: 'standard',
+    });
+
+    const result = await bootstrapper.ensureRequesterSafe('test-password');
+
+    expect(result.ok).toBe(false);
+    // The operator-facing text, not a raw stack.
+    expect(result.message).not.toMatch(/\n\s+at /);
+    // Specifically the wait exhausting, not some earlier gate: the shared
+    // helper's message names its attempt budget and the target it never met.
+    expect(result.rawErrorMessage).toMatch(/Balance at 0x[0-9a-fA-F]{40} is 0 wei after \d+ getBalance attempts/);
+    expect(result.rawErrorMessage).toContain(REQUESTER_SAFE_DEPLOY_ETH.toString());
+    expect(deriveAgentAddress(mnemonic, 1)).toMatch(/^0x[0-9a-fA-F]{40}$/);
+  }, 30_000);
 });
