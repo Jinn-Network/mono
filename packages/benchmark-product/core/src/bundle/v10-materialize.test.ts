@@ -202,10 +202,13 @@ describe("composed bundle v10 — producer, one run per pre-composition cell", (
           .toBe((expected.vector as readonly string[]).includes(capability.token));
       }
       expect(claim["verification"]["checks"]).toEqual(expected.checks);
-      // Against the frozen constants, not against the derivation that produced them: every vector
-      // registered today pins the 0.2.1 line `/7` and `/8` pin, and never `/6`'s first-public 0.1.
-      expect(claim["verification"]["command"]).toBe(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND);
-      expect(claim["verification"]["compatibleCommand"]).toBe(PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND);
+      // Against the literal lines, not against the derivation that produced them: every vector
+      // registered today pins the first checker release, which reads `/10`, and never the verify
+      // 0.2.1 line `/7` and `/8` pin or `/6`'s first-public 0.1, which refuse it (issue #4746).
+      expect(claim["verification"]["command"]).toBe("npx @colophon-claims/check@0.2.1 <bundle-dir>");
+      expect(claim["verification"]["compatibleCommand"]).toBe("npx @colophon-claims/check@0.2 <bundle-dir>");
+      expect(claim["verification"]["command"]).not.toBe(PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND);
+      expect(claim["verification"]["compatibleCommand"]).not.toBe(PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND);
       // The Report extension is the disclosure capability's one edge, present exactly when declared.
       expect(json(built.bundleDir, "report.json")[DISCLOSURE_SPECIFICATION_EXTENSION] !== undefined)
         .toBe((expected.vector as readonly string[]).includes("disclosure-specification"));

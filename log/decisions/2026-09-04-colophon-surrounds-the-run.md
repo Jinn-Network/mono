@@ -96,6 +96,9 @@ Those are all on the seal's side of the line, and they are the fix list.
    are fixture shims, not pins); the Harbor reader, then the Inspect reader;
    #3417. The board's front door is a design fork after that, not part of
    this train. The walkthrough that tests all of it is #2851, rewritten.
+   **Amended by [DR-2026-09-21](./2026-09-21-board-front-door.md):** that fork
+   is now designed (submit a locator, cold-verify, list). This order-of-work
+   decision otherwise stands.
 
 ## Consequences
 

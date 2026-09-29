@@ -25,6 +25,8 @@ export const PRODUCT_RELEASE_PLATFORM_PINS_PATH = 'packages/benchmark-product/pr
 export const CLAIM_PIN_SOURCES = [
   'packages/benchmark-product/core/src/legacy-closures.ts',
   'packages/benchmark-product/check/src/legacy-closures.ts',
+  // The composed `/10` claim's reader lines, under the checker's own name (issue #4746).
+  'packages/benchmark-product/check/src/capabilities.ts',
   'packages/benchmark-product/cli/src/main.ts',
 ];
 
@@ -402,11 +404,12 @@ export function registeredReaderReleases(packageName) {
  * has never served, which is exactly the state a first publish is in -- so refusing there would make
  * the guard block the release it exists to gate, permanently. That case falls back to the offline
  * ledger, which already names the version about to be published; every other status still refuses
- * (issue #4188).
+ * (issue #4188). A caller that publishes nothing under the name passes `ledgerOnNotFound: false`,
+ * because for it a 404 is exactly what it reads: npm serves nothing there (issue #4746).
  */
-export async function fetchPublishedReaderVersions(packageName, fetchImpl = fetch) {
+export async function fetchPublishedReaderVersions(packageName, fetchImpl = fetch, { ledgerOnNotFound = true } = {}) {
   const response = await fetchImpl(`https://registry.npmjs.org/${packageName.replace('/', '%2f')}`);
-  if (response.status === 404) return registeredReaderReleases(packageName);
+  if (response.status === 404) return ledgerOnNotFound ? registeredReaderReleases(packageName) : [];
   if (!response.ok) {
     throw new Error(`cannot read published ${packageName} versions from npm: HTTP ${response.status}`);
   }
@@ -729,8 +732,38 @@ export function assertClaimReaderPinsMatchPublish(
   return pins;
 }
 
-export async function checkClaimPins(repoRoot, manifest, published) {
-  const registry = published ?? await fetchPublishedReaderVersions(manifest.name);
+/**
+ * Refuses a publish of a package that is not a reader while any reader pin in the tree names a
+ * version npm does not serve.
+ *
+ * `core` and `cli` publish no reader, so no version of theirs can satisfy a reader pin, and the
+ * offline ledger names a release before npm serves it, so it is not evidence here either. Both are
+ * dispatched after `check`, which publishes the checker and its alias; a core published before
+ * them would seal claims -- the composed `/10` claim pins the first checker release -- whose reader
+ * line 404s (issue #4746).
+ */
+export function assertClaimReaderPinsServed(pins, publishing, served) {
+  for (const [specifier, versions] of Object.entries(pins)) {
+    const unserved = unresolvableAgainst(versions, served(specifier));
+    if (unserved.length > 0) {
+      throw new Error(
+        `claim pins name ${specifier}@${unserved.join(', @')}, which npm does not serve; publish ${specifier} before ${publishing}`,
+      );
+    }
+  }
+  return pins;
+}
+
+export async function checkClaimPins(repoRoot, manifest, published, fetchImpl = fetch) {
+  if (!Object.hasOwn(READER_RELEASES, manifest.name)) {
+    const pins = collectClaimReaderPins(repoRoot);
+    const served = new Map();
+    for (const specifier of Object.keys(pins)) {
+      served.set(specifier, await fetchPublishedReaderVersions(specifier, fetchImpl, { ledgerOnNotFound: false }));
+    }
+    return assertClaimReaderPinsServed(pins, `${manifest.name}@${manifest.version}`, (specifier) => served.get(specifier));
+  }
+  const registry = published ?? await fetchPublishedReaderVersions(manifest.name, fetchImpl);
   return assertClaimReaderPinsMatchPublish(
     collectClaimReaderPins(repoRoot),
     manifest.name,

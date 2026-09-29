@@ -31,7 +31,7 @@ Read this table first. It is the whole point of the document.
 | Every verdict is a DSSE-signed in-toto statement verifying against its named evaluator key | yes | | |
 | `did:key` and evaluator key ids derive from the carried public keys | yes | | |
 | A supplied domain binding was signed by the key that signed this bundle | yes | | |
-| The bound domain actually publishes that binding | | | needs a DNS or HTTPS lookup you make yourself |
+| The bound domain actually publishes that binding | DNS TXT or HTTPS well-known lookup you make yourself | | |
 | The party controlling the bound domain's zone is the party it appears to be | | | correct — no tool |
 | The claim package's stored headline mirrors the signed report's results (headline-shaped claims; a comparison-shaped claim has no headline to mirror and the check reports `skipped`) | yes | | |
 | The matrix is the correct aggregation of the evidence graph (re-derivation, byte-exact) | | yes | |
@@ -402,8 +402,8 @@ npx @colophon-claims/check@0.2 <bundle-dir>
 ```
 
 A bundle sealed before the checker was renamed names `@colophon-claims/verify`
-there. That name stays published permanently as a passthrough alias onto
-`@colophon-claims/check`, so the command the bundle itself pins keeps resolving.
+there. Run the line that bundle itself pins in `claim-package.json`
+`verification.command` — the producer named it for that exact bundle.
 
 Exit 0 with `Recomputed: 6 of 6 checks passed` (`manifest`, `evidence-closure`,
 `trust`, `matrix-rederivation`, `report-verification`, `claim-consistency`);

@@ -55,7 +55,9 @@ or that the compared identities are independent parties.
 
 ## Freeze-artifact repositories
 
-A qualification bundle (v4, v7, or v8, or a composed v10 bundle that declares
+A qualification bundle (`benchmark-product-public-bundle/4`,
+`benchmark-product-public-bundle/7`, or `benchmark-product-public-bundle/8`,
+or a composed `benchmark-product-public-bundle/10` bundle that declares
 `binary-qualification`) can be projected into a public repository of its freeze artifacts —
 item bank, sources, admission decisions, labels, judge instruments, and the screening
 material. That repository is a **derived artifact, never the claim of record**:
@@ -77,9 +79,13 @@ and the licence scaffolding are specified in `../PUBLIC-BUNDLE.md`.
 
 The rendered tree's format is `colophon-freeze-repo/2`. The `/1` renderer stated a source
 `downloadLocation` and a `supplier` its record did not support, and refused an ordinary
-dual licence such as `Apache-2.0 OR MIT` outright; correcting those changes the rendered
-bytes, so it is a format bump rather than silent drift, and a tree published under `/1`
-reports drift against this version. Regenerate and republish it.
+dual licence such as `Apache-2.0 OR MIT` outright. The bump is carried by the first of
+those: replacing the unsupported `downloadLocation` and `supplier` values with SPDX's
+`NOASSERTION` changes the rendered bytes for bundles `/1` already accepted. Opening the
+dual licence would not have bumped the format on its own — it only admits a closure the
+renderer previously refused, and there is no prior tree for that output to differ from. A
+tree published under `/1` therefore reports drift against this version. Regenerate and
+republish it.
 
 Three API notes for anyone embedding this package rather than running its binary. `runVerifierCli`'s
 `deps.verify` test seam now returns `VerifiedPublicBundleSnapshot` (the verification **and** the

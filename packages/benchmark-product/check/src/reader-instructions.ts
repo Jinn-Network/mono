@@ -61,14 +61,10 @@ export const PUBLIC_BUNDLE_V8_COMPATIBLE_VERIFICATION_COMMAND =
  *
  * Its reader line is derived too — `readerInstructions(vector)`, the latest minimum release among
  * the declared capabilities and the generation's own base. This row states that BASE, for a reader
- * who has only the format string. `/10` must not inherit `/6`'s first-public `@0.1` line: no `0.1`
- * reader understands the format, so a claim naming one would be an instruction to fail.
- *
- * **Leftover (issue #3405):** `0.2.1` is the latest published reader and predates `/10` — it
- * refuses `/10` at manifest parse. The in-tree checker in this repository reads `/10`. A
- * published npm pin that serves `/10` does not exist yet; this packet does not publish one.
- * The producer default is `/10` anyway (D1). The base is repointed when a release that actually
- * serves `/10` is published.
+ * who has only the format string. `/10` inherits neither `/6`'s first-public `@0.1` line nor the
+ * `verify` 0.2.1 line `/7` and `/8` pin: both releases predate the format and refuse it at
+ * manifest parse, so a claim naming either would be an instruction to fail. The base is the first
+ * `check` release, the first reader of `/10` (issue #4746).
  */
 export const PUBLIC_BUNDLE_V10_VERIFICATION_COMMAND =
   READER_RELEASE_LINES[COMPOSED_FORMAT_MINIMUM_READER_RELEASE].command;
@@ -79,8 +75,9 @@ export const PUBLIC_BUNDLE_V10_COMPATIBLE_VERIFICATION_COMMAND =
  * Spans every lineage, so it is composed here rather than frozen in `legacy-closures.ts`: the four
  * legacy rows come from the frozen closures, the `/5` row is the evidence-native line, and the `/8`
  * row is the disclosed closure and the `/10` row the composed generation's base line. Every
- * format through v6 stamps the same first public 0.1 line; v7 is the first that cannot, and v8 and
- * v10 pin the same 0.2.1 line as v7.
+ * format through v6 stamps the same first public 0.1 line; v7 is the first that cannot, and v8
+ * pins the same `verify` 0.2.1 line as v7. v10 pins the first `check` release, under the checker's
+ * own name.
  *
  * `command` is the exact producer-side release and `compatibleCommand` the compatible major line.
  * On every row but `/5` the claim states both. The `/5` row is asymmetric (issue #3941): its

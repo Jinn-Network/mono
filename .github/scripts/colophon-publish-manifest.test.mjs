@@ -12,6 +12,7 @@ import {
   assertClaimPinsMatchPublish,
   assertClaimReaderPinsMatchPublish,
   assertReaderInstructionPinsResolve,
+  checkClaimPins,
   collectClaimReaderPins,
   collectPinsFromSource,
   collectReaderInstructionPins,
@@ -349,7 +350,7 @@ test('every claim pin in the tree names a published reader, and the tree pins ea
     pins['@colophon-claims/verify'].includes('0.2.1'),
     'the frozen closures must keep pinning the version published under the retired name',
   );
-  assert.deepEqual(pins['@colophon-claims/check'], ['0.2']);
+  assert.deepEqual(pins['@colophon-claims/check'], ['0.2', '0.2.1']);
   assert.deepEqual(
     assertClaimReaderPinsMatchPublish(pins, '@colophon-claims/check', checkerManifest().version),
     pins,
@@ -547,8 +548,11 @@ const CLAIM_PIN_SETS = {
   'packages/benchmark-product/check/src/legacy-closures.ts': {
     '@colophon-claims/verify': ['0.1', '0.1.0', '0.2', '0.2.0', '0.2.1'],
   },
-  // The only claim source on the new name: NEXT-STEPS.md is written to the operator's own disk
-  // beside the demo output, sealed into no bundle, so it is a fresh instruction and moves.
+  // The composed `/10` claim's lines: the first checker release, which reads the format, and the
+  // checker's `@0.2` line, which admits no release before it (issue #4746).
+  'packages/benchmark-product/check/src/capabilities.ts': { '@colophon-claims/check': ['0.2', '0.2.1'] },
+  // NEXT-STEPS.md is written to the operator's own disk beside the demo output, sealed into no
+  // bundle, so it is a fresh instruction and moves.
   'packages/benchmark-product/cli/src/main.ts': { '@colophon-claims/check': ['0.2'] },
 };
 
@@ -697,4 +701,86 @@ test('reader instructions name only reader versions npm serves, under whichever 
     /reader instructions name unpublished @colophon-claims\/check@0\.2;/u,
     'each name resolves against its own ledger, so the checker cannot borrow the alias line',
   );
+});
+
+/** A registry stand-in serving exactly `served` (package name -> versions); any other name 404s. */
+function registryServing(served) {
+  return async (url) => {
+    const name = decodeURIComponent(url.slice('https://registry.npmjs.org/'.length));
+    if (!Object.hasOwn(served, name)) return { ok: false, status: 404 };
+    return { ok: true, status: 200, json: async () => ({ versions: Object.fromEntries(served[name].map((v) => [v, {}])) }) };
+  };
+}
+
+function productManifest(name) {
+  return JSON.parse(readFileSync(join(repoRoot, `packages/benchmark-product/${name}/package.json`), 'utf8'));
+}
+
+test('the check dispatch admits the checker version it publishes, and no other unserved checker pin (issue #4746)', async () => {
+  // Every /10 claim pins the first checker release, which the same `check` dispatch publishes
+  // after its guards run. npm serves only the name's 0.0.0 reservation until then, so the checker's
+  // own guard admits exactly the version going out, and the alias guard, which also runs before the
+  // checker publish, resolves the checker pins against the ledger naming that version. Neither path
+  // is new: this pins that the composed pin passes both without widening either.
+  const pins = collectClaimReaderPins(repoRoot);
+  assert.deepEqual(pins['@colophon-claims/check'], ['0.2', '0.2.1']);
+  assert.deepEqual(await checkClaimPins(repoRoot, checkerManifest(), ['0.0.0']), pins);
+  assert.deepEqual(await checkClaimPins(repoRoot, aliasManifest(), ['0.1.0', '0.2.0', '0.2.1']), pins);
+  assert.throws(
+    () => assertClaimReaderPinsMatchPublish(
+      { ...pins, '@colophon-claims/check': ['0.2', '0.2.1', '0.2.2'] },
+      '@colophon-claims/check',
+      '0.2.1',
+      (name) => (name === '@colophon-claims/check' ? ['0.0.0'] : registeredReaderReleases(name)),
+    ),
+    /claim pins name unpublished verifier 0\.2\.2; publish those before 0\.2\.1/u,
+  );
+});
+
+test('core and cli refuse until npm serves every reader the tree pins (issue #4746)', async () => {
+  // core and cli publish no reader, so no version of theirs satisfies a reader pin, and the offline
+  // ledger names a release before npm serves it, so it is not evidence here either. They are
+  // dispatched after `check`; a core published first would seal claims whose reader line 404s.
+  const beforeCheck = registryServing({
+    '@colophon-claims/check': ['0.0.0'],
+    '@colophon-claims/verify': ['0.1.0', '0.2.0', '0.2.1'],
+  });
+  for (const manifest of [productManifest('core'), productManifest('cli')]) {
+    await assert.rejects(
+      () => checkClaimPins(repoRoot, manifest, undefined, beforeCheck),
+      new RegExp(
+        `claim pins name @colophon-claims/check@0\\.2, @0\\.2\\.1, which npm does not serve; publish @colophon-claims/check before ${manifest.name}@0\\.1\\.0`,
+        'u',
+      ),
+    );
+  }
+  await assert.rejects(
+    () => checkClaimPins(repoRoot, productManifest('core'), undefined, registryServing({
+      '@colophon-claims/verify': ['0.1.0', '0.2.0', '0.2.1', '0.2.2'],
+    })),
+    /claim pins name @colophon-claims\/check@0\.2, @0\.2\.1, which npm does not serve/u,
+    'a 404 is not a first publish here: nothing under a reader name goes out in this dispatch',
+  );
+  await assert.rejects(
+    () => checkClaimPins(repoRoot, productManifest('core'), undefined, async () => ({ ok: false, status: 503 })),
+    /cannot read published @colophon-claims\/check versions from npm: HTTP 503/u,
+  );
+  const afterCheck = registryServing({
+    '@colophon-claims/check': ['0.0.0', '0.2.1'],
+    '@colophon-claims/verify': ['0.1.0', '0.2.0', '0.2.1', '0.2.2'],
+  });
+  for (const manifest of [productManifest('core'), productManifest('cli')]) {
+    assert.deepEqual(await checkClaimPins(repoRoot, manifest, undefined, afterCheck), collectClaimReaderPins(repoRoot));
+  }
+});
+
+test('the publish workflow guards core and cli on served reader pins before rewriting or publishing them (issue #4746)', () => {
+  const workflow = readFileSync(join(repoRoot, '.github/workflows', COLOPHON_PUBLISH_WORKFLOW), 'utf8');
+  const product = 'packages/benchmark-product/${{ github.event.inputs.package }}/package.json';
+  const guard = workflow.indexOf(`--check-claim-pins ${product}`);
+  const apply = workflow.indexOf(`--apply ${product}`);
+  assert.ok(guard > 0, 'core and cli must run the claim-pin guard');
+  assert.ok(guard < apply, 'the guard must refuse before the manifest is rewritten for publish');
+  const step = workflow.slice(workflow.lastIndexOf('- name:', guard), guard);
+  assert.match(step, /if: \$\{\{ github\.event\.inputs\.package == 'core' \|\| github\.event\.inputs\.package == 'cli' \}\}/u);
 });

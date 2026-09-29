@@ -30,6 +30,7 @@ export {
   type ChainVerification,
   type ChainVerificationInput,
   type ChainVerificationOutcome,
+  type HeadRevalidationInput,
   type UnverifiedChainAcknowledgement,
   type WalkTruncation,
 } from "./chain-verification.js";

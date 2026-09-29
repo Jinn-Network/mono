@@ -38,19 +38,32 @@ import { refuse } from "./profile/errors.js";
 import type { PublicBundleVerificationCheck } from "./verify.js";
 
 /**
- * The published reader releases a capability may name as its minimum, each with
- * the exact and compatible reader lines a claim pins for it. Aliases of the frozen commands rather
- * than fresh literals: those constants are what the publish guard checks against npm, so a release
- * cannot appear here without having been published.
+ * The reader releases a capability may name as its minimum, each with the exact and compatible
+ * reader lines a claim pins for it, oldest first.
+ *
+ * Keyed by package name AND version, because both reader names carry a `0.2.1`: the `verify`
+ * release that `/7` and `/8` pin, which predates the composed generation and refuses it at
+ * manifest parse, and the first `check` release, which reads it (issue #4746). A version-only key
+ * cannot hold both. Order is the table's, not the version's: each release reads every format the
+ * one before it reads, so a later row is a later reader even where the versions tie.
+ *
+ * The `verify` rows alias the frozen commands. The `check` row is spelled here, and this file is in
+ * the publish guard's `CLAIM_PIN_SOURCES` (`.github/scripts/colophon-publish-manifest.mjs`), so
+ * its lines are checked against npm like every other sealed pin: the `check` dispatch admits the
+ * version it publishes, and `core` and `cli` refuse until npm serves it.
  */
 export const READER_RELEASE_LINES = {
-  "0.1.0": {
+  "verify@0.1.0": {
     command: PUBLIC_BUNDLE_VERIFICATION_COMMAND,
     compatibleCommand: PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND,
   },
-  "0.2.1": {
+  "verify@0.2.1": {
     command: PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
     compatibleCommand: PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
+  },
+  "check@0.2.1": {
+    command: "npx @colophon-claims/check@0.2.1 <bundle-dir>",
+    compatibleCommand: "npx @colophon-claims/check@0.2 <bundle-dir>",
   },
 } as const;
 
@@ -58,16 +71,12 @@ export type ReaderRelease = keyof typeof READER_RELEASE_LINES;
 
 /**
  * The reader release the composed generation itself needs, whatever it declares: the base every
- * vector's minimum is taken against. No `0.1` reader understands the format, so a vector of
- * capabilities that `0.1.0` first implemented still cannot name that line.
- *
- * **Leftover (issue #3405):** `0.2.1` is the latest published reader and predates the composed
- * format, so it refuses one at manifest parse. The in-tree checker reads `/10`. A published npm
- * pin that serves `/10` does not exist yet; this packet does not publish one. The producer
- * default is `/10` anyway (D1). The cutover that publishes a release reading the format
- * repoints this.
+ * vector's minimum is taken against. The `verify` releases above predate the composed format and
+ * refuse it at manifest parse, so a vector of capabilities one of them first implemented still
+ * cannot name its line. The first `check` release is the first reader of `/10`, and `@0.2` under
+ * the checker's name admits no release before it.
  */
-export const COMPOSED_FORMAT_MINIMUM_READER_RELEASE: ReaderRelease = "0.2.1";
+export const COMPOSED_FORMAT_MINIMUM_READER_RELEASE: ReaderRelease = "check@0.2.1";
 
 /** A path shape a capability allowlists, e.g. `anchors/<sha256>.bin`. */
 export interface CapabilityMemberPattern {
@@ -163,7 +172,7 @@ export const CAPABILITY_REGISTRY = [
     roleDerivations: [],
     claimSection: "qualification",
     checks: [],
-    minimumReaderRelease: "0.1.0",
+    minimumReaderRelease: "verify@0.1.0",
     activation: (facts) => facts.projectsBinaryQualification,
   },
   {
@@ -180,7 +189,7 @@ export const CAPABILITY_REGISTRY = [
     roleDerivations: [],
     claimSection: "anchors",
     checks: ["integrity-anchors"],
-    minimumReaderRelease: "0.1.0",
+    minimumReaderRelease: "verify@0.1.0",
     activation: (facts) => facts.anchoredClosure,
   },
   {
@@ -201,7 +210,7 @@ export const CAPABILITY_REGISTRY = [
     roleDerivations: [{ role: DISCLOSURE_SPECIFICATION_BUNDLE_ROLE, derivedFrom: DISCLOSURE_SPECIFICATION_EXTENSION }],
     claimSection: "disclosure",
     checks: ["disclosure-specification"],
-    minimumReaderRelease: "0.2.1",
+    minimumReaderRelease: "verify@0.2.1",
     // A run publishes one bundle per analysis, and only the qualification analysis's Report names
     // the record, so a sibling headline or comparison analysis never carried the declaration.
     activation: (facts) => facts.declaresDisclosure && facts.projectsBinaryQualification,
@@ -210,7 +219,8 @@ export const CAPABILITY_REGISTRY = [
     // Issue #3417. Additive: a mandatory marker member, a claim section, and a check. The
     // import-aware disclosure is not a member — both claim-consistency copies rebuild it from
     // the declared vector — so registering the token without implementing that rebuild cannot
-    // pass the check-list equality below.
+    // pass the check-list equality below. New with the composed generation, so no `verify`
+    // release implements it: its first reader is the first `check` release (issue #4746).
     token: EXTERNAL_IMPORT_CAPABILITY,
     order: 4,
     requires: [],
@@ -221,7 +231,7 @@ export const CAPABILITY_REGISTRY = [
     roleDerivations: [],
     claimSection: "externalImport",
     checks: ["external-import"],
-    minimumReaderRelease: "0.2.1",
+    minimumReaderRelease: "check@0.2.1",
     activation: (facts) => facts.importedRun,
   },
 ] as const satisfies readonly CapabilityEntry[];
@@ -248,14 +258,21 @@ export const CapabilityVectorSchema = z.array(z.string().regex(TOKEN_PATTERN)).s
   }
 });
 
-/** Numeric, component by component: `0.10.0` is later than `0.9.0`. */
-export function compareReaderReleases(left: string, right: string): number {
-  const [leftParts, rightParts] = [left, right].map((release) => release.split(".").map(Number));
-  for (let index = 0; index < 3; index += 1) {
-    const difference = (leftParts![index] ?? 0) - (rightParts![index] ?? 0);
-    if (difference !== 0) return difference;
-  }
-  return 0;
+const READER_RELEASE_ORDER: readonly string[] = Object.keys(READER_RELEASE_LINES);
+
+/** A release outside the table has no position, so it throws rather than sorting to either end. */
+function readerReleasePosition(release: string): number {
+  const position = READER_RELEASE_ORDER.indexOf(release);
+  if (position < 0) throw new Error(`reader release "${release}" is not in READER_RELEASE_LINES`);
+  return position;
+}
+
+/**
+ * By position in `READER_RELEASE_LINES`, which lists releases oldest first. Not by version: the
+ * `verify` and `check` releases share `0.2.1`, and only the second reads `/10`.
+ */
+export function compareReaderReleases(left: ReaderRelease, right: ReaderRelease): number {
+  return readerReleasePosition(left) - readerReleasePosition(right);
 }
 
 /**

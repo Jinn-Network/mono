@@ -101,6 +101,25 @@ const readerLine = (command: string): string => {
   return token;
 };
 
+/**
+ * The `{verify|check}@x.y[.z]` token of a reader command: `readerLine` with the package name kept.
+ * `verify@0.2.1` and `check@0.2.1` are two readers, and only the second reads `/10` (#4746).
+ */
+const readerSpecifier = (command: string): string => {
+  const token = /(?:verify|check)@[0-9][^\s]*/u.exec(command)?.[0];
+  if (token === undefined) throw new Error(`not a reader command: ${command}`);
+  return token;
+};
+
+/**
+ * How the per-format table states a reader line: bare `@x.y[.z]` on the rows that run the `verify`
+ * name, and with the package in full on a row that runs the checker's own name (#4746).
+ */
+const tableLine = (command: string): string => {
+  const specifier = readerSpecifier(command);
+  return specifier.startsWith("verify@") ? readerLine(command) : `@colophon-claims/${specifier}`;
+};
+
 /** The body of every fenced block in a Markdown region, whatever its info string. Both the opener
  * and the closer must sit at a line start, as a Markdown renderer reads an unindented fence (the
  * only kind this guide writes): an inline ```` ```x``` ```` in prose is code, not a fence, and
@@ -238,6 +257,11 @@ describe("product documentation consistency", () => {
       expect(freezeSection.includes(`\`${format}\``), `${format} accepted=${accepted}`).toBe(accepted);
     }
     expect(freezeSection).toContain(`\`${BINARY_QUALIFICATION_CAPABILITY}\``);
+    // The bump obligation is scoped to a tree an already-acceptable bundle already rendered
+    // (issue #3631). An unconditional "renderer change is a format bump" sentence contradicted
+    // opening `/8` under `colophon-freeze-repo/2` without a bump: there was no prior `/8` tree.
+    expect(freezeSection).toMatch(/already-acceptable\s+bundle/);
+    expect(freezeSection).toMatch(/previously refused closure/);
   });
 
   it("pins the published evidence-native v5 closure, its two profiles, and its reader line", () => {
@@ -303,6 +327,31 @@ describe("product documentation consistency", () => {
     expect([...new Set(stated)].sort()).toEqual(["@0.2"]);
   });
 
+  it("files the domain-publication lookup under tools the reader can run (issue #3692)", () => {
+    const doc = read(externalVerificationPath);
+    const heading = "## What verification proves, and what it does not";
+    const headingAt = doc.indexOf(heading);
+    expect(headingAt, heading).toBeGreaterThanOrEqual(0);
+    const afterHeading = doc.slice(headingAt);
+    const nextHeading = afterHeading.slice(heading.length).search(/^## /mu);
+    const section = nextHeading === -1
+      ? afterHeading
+      : afterHeading.slice(0, heading.length + nextHeading);
+    const cells = (claim: string): string[] => {
+      const line = section.split("\n").find((row) => row.includes(`| ${claim} |`));
+      expect(line, claim).toBeDefined();
+      return line!.split("|").map((cell) => cell.trim());
+    };
+    const lookup = cells("The bound domain actually publishes that binding");
+    // Column 1: the reader can settle this with dig/curl. Column 3 is for claims no procedure settles.
+    expect(lookup[2]).toMatch(/DNS|HTTPS|lookup/i);
+    expect(lookup[3]).toBe("");
+    expect(lookup[4]).toBe("");
+    const zone = cells("The party controlling the bound domain's zone is the party it appears to be");
+    expect(zone[2]).toBe("");
+    expect(zone[4]).toMatch(/no tool/i);
+  });
+
   it("scopes the portable-verification pointer so /5 does not inherit the /2 kit (#4679)", () => {
     const guide = read(bundleReadmePath);
     const tableStart = guide.indexOf("\n## Portable verification\n");
@@ -349,7 +398,9 @@ describe("product documentation consistency", () => {
     // Keyed by the row's first cell verbatim. Prompted screening is a fourth axis the format string
     // does not record, so `/2` and `/4` each carry two rows pinning different lines.
     // `/10` has no fixed check list: it runs whatever its declared vector derives. Its row states
-    // the range, from the empty vector to the vector naming every registered capability.
+    // the range, from the empty vector to the vector naming every registered capability. It is
+    // also the one row on the checker's own name, so `tableLine` keeps the package in its cells
+    // and a `verify` line there cannot pass for the checker's (#4746).
     const composedChecks = [[], CAPABILITY_REGISTRY.map((capability) => capability.token).sort()]
       .map((vector) => checkCountWord(expectedChecks(vector)))
       .join(" to ");
@@ -358,29 +409,29 @@ describe("product documentation consistency", () => {
       { pinned: readonly string[]; compatible: readonly string[]; checks: readonly string[] | string }
     > = {
       [`\`${BUNDLE_FORMAT}\`, unprompted`]: {
-        pinned: [readerLine(instruction(BUNDLE_FORMAT).command)],
-        compatible: [readerLine(instruction(BUNDLE_FORMAT).compatibleCommand)],
+        pinned: [tableLine(instruction(BUNDLE_FORMAT).command)],
+        compatible: [tableLine(instruction(BUNDLE_FORMAT).compatibleCommand)],
         checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
       },
       [`\`${BUNDLE_FORMAT}\`, prompted screening`]: {
         pinned: [
-          readerLine(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
-          readerLine(LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
+          tableLine(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
+          tableLine(LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
         ],
-        compatible: [readerLine(PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND)],
+        compatible: [tableLine(PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND)],
         checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
       },
       [`\`${BUNDLE_V4_FORMAT}\`, unprompted`]: {
-        pinned: [readerLine(instruction(BUNDLE_V4_FORMAT).command)],
-        compatible: [readerLine(instruction(BUNDLE_V4_FORMAT).compatibleCommand)],
+        pinned: [tableLine(instruction(BUNDLE_V4_FORMAT).command)],
+        compatible: [tableLine(instruction(BUNDLE_V4_FORMAT).compatibleCommand)],
         checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
       },
       [`\`${BUNDLE_V4_FORMAT}\`, prompted screening`]: {
         pinned: [
-          readerLine(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
-          readerLine(LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
+          tableLine(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
+          tableLine(LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND),
         ],
-        compatible: [readerLine(PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND)],
+        compatible: [tableLine(PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND)],
         checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
       },
       // The one row that does not read the instruction table's `command`, because `/5` is the one
@@ -389,28 +440,28 @@ describe("product documentation consistency", () => {
       // The asymmetry is documented on `PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND` and on the
       // instruction table itself (issue #3941); this row follows that documentation.
       [`\`${BUNDLE_V5_FORMAT}\``]: {
-        pinned: [readerLine(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND)],
+        pinned: [tableLine(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND)],
         compatible: [],
         checks: EVIDENCE_NATIVE_BUNDLE_V5_CHECKS,
       },
       [`\`${BUNDLE_V6_FORMAT}\``]: {
-        pinned: [readerLine(instruction(BUNDLE_V6_FORMAT).command)],
-        compatible: [readerLine(instruction(BUNDLE_V6_FORMAT).compatibleCommand)],
+        pinned: [tableLine(instruction(BUNDLE_V6_FORMAT).command)],
+        compatible: [tableLine(instruction(BUNDLE_V6_FORMAT).compatibleCommand)],
         checks: PUBLIC_BUNDLE_V6_CHECKS,
       },
       [`\`${BUNDLE_V7_FORMAT}\``]: {
-        pinned: [readerLine(instruction(BUNDLE_V7_FORMAT).command)],
-        compatible: [readerLine(instruction(BUNDLE_V7_FORMAT).compatibleCommand)],
+        pinned: [tableLine(instruction(BUNDLE_V7_FORMAT).command)],
+        compatible: [tableLine(instruction(BUNDLE_V7_FORMAT).compatibleCommand)],
         checks: PUBLIC_BUNDLE_V7_CHECKS,
       },
       [`\`${BUNDLE_V8_FORMAT}\``]: {
-        pinned: [readerLine(instruction(BUNDLE_V8_FORMAT).command)],
-        compatible: [readerLine(instruction(BUNDLE_V8_FORMAT).compatibleCommand)],
+        pinned: [tableLine(instruction(BUNDLE_V8_FORMAT).command)],
+        compatible: [tableLine(instruction(BUNDLE_V8_FORMAT).compatibleCommand)],
         checks: PUBLIC_BUNDLE_V8_CHECKS,
       },
       [`\`${BUNDLE_V10_FORMAT}\``]: {
-        pinned: [readerLine(instruction(BUNDLE_V10_FORMAT).command)],
-        compatible: [readerLine(instruction(BUNDLE_V10_FORMAT).compatibleCommand)],
+        pinned: [tableLine(instruction(BUNDLE_V10_FORMAT).command)],
+        compatible: [tableLine(instruction(BUNDLE_V10_FORMAT).compatibleCommand)],
         checks: `${composedChecks}, by declared capability`,
       },
     };
@@ -486,7 +537,7 @@ describe("product documentation consistency", () => {
       PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
       LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
       PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
-    ].map(readerLine);
+    ].map(readerSpecifier);
 
     for (const format of SUPPORTED_BUNDLE_FORMATS) {
       const heading = sections[format];
@@ -505,9 +556,11 @@ describe("product documentation consistency", () => {
       // Every fence, whatever its info string: the recipes are `bash` today, but a `sh` or bare
       // fence is still an instruction to run, and scanning only ```bash would let one carry a line
       // the format does not pin (#4011). Verified a no-op on the guide as it stands.
+      // Under either reader name, compared with the name kept: `verify@0.2.1` and `check@0.2.1`
+      // share a version, and only the second reads `/10` (#4746).
       const stated = fenceBodies(section)
-        .flatMap((body) => [...body.matchAll(/npx @colophon-claims\/verify\S*/gu)])
-        .map((command) => readerLine(command[0]));
+        .flatMap((body) => [...body.matchAll(/npx @colophon-claims\/(?:verify|check)\S*/gu)])
+        .map((command) => readerSpecifier(command[0]));
       expect(stated.length, `${format} states no reader command`).toBeGreaterThan(0);
 
       const instruction = PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[format];
@@ -523,10 +576,10 @@ describe("product documentation consistency", () => {
       // must still be one of those two.
       const pinned = new Set(
         format === BUNDLE_V5_FORMAT
-          ? [readerLine(instruction.compatibleCommand)]
+          ? [readerSpecifier(instruction.compatibleCommand)]
           : [
-              readerLine(instruction.command),
-              readerLine(instruction.compatibleCommand),
+              readerSpecifier(instruction.command),
+              readerSpecifier(instruction.compatibleCommand),
               ...(format === BUNDLE_FORMAT || format === BUNDLE_V4_FORMAT ? promptedLines : []),
             ],
       );
@@ -611,21 +664,24 @@ describe("product documentation consistency", () => {
       expect(block, block).not.toContain("@colophon-claims/check");
     }
     // The reader surface the README sends people to is a registry command, so the README has to
-    // say so rather than leaving it under the hold.
-    expect(readme).toMatch(/`@colophon-claims\/check` is published/u);
-    // The stated `latest` is what sends a reader to a registry version, so it has to be THE version
-    // this tree pins -- not merely a token that appears somewhere in the file. Located by its own
-    // sentence so a disagreement fails on the line that is wrong (#4206).
+    // say so rather than leaving it under the hold. Live registry (2026-09-26): the working
+    // checker is still `@colophon-claims/verify` `latest` `0.2.1`; `@colophon-claims/check` is a
+    // `0.0.0` name reservation, not a working checker. Pin those registry facts, not in-tree
+    // `check/package.json` or `verify/package.json` versions (#4732).
+    expect(readme).toMatch(/`@colophon-claims\/verify` is published/u);
+    expect(readme).not.toMatch(/`@colophon-claims\/check` is published/u);
     const publication = blocks.find(
-      (block) => /`@colophon-claims\/check` is published/u.test(block),
+      (block) => /`@colophon-claims\/verify` is published/u.test(block),
     );
     expect(publication, "README publication sentence").toBeTypeOf("string");
-    const checker = JSON.parse(read(resolve(productRoot, "check/package.json"))) as {
-      version: string;
-    };
     // Matched against the unwrapped sentence: the hard wrap is cosmetic, so a re-flow that lands
     // the newline between the two tokens must not be reported as a version disagreement.
-    expect(publication?.replace(/\s+/gu, " ")).toContain(`\`latest\` \`${checker.version}\``);
+    expect(publication?.replace(/\s+/gu, " ")).toContain("`latest` `0.2.1`");
+    const readerCommands = fenceBodies(readme)
+      .flatMap((body) => body.split("\n"))
+      .map((line) => line.trim())
+      .filter((line) => /npx @colophon-claims\/(?:verify|check)@/u.test(line));
+    expect(readerCommands).toEqual(["npx @colophon-claims/verify@0.2 ./bundle"]);
   });
 
   it("keeps the two format references silent about registry state", () => {
@@ -634,19 +690,29 @@ describe("product documentation consistency", () => {
     // unpublished -- went stale on the next publish, and nothing pinned it (#3961 was the third
     // sweep of the same prose). The format references describe pinned artifacts and immutable
     // reader behavior; the product README's publication paragraph is the one home for registry
-    // state, and the test above pins it to the version this tree pins. A block that names the
+    // state, and the test above pins it to the live registry `latest`. A block that names the
     // reader AND speaks in registry vocabulary is the defect. The co-occurrence is what keeps
     // `publish` in its bundle-emission sense legal: "the bundle published on colophon.claims"
     // names no reader, and "every v5 bundle published before this profile existed" carries no
     // auxiliary verb.
     const reader = /@colophon-claims\/(?:verify|check|cli|core)|`@?\d+\.\d+(?:\.\d+)?`/u;
     const registryState =
-      /`latest`|\bregistry\b|\bunpublished\b|\b(?:is|are|was|were|been)\s+published\b|\bpublication\s+pending\b|\bpending\s+publication\b|\bnot\s+yet\s+published\b|\bsince\s+been\s+cut\b|\bresolves?\s+to\s+`\d/iu;
+      /`latest`|\bregistry\b|\bunpublished\b|\b(?:is|are|was|were|been|stays?|stayed|remains?|remained|keeps?|kept)\s+(?:\w+\s+)?published\b|\bpublication\s+pending\b|\bpending\s+publication\b|\bnot\s+yet\s+published\b|\bsince\s+been\s+cut\b|\bresolves?\s+to\s+`\d/iu;
     // The guard's own negative: a literal offending sentence must trip both halves, and an
     // emission-sense sentence beside a version token must not, or an edit to either regex that
     // matches nothing passes silently.
-    const offending = "`@colophon-claims/verify@0.2.1` is published as `latest`.";
-    expect(reader.test(offending) && registryState.test(offending)).toBe(true);
+    // The last two entries are the literal sentences that survived this guard in
+    // `PUBLIC-BUNDLE.md` and `EXTERNAL-VERIFICATION.md` until #4847: the copular form admits an
+    // intervening adverb ("is now published"), and `stays/remains/keeps` are auxiliaries the
+    // first version of this alternative did not list. Keep them so that gap cannot reopen.
+    const offending = [
+      "`@colophon-claims/verify@0.2.1` is published as `latest`.",
+      "The checker is now published as `@colophon-claims/check`.",
+      "`@colophon-claims/verify` stays published permanently as a passthrough alias onto it.",
+    ];
+    for (const sentence of offending) {
+      expect(reader.test(sentence) && registryState.test(sentence), sentence).toBe(true);
+    }
     const emission = "a bundle published before `0.2.1` existed pins `@0.2.0`";
     expect(reader.test(emission)).toBe(true);
     expect(registryState.test(emission)).toBe(false);
@@ -870,13 +936,15 @@ const sweptMarkdownFiles: readonly string[] = walkFiles(productRoot).filter((pat
 );
 
 /**
- * The two documents that may still print `npx @colophon-claims/verify…`, and why each may.
+ * The documents that may still print `npx @colophon-claims/verify…`, and why each may.
  * `PUBLIC-BUNDLE.md` quotes the per-format lines the published bundles themselves seal -- quoting a
- * sealed byte is not issuing an instruction -- and the alias package's own README exists to tell
- * its readers that exact command still resolves. `EXTERNAL-VERIFICATION.md` is deliberately absent:
- * it issues a fresh instruction to a cold external verifier, so it prints the current name.
+ * sealed byte is not issuing an instruction. The alias package's own README still documents the
+ * old name so that command keeps resolving. The product README documents the live registry until a
+ * real `@colophon-claims/check` release ships, so it tells strangers to run the name npm actually
+ * serves. `EXTERNAL-VERIFICATION.md` is deliberately absent: it issues a fresh instruction to a
+ * cold external verifier, so it prints the current name.
  */
-const LEGACY_COMMAND_MARKDOWN = ["PUBLIC-BUNDLE.md", "verify/README.md"] as const;
+const LEGACY_COMMAND_MARKDOWN = ["PUBLIC-BUNDLE.md", "verify/README.md", "README.md"] as const;
 
 /**
  * The exact multiset of retired-name literals each frozen file carries, keyed by product-relative

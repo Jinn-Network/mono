@@ -32,6 +32,7 @@ import { PUBLIC_BUNDLE_V8_CHECKS } from "./reader-instructions.js";
 import { expectRefusal } from "./testing/expect-refusal.js";
 import {
   CAPABILITY_REGISTRY,
+  COMPOSED_FORMAT_MINIMUM_READER_RELEASE,
   CapabilityVectorSchema,
   READER_RELEASE_LINES,
   activeCapabilityVector,
@@ -58,7 +59,7 @@ function entry(token: string, order: number, overrides: Partial<CapabilityEntry>
     roleDerivations: [],
     claimSection: token,
     checks: [],
-    minimumReaderRelease: "0.2.1",
+    minimumReaderRelease: "verify@0.2.1",
     activation: () => false,
     ...overrides,
   };
@@ -345,39 +346,60 @@ describe("must-understand resolution", () => {
 });
 
 describe("reader instructions", () => {
-  test("releases compare numerically, component by component", () => {
-    expect(compareReaderReleases("0.1.0", "0.2.1")).toBeLessThan(0);
-    expect(compareReaderReleases("0.2.1", "0.2.1")).toBe(0);
-    // Not lexicographic: "0.10.0" sorts before "0.9.0" as a string.
-    expect(compareReaderReleases("0.10.0", "0.9.0")).toBeGreaterThan(0);
+  test("releases compare by their place in the table, not by version (issue #4746)", () => {
+    expect(Object.keys(READER_RELEASE_LINES)).toEqual(["verify@0.1.0", "verify@0.2.1", "check@0.2.1"]);
+    expect(compareReaderReleases("verify@0.1.0", "verify@0.2.1")).toBeLessThan(0);
+    expect(compareReaderReleases("verify@0.2.1", "verify@0.2.1")).toBe(0);
+    // The two 0.2.1 releases share a version and are still two readers: only the checker reads /10.
+    expect(compareReaderReleases("check@0.2.1", "verify@0.2.1")).toBeGreaterThan(0);
+    expect(() => compareReaderReleases("0.2.1" as never, "check@0.2.1"))
+      .toThrow(/reader release "0\.2\.1" is not in READER_RELEASE_LINES/u);
   });
 
-  test("every published line is an alias of a frozen command, never a fresh literal", () => {
+  test("the verify lines alias the frozen commands; the checker's 0.2.1 is its own entry (issue #4746)", () => {
     // `.github/scripts/colophon-publish-manifest.test.mjs` pins exactly which files may quote a
-    // verifier specifier, so this module names the frozen constants instead of respelling them.
-    expect(READER_RELEASE_LINES["0.2.1"]).toEqual({
+    // reader specifier, so the verify rows name the frozen constants instead of respelling them,
+    // and this file is on that list for the checker row it spells.
+    expect(READER_RELEASE_LINES["verify@0.2.1"]).toEqual({
       command: PUBLIC_BUNDLE_V7_VERIFICATION_COMMAND,
       compatibleCommand: PUBLIC_BUNDLE_V7_COMPATIBLE_VERIFICATION_COMMAND,
     });
-    expect(READER_RELEASE_LINES["0.1.0"]).toEqual({
+    expect(READER_RELEASE_LINES["verify@0.1.0"]).toEqual({
       command: "npx @colophon-claims/verify@0.1.0 <bundle-dir>",
       compatibleCommand: "npx @colophon-claims/verify@0.1 <bundle-dir>",
+    });
+    expect(READER_RELEASE_LINES["check@0.2.1"]).toEqual({
+      command: "npx @colophon-claims/check@0.2.1 <bundle-dir>",
+      compatibleCommand: "npx @colophon-claims/check@0.2 <bundle-dir>",
     });
   });
 
   test("no vector names a reader older than the composed generation's own base line", () => {
-    // `binary-qualification` and `anchoring` were first implemented by 0.1.0, but no 0.1 reader
-    // understands the composed format, so the maximum is taken against the generation's base.
-    for (const vector of [[], ["anchoring"], ["binary-qualification"]]) {
-      expect(composeClosure(vector).minimumReaderRelease).toBe("0.2.1");
-      expect(readerInstructions(vector)).toEqual(READER_RELEASE_LINES["0.2.1"]);
+    // `binary-qualification` and `anchoring` were first implemented by verify 0.1.0 and
+    // `disclosure-specification` by verify 0.2.1, but no verify release understands the composed
+    // format, so the maximum is taken against the generation's base: the first checker release.
+    expect(COMPOSED_FORMAT_MINIMUM_READER_RELEASE).toBe("check@0.2.1");
+    for (const vector of [[], ["anchoring"], ["binary-qualification"], ["binary-qualification", "disclosure-specification"]]) {
+      expect(composeClosure(vector).minimumReaderRelease).toBe("check@0.2.1");
+      expect(readerInstructions(vector)).toEqual(READER_RELEASE_LINES["check@0.2.1"]);
     }
   });
 
-  test("the derivation is a maximum over the declared capabilities", () => {
-    const later = entry("later", 1, { minimumReaderRelease: "0.2.1" });
-    const earlier = entry("earlier", 2, { minimumReaderRelease: "0.1.0" });
-    expect(composeClosure(["earlier", "later"], [later, earlier]).minimumReaderRelease).toBe("0.2.1");
+  test("each capability names the first release implementing it (issue #4746)", () => {
+    expect(Object.fromEntries(CAPABILITY_REGISTRY.map((entry) => [entry.token, entry.minimumReaderRelease]))).toEqual({
+      "binary-qualification": "verify@0.1.0",
+      anchoring: "verify@0.1.0",
+      "disclosure-specification": "verify@0.2.1",
+      // New with the composed generation: no verify release implements it.
+      "external-import": "check@0.2.1",
+    });
+  });
+
+  test("the derivation is a maximum over the declared capabilities and the base", () => {
+    const later = entry("later", 1, { minimumReaderRelease: "check@0.2.1" });
+    const earlier = entry("earlier", 2, { minimumReaderRelease: "verify@0.1.0" });
+    expect(composeClosure(["earlier", "later"], [later, earlier]).minimumReaderRelease).toBe("check@0.2.1");
+    expect(composeClosure(["earlier"], [earlier]).minimumReaderRelease).toBe("check@0.2.1");
   });
 });
 
