@@ -7,6 +7,7 @@ import {
   DEFAULT_TESTNET_RPC_URLS,
   DEFAULT_MAINNET_RPC_URLS,
   loadConfig,
+  clampConfigToTestnetDefaults,
   buildConfigProvenance,
   getConfigPathFromArgs,
 } from '../src/config.js';
@@ -1553,5 +1554,28 @@ describe('requireConfigPathFromArgvSources (#4673)', () => {
   it('throws when the verb named --config with an empty value', () => {
     expect(() => requireConfigPathFromArgvSources(['--config='], ['--config', '/tmp/process.json']))
       .toThrow('--config was given with an empty value');
+  });
+});
+
+describe('clampConfigToTestnetDefaults (#4826)', () => {
+  it('rewrites both RPC fields, not just the head URL', () => {
+    // Regression: the pre-launch mainnet clamp in main.ts used to set
+    // `rpcUrl` alone. Once the fleet bootstrap started consuming `rpcUrls`
+    // (#4826), that left a clamped-to-testnet daemon building every viem
+    // client from the mainnet fallback chain the clamp had just refused.
+    const config = {
+      network: 'mainnet' as const,
+      rpcUrl: DEFAULT_MAINNET_RPC_URLS[0]!,
+      rpcUrls: [...DEFAULT_MAINNET_RPC_URLS],
+    };
+
+    clampConfigToTestnetDefaults(config);
+
+    expect(config.network).toBe('testnet');
+    expect(config.rpcUrls).toEqual([...DEFAULT_TESTNET_RPC_URLS]);
+    expect(config.rpcUrl).toBe(config.rpcUrls[0]);
+    for (const url of config.rpcUrls) {
+      expect(DEFAULT_MAINNET_RPC_URLS).not.toContain(url);
+    }
   });
 });

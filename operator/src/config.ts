@@ -925,6 +925,21 @@ export const DEFAULT_MAINNET_RPC_URLS: readonly string[] = [
   'https://base.meowrpc.com',
 ];
 
+/**
+ * Pre-launch mainnet clamp (`main.ts`): rewrite a `mainnet` config to testnet
+ * defaults in place. Mutates both RPC fields together — consumers build their
+ * viem clients from `rpcUrls` (the #592 fallback chain, issue #4826), so
+ * setting `rpcUrl` alone would leave the daemon talking to the very mainnet
+ * providers this clamp exists to refuse.
+ */
+export function clampConfigToTestnetDefaults(
+  config: Pick<JinnConfig, 'network' | 'rpcUrl' | 'rpcUrls'>,
+): void {
+  config.network = 'testnet';
+  config.rpcUrls = [...DEFAULT_TESTNET_RPC_URLS];
+  config.rpcUrl = config.rpcUrls[0]!;
+}
+
 
 export type ConfigLoadErrorCode =
   | 'config_file_not_found'

@@ -25,7 +25,12 @@ import { homedir, hostname, userInfo } from 'node:os';
 import { randomBytes as cryptoRandomBytes, randomUUID as cryptoRandomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadConfig, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
+import {
+  loadConfig,
+  clampConfigToTestnetDefaults,
+  DEFAULT_CONFIG_PATH,
+  DEFAULT_TESTNET_RPC_URLS,
+} from './config.js';
 import { requireConfigPathFromArgs } from './config/path-args.js';
 import { readKeystorePasswordFile, writePrimaryKeystorePassword } from './earning/password-file.js';
 import { writeConfigFileAtomic } from './config/atomic-write.js';
@@ -251,8 +256,7 @@ if (passwordResolution.source === 'generated') {
 const CONFIGURED_NETWORK: 'mainnet' | 'testnet' = config.network;
 if (config.network === 'mainnet' && process.env['JINN_ENABLE_MAINNET'] !== '1') {
   console.warn('[main] Mainnet is disabled before launch; using testnet defaults.');
-  config.network = 'testnet';
-  config.rpcUrl = 'https://base-sepolia-rpc.publicnode.com';
+  clampConfigToTestnetDefaults(config);
 }
 // #2380 / D5: recomputed here (not threaded through argv) so /v1/status and daemon_started
 // report the resolved vertical mode. After D5 every `jinn run` reaches this file; leftover
