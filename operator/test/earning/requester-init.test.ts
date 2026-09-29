@@ -16,7 +16,6 @@ import {
   requesterMinMasterEth,
 } from '../../src/earning/requester-init.js';
 import {
-  deriveAgentAddress,
   deriveMasterAddress,
   encryptMnemonic,
   generateMnemonic,
@@ -34,15 +33,9 @@ function buildBootstrapper(earningDir: string): FleetBootstrapper {
   });
 }
 
-async function seedKeystore(earningDir: string): Promise<FleetStateStore> {
-  const store = new FleetStateStore(earningDir);
-  await store.saveMnemonicKeystore(await encryptMnemonic(generateMnemonic(), 'test-password'));
-  return store;
-}
-
-/** As `seedKeystore`, but hands back the mnemonic so a caller can derive the
- * addresses whose balances it needs to script. Real mnemonic, real signing
- * path — never assert a hardcoded address against it. */
+/** Real mnemonic, real signing path — never assert a hardcoded address
+ * against it. Callers that need to script balances per address take the
+ * mnemonic and derive them. */
 async function seedKeystoreWithMnemonic(
   earningDir: string,
 ): Promise<{ store: FleetStateStore; mnemonic: string }> {
@@ -50,6 +43,10 @@ async function seedKeystoreWithMnemonic(
   const mnemonic = generateMnemonic();
   await store.saveMnemonicKeystore(await encryptMnemonic(mnemonic, 'test-password'));
   return { store, mnemonic };
+}
+
+async function seedKeystore(earningDir: string): Promise<FleetStateStore> {
+  return (await seedKeystoreWithMnemonic(earningDir)).store;
 }
 
 describe('requesterMinMasterEth', () => {
@@ -329,6 +326,5 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
     // helper's message names its attempt budget and the target it never met.
     expect(result.rawErrorMessage).toMatch(/Balance at 0x[0-9a-fA-F]{40} is 0 wei after \d+ getBalance attempts/);
     expect(result.rawErrorMessage).toContain(REQUESTER_SAFE_DEPLOY_ETH.toString());
-    expect(deriveAgentAddress(mnemonic, 1)).toMatch(/^0x[0-9a-fA-F]{40}$/);
   }, 30_000);
 });

@@ -18,7 +18,7 @@ import { mkdtemp, rm } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getAddress } from 'viem';
+import { getAddress, parseTransaction, type Hex } from 'viem';
 import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
 import { FleetStateStore } from '../../src/earning/store.js';
 import {
@@ -90,8 +90,7 @@ describe('stepSelfBondSetup agent-ETH balance wait', () => {
     const fake = await startFakeRpc({
       eth_getBalance: (params: unknown[]) => `0x${balanceFor(String(params[0])).toString(16)}`,
       eth_sendRawTransaction: (params: unknown[]) => {
-        // Decode enough of the signed envelope to record the transfer target
-        // and value without reaching for a second library.
+        // Record the transfer target and value off the signed envelope.
         sends.push(decodeTransfer(String(params[0])));
         return `0x${(sends.length).toString(16).padStart(64, '0')}`;
       },
@@ -104,6 +103,10 @@ describe('stepSelfBondSetup agent-ETH balance wait', () => {
       rpcUrl: fake.url,
       stakingMode: 'self-bond',
     });
+    // MOCK_JUSTIFICATION: the OLAS bond-token read is an ERC-20 `eth_call`
+    // the fake answers with `0x`, which viem cannot decode. Stubbing the one
+    // private reader keeps the fence under test — every balance, transfer and
+    // wait below it — on the real path.
     vi.spyOn(bootstrapper as any, 'getBondTokenBalance').mockResolvedValue(
       10n ** 30n,
     );
@@ -117,7 +120,7 @@ describe('stepSelfBondSetup agent-ETH balance wait', () => {
     // fires — but only if `agentBalanceAfter` survived, since
     // `eoaAvailable = agentBalanceAfter - minEoaGasEth` gates it.
     const safe = getAddress(SAFE_ADDRESS).toLowerCase();
-    const { bootstrapper, store, sends, agentAddress, mnemonic } = await setup((address) =>
+    const { bootstrapper, store, sends, mnemonic } = await setup((address) =>
       address.toLowerCase() === safe ? 0n : REQUIRED_AGENT_ETH,
     );
 
@@ -128,7 +131,6 @@ describe('stepSelfBondSetup agent-ETH balance wait', () => {
     expect(sends[0]!.to.toLowerCase()).toBe(safe);
     expect(sends[0]!.value).toBe(MIN_SAFE_ETH);
     expect(REQUIRED_AGENT_ETH - MIN_EOA_GAS).toBeGreaterThanOrEqual(MIN_SAFE_ETH);
-    expect(agentAddress).toMatch(/^0x[0-9a-fA-F]{40}$/);
   }, 30_000);
 
   it('names the service when the agent balance never reaches the self-bond target', async () => {
@@ -137,28 +139,16 @@ describe('stepSelfBondSetup agent-ETH balance wait', () => {
     );
 
     const state = await store.load('base-sepolia');
+    // The index prefix AND the helper's own text: that text carries the
+    // balance actually observed, which is what an operator needs to tell
+    // "nothing landed" from "landed, target slightly short".
     await expect((bootstrapper as any).stepSelfBondSetup(state, mnemonic, 1))
-      .rejects.toThrow(new RegExp(`Service 1:.*${agentAddress}`));
+      .rejects.toThrow(new RegExp(`Service 1:.*${agentAddress}.*${REQUIRED_AGENT_ETH - 1n} wei`));
   }, 30_000);
 });
 
-/** Minimal EIP-1559 signed-transaction reader: `to` and `value` only. */
+/** `to` and `value` of a signed envelope, via viem's own parser. */
 function decodeTransfer(raw: string): { to: string; value: bigint } {
-  // viem signs type-2 envelopes: 0x02 || rlp([chainId, nonce, maxPriority,
-  // maxFee, gas, to, value, data, accessList, v, r, s]).
-  const bytes = Buffer.from(raw.slice(4), 'hex');
-  let i = 0;
-  // Skip the outer list header.
-  const first = bytes[i]!;
-  i += first >= 0xf8 ? 1 + (first - 0xf7) : 1;
-  const items: Buffer[] = [];
-  while (items.length < 7 && i < bytes.length) {
-    const prefix = bytes[i]!;
-    if (prefix < 0x80) { items.push(bytes.subarray(i, i + 1)); i += 1; }
-    else if (prefix < 0xb8) { const len = prefix - 0x80; items.push(bytes.subarray(i + 1, i + 1 + len)); i += 1 + len; }
-    else { const lenLen = prefix - 0xb7; const len = Number(BigInt(`0x${bytes.subarray(i + 1, i + 1 + lenLen).toString('hex') || '0'}`)); items.push(bytes.subarray(i + 1 + lenLen, i + 1 + lenLen + len)); i += 1 + lenLen + len; }
-  }
-  const to = `0x${items[5]!.toString('hex')}`;
-  const valueHex = items[6]!.toString('hex');
-  return { to, value: valueHex === '' ? 0n : BigInt(`0x${valueHex}`) };
+  const tx = parseTransaction(raw as Hex);
+  return { to: tx.to ?? '', value: tx.value ?? 0n };
 }

@@ -169,7 +169,10 @@ describe('stepFleetSafeDeploy agent-EOA balance wait', () => {
     // how the helper is called.
     const { ctx, state, mnemonic } = await setup([FUNDING / 2n, FUNDING - 1n]);
 
-    await expect(stepFleetSafeDeploy(ctx, state, mnemonic, FUNDING)).rejects.toThrow();
+    // Pin the helper's own exhaustion message: a bare `toThrow()` would also
+    // be satisfied by a fixture error thrown before the wait is ever reached.
+    await expect(stepFleetSafeDeploy(ctx, state, mnemonic, FUNDING))
+      .rejects.toThrow(/Balance at 0x[0-9a-fA-F]{40} is .* after \d+ getBalance attempts/);
     expect(safeAdapter.initPredictedSafe).not.toHaveBeenCalled();
   }, 30_000);
 

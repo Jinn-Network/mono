@@ -2117,13 +2117,17 @@ export class FleetBootstrapper {
         addr(agentAddress),
         requiredAgentEth,
       );
-    } catch {
+    } catch (err) {
       // The helper's own message names only the address. In a fleet, "which
-      // service" is the first question an operator asks, so re-throw with the
-      // index rather than letting the helper's text stand.
+      // service" is the first question an operator asks, so prefix the index.
+      // Keep the original text and `cause`: the helper reports the balance it
+      // actually observed, and a transport failure mid-poll reaches here too
+      // — rewriting that as a funding problem would send the operator to the
+      // wrong wallet.
       throw new Error(
-        `Service ${index}: agent ${agentAddress} needs ${requiredAgentEth} wei ETH ` +
-        `but the balance did not reach it`,
+        `Service ${index}: agent ${agentAddress} needs ${requiredAgentEth} wei ETH: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
       );
     }
 

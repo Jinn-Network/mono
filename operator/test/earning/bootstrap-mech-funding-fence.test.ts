@@ -200,7 +200,10 @@ describe('stepDeployMech agent-EOA funding fence', () => {
     ]);
 
     const state = await store.load('base-sepolia');
-    await expect((bootstrapper as any).stepDeployMech(state, mnemonic, 1)).rejects.toThrow();
+    // Pin the helper's own exhaustion message: a bare `toThrow()` would also
+    // be satisfied by a fixture error thrown before the wait is ever reached.
+    await expect((bootstrapper as any).stepDeployMech(state, mnemonic, 1))
+      .rejects.toThrow(/Balance at 0x[0-9a-fA-F]{40} is .* after \d+ getBalance attempts/);
 
     expect(safeAdapter.executeSafeTxDirect).not.toHaveBeenCalled();
   }, 30_000);

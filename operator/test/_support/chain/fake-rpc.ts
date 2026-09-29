@@ -134,9 +134,23 @@ export async function startFakeRpc(
       methods.push(method);
       calls.push({ method, params });
       const handler = handlers.get(method);
-      const payload = handler === undefined
-        ? { jsonrpc: '2.0', id: body.id ?? null, error: { code: -32601, message: `fake-rpc: unhandled ${method}` } }
-        : { jsonrpc: '2.0', id: body.id ?? null, result: handler(params) };
+      let payload: Record<string, unknown>;
+      if (handler === undefined) {
+        payload = { jsonrpc: '2.0', id: body.id ?? null, error: { code: -32601, message: `fake-rpc: unhandled ${method}` } };
+      } else {
+        try {
+          payload = { jsonrpc: '2.0', id: body.id ?? null, result: handler(params) };
+        } catch (err) {
+          // A handler that throws is a caller scripting an RPC error. Answer
+          // the request instead of letting the throw escape this callback:
+          // an unanswered request hangs the client to the vitest timeout.
+          payload = {
+            jsonrpc: '2.0',
+            id: body.id ?? null,
+            error: { code: -32603, message: err instanceof Error ? err.message : String(err) },
+          };
+        }
+      }
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify(payload));
     });
