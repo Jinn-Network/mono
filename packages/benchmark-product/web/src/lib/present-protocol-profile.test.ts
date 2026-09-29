@@ -20,7 +20,7 @@ describe("presentProtocolText", () => {
     expect(presentProtocolText(`profile ${served}`)).toBe(`profile ${served}`);
   });
 
-  test("names an unserved Jinn identifier by its path, without the origin", () => {
+  test("names an unserved protocol identifier by its path, without the origin", () => {
     expect(presentProtocolText("profile https://spec.jinn.network/task-profiles/binary-judgment/1.0"))
       .toBe("profile task-profiles/binary-judgment/1.0");
   });

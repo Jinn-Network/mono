@@ -21,7 +21,11 @@ const SPEC_ORIGIN = "https://spec.jinn.network/";
  * Exact paths, not the inventory's `servedPathPrefixes`: the release serves
  * `task-profiles/binary-judgment/2.0` but not `/1.0`, and nothing under
  * `profiles/benchmark-product-public-bundle/`, so a prefix would print unresolvable names whole.
- * This is the one copy in this package; update it when the platform moves to another spec release.
+ * This is the one copy in this package, and it is frozen with `/10`. The `/10` page is byte-pinned,
+ * so once a `/10` bundle is published, editing this set in place can make the checker refuse that
+ * bundle: its `index.html` is no longer the exact projection. A later spec release's paths can reach
+ * `/10` only through a newly registered presentation capability (`FORMAT_PRESENTATION_CAPABILITIES`
+ * in `assets.ts`). The CLI's human errors and the GUI are not byte-pinned.
  */
 export const SPEC_RELEASE_SERVED_PATHS: ReadonlySet<string> = new Set([
   "facts/authorization/v1",

@@ -15,7 +15,9 @@ const SPEC_ORIGIN = "https://spec.jinn.network/";
 
 /**
  * Every path the Jinn protocol spec release `v0.1.0` (`Jinn-Network/spec`) serves at `SPEC_ORIGIN`,
- * less its conformance fixtures. Exact paths, not path prefixes; see the verifier's copy.
+ * less its conformance fixtures. Exact paths, not path prefixes. The verifier's copy is frozen with
+ * its byte-pinned `/10` page and says how a later spec release's paths can reach it; this GUI is not
+ * byte-pinned, and the parity test keeps the two sets equal.
  */
 export const SPEC_RELEASE_SERVED_PATHS: ReadonlySet<string> = new Set([
   "facts/authorization/v1",

@@ -51,7 +51,7 @@ describe("origin-free reader presentation (#2981)", () => {
     expect(readme).toContain("jinn.benchmarking.method/wilson");
   });
 
-  test("/10 HTML and README print none of the golden bundle's unresolvable Jinn identifiers", async () => {
+  test("/10 HTML and README print none of the golden bundle's unresolvable protocol identifiers", async () => {
     const assets = buildPublicAssets(await goldenInput(BUNDLE_V10_FORMAT));
     for (const name of ["index.html", "README.md"] as const) {
       const text = decoder.decode(assets[name]!);
