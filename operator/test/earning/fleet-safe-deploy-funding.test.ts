@@ -94,8 +94,10 @@ describe('stepFleetSafeDeploy — agent-EOA balance fence (#4827)', () => {
 
     // Master clears the requester gate; the agent EOA is partially funded.
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockImplementation(
-      async ({ address }: { address: string }) =>
-        getAddress(address) === agentAddress ? AGENT_STARTING_WEI : requesterMinMasterEth(),
+      async (...args: unknown[]) => {
+        const { address } = args[0] as { address: string };
+        return getAddress(address) === agentAddress ? AGENT_STARTING_WEI : requesterMinMasterEth();
+      },
     );
     // Safe not yet deployed, so the deploy branch runs.
     vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0x');
