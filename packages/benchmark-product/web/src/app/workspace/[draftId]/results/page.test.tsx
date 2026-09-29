@@ -314,7 +314,8 @@ describe("semantic results and report surface", () => {
 
     expect(markup).toContain(reportSha256);
     expect(markup).toContain(envelopeSha256);
-    expect(markup).toContain("jinn.benchmarking.method/wilson");
+    expect(markup).toContain("method/wilson");
+    expect(markup).not.toContain("jinn.benchmarking.method/wilson");
     expect(markup).toContain("Preregistered");
     expect(markup).toContain("Claim package");
     expect(markup).toContain("Claim scope arms and pinning");

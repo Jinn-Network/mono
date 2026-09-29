@@ -12,6 +12,7 @@ import type { ClaimPackage } from "./profile/claim.js";
 import type { PublicComparisonCell, PublicComparisonView } from "./comparison.js";
 import type { SupportedBundleFormat } from "./manifest.js";
 import { BUNDLE_V10_FORMAT } from "./manifest.js";
+import { presentInternalProtocolIdentifiers } from "./identifier-presentation.js";
 import { armDenominators, type ArmDenominators, type PlannedSlotAccounting } from "./denominators.js";
 
 /**
@@ -26,10 +27,18 @@ import { armDenominators, type ArmDenominators, type PlannedSlotAccounting } fro
  *
  * `report-prose-singularity` is the four rulings of issue #3016: each of the page's statements is
  * made once, in the highest-priority slot that carries it, and the narrated control is cut.
+ *
  * `declared-strict-denominators` is the declared / all-slots pair on the wilson arm tables
  * (issue #3698): three adjacent numbers, derived from `armDenominators`, not a second arithmetic.
+ *
+ * `origin-free-identifiers` is issue #2981: reader-facing HTML and README print a protocol
+ * identifier whole only when the spec origin serves it, and otherwise its name without the origin,
+ * while sealed records keep the raw identifiers.
  */
-export type PresentationCapability = "report-prose-singularity" | "declared-strict-denominators";
+export type PresentationCapability =
+  | "report-prose-singularity"
+  | "declared-strict-denominators"
+  | "origin-free-identifiers";
 
 /**
  * Which presentation capabilities each format's page renders.
@@ -51,7 +60,7 @@ export const FORMAT_PRESENTATION_CAPABILITIES: {
   "benchmark-product-public-bundle/6": [],
   "benchmark-product-public-bundle/7": [],
   "benchmark-product-public-bundle/8": [],
-  [BUNDLE_V10_FORMAT]: ["report-prose-singularity", "declared-strict-denominators"],
+  [BUNDLE_V10_FORMAT]: ["report-prose-singularity", "declared-strict-denominators", "origin-free-identifiers"],
 };
 
 interface PublicAssetInputBase {
@@ -265,6 +274,10 @@ function plainText(value: string): string {
 
 function canonicalText(value: unknown): string {
   return decoder.decode(canonicalJsonBytes(value));
+}
+
+function presentReaderText(text: string, capabilities: ReadonlySet<PresentationCapability>): string {
+  return capabilities.has("origin-free-identifiers") ? presentInternalProtocolIdentifiers(text) : text;
 }
 
 function boundedVisual(value: string, maximumCodePoints: number): string {
@@ -1527,10 +1540,10 @@ export function buildPublicAssets(input: PublicAssetInput): Readonly<Record<stri
     );
   }
   return {
-    "index.html": encoder.encode(buildIndex(input, reportFacts, claimFacts, capabilities)),
+    "index.html": encoder.encode(presentReaderText(buildIndex(input, reportFacts, claimFacts, capabilities), capabilities)),
     "badge.svg": encoder.encode(buildBadge(input, reportFacts)),
     "social-card.svg": encoder.encode(buildSocialCard(input, reportFacts)),
-    "README.md": encoder.encode(buildReadme(input, reportFacts, claimFacts, capabilities)),
+    "README.md": encoder.encode(presentReaderText(buildReadme(input, reportFacts, claimFacts, capabilities), capabilities)),
     "share.txt": encoder.encode(buildShareText(input, reportFacts)),
   };
 }

@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { PRODUCT_BRANDING } from "@/lib/branding";
 import { GUI_SERVER_ACTIONS } from "@/lib/server/gui-action-registry";
 import { loadResultsView } from "@/lib/server/view-models";
+import { presentProtocolText } from "@/lib/present-protocol-profile";
 
 const ATTRITION_FIELDS = ["expected", "judged", "unjudged", "unscorable", "expired", "invalidated", "excluded", "replacements"] as const;
 const AXES = ["harness", "model", "loadout", "isolation"] as const;
@@ -52,7 +53,9 @@ interface PresentedComparisonParameters {
 
 function formatFact(value: unknown): string {
   if (value === null) return "null";
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return presentProtocolText(String(value));
+  }
   if (Array.isArray(value)) return value.map(formatFact).join(", ");
   if (typeof value === "object") {
     return Object.entries(value as Readonly<Record<string, unknown>>)
@@ -362,7 +365,7 @@ function StoredReportResults({ report }: { readonly report: RunResultsReport }) 
 function Report({ report, attrition }: { readonly report: RunResultsReport; readonly attrition: RunResultsDocument["attrition"] }) {
   return <section aria-labelledby="report-heading" className="min-w-0 space-y-6">
     <Card className="min-w-0 overflow-hidden"><CardHeader><h2 id="report-heading" className="text-xl font-semibold">Sealed report</h2></CardHeader><CardContent className="min-w-0 space-y-5 [overflow-wrap:anywhere]">
-      <dl className="grid min-w-0 gap-3 sm:grid-cols-2"><div><dt className="font-medium">Report digest</dt><dd><Digest>{report.reportSha256}</Digest></dd></div><div><dt className="font-medium">Envelope digest</dt><dd><Digest>{report.reportEnvelopeSha256}</Digest></dd></div><div><dt className="font-medium">Method</dt><dd>{report.record.method.id} version {report.record.method.version}</dd></div><div><dt className="font-medium">Method parameters</dt><dd>{formatFact(report.record.method.parameters)}</dd></div><div><dt className="font-medium">Preregistered</dt><dd>{report.record.preregistered === true ? "Yes" : "No"}</dd></div><div><dt className="font-medium">Report disclosures</dt><dd>{report.record.disclosures.perSubject.length} subject disclosure block(s)</dd></div></dl>
+      <dl className="grid min-w-0 gap-3 sm:grid-cols-2"><div><dt className="font-medium">Report digest</dt><dd><Digest>{report.reportSha256}</Digest></dd></div><div><dt className="font-medium">Envelope digest</dt><dd><Digest>{report.reportEnvelopeSha256}</Digest></dd></div><div><dt className="font-medium">Method</dt><dd>{presentProtocolText(report.record.method.id)} version {report.record.method.version}</dd></div><div><dt className="font-medium">Method parameters</dt><dd>{formatFact(report.record.method.parameters)}</dd></div><div><dt className="font-medium">Preregistered</dt><dd>{report.record.preregistered === true ? "Yes" : "No"}</dd></div><div><dt className="font-medium">Report disclosures</dt><dd>{report.record.disclosures.perSubject.length} subject disclosure block(s)</dd></div></dl>
       <StoredReportResults report={report} />
       <div className="min-w-0"><h3 className="font-semibold">Stored report per-subject disclosures</h3><ol className="min-w-0 list-decimal pl-5 [overflow-wrap:anywhere]">{report.record.disclosures.perSubject.map((disclosure: unknown, index: number) => <li className="min-w-0 break-words" key={index}>{formatFact(disclosure)}</li>)}</ol></div>
       <div role="status" className="rounded-md border p-3"><p className="font-semibold">Signature / verification status: {report.verification.status}</p><p>{report.verification.detail}</p></div>
