@@ -57,7 +57,7 @@ describe("no already-published format's presentation bytes move", () => {
     }
   });
 
-  test("/10 changes the report page and nothing else", async () => {
+  test("/10 changes the report page and the README, and nothing else", async () => {
     const baseline = buildPublicAssets(await goldenInput(BUNDLE_FORMAT));
     const composed = buildPublicAssets(await goldenInput(BUNDLE_V10_FORMAT));
     const changed = Object.entries(baseline)
@@ -65,7 +65,9 @@ describe("no already-published format's presentation bytes move", () => {
       .map(([name]) => name);
     // Pinned exactly, in both directions: an empty set would mean the allocation renders nothing
     // new, and a larger one would mean a ruling reached an asset no ruling names (design §6).
-    expect(changed).toEqual(["index.html"]);
+    // Insertion order of `buildPublicAssets`: the HTML page, then the README that restates the
+    // same wilson table. Badge, social card, and share text stay byte-identical.
+    expect(changed).toEqual(["index.html", "README.md"]);
   });
 });
 
