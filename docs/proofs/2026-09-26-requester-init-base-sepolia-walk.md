@@ -47,9 +47,12 @@ then deployed
 [`0xf813E8C21B5c9803AE6aC9239A0B1F865916da4D`](https://sepolia.basescan.org/address/0xf813E8C21B5c9803AE6aC9239A0B1F865916da4D)
 in 10.8 s.
 
-That is the fallback-RPC race `waitForContractCode` already covered after
-deploy: a receipt on one slot is not a balance on the slot that
-`eth_fillTransaction` uses next. `stepFleetSafeDeploy` now waits for
+That is the sibling of the race `waitForContractCode` already covered after
+deploy. A funding receipt proves the transfer landed on the node that served
+the receipt; it does not prove that the node serving the next `eth_getBalance`
+/ `eth_fillTransaction` has seen that block — here, a different backend behind
+the one load-balanced Base Sepolia host. The wait reduces that window; it does
+not close it. `stepFleetSafeDeploy` now waits for
 `getBalance >= agentFundingWei` before the factory call. The first-touch row
 above is that path on a new wallet.
 

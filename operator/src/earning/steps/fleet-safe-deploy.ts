@@ -69,10 +69,15 @@ export async function stepFleetSafeDeploy(
     if (fundReceipt.status !== 'success') {
       throw new Error(`Fleet agent funding tx failed: ${fundHash}`);
     }
-    // Receipt success is not enough: the fallback RPC used for the next
-    // `eth_fillTransaction` can still see the agent as empty. Wait until
-    // getBalance agrees the transfer is visible before asking that EOA to
-    // pay for the Safe factory call.
+    // A funding receipt proves the transfer landed on the node that served
+    // the receipt. It does not prove that the node serving the next
+    // `eth_getBalance` / `eth_fillTransaction` has seen that block — that node
+    // may be a different backend behind one load-balanced host (the default
+    // Base Sepolia endpoint) or a different slot of a multi-provider fallback
+    // chain. This wait reduces the window; it does not close it. A later send
+    // can still be served by a node further behind than the one that answered
+    // the wait. Wait until getBalance agrees the transfer is visible before
+    // asking that EOA to pay for the Safe factory call.
     await waitForNativeBalanceAtLeast(
       ctx.publicClient,
       getAddress(agentAddress) as Address,

@@ -633,11 +633,17 @@ export async function waitForContractCode(
 /**
  * Poll publicClient.getBalance until `address` holds at least `minWei`.
  *
- * Absorbs the sibling of the post-deploy getCode race: a funding-tx receipt
- * can return success on one RPC while a later `eth_fillTransaction` /
- * getBalance against another slot of the fallback chain still sees 0. The
- * live B0a walk (#2446) hit that as `gas required exceeds allowance (0)` on
- * the Safe factory call immediately after waiting for the master → agent
+ * Absorbs the sibling of the post-deploy getCode race. A funding receipt
+ * proves the transfer landed on the node that served the receipt. It does not
+ * prove that the node serving the next `eth_getBalance` /
+ * `eth_fillTransaction` has seen that block — that node may be a different
+ * backend behind one load-balanced host (the default Base Sepolia endpoint)
+ * or a different slot of a multi-provider fallback chain. This wait reduces
+ * the window; it does not close it. A later send can still be served by a
+ * node further behind than the one that answered the wait.
+ *
+ * The live B0a walk (#2446) hit that as `gas required exceeds allowance (0)`
+ * on the Safe factory call immediately after waiting for the master → agent
  * transfer receipt.
  */
 export async function waitForNativeBalanceAtLeast(
