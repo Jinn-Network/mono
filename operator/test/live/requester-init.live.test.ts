@@ -104,6 +104,30 @@ function runRequesterInit(childEnv: NodeJS.ProcessEnv): Promise<{
   });
 }
 
+/**
+ * The failure datum the 2026-09-26 walk dropped (#4848).
+ *
+ * On a non-zero exit the envelope on stdout carries `details.cause` — the raw
+ * chain error. `message` is only a classifier summary shared by unrelated
+ * branches of `operator-errors.ts`, so an assertion message quoting stderr
+ * alone cannot say which account was short of ETH. Best-effort: a run that
+ * emitted no parseable envelope must still report its exit code.
+ */
+function describeFatalEnvelope(stdout: string): string {
+  let payload: Record<string, unknown>;
+  try {
+    payload = parseJsonStdout(stdout);
+  } catch {
+    return `no JSON envelope on stdout: ${stdout.slice(-400)}`;
+  }
+  const details = payload['details'];
+  const cause =
+    details !== null && typeof details === 'object' && 'cause' in details
+      ? String((details as Record<string, unknown>)['cause'])
+      : '<no details.cause>';
+  return `code=${String(payload['code'])} message=${String(payload['message'])} cause=${cause}`;
+}
+
 function parseJsonStdout(stdout: string): Record<string, unknown> {
   const trimmed = stdout.trim();
   try {
@@ -147,7 +171,9 @@ describeLive('live requester init on Base Sepolia', () => {
 
       expect(
         result.exitCode,
-        `exit ${result.exitCode}; drips=${dripCount}; stderr=${result.stderr.slice(-800)}`,
+        `exit ${result.exitCode}; drips=${dripCount}; ` +
+        `envelope=${describeFatalEnvelope(result.stdout)}; ` +
+        `stderr=${result.stderr.slice(-800)}`,
       ).toBe(0);
       const payload = parseJsonStdout(result.stdout);
       expect(payload.chain).toBe('base-sepolia');

@@ -756,6 +756,15 @@ export class FleetBootstrapper {
       const userMessage = hint !== undefined ? `${summary}\nHint: ${hint}` : summary;
       console.error(`[requester-init] ${summary}`);
       if (hint !== undefined) console.error(`Hint: ${hint}`);
+      // Always log the raw cause once on stderr, as the two sibling catches do.
+      // The summary is a classifier output shared by unrelated branches of
+      // `operator-errors.ts` (`gas required exceeds allowance (0)` and the
+      // `insufficient funds ...` family), so it cannot say which account was
+      // short of ETH. The raw line is the datum that discriminates them, and
+      // without it a live walk records a diagnosis it cannot support (#4848).
+      if (rawMessage && rawMessage !== summary) {
+        console.error(`[requester-init] raw: ${rawMessage.split('\n')[0]}`);
+      }
       return {
         ok: false,
         fleet_state: state,

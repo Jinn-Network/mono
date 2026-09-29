@@ -289,6 +289,44 @@ describe('FleetBootstrapper.ensureRequesterSafe', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('logs the raw deploy error, not just the classifier summary', async () => {
+    // The classifier collapses two unrelated defects — `gas required exceeds
+    // allowance (0)` and the `insufficient funds ...` family — onto one
+    // summary string, so the summary alone cannot say which account was short.
+    // The two sibling catches (`ensureStage1`, `ensureStage1And2`) already log
+    // the raw line once on stderr; this path did not, which is why the
+    // 2026-09-26 live walk recorded a non-discriminating diagnosis (#4848).
+    const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-b0a-'));
+    dirs.push(earningDir);
+    const store = await seedKeystore(earningDir);
+    await store.patchFleet({ fleet_safe_address: PREDICTED_SAFE });
+    const bootstrapper = buildBootstrapper(earningDir);
+
+    vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(
+      requesterMinMasterEth(),
+    );
+    vi.spyOn((bootstrapper as any).publicClient, 'getCode').mockResolvedValue('0x');
+    const raw =
+      'insufficient funds for gas * price + value: balance 0, tx cost 250000\nRequest Arguments: ...';
+    vi.spyOn(bootstrapper as any, 'stepFleetSafeDeploy').mockRejectedValue(new Error(raw));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await bootstrapper.ensureRequesterSafe('test-password');
+
+    expect(result.ok).toBe(false);
+    expect(result.rawErrorMessage).toContain('insufficient funds for gas');
+    const logged = errorSpy.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(
+      logged.some((line) => line.startsWith('[requester-init] raw: ')),
+    ).toBe(true);
+    // One line only — the raw message's first line, so a multi-line viem dump
+    // does not bury the summary it sits beside.
+    const rawLine = logged.find((line) => line.startsWith('[requester-init] raw: '))!;
+    expect(rawLine).toBe(
+      '[requester-init] raw: insufficient funds for gas * price + value: balance 0, tx cost 250000',
+    );
+  });
+
   it('funds the deploying EOA with an amount the requester gate can actually cover', async () => {
     // The gate and the transfer must agree. `stepFleetSafeDeploy` defaults to
     // the operator's STAGE1_AGENT_ETH (0.01), which a master that only cleared
