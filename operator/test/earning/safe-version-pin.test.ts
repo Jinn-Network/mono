@@ -11,6 +11,18 @@
  * bootstrap. CI on `next` does NOT exercise the real deploy path (the Anvil e2e
  * is excluded from `yarn test`), so this unit guard locks the pin: dropping
  * `safeDeploymentConfig.safeVersion` makes this test fail loudly.
+ *
+ * The pin is transport-independent: `initPredictedSafe` hands `Safe.init` an
+ * EIP-1193 provider over the whole #592 fallback chain rather than a URL string
+ * (#4869), which changes which RPC answers, never which contracts deploy.
+ * Confirmed on a Base-mainnet Anvil fork with a dead slot 0 and the fork as
+ * slot 1: the Safe deployed through the healthy tail, and
+ * `keccak256(getCode(safe))` came back
+ * `0xb89c1b3bdf2cf8827818646bce9a8f6e372885f8c55e5c07acbd307cb133b000` — byte
+ * for byte the immutable `proxyHash()` that OLAS
+ * `GnosisSafeSameAddressMultisig` (`0xFbBEc0C8b13B38a9aC0499694A69a10204c5E2aB`
+ * on Base) enforces. That hash is the number to re-measure against if this pin
+ * is ever questioned; a 1.4.1 proxy does not produce it.
  */
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import type { Hex } from 'viem';
