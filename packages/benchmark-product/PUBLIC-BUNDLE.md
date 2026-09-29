@@ -6,6 +6,13 @@ check it, public trust material, and five deterministic presentation assets.
 Its evidence remains verifiable after the originating product workspace and
 private keys are gone.
 
+The served public archive may also contain `/lock-index.json`, a generated
+listing of that workspace's announced locks with archive paths and carried
+anchors. The index is rewritten on regeneration; everything it points at is
+immutable. It is never a bundle member and is never part of portable
+verification. See
+[Serving the Colophon announcement source](../../docs/runbooks/colophon-announcement-source-serving.md).
+
 `publish` means local immutable emission, not hosting. It does **not** upload, host, deploy,
 register, release, or write remotely. Deployment status is none.
 
