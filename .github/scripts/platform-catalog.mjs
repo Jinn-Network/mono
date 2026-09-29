@@ -757,9 +757,10 @@ export function loadCatalogPackages(repoRoot, { releaseGroup } = {}) {
     .sort((left, right) => (left.directory < right.directory ? -1 : left.directory > right.directory ? 1 : 0));
 }
 
-export function stackPublishedReleaseGroupIds(catalog) {
+// Callee groups before their dependents, so a group packs after the groups it compiles against.
+function orderedReleaseGroupIds(catalog, selected, label) {
   const ids = Object.entries(catalog.releaseGroups)
-    .filter(([, group]) => group.stackPublished === true)
+    .filter(([, group]) => selected(group))
     .map(([groupId]) => groupId);
   const idSet = new Set(ids);
   const remaining = new Set(ids);
@@ -773,13 +774,47 @@ export function stackPublishedReleaseGroupIds(catalog) {
       .sort();
     if (wave.length === 0) {
       throw new Error(
-        `dependency cycle among stack-published release groups: ${[...remaining].sort().join(', ')}`,
+        `dependency cycle among ${label} release groups: ${[...remaining].sort().join(', ')}`,
       );
     }
     for (const id of wave) remaining.delete(id);
     ordered.push(...wave);
   }
   return ordered;
+}
+
+// Stack-published groups are served at the protocol origin (spec.jinn.network) and are the
+// only groups eligible for a stable cut.
+export function stackPublishedReleaseGroupIds(catalog) {
+  return orderedReleaseGroupIds(catalog, (group) => group.stackPublished === true, 'stack-published');
+}
+
+function requireLane(lane) {
+  if (lane !== 'canary' && lane !== 'stable') {
+    throw new Error(`lane must be canary or stable, got ${lane ?? '<missing>'}`);
+  }
+}
+
+function inLane(group, lane) {
+  return lane === 'canary' ? group?.canary === true : group?.stackPublished === true;
+}
+
+// The groups platform verification builds, packs, and receipts on a lane. The canary lane is
+// every canary-eligible group: the stack-published groups plus any canary-only group that
+// publishes npm canaries but is never stack-published, such as benchmarking-product-v1
+// (DR-2026-09-03 section 3). The stable lane is exactly the stack-published groups.
+export function laneReleaseGroupIds(catalog, lane) {
+  requireLane(lane);
+  return orderedReleaseGroupIds(catalog, (group) => inLane(group, lane), `${lane}-lane`);
+}
+
+export function requireLaneReleaseGroup(catalog, releaseGroup, lane) {
+  requireLane(lane);
+  const definition = catalog.releaseGroups?.[releaseGroup];
+  if (!inLane(definition, lane)) {
+    throw new Error(`release group ${releaseGroup} is not verified on the ${lane} lane`);
+  }
+  return definition;
 }
 
 export function requireStackPublishedReleaseGroup(catalog, releaseGroup) {
@@ -810,8 +845,8 @@ export function resolveRequestedReleaseGroup(catalog, releaseGroup) {
   return defaultStackPublishedReleaseGroup(catalog);
 }
 
-export function stackPublishedRewriteNames(catalog, releaseGroup) {
-  requireStackPublishedReleaseGroup(catalog, releaseGroup);
+export function releaseGroupRewriteNames(catalog, releaseGroup, lane) {
+  requireLaneReleaseGroup(catalog, releaseGroup, lane);
   const allowed = new Set(catalog.releaseGroups[releaseGroup].allowedDependencyReleaseGroups);
   return new Set(
     catalog.packages
@@ -832,17 +867,22 @@ export function stackPublishedGroupArtifactPaths(verificationRoot, releaseGroup)
   };
 }
 
-export function loadStackPublishedCatalogPackages(repoRoot, { lane } = {}) {
+export function loadStackPublishedCatalogPackages(repoRoot) {
   const catalog = loadPlatformCatalog(repoRoot);
   const groups = stackPublishedReleaseGroupIds(catalog);
   if (groups.length === 0) {
     throw new Error('no stack-published release group is cataloged');
   }
-  return groups.flatMap((releaseGroup) => (
-    lane === undefined
-      ? loadCatalogPackages(repoRoot, { releaseGroup })
-      : loadPublishableCatalogPackages(repoRoot, { releaseGroup, lane })
-  ));
+  return groups.flatMap((releaseGroup) => loadCatalogPackages(repoRoot, { releaseGroup }));
+}
+
+// Every package that publishes on the lane: the union the npm trusted-publisher list covers.
+export function loadLanePublishableCatalogPackages(repoRoot, lane) {
+  const groups = laneReleaseGroupIds(loadPlatformCatalog(repoRoot), lane);
+  if (groups.length === 0) {
+    throw new Error(`no release group is eligible for ${lane} publication`);
+  }
+  return groups.flatMap((releaseGroup) => loadPublishableCatalogPackages(repoRoot, { releaseGroup, lane }));
 }
 
 export function loadPublishableCatalogPackages(repoRoot, {
@@ -860,7 +900,7 @@ export function loadPublishableCatalogPackages(repoRoot, {
       ? STABLE_PUBLISH_POLICIES
       : null;
   if (!allowedPolicies) throw new Error(`publication lane must be canary or stable, got ${lane}`);
-  const enabled = definition?.stackPublished === true && definition?.[lane] === true;
+  const enabled = definition?.[lane] === true && inLane(definition, lane);
   const members = catalog.packages.filter((pkg) => pkg.releaseGroup === releaseGroup);
   if (!enabled || members.length === 0
     || members.some(({ publishPolicy }) => !allowedPolicies.has(publishPolicy))) {

@@ -3,7 +3,7 @@ import {
   defaultStackPublishedReleaseGroup,
   loadCatalogPackages,
   loadPlatformCatalog,
-  requireStackPublishedReleaseGroup,
+  requireLaneReleaseGroup,
 } from './platform-catalog.mjs';
 
 // Publish-manifest rewriting and validation still inspect every npm dependency
@@ -16,10 +16,10 @@ export const DEPENDENCY_SECTIONS = [
   'peerDependencies',
 ];
 
-export function discoverStackPackages(repoRoot, { releaseGroup } = {}) {
+export function discoverStackPackages(repoRoot, { releaseGroup, lane = 'canary' } = {}) {
   const catalog = loadPlatformCatalog(repoRoot);
   const groupId = releaseGroup ?? defaultStackPublishedReleaseGroup(catalog);
-  requireStackPublishedReleaseGroup(catalog, groupId);
+  requireLaneReleaseGroup(catalog, groupId, lane);
   return loadCatalogPackages(repoRoot, { releaseGroup: groupId }).map(({
     directory,
     name,

@@ -531,11 +531,22 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | sealed-platform-v1 | 11 | environments-ci<br>evidence-ci<br>record-discovery-ci<br>task-execution-ci<br>trust-ci | canary-and-stable | true | true | true |
 | transitional-or-private | 10 | benchmark-product-ci<br>broadcast-bot-ci<br>environments-ci<br>indexer-ci<br>indexer-enrichment-ci<br>operator-console-ci<br>plugin-tree-ci<br>policy-optimization-ci<br>task-supply-ci<br>website-ci | private<br>never | false | false | false |
 
-The exact 64-package trusted-publisher set is the union of stack-published groups. Receipt-gated canary publication is enabled for every stack-published group. **Stable publication is disabled until live `spec.jinn.network` profile hosting verification passes.** The 2 `experimental-policy` packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
+The exact 75-package trusted-publisher set is the union of canary-eligible groups: the 64 stack-published packages plus every canary-only group, which publishes npm canaries but is never stack-published or served at `spec.jinn.network`. Receipt-gated canary publication is enabled for every canary-eligible group. **Stable publication is disabled until live `spec.jinn.network` profile hosting verification passes.** The 2 `experimental-policy` packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
 
 | Package | Workflow | Environment field |
 | --- | --- | --- |
 | @jinn-network/attestation-issuer | stack-npm-publish.yml | npm-publish |
+| @jinn-network/benchmarking-aggregate | stack-npm-publish.yml | npm-publish |
+| @jinn-network/benchmarking-evaluation | stack-npm-publish.yml | npm-publish |
+| @jinn-network/benchmarking-evidence | stack-npm-publish.yml | npm-publish |
+| @jinn-network/benchmarking-interop | stack-npm-publish.yml | npm-publish |
+| @jinn-network/benchmarking-local | stack-npm-publish.yml | npm-publish |
+| @jinn-network/benchmarking-native-capture | stack-npm-publish.yml | npm-publish |
+| @jinn-network/benchmarking-protocol | stack-npm-publish.yml | npm-publish |
+| @jinn-network/benchmarking-publication | stack-npm-publish.yml | npm-publish |
+| @jinn-network/benchmarking-records | stack-npm-publish.yml | npm-publish |
+| @jinn-network/benchmarking-run | stack-npm-publish.yml | npm-publish |
+| @jinn-network/benchmarking-testing | stack-npm-publish.yml | npm-publish |
 | @jinn-network/chain-environment-record | stack-npm-publish.yml | npm-publish |
 | @jinn-network/chain-environment-verification | stack-npm-publish.yml | npm-publish |
 | @jinn-network/chain-scenarios | stack-npm-publish.yml | npm-publish |

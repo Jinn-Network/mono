@@ -51,6 +51,17 @@ test('the real implementations-v1 set is exactly the catalog-selected group', ()
   assert.equal(new Set(found.map((pkg) => pkg.name)).size, found.length, 'package names must be unique');
 });
 
+test('the real benchmarking-product-v1 set is selectable on the canary lane only', () => {
+  const found = discoverStackPackages(repoRoot, { releaseGroup: 'benchmarking-product-v1', lane: 'canary' });
+  const catalogPackages = loadCatalogPackages(repoRoot, { releaseGroup: 'benchmarking-product-v1' });
+  assert.equal(found.length, 11);
+  assert.deepEqual(found.map((pkg) => pkg.name), catalogPackages.map((pkg) => pkg.name));
+  assert.throws(
+    () => discoverStackPackages(repoRoot, { releaseGroup: 'benchmarking-product-v1', lane: 'stable' }),
+    /release group benchmarking-product-v1 is not verified on the stable lane/u,
+  );
+});
+
 test('the graph keeps runtime in-set edges, ignores dev-only edges, and drops external edges', () => {
   const packages = [
     { directory: 'packages/trust/core', name: '@jinn-network/trust-core', manifest: { dependencies: { zod: '4.4.3' } } },

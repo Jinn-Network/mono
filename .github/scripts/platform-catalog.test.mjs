@@ -5,9 +5,11 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  laneReleaseGroupIds,
   loadCatalogPackages,
   loadPublishableCatalogPackages,
   loadPlatformCatalog,
+  requireLaneReleaseGroup,
   requireStackPublishedReleaseGroup,
   stackPublishedReleaseGroupIds,
   validatePlatformCatalog,
@@ -121,6 +123,62 @@ test('a canary-only group can leave the platform stack without changing member p
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('a canary-only group off the platform stack publishes on the canary lane only', () => {
+  const catalog = fixtureCatalog();
+  catalog.releaseGroups['platform-v1'].stackPublished = false;
+  const root = fixtureRepo({ catalog });
+  try {
+    const loaded = loadPlatformCatalog(root);
+    assert.deepEqual(laneReleaseGroupIds(loaded, 'canary'), ['platform-v1']);
+    assert.deepEqual(laneReleaseGroupIds(loaded, 'stable'), []);
+    assert.equal(requireLaneReleaseGroup(loaded, 'platform-v1', 'canary').canary, true);
+    assert.throws(
+      () => requireLaneReleaseGroup(loaded, 'platform-v1', 'stable'),
+      /release group platform-v1 is not verified on the stable lane/u,
+    );
+    assert.equal(
+      loadPublishableCatalogPackages(root, { releaseGroup: 'platform-v1', lane: 'canary' }).length,
+      catalog.releaseGroups['platform-v1'].expectedPackageCount,
+    );
+    assert.throws(
+      () => loadPublishableCatalogPackages(root, { releaseGroup: 'platform-v1', lane: 'stable' }),
+      /release group platform-v1 is not eligible for stable publication/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('stable publication stays reserved to stack-published groups', () => {
+  const catalog = fixtureCatalog();
+  const definition = catalog.releaseGroups['platform-v1'];
+  definition.publishPolicies = ['canary-and-stable'];
+  definition.stackPublished = false;
+  definition.stable = true;
+  for (const pkg of catalog.packages.filter(({ releaseGroup }) => releaseGroup === 'platform-v1')) {
+    pkg.publishPolicy = 'canary-and-stable';
+  }
+  const root = fixtureRepo({ catalog });
+  try {
+    const loaded = loadPlatformCatalog(root);
+    assert.deepEqual(laneReleaseGroupIds(loaded, 'canary'), ['platform-v1']);
+    assert.deepEqual(laneReleaseGroupIds(loaded, 'stable'), []);
+    assert.throws(
+      () => loadPublishableCatalogPackages(root, { releaseGroup: 'platform-v1', lane: 'stable' }),
+      /release group platform-v1 is not eligible for stable publication/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('laneReleaseGroupIds refuses an unknown lane', () => {
+  assert.throws(
+    () => laneReleaseGroupIds(fixtureCatalog(), 'nightly'),
+    /lane must be canary or stable, got nightly/u,
+  );
 });
 
 test('stable publication eligibility requires every group member to permit stable publication', () => {
@@ -897,6 +955,43 @@ test('stackPublishedReleaseGroupIds emits callee groups before dependents', () =
   ]);
 });
 
+test('laneReleaseGroupIds orders a canary-only product group after the stack groups it consumes', () => {
+  const catalog = {
+    releaseGroups: {
+      'benchmarking-product-v1': {
+        stackPublished: false,
+        canary: true,
+        stable: false,
+        allowedDependencyReleaseGroups: ['benchmarking-product-v1', 'implementations-v1', 'sealed-platform-v1'],
+      },
+      'implementations-v1': {
+        stackPublished: true,
+        canary: true,
+        stable: true,
+        allowedDependencyReleaseGroups: ['implementations-v1', 'sealed-platform-v1'],
+      },
+      'sealed-platform-v1': {
+        stackPublished: true,
+        canary: true,
+        stable: true,
+        allowedDependencyReleaseGroups: ['sealed-platform-v1'],
+      },
+      'experimental-policy': {
+        stackPublished: false,
+        canary: false,
+        stable: false,
+        allowedDependencyReleaseGroups: ['experimental-policy'],
+      },
+    },
+  };
+  assert.deepEqual(laneReleaseGroupIds(catalog, 'canary'), [
+    'sealed-platform-v1',
+    'implementations-v1',
+    'benchmarking-product-v1',
+  ]);
+  assert.deepEqual(laneReleaseGroupIds(catalog, 'stable'), stackPublishedReleaseGroupIds(catalog));
+});
+
 test('the live catalog publishes sealed-platform-v1 and implementations-v1', () => {
   const catalog = loadPlatformCatalog(repoRoot);
   assert.deepEqual(stackPublishedReleaseGroupIds(catalog), [
@@ -982,10 +1077,22 @@ test('the live catalog holds the benchmarking packages in a product canary-only 
   assert.equal(group.stackPublished, false);
   assert.equal(group.canary, true);
   assert.equal(group.stable, false);
-  assert.equal(stackPublishedReleaseGroupIds(catalog).includes('benchmarking-product-v1'), false);
+  // Off the protocol origin: never stack-published, so never served or stable-published.
+  assert.deepEqual(stackPublishedReleaseGroupIds(catalog), ['sealed-platform-v1', 'implementations-v1']);
+  assert.deepEqual(laneReleaseGroupIds(catalog, 'stable'), ['sealed-platform-v1', 'implementations-v1']);
   assert.throws(
-    () => loadPublishableCatalogPackages(repoRoot, { releaseGroup: 'benchmarking-product-v1', lane: 'canary' }),
-    /benchmarking-product-v1 is not eligible for canary publication/u,
+    () => loadPublishableCatalogPackages(repoRoot, { releaseGroup: 'benchmarking-product-v1', lane: 'stable' }),
+    /benchmarking-product-v1 is not eligible for stable publication/u,
+  );
+  // On the npm canary lane, after the stack groups its packages depend on.
+  assert.deepEqual(laneReleaseGroupIds(catalog, 'canary'), [
+    'sealed-platform-v1',
+    'implementations-v1',
+    'benchmarking-product-v1',
+  ]);
+  assert.equal(
+    loadPublishableCatalogPackages(repoRoot, { releaseGroup: 'benchmarking-product-v1', lane: 'canary' }).length,
+    11,
   );
 
   const members = catalog.packages.filter(({ releaseGroup }) => releaseGroup === 'benchmarking-product-v1');

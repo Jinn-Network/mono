@@ -10,7 +10,7 @@ import {
   GLOBAL_SELECTORS,
   selectVerification,
 } from './platform-verification-selection.mjs';
-import { loadPlatformCatalog, stackPublishedReleaseGroupIds } from './platform-catalog.mjs';
+import { laneReleaseGroupIds, loadPlatformCatalog } from './platform-catalog.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
 const select = (changedFiles) => selectVerification({ repoRoot, changedFiles });
@@ -28,10 +28,10 @@ const synthetic = (path) => {
   return path;
 };
 
-test('every required gate of stack-published groups maps to a catalog domain', () => {
+test('every required gate of canary-lane groups maps to a catalog domain', () => {
   const catalog = loadPlatformCatalog(repoRoot);
   const declared = [...new Set(
-    stackPublishedReleaseGroupIds(catalog)
+    laneReleaseGroupIds(catalog, 'canary')
       .flatMap((groupId) => catalog.releaseGroups[groupId].requiredGateIds),
   )].sort();
   assert.deepEqual([...GATE_DOMAINS.keys()].sort(), declared);
