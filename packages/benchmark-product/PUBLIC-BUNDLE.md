@@ -712,10 +712,10 @@ Every row but `.../10` runs as `npx @colophon-claims/verify<line> <bundle-dir>`.
 states its package in full and runs as `npx <line> <bundle-dir>`. Append the anchor flags where
 the row lists them.
 
-The checker is now published as `@colophon-claims/check`. `@colophon-claims/verify` — the name
-every row above but `.../10` states, because it is the name those formats sealed — stays published
-permanently as a passthrough alias onto it, so each sealed line keeps resolving. `.../10` is the
-first format sealed under the checker's own name.
+Every row above but `.../10` names `@colophon-claims/verify`, because that is the name those
+formats sealed. `.../10` is the first format sealed under the checker's own name,
+`@colophon-claims/check`. A bundle's reader line is the one its own format sealed; run the line
+the row lists for that format, not a renamed successor.
 
 The qualification axis, unlike prompted screening, is not left to the format string's word. Across
 the legacy lineage and v8 — every row above but `.../5`, whose evidence-native closure is read by a
@@ -993,10 +993,10 @@ without the check saying so.
 The format is `colophon-freeze-repo/2`, and the determinism claim is stated for
 it exactly: for a given format version the rendered tree is a pure function of the
 bundle bytes. No clock, no locale, no filesystem enumeration order, and no tool
-version reaches the tree. A renderer change that alters the tree an already-acceptable
-bundle renders is therefore a format bump, not silent drift. Opening the projection
-to a previously refused closure does not bump the format: there is no prior tree
-for the new output to differ from.
+version reaches the tree. A renderer change that alters or withholds the tree an
+already-acceptable bundle renders is therefore a format bump, not silent drift.
+Opening the projection to a previously refused closure does not bump the format:
+there is no prior tree for the new output to differ from.
 
 The layout:
 
