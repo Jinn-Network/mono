@@ -6,12 +6,13 @@
  * `createBaseVenue` (chain I/O) and `openOperatorEvidence` are stubbed via `vi.mock`; the
  * composition assertions exercise the real backend and projector wiring around those ports.
  */
-import { mkdtempSync } from 'node:fs';
-import { generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { generateKeyPairSync, randomUUID, sign as cryptoSign } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLAIM_NOTHING } from '@jinn-network/marketplace-pipeline';
+import { openAttemptJournal } from '@jinn-network/task-execution-supervisor';
 import { documentDigest, sealSubmission, sealTask } from '@jinn-network/task-execution-protocol';
 import { buildRepositoryWorkProfile, sealTaskProfile } from '@jinn-network/task-execution-profiles';
 import {
@@ -663,6 +664,77 @@ describe('buildOperatorComposition', () => {
     expect(evidenceCloseMock).toHaveBeenCalledTimes(1);
     expect(venueCloseMock).toHaveBeenCalledTimes(1);
     store.close();
+  });
+
+  it('converges an untracked nonterminal attempt at boot (#4397)', async () => {
+    // #4397: `buildOperatorComposition` awaits `reconcileNonterminalAtBoot` on the backend it just
+    // constructed, so an attempt abandoned before any spawn intent — nothing in the operator
+    // remembers it — is terminal before the first coordinator `recover()`. Deleting that call
+    // leaves this attempt nonterminal, holding a concurrency slot forever. The sibling
+    // compositions pin the same call (`native-solver-backend.test.ts`,
+    // `native-evaluator-composition.test.ts`); this is the fleet daemon's equivalent.
+    createBaseVenueMock.mockReset().mockImplementation(() => stubVenue());
+    openOperatorEvidenceMock.mockReset().mockResolvedValue({
+      runtime: {},
+      ports: { repository: {}, catalog: {}, awaitIndexed: vi.fn() },
+      close: evidenceCloseMock,
+    });
+
+    const { buildOperatorComposition } = await import('../../src/daemon/composition-root.js');
+
+    const stateRoot = mkdtempSync(join(tmpdir(), 'jinn-composition-sweep-state-'));
+    const id = randomUUID();
+    const attempt = `urn:uuid:${id}` as const;
+    const meta = join(stateRoot, 'attempts', id, 'meta');
+    mkdirSync(meta, { recursive: true });
+    writeFileSync(join(meta, 'attempt.json'), JSON.stringify({
+      attempt,
+      task: `sha256:${'0'.repeat(64)}`,
+      submission: `urn:uuid:${randomUUID()}`,
+      effectiveDeadline: '2099-01-01T00:00:00.000Z',
+    }));
+    openAttemptJournal(meta).append({ attemptId: attempt, type: 'attempt-engaged', details: { attempt } });
+
+    const chain = {
+      chainId: 84532,
+      taskCoordinator: '0x3333333333333333333333333333333333333333',
+      jinnRouter: '0x4444444444444444444444444444444444444444',
+      mechMarketplace: '0x5555555555555555555555555555555555555555',
+      activityChecker: '0x6666666666666666666666666666666666666666',
+      generation: 'today',
+    };
+    const store = new Store(':memory:');
+    const composition = await buildOperatorComposition({
+      mode: 'native',
+      config: {
+        ipfsRegistryUrl: 'https://registry.example',
+        rpcUrl: 'http://127.0.0.1:8545',
+        claudePath: 'claude',
+        executionWiring: WIRING,
+        claimPolicy: { mode: 'claim-nothing' },
+      } as never,
+      publicClient: { getBlock: async () => ({ number: 0n, hash: `0x${'0'.repeat(64)}` }) } as never,
+      walletClient: { account: { address: '0x1111111111111111111111111111111111111111' } } as never,
+      safeAddress: '0x1111111111111111111111111111111111111111',
+      mechAddress: '0x2222222222222222222222222222222222222222',
+      chain: chain as never,
+      stateRoot,
+      evidenceRoot: mkdtempSync(join(tmpdir(), 'jinn-composition-sweep-evidence-')),
+      venueStateDbPath: join(stateRoot, 'venue.db'),
+      profileStore: { get: () => undefined },
+      store,
+      nativeRoleIdentities: nativeRoleIdentities(),
+      nativeClaimRuntime: nativeClaimRuntime(store, chain.taskCoordinator),
+      nativeProjectorPorts: nativeProjectorPorts(),
+    } as never);
+
+    try {
+      const { derived } = (await composition.backend.observe(attempt)).descriptor;
+      expect(derived).toMatchObject({ terminal: true, state: 'rejected' });
+    } finally {
+      await composition.close();
+      store.close();
+    }
   });
 
   it('threads the chain-direct settlement reader into the fleet solution settlement port (#29)', async () => {

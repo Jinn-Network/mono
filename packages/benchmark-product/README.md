@@ -31,10 +31,11 @@ The self-serve source is now split into Colophon-owned Tier 4 packages:
 
 - `@colophon-claims/cli` — the installable `colophon` command;
 - `@colophon-claims/core` — product operations and local composition;
-- `@colophon-claims/check` — the smaller reader-only checker;
+- `@colophon-claims/check` — the source-tree reader, reserved on npm at
+  `0.0.0` and not a working checker;
 - `@colophon-claims/web` — private source/build input for the local UI.
 
-`@colophon-claims/check` is published to npm, `latest` `0.2.1`. The reader
+`@colophon-claims/verify` is published to npm, `latest` `0.2.1`. The reader
 lines below therefore run straight from the registry; nothing has to be checked
 out to verify a received bundle.
 
@@ -62,7 +63,7 @@ a registry command because `@colophon-claims/cli` has not been published.
 For a received bundle, the smaller reader surface is:
 
 ```bash
-npx @colophon-claims/check@0.2 ./bundle
+npx @colophon-claims/verify@0.2 ./bundle
 ```
 
 That line reads the bundle formats through public-bundle/6, and only the claims
@@ -74,9 +75,8 @@ per-format table in [`PUBLIC-BUNDLE.md`](PUBLIC-BUNDLE.md) covers the case where
 you have only `bundle.json`; the format string alone is not sufficient, because
 prompted-screening bundles pin a later line without changing their format.
 
-Reports sealed before the rename pin `@colophon-claims/verify`. That name stays
-published permanently as a passthrough alias onto `@colophon-claims/check`, so
-every sealed instruction keeps resolving.
+Reports sealed before the planned reader rename pin `@colophon-claims/verify`.
+That is still the working registry checker.
 
 To verify a bundle with tools that are not ours, see
 [`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md).

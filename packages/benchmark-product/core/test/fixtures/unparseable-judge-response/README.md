@@ -8,3 +8,6 @@ fence grammar correctly refuses, and which — before the sealed abstain Evaluat
 refused at delivery by the harness's verdict-consistency check and permanently lost the cell. These
 files are bytes, not text: they carry no trailing newline, and any edit changes their digest and can
 silently change whether a shape parses. Keep them byte-exact.
+
+Two files here do parse, despite the directory's name: `parseable-correct.txt` is the ACCEPT
+control and `parseable-wrong.txt` is the REJECT control.

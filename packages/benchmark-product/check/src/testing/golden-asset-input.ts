@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { parseMatrix, parseReport } from "@jinn-network/benchmarking-records";
 import type { PublicAssetInput } from "../assets.js";
+import type { PublicComparisonView } from "../comparison.js";
 import type { SupportedBundleFormat } from "../manifest.js";
 import { verifyPublicBundleSnapshot } from "../verify.js";
 
@@ -41,7 +42,7 @@ interface AssemblyCell {
   readonly verdicts: readonly { readonly verdict: string }[];
 }
 
-type GoldenFacts = Omit<PublicAssetInput, "format">;
+type GoldenFacts = Omit<Extract<PublicAssetInput, { readonly comparison: PublicComparisonView }>, "format">;
 
 let cached: GoldenFacts | undefined;
 

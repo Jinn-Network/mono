@@ -79,6 +79,12 @@ Classify each note:
 
 - **merge-blocking** → Request changes (finding child path below)
 - **non-blocking** merge-OK debt / nits → follow-up entry on Approve
+- **rename trigger** — a PR that renames an identifier, origin, namespace, or
+  record kind must re-ground every negative assertion naming the old spelling,
+  in the same PR. A missed re-ground is merge-blocking. This is a
+  classification item, not a mechanical gate: it fires when the reviewer can
+  see the rename in the diff. Untouched vacuous assertions this PR did not
+  rename are out of scope.
 
 Cap ≤5 follow-ups per approve pass. If more, escalate Human or fold into
 fewer issues. Never use `review-finding` labels or child markers for
