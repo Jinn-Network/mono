@@ -24,7 +24,7 @@ export default async function PreviewPage({ params }: { readonly params: Promise
           {row.map((value, index) => index === 0 ? <th className="p-4 font-medium" scope="row" key={value}>{value}</th> : <td className="p-4 text-muted-foreground" key={value}>{value}</td>)}
         </tr>)}</tbody></table>
       </div>
-      <aside className="mt-10 border-l-4 border-[var(--ochre)] bg-[var(--ochre-soft)] p-5"><h2 className="text-2xl">What is real today</h2><p className="mt-2 max-w-[65ch]">The local workspace, built CLI, real local venue, deterministic public bundle, and standalone six-check verifier are available. This hosted index is intentionally not connected.</p><Button asChild className="mt-5"><Link href="/workspace">Open the local workspace</Link></Button></aside>
+      <aside className="mt-10 border-l-4 border-[var(--ochre)] bg-[var(--ochre-soft)] p-5"><h2 className="text-2xl">What is real today</h2><p className="mt-2 max-w-[65ch]">The local workspace, built CLI, real local venue, deterministic public bundle, and standalone verifier are available. This hosted index is intentionally not connected.</p><Button asChild className="mt-5"><Link href="/workspace">Open the local workspace</Link></Button></aside>
     </main>
   </>;
 }

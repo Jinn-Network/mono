@@ -2,6 +2,7 @@ import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evi
 import { isMetadataFirstBundleProfile } from "@jinn-network/benchmarking-protocol";
 import { expectedChecks } from "./capabilities.js";
 import { legacyClosure } from "./legacy-closures.js";
+import { BUNDLE_V5_FORMAT, BUNDLE_V8_FORMAT, BUNDLE_V10_FORMAT } from "./manifest.js";
 import { refuse } from "./profile/errors.js";
 import { PUBLIC_BUNDLE_V8_CHECKS } from "./reader-instructions.js";
 import type { PublicBundleVerificationCheck, PublicBundleVerificationResult } from "./verify.js";
@@ -105,7 +106,7 @@ export function bundleIdentityLabel(result: Pick<PublicBundleVerificationResult,
  * that keys on that side effect hands out a command no released reader line can run (issue #3313).
  */
 export function isMetadataFirstBundle(result: PublicBundleVerificationResult): boolean {
-  return result.format === "benchmark-product-public-bundle/5" && isMetadataFirstBundleProfile(result.profile);
+  return result.format === BUNDLE_V5_FORMAT && isMetadataFirstBundleProfile(result.profile);
 }
 
 /**
@@ -115,19 +116,19 @@ export function isMetadataFirstBundle(result: PublicBundleVerificationResult): b
  * can print a pass over bytes nobody read (issue #2986).
  */
 export function summarizeVerificationOutcome(result: PublicBundleVerificationResult): VerificationOutcome {
-  const total = result.format === "benchmark-product-public-bundle/5"
+  const total = result.format === BUNDLE_V5_FORMAT
     ? EVIDENCE_NATIVE_BUNDLE_V5_CHECKS.length
-    : result.format === "benchmark-product-public-bundle/8"
+    : result.format === BUNDLE_V8_FORMAT
       ? PUBLIC_BUNDLE_V8_CHECKS.length
       // Named before the fall-through for the same reason `/8` is: `legacyClosure` refuses any
       // format outside the frozen four rather than answering from another cell. The composed
       // generation has no cell at all: its denominator is derived from the vector the bundle
       // declares (design §6 step 5), and an untyped caller's unknown or missing vector is refused
       // by that derivation rather than counted.
-      : result.format === "benchmark-product-public-bundle/10"
+      : result.format === BUNDLE_V10_FORMAT
         ? expectedChecks(result.capabilities).length
         : legacyClosure(result.format).checks.length;
-  const deferred = result.format === "benchmark-product-public-bundle/5"
+  const deferred = result.format === BUNDLE_V5_FORMAT
     && result.artifactContent.status === "not-fetched"
     ? result.artifactContent
     : undefined;
