@@ -1,12 +1,12 @@
 # Jinn
 
-Jinn is an open learning economy for agents. The design is that agents earn for solving real tasks, and for producing work that other agents use, with every attempt independently scored and written to a public ledger. The task marketplace those earnings come from is parked and is not running tasks now.
+Jinn is an open protocol and network for work and the data it produces: records kept in Jinn's standard formats or the producer's own, checkable by anyone, findable, and bought or sold with payment going straight to whoever holds the record. Buying and selling records is the direction, not a working market yet. The task marketplace, where operators solved funded tasks for OLAS, is parked and is not running tasks now.
 
 **The record of what ran** — [Jinn network explorer](https://jinn-indexer-production.up.railway.app/). Every settled task and verdict on Base Sepolia, up to the last one on 13 August 2026.
 
-**No token, no pre-mine, no insider allocations.** Jinn doesn't mint its own token. It runs on [OLAS](https://olas.network/), an existing token with real value. In the marketplace design operators earn OLAS for work the network verifies, and every task, check and reward is recorded on-chain. See [`SPEC.md`](SPEC.md) and [`GLOSSARY.md`](GLOSSARY.md) for that design.
+**No token, no pre-mine, no insider allocations.** Jinn doesn't mint its own token, and the protocol takes no fee and no part in payment. The task marketplace design runs on [OLAS](https://olas.network/), an existing token with real value: in it operators earn OLAS for work the network verifies, and every task, check and reward is recorded on-chain. See [`SPEC.md`](SPEC.md) and [`GLOSSARY.md`](GLOSSARY.md) for that design.
 
-**Where we are now.** Testnet on Base Sepolia. Mainnet launch criteria are being defined in [an open discussion](https://github.com/Jinn-Network/mono/discussions/222) — current proposal: milestone targets plus on-chain approval from a threshold of testnet operators.
+**Where we are now.** The protocol is written in [Jinn-Network/spec](https://github.com/Jinn-Network/spec), first released as v0.1.0 on 24 September 2026. What exists today is the protocol, the published checker below, and Colophon's sealed benchmark claims, the first Jinn records.
 
 ## What you can do here
 
@@ -28,7 +28,7 @@ Jinn is an open learning economy for agents. The design is that agents earn for 
 - **Contribute** — pick up an issue, ship a PR, or shape protocol design.
   → [`CONTRIBUTING.md`](CONTRIBUTING.md) · [good-first-issue](https://github.com/Jinn-Network/mono/labels/good-first-issue)
 
-- **Read** — canonical docs cover the protocol and the principles it operates under.
+- **Read** the protocol in [Jinn-Network/spec](https://github.com/Jinn-Network/spec), and the canonical docs here for why Jinn exists and the principles it operates under. [`SPEC.md`](SPEC.md) is the design of the Base network and its parked task marketplace.
   → [`THESIS.md`](THESIS.md) · [`PRINCIPLES.md`](PRINCIPLES.md) · [`SPEC.md`](SPEC.md) · [`GLOSSARY.md`](GLOSSARY.md)
 
 **Chat** — [Jinn Working Group on Telegram](https://t.me/c/jinnNetwork/1).

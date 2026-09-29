@@ -6,7 +6,7 @@
 
 ## Tokens and economic primitives
 
-Jinn is **tokenless and OLAS-native** (DR-2026-06-30 — [`spec/2026-06-30-tokenless-olas-native.md`](spec/2026-06-30-tokenless-olas-native.md)). There is no JINN token; OLAS is the unit of both stake and reward. The retired JINN-token terms are kept for searchability under "Deprecated and historical names".
+Jinn is **tokenless** ([`spec/2026-06-30-tokenless-olas-native.md`](spec/2026-06-30-tokenless-olas-native.md), DR-2026-06-30): there is no JINN token, and the protocol takes no fee and no part in payment. The OLAS terms below describe the parked task marketplace, which is OLAS-native: there, OLAS is the unit of both stake and reward. The retired JINN-token terms are kept for searchability under "Deprecated and historical names".
 
 | Term | Usage notes |
 |------|-------------|
@@ -59,7 +59,7 @@ Replaces the informal "task trace" and "contribution" (as a noun — *contribute
 
 ### Corpus
 
-The network's accumulating collection of attempts — a public good of scrubbed, consented traces, and the substrate the network searches and learns over. Named consistently across the explorer's Corpus surface and the CLI's corpus commands.
+The accumulating collection of records announced by their holders, offered free or priced (see **Offer** and **Price** below). A record may be kept in Jinn's standard formats or its producer's own, and anyone can check it. The attempts the parked task marketplace published (scrubbed, consented, held on IPFS and anchored on-chain) are part of it. Named consistently across the explorer's Corpus surface and the CLI's corpus commands.
 
 ### Envelope
 
@@ -69,7 +69,23 @@ The signed container format an attempt is published in — a manifest plus the s
 
 In Jinn, the network learns by doing — running attempts, scoring them, accumulating the corpus, and improving the search across it. This is the Bitter Lesson sense of learning (Sutton): the general method that scales arbitrarily with compute, in contrast to hand-coded structure.
 
-Used in place of "training" in external contexts. Builders hear "training" as gradient descent on a model; "learning" carries the same conceptual weight without the LLM collapse.
+Used in place of "training" in external contexts when the subject is how a network or an agent improves. Builders hear "training" as gradient descent on a model; "learning" carries the same conceptual weight without the LLM collapse. Where the words name what buyers do with records (training a model on them), "training" is the right word. See BRAND.md "'Training' in external contexts".
+
+## Records and offers
+
+The protocol, [Jinn-Network/spec](https://github.com/Jinn-Network/spec#what-two-implementations-must-be-able-to-do), is the authority on these terms; the entries below point to it and do not redefine it. Offers exist in the protocol today. Buying and selling records is the direction, not a working market.
+
+### Holder
+
+Whoever holds a record and can release it. The holder publishes any offer for the record, and payment for a priced record goes straight to the holder, outside the protocol.
+
+### Offer
+
+A record, published by a record's holder, that names the record by its digest, gives its price (or no price, for a free offer), and names the gate where a buyer asks for it. The protocol carries offers and lets anyone find and verify them; it does not settle payment. See [Jinn-Network/spec](https://github.com/Jinn-Network/spec#what-two-implementations-must-be-able-to-do).
+
+### Price
+
+What a priced offer asks for its record: an amount on a named payment rail, with the address to pay on that rail. An offer can name more than one rail. A free offer carries no price. The spec, with its offer fixtures, is the precise rule; see [Jinn-Network/spec](https://github.com/Jinn-Network/spec#what-two-implementations-must-be-able-to-do).
 
 ## Deprecated and historical names
 
@@ -82,7 +98,7 @@ Included so renames remain searchable and unambiguous. Do not use the deprecated
 | capture envelope (user-facing) | attempt | *Envelope* stays as the internal container term; the user-facing noun is *attempt*. |
 | Trainer | Curator | Renamed to drop the LLM-training frame. |
 | Launcher | Curator | Earlier name that described the act (launching a SolverNet) rather than the role. |
-| training | learning | In external contexts (pitch decks, marketing, growth, external docs). "Training" remains acceptable in internal / technical writing where the LLM frame is not at risk. See BRAND.md "Replace 'training' in external contexts". |
+| training | learning | In external contexts (pitch decks, marketing, growth, external docs) when the subject is how a network or an agent improves. "Training" remains acceptable in internal / technical writing where the LLM frame is not at risk, and in any context where it names what buyers do with records (training a model on them). See BRAND.md "'Training' in external contexts". |
 | JINN (token) | OLAS | The native protocol token was dropped by DR-2026-06-30 (tokenless, OLAS-native); OLAS is now the unit of stake and reward. Historical references survive in phase-history docs and contract names (e.g. `JinnRouter`). Do not describe a JINN token in new writing. |
 | veJINN | veOLAS nomination | Vote-escrowed JINN directed JINN emissions across staking contracts; superseded — Jinn now directs veOLAS to its OLAS staking nominee. |
 | JinnDistributor | — | The JINN reward-distribution contract; deleted by DR-2026-06-30. Reward now flows via OLAS staking emissions + the stOLAS distributor. No successor term. |
