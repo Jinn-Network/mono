@@ -2,9 +2,10 @@
 
 **Status: placeholder. Mainnet operator flow ships with Phase 2.**
 
-Until the Phase 2 mainnet launch milestone, Jinn protocol activity lives
-entirely on testnet. Operators should use `JINN_NETWORK=testnet` and follow
-[`docs/operator-testnet.md`](./operator-testnet.md).
+There is no mainnet operator flow. The task marketplace ran on testnet (Base
+Sepolia), and it is parked and is not running tasks.
+[`docs/operator-testnet.md`](./operator-testnet.md) is kept as the record of
+how operators ran there; it is not a setup guide.
 
 This document will be filled in closer to Phase 2 launch with:
 

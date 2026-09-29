@@ -2,7 +2,7 @@
 
 Jinn operator daemon. Runs a headless daemon that participates in the Jinn training loop: create Tasks, solve them through Harnesses, evaluate Solutions, and earn rewards for measured work.
 
-**New operator?** Start with the full testnet runbook:
+**Network status:** the task marketplace on Base Sepolia is parked and is not running tasks, so a daemon started today finds no work and earns nothing. The testnet runbook is kept as the record of how operators ran:
 <https://github.com/Jinn-Network/mono/blob/main/docs/operator-testnet.md>
 
 ## Operator console (separate app)
