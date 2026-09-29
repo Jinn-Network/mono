@@ -2104,7 +2104,10 @@ export class FleetBootstrapper {
         to: addr(agentAddress),
         value: fundAmount,
       });
-      await waitForTransactionReceiptWithRetry(this.publicClient, fundHash);
+      const fundReceipt = await waitForTransactionReceiptWithRetry(this.publicClient, fundHash);
+      if (fundReceipt.status !== 'success') {
+        throw new Error(`Service ${index}: agent funding tx failed: ${fundHash}`);
+      }
     }
 
     // 3. Check agent ETH balance (public RPCs can lag after a write). Runs

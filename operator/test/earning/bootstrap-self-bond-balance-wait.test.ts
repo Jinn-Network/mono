@@ -145,6 +145,43 @@ describe('stepSelfBondSetup agent-ETH balance wait', () => {
     await expect((bootstrapper as any).stepSelfBondSetup(state, mnemonic, 1))
       .rejects.toThrow(new RegExp(`Service 1:.*${agentAddress}.*${REQUIRED_AGENT_ETH - 1n} wei`));
   }, 30_000);
+
+  it('surfaces a reverted funding transfer as a transaction failure, not a balance problem', async () => {
+    const agentReads: string[] = [];
+    const { bootstrapper, store, fake, agentAddress, mnemonic } = await setup((address) => {
+      if (address.toLowerCase() === agentAddressLower) agentReads.push(address);
+      return 0n;
+    });
+    const agentAddressLower = agentAddress.toLowerCase();
+    // The fake's first send returns hash 0x…01.
+    const fundHash = `0x${'1'.padStart(64, '0')}`;
+    fake.on('eth_getTransactionReceipt', (params: unknown[]) => ({
+      transactionHash: String(params[0]),
+      transactionIndex: '0x0',
+      blockHash: `0x${'11'.repeat(32)}`,
+      blockNumber: '0x10',
+      from: `0x${'00'.repeat(20)}`,
+      to: `0x${'00'.repeat(20)}`,
+      cumulativeGasUsed: '0x5208',
+      gasUsed: '0x5208',
+      contractAddress: null,
+      logs: [],
+      logsBloom: `0x${'00'.repeat(256)}`,
+      status: '0x0',
+      effectiveGasPrice: '0x3b9aca00',
+      type: '0x2',
+    }));
+
+    const state = await store.load('base-sepolia');
+    const started = Date.now();
+    await expect((bootstrapper as any).stepSelfBondSetup(state, mnemonic, 1))
+      .rejects.toThrow(`Service 1: agent funding tx failed: ${fundHash}`);
+
+    // The throw precedes the balance wait: only the pre-transfer read, and no
+    // ~10 s poll budget burned.
+    expect(agentReads).toHaveLength(1);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  }, 30_000);
 });
 
 /** `to` and `value` of a signed envelope, via viem's own parser. */
