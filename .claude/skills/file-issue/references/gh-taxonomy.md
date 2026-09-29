@@ -313,7 +313,8 @@ prerequisite is an open PR, an issue must stand for it — the PR carries
 `closedByPullRequestsReferences` is the query that proves the link exists (it
 is the inverse of a PR's `closingIssuesReferences`).
 These two fields are not behind the `issue_dependencies` feature flag, so they
-need no `GraphQL-Features` header (unlike `addBlockedBy` / `blockedBy` above).
+need no `GraphQL-Features` header (unlike the `addBlockedBy` mutation in
+`SKILL.md` Step 5).
 
 ```bash
 # Which PRs will close this issue?
@@ -326,7 +327,7 @@ query($owner:String!,$name:String!,$number:Int!){
       }
     }
   }
-}' -F owner=Jinn-Network -F name=mono -F number=<N> \
+}' -F owner=Jinn-Network -F name=mono -F number="<N>" \
   --jq '.data.repository.issue.closedByPullRequestsReferences.nodes'
 ```
 
@@ -346,7 +347,7 @@ query($owner:String!,$name:String!,$number:Int!){
       closingIssuesReferences(first:10){ nodes{ number url } }
     }
   }
-}' -F owner=Jinn-Network -F name=mono -F number=<PR> \
+}' -F owner=Jinn-Network -F name=mono -F number="<PR>" \
   --jq '.data.repository.pullRequest.closingIssuesReferences.nodes'
 ```
 

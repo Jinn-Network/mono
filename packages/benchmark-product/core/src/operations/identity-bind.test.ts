@@ -106,6 +106,16 @@ describe("identityBind (issue #2983)", () => {
     expect(last.outcome).toBe("ok");
   });
 
+  test("statedAt is the same instant as the audit entry (issue #3677)", () => {
+    const result = identityBind(contextFor(), { domain: "example.com" });
+    if (!result.ok) throw new Error(result.error.detail);
+    const document = JSON.parse(readFileSync(result.result.documentPath, "utf8")) as {
+      statedAt: string;
+    };
+    const last = readAuditEntries(workspaceDir).at(-1)!;
+    expect(document.statedAt).toBe(last.at);
+  });
+
   test("ungated does not mean unauthenticated: a non-member cannot name this workspace's key", () => {
     const result = identityBind(contextFor("stranger"), { domain: "example.com" });
     expect(result.ok).toBe(false);
