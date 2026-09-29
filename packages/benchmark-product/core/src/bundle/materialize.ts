@@ -1118,7 +1118,7 @@ function recordClosure(input: MaterializeBundleInput): {
       ? BUNDLE_V4_FORMAT
       : BUNDLE_FORMAT;
   const format = composedGeneration ? BUNDLE_V10_FORMAT : legacyFormat;
-  for (const [path, bytes] of Object.entries(buildPublicAssets({
+  const assetFacts = {
     format,
     claim,
     matrix,
@@ -1127,9 +1127,25 @@ function recordClosure(input: MaterializeBundleInput): {
     matrixSha256: runState.matrixSha256,
     recordSha256s: evidenceCatalog.records.map((record) => record.sha256),
     dissentCellKeys,
-    comparison,
-    ...(binaryAssetQualification === undefined ? {} : { binaryQualification: binaryAssetQualification }),
-  }))) {
+  };
+  // One profile per input (#3331): the qualification path never carries a comparison key, and the
+  // comparison path never carries a binaryQualification key.
+  let publicAssets: ReturnType<typeof buildPublicAssets>;
+  if (binaryAssetQualification !== undefined) {
+    publicAssets = buildPublicAssets({ ...assetFacts, binaryQualification: binaryAssetQualification });
+  } else if (comparison !== undefined) {
+    publicAssets = buildPublicAssets({ ...assetFacts, comparison });
+  } else {
+    // Unreachable: `binaryAssetQualification` is assigned unconditionally on the qualification
+    // path and `comparison` on every other one, so both-absent is unsatisfiable. Kept as a type
+    // narrowing for the one-profile union, not a new runtime branch.
+    refuse(
+      "record-integrity",
+      "bundle.presentation",
+      "comparison public assets require the producer-derived comparison projection",
+    );
+  }
+  for (const [path, bytes] of Object.entries(publicAssets)) {
     files.set(path, bytes);
   }
   return {

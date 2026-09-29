@@ -591,8 +591,8 @@ describe("binary qualification public assets", () => {
 
   test("fails closed when replay-verified admission/instrument facts are absent or attached to a legacy method", () => {
     const binary = binaryAssetFixture();
-    expect(() => buildPublicAssets({ ...binary, binaryQualification: undefined })).toThrow(/require exactly one/u);
-    expect(() => buildPublicAssets({ ...fixture(), binaryQualification: binary.binaryQualification })).toThrow(/require exactly one/u);
+    expect(() => buildPublicAssets({ ...binary, binaryQualification: undefined } as unknown as PublicAssetInput)).toThrow(/require exactly one/u);
+    expect(() => buildPublicAssets({ ...fixture(), binaryQualification: binary.binaryQualification } as unknown as PublicAssetInput)).toThrow(/require exactly one/u);
   });
 
   // Issue #3643: the mismatch above refuses with the package's typed error, so a caller can branch
@@ -604,7 +604,7 @@ describe("binary qualification public assets", () => {
     for (const input of [
       { ...binary, binaryQualification: undefined },
       { ...fixture(), binaryQualification: binary.binaryQualification },
-    ]) {
+    ] as unknown as PublicAssetInput[]) {
       expect(() => buildPublicAssets(input)).toThrow(expect.objectContaining({
         name: "BenchmarkProductError",
         code: "record-integrity",
@@ -871,7 +871,7 @@ describe("task-selection provenance is not projected onto the face", () => {
     // the non-declaring build, which is precisely what the pinned 0.1.0 verifier rebuilds.
     const plain = buildPublicAssets(fixture());
     for (const mode of ["claimant-chosen", "fixed-public-set", "drawn-post-lock"] as const) {
-      const declaring = buildPublicAssets({ ...fixture(), taskSelection: mode } as PublicAssetInput);
+      const declaring = buildPublicAssets({ ...fixture(), taskSelection: mode } as unknown as PublicAssetInput);
       expect(Object.keys(declaring).sort()).toEqual(Object.keys(plain).sort());
       for (const path of Object.keys(plain)) {
         expect(declaring[path], `${path} must not depend on a declared ${mode}`).toEqual(plain[path]);
