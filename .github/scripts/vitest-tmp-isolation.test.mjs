@@ -1076,7 +1076,7 @@ test('fs.allow in one projects entry does not cover a seam path in another', () 
 // every entry back into root scope: the allowance in the sibling entry credits the seam path it
 // should not reach. Pinned because it is a false green, the one direction the doc block's
 // fail-closed argument does not cover, and a reader who finds it in the wild should find it here.
-test('a projects key the match does not see yields no entry ranges, collapsing scope to root', () => {
+test('which projects key forms the match sees decides whether scope collapses to root', () => {
   const config = 'packages/x/vitest.config.ts';
   const seam = '../../test-support/tmp-isolation/isolate-tmp.ts';
   const entries = `{ server: { fs: { allow: ['../..'] } } }, { test: { setupFiles: ['${seam}'] } }`;
