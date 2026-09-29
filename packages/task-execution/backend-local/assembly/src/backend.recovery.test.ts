@@ -1069,7 +1069,7 @@ describe("restart reconstruction and §6.4 actions", () => {
   });
 
   // The fail-closed third case, and the one the whole-suite-green refactor would otherwise erase.
-  // `attemptProcessAlive` answers "alive" when it cannot tell — an unreadable probe is not proof of
+  // `attemptLiveness` answers "alive" when it cannot tell — an unreadable probe is not proof of
   // death, and keeping the slot is exactly the behavior this Attempt had before #3192. Without this
   // test, deleting the `try`/`catch` would still leave the suite green, because the outer handler in
   // `rebuildIndexes` swallows the throw and takes the opposite branch: the wedge would come back
@@ -1077,7 +1077,8 @@ describe("restart reconstruction and §6.4 actions", () => {
   // CODE-level regression by corrupting one Attempt's fingerprint. The environment-level one it
   // cannot reach is a probe that throws for EVERY Attempt (`listProcessGroupPids` enumerates
   // `/proc` unguarded on Linux, so a `/proc` this process may not read does exactly that), which
-  // restores the wedge wholesale, is caught by design, and is logged nowhere.
+  // restores the wedge wholesale. That one is caught by design and, since #4395, journaled as a
+  // `liveness-unverifiable` progress event — the next test pins both halves of it.
   test("a rehydrated nonterminal attempt whose liveness cannot be determined keeps its slot", async () => {
     const root = await stateRoot("capacity-rehydration-unreadable");
     const first = fixture(root, { maxConcurrentAttempts: 1 });
