@@ -125,7 +125,12 @@ function describeFatalEnvelope(stdout: string): string {
     details !== null && typeof details === 'object' && 'cause' in details
       ? String((details as Record<string, unknown>)['cause'])
       : '<no details.cause>';
-  return `code=${String(payload['code'])} message=${String(payload['message'])} cause=${cause}`;
+  // Bounded like every other stream this file quotes: a viem cause runs to
+  // multiple KB, and an unbounded one would push the `stderr=` tail out of view.
+  return (
+    `code=${String(payload['code'])} message=${String(payload['message'])} ` +
+    `cause=${cause.slice(0, 1200)}`
+  );
 }
 
 function parseJsonStdout(stdout: string): Record<string, unknown> {

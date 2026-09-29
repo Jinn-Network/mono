@@ -68,18 +68,21 @@ Sequence:
   which account was short, and it does not support the earlier reading of this
   section that the 0.0015 ETH gate is undersized. Concretely against that
   reading: the deploy is submitted by the **agent EOA**, not the master
-  (`operator/src/earning/steps/fleet-safe-deploy.ts:76-86` sends with
+  (`operator/src/earning/steps/fleet-safe-deploy.ts:88-95` sends with
   `account: agentSigner`); at review time the agent EOA
   `0xA956463BAb233E9289E9a3B7B2e15363054961bd` held exactly 0.001 ETH at
-  nonce 0 — funded with `REQUESTER_SAFE_DEPLOY_ETH`, nothing spent — and a
-  ~250k-gas Safe deploy at the sub-gwei prices Base Sepolia settles at costs
-  on the order of 1e-6 ETH (`operator/src/earning/requester-init.ts:20-25`).
-  The gate arithmetic above is therefore recorded as context, not as the
-  diagnosis.
+  nonce 0 — funded with `REQUESTER_SAFE_DEPLOY_ETH`, nothing spent — and
+  `operator/src/earning/requester-init.ts:20-25` sizes that 0.001 ETH as ~4x
+  the cost of a ~250k-gas Safe deploy at 1 gwei. Base Sepolia settles well
+  below 1 gwei (0.006 gwei when this was checked, i.e. ~1e-6 ETH for the
+  deploy), so the funded amount is not marginal on either figure. The gate
+  arithmetic above is therefore recorded as context, not as the diagnosis.
 
   **What the re-run must capture** (#4848): the verbatim `details.cause` from
   the `fatal` envelope on stdout, and the `[requester-init] raw: …` line on
-  stderr. Neither was in this walk's receipts — the requester catch in
+  stderr. `details.cause` is the whole viem error, which embeds the RPC URL —
+  drop its `URL:` line before pasting, or an operator running with a keyed
+  primary (the prepend `CLAUDE.md` recommends) commits the key. Neither was in this walk's receipts — the requester catch in
   `FleetBootstrapper.ensureRequesterSafe` logged only the summary (unlike its
   two sibling catches), and the live test's exit-code assertion quoted stderr
   only. Both are fixed under #4848, so the next walk records the
