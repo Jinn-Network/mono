@@ -173,6 +173,10 @@ async function removeRefusedBundles(
     for (const bundleDir of bundleDirs) {
       if (named.has(bundleDir)) continue;
       try {
+        // `bundle.json` goes first, on its own: `runPublish`'s under-lock gate reads its absence as
+        // "this directory is gone", so a removal that fails partway must never leave it behind a
+        // directory whose other files are already unlinked.
+        rmSync(join(bundleDir, "bundle.json"), { force: true });
         rmSync(bundleDir, { recursive: true, force: true });
       } catch {
         // Best effort.
@@ -339,10 +343,11 @@ export function runPublish(
           // lock, so re-checking here is enough. Either this check runs first and
           // `removeRefusedBundles` then finds the directory named and skips it, or the removal ran
           // first and this refuses rather than naming a directory that is gone. `bundle.json` is
-          // written by every bundle format and a recursive removal unlinks it before it can rmdir
-          // the root, so checking it is strictly stronger than checking the directory. Deliberately
-          // not a re-verification: `verifyPublicBundle` already read these bytes, and re-hashing
-          // every file would lengthen the lock hold in proportion to bundle size.
+          // written by every bundle format and `removeRefusedBundles` unlinks it before anything
+          // else, so its presence means no removal has started — strictly stronger than checking the
+          // directory, which survives a removal that fails partway. Deliberately not a
+          // re-verification: `verifyPublicBundle` already read these bytes, and re-hashing every
+          // file would lengthen the lock hold in proportion to bundle size.
           for (const identity of [canonical.identity, ...additional.map((entry) => entry.bundleIdentity)]) {
             if (!existsSync(join(publicBundlePath(clockedContext.workspaceDir, input.draftId, identity), "bundle.json"))) {
               refuse("conflict", "bundle.target", "the immutable public bundle directory disappeared before publication completed");
