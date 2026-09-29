@@ -97,7 +97,10 @@ describe('Fleet bootstrap Mech deployment Safe execution', () => {
     expect(safeAdapter.initDeployedSafe).not.toHaveBeenCalled();
     expect(directSafeExec).toHaveBeenCalledOnce();
     expect(directSafeExec).toHaveBeenCalledWith(expect.objectContaining({
-      rpcUrl: 'http://127.0.0.1:8545',
+      // The whole #592 provider chain, not the head URL alone (#4826): this
+      // path builds its own viem clients, so a head-only argument meant a
+      // dead slot 0 refused the mech deploy outright.
+      rpcUrl: ['http://127.0.0.1:8545'],
       safeAddress,
       to: expect.stringMatching(/^0x[0-9a-fA-F]{40}$/),
       data: expect.stringMatching(/^0x/),
