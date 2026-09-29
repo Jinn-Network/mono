@@ -70,6 +70,7 @@ describe('stepFleetSafeDeploy agent-EOA balance wait', () => {
     events: string[];
     mnemonic: string;
     agentAddress: string;
+    fake: FakeRpc;
   }> {
     const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-fsd-'));
     dirs.push(earningDir);
@@ -141,7 +142,7 @@ describe('stepFleetSafeDeploy agent-EOA balance wait', () => {
       rpcUrls: [fake.url],
     });
 
-    return { ctx, state: await store.load('base-sepolia'), events, mnemonic, agentAddress };
+    return { ctx, state: await store.load('base-sepolia'), events, mnemonic, agentAddress, fake };
   }
 
   it('funds the agent EOA, waits for the funded balance, then calls the Safe factory', async () => {
@@ -173,6 +174,37 @@ describe('stepFleetSafeDeploy agent-EOA balance wait', () => {
     // be satisfied by a fixture error thrown before the wait is ever reached.
     await expect(stepFleetSafeDeploy(ctx, state, mnemonic, FUNDING))
       .rejects.toThrow(/Balance at 0x[0-9a-fA-F]{40} is .* after \d+ getBalance attempts/);
+    expect(safeAdapter.initPredictedSafe).not.toHaveBeenCalled();
+  }, 30_000);
+
+  it('surfaces a reverted funding transfer as a transaction failure, not a balance problem', async () => {
+    const { ctx, state, events, mnemonic, fake } = await setup([FUNDING / 2n, FUNDING]);
+    const fundHash = `0x${'ab'.repeat(32)}`;
+    fake.on('eth_getTransactionReceipt', (params: unknown[]) => {
+      events.push('eth_getTransactionReceipt');
+      return {
+        transactionHash: String(params[0]),
+        transactionIndex: '0x0',
+        blockHash: `0x${'11'.repeat(32)}`,
+        blockNumber: '0x10',
+        from: `0x${'00'.repeat(20)}`,
+        to: `0x${'00'.repeat(20)}`,
+        cumulativeGasUsed: '0x5208',
+        gasUsed: '0x5208',
+        contractAddress: null,
+        logs: [],
+        logsBloom: `0x${'00'.repeat(256)}`,
+        status: '0x0',
+        effectiveGasPrice: '0x3b9aca00',
+        type: '0x2',
+      };
+    });
+
+    await expect(stepFleetSafeDeploy(ctx, state, mnemonic, FUNDING))
+      .rejects.toThrow(`Fleet agent funding tx failed: ${fundHash}`);
+
+    // The throw precedes the wait, so no second balance read and no factory call.
+    expect(events.filter((e) => e === 'eth_getBalance')).toHaveLength(1);
     expect(safeAdapter.initPredictedSafe).not.toHaveBeenCalled();
   }, 30_000);
 
