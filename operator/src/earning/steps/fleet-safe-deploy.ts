@@ -47,7 +47,7 @@ export async function stepFleetSafeDeploy(
   // `stage1MinMasterEth` so the gate and the transfer agree (jinn-mono-u34i);
   // `agentFundingWei` lets a caller with a smaller gate keep that agreement.
   const masterAccount = deriveMasterSigner(mnemonic);
-  const masterWallet = createJinnWalletClient(ctx.config.rpcUrl, ctx.chain, masterAccount);
+  const masterWallet = createJinnWalletClient(ctx.rpcUrls, ctx.chain, masterAccount);
   const agentBalance = await ctx.publicClient.getBalance({
     address: getAddress(agentAddress) as Address,
   });
@@ -88,7 +88,7 @@ export async function stepFleetSafeDeploy(
     threshold: 1,
   });
   const deployTx = await safe.createSafeDeploymentTransaction();
-  const agentWallet = createJinnWalletClient(ctx.config.rpcUrl, ctx.chain, agentSigner);
+  const agentWallet = createJinnWalletClient(ctx.rpcUrls, ctx.chain, agentSigner);
   const deployHash = await viemSendTransactionWithRetry(
     agentWallet,
     ctx.publicClient,

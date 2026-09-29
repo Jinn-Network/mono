@@ -27,7 +27,7 @@ export async function stepFleetIdentityRegister(
 
   const fleetSafe = state.fleet_safe_address!;
   const agentSigner = deriveAgentSigner(mnemonic, 1);
-  const agentWallet = createJinnWalletClient(ctx.config.rpcUrl, ctx.chain, agentSigner);
+  const agentWallet = createJinnWalletClient(ctx.rpcUrls, ctx.chain, agentSigner);
 
   // Mint agentId — empty agent URI for v0 (matches stepRegisterAgent §6.1 in spec).
   const registerData = encodeFunctionData({

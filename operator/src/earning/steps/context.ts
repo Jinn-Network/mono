@@ -18,6 +18,8 @@ export interface StepContext {
   readonly store: FleetStateStore;
   readonly config: ChainConfig;
   readonly publicClient: ReturnType<typeof createJinnPublicClient>;
+  /** Full resolved #592 provider chain. `config.rpcUrl` is its head. */
+  readonly rpcUrls: readonly string[];
   readonly chain: JinnOnchainNetwork;
   readonly stakingMode: StakingMode;
   readonly targetServices: number;

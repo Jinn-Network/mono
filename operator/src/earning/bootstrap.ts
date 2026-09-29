@@ -87,6 +87,7 @@ import {
 import { isUnauthorizedAccountError } from '../errors/unauthorized-account.js';
 import { formatKnownRevert } from '../adapters/mech/safe-revert.js';
 import { createJinnPublicClient, createJinnWalletClient, type JinnOnchainNetwork } from './viem-clients.js';
+import { parseRpcUrls } from '../rpc/transport.js';
 import { isTransientEthReadError } from '../chain-read-errors.js';
 import { nextFleetServiceIndex } from './next-service-index.js';
 import { displayFleetServiceIndex } from './fleet-display-index.js';
@@ -293,7 +294,8 @@ const DEFAULT_FAUCET_RATE_LIMIT_BACKOFF_MS = 15_000;
 export interface FleetBootstrapperOptions {
   earningDir?: string;
   chain?: 'base' | 'base-sepolia';
-  rpcUrl?: string;
+  /** Single URL, comma-string, or the resolved #592 provider chain. */
+  rpcUrl?: string | readonly string[];
   env?: NodeJS.ProcessEnv;
   stakingMode?: 'standard' | 'self-bond';
   targetServices?: number;
@@ -351,6 +353,8 @@ export class FleetBootstrapper {
   private readonly store: FleetStateStore;
   private readonly config: ChainConfig;
   private readonly publicClient: ReturnType<typeof createJinnPublicClient>;
+  /** Full resolved #592 provider chain. `config.rpcUrl` is its head. */
+  private readonly rpcUrls: readonly string[];
   private readonly chain: JinnOnchainNetwork;
   private readonly stakingMode: StakingMode;
   private readonly targetServices: number;
@@ -398,11 +402,18 @@ export class FleetBootstrapper {
       minSafeEthWei: options.minSafeEthWei ?? this.env['JINN_MIN_SAFE_ETH_WEI'],
     });
 
-    if (options.rpcUrl) {
-      this.config.rpcUrl = options.rpcUrl;
-    }
+    // The #592 chain, resolved once. An absent option falls back to the chain
+    // default rather than to `parseRpcUrls([])`, which throws on an empty list.
+    this.rpcUrls = options.rpcUrl !== undefined
+      ? parseRpcUrls(options.rpcUrl)
+      : [this.config.rpcUrl];
+    // The head stays a plain string: the Safe SDK (`init({ provider })`) and
+    // `rpcHostForDisplay` both take exactly one URL. A single-string option
+    // still yields a one-element list, so this is byte-identical to the old
+    // behaviour for every existing caller.
+    this.config.rpcUrl = this.rpcUrls[0]!;
 
-    this.publicClient = createJinnPublicClient(this.config.rpcUrl, this.chain);
+    this.publicClient = createJinnPublicClient(this.rpcUrls, this.chain);
   }
 
   async getStatus(): Promise<FleetState> {
@@ -1011,7 +1022,7 @@ export class FleetBootstrapper {
 
       if (pendingSetupMigration) {
         const masterAccount = deriveMasterSigner(mnemonic);
-        const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
+        const masterWallet = createJinnWalletClient(this.rpcUrls, this.chain, masterAccount);
         const migration = await migrateDeprecatedTestnetSetup({
           stateStore: this.store,
           state,
@@ -1600,7 +1611,7 @@ export class FleetBootstrapper {
 
     // Master EOA signs the stake() call
     const masterAccount = deriveMasterSigner(mnemonic);
-    const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
+    const masterWallet = createJinnWalletClient(this.rpcUrls, this.chain, masterAccount);
     const agentAddress = svc.agent_address as Address;
 
     const configHashBytes = cidToBytes32(this.config.serviceHash) as Hex;
@@ -1710,7 +1721,7 @@ export class FleetBootstrapper {
 
     // Fund agent with gas from master
     const masterAccount = deriveMasterSigner(mnemonic);
-    const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
+    const masterWallet = createJinnWalletClient(this.rpcUrls, this.chain, masterAccount);
     const agentBalance = await this.publicClient.getBalance({
       address: getAddress(svc.agent_address) as Address,
     });
@@ -1840,7 +1851,7 @@ export class FleetBootstrapper {
     }
 
     const agentSigner = deriveAgentSigner(mnemonic, index);
-    const agentWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, agentSigner);
+    const agentWallet = createJinnWalletClient(this.rpcUrls, this.chain, agentSigner);
 
     // ── Sub-step A: mint NFT (skip if agent_id is already set OR fleet identity exists). ─
     let agentId: string;
@@ -2082,7 +2093,7 @@ export class FleetBootstrapper {
     const SELF_BOND_AGENT_ETH = 25_000_000_000_000_000n; // 0.025 ETH
     const requiredAgentEth = SELF_BOND_AGENT_ETH;
     const masterAccount = deriveMasterSigner(mnemonic);
-    const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
+    const masterWallet = createJinnWalletClient(this.rpcUrls, this.chain, masterAccount);
     const agentBalance = await this.publicClient.getBalance({ address: getAddress(agentAddress) as Address });
 
     if (agentBalance < requiredAgentEth) {
@@ -2123,7 +2134,7 @@ export class FleetBootstrapper {
       const shortfall = this.config.minSafeEth - safeEthBalance;
       if (eoaAvailable >= shortfall) {
         console.error(`[fleet-bootstrap] Service ${index}: auto-topping Safe with ${shortfall} wei ETH`);
-        const agentWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, agentSigner);
+        const agentWallet = createJinnWalletClient(this.rpcUrls, this.chain, agentSigner);
         const topHash = await viemSendTransactionWithRetry(agentWallet, this.publicClient, {
           account: agentSigner as Account,
           to: addr(safeAddress),
@@ -2162,7 +2173,7 @@ export class FleetBootstrapper {
       });
 
       const deployTx = await safe.createSafeDeploymentTransaction();
-      const agentWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, agentSigner);
+      const agentWallet = createJinnWalletClient(this.rpcUrls, this.chain, agentSigner);
       const deployHash = await viemSendTransactionWithRetry(agentWallet, this.publicClient, {
         account: agentSigner as Account,
         to: deployTx.to as Address,
@@ -2507,6 +2518,7 @@ export class FleetBootstrapper {
       store: this.store,
       config: this.config,
       publicClient: this.publicClient,
+      rpcUrls: this.rpcUrls,
       chain: this.chain,
       stakingMode: this.stakingMode,
       targetServices: this.targetServices,

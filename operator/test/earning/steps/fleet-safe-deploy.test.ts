@@ -138,6 +138,7 @@ describe('stepFleetSafeDeploy agent-EOA balance wait', () => {
       store,
       config,
       publicClient: createJinnPublicClient(fake.url, 'base-sepolia'),
+      rpcUrls: [fake.url],
     });
 
     return { ctx, state: await store.load('base-sepolia'), events, mnemonic, agentAddress };

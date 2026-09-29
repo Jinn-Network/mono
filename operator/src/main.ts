@@ -798,7 +798,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           const bs = new FleetBootstrapper({
             earningDir: config.earningDir,
             chain: NETWORK_CHAIN,
-            rpcUrl: config.rpcUrl,
+            rpcUrl: config.rpcUrls,
             stakingMode: config.stakingMode,
             targetServices: config.targetServices,
           });
@@ -811,7 +811,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           const bs = new FleetBootstrapper({
             earningDir: config.earningDir,
             chain: NETWORK_CHAIN,
-            rpcUrl: config.rpcUrl,
+            rpcUrl: config.rpcUrls,
             stakingMode: config.stakingMode,
             targetServices: config.targetServices,
             testnetL2DeploymentPath: config.testnetL2DeploymentPath,

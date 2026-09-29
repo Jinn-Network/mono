@@ -141,7 +141,7 @@ export async function runFleetBootstrap(deps: {
   const bootstrapper = new FleetBootstrapper({
     earningDir: config.earningDir,
     chain: NETWORK_CHAIN,
-    rpcUrl: config.rpcUrl,
+    rpcUrl: config.rpcUrls,
     stakingMode: config.stakingMode,
     targetServices: config.targetServices,
     testnetL2DeploymentPath: config.testnetL2DeploymentPath,

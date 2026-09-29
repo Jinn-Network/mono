@@ -94,6 +94,8 @@ describe('stepDeployMech agent-EOA funding fence', () => {
           identity_registry_address: null,
           agent_registered_tx: null,
           safe_bound_to_agent: false,
+          error_revert_reason: null,
+          error_short_message: null,
         },
       ],
     });

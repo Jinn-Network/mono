@@ -75,7 +75,8 @@ export interface RequesterCommandDeps {
   ensureRequesterSafe(input: {
     readonly earningDir: string;
     readonly chain: 'base' | 'base-sepolia';
-    readonly rpcUrl: string;
+    /** Resolved #592 provider chain; the bootstrapper keeps slot 0 as the head. */
+    readonly rpcUrl: string | readonly string[];
     readonly password: string;
   }): Promise<FleetBootstrapResult>;
 }
@@ -193,7 +194,7 @@ export function createRequesterCommand(deps: RequesterCommandDeps = PRODUCTION_D
       result = await deps.ensureRequesterSafe({
         earningDir: config.earningDir,
         chain,
-        rpcUrl: config.rpcUrl,
+        rpcUrl: config.rpcUrls,
         password: password.password,
       });
     } catch (err) {

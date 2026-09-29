@@ -43,7 +43,7 @@ const PRODUCTION_DEPS: FleetScaleDeps = {
   bootstrapperFactory: (config) => new FleetBootstrapper({
     earningDir: config.earningDir,
     chain: (config as any).networkChain ?? (config.network === 'testnet' ? 'base-sepolia' : 'base'),
-    rpcUrl: config.rpcUrl,
+    rpcUrl: config.rpcUrls,
     stakingMode: config.stakingMode,
     targetServices: config.targetServices,
     testnetL2DeploymentPath: config.testnetL2DeploymentPath,
