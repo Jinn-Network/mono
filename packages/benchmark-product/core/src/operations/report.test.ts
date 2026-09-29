@@ -1212,6 +1212,63 @@ describe("portable public bundle", () => {
     expect(existsSync(publicBundlePath(workspaceDir, "draft-1", identity))).toBe(true);
   });
 
+  test("a refusal does not remove a bundle directory a concurrent publisher adopted but has not yet named", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    expect((await runReport(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+    // The sibling test above stands its peer in with `beforeRunState`, so its adoption is simulated.
+    // This drives the real thing: two concurrent publishers of one draft, where the second ADOPTS
+    // the byte-identical directory the first renamed into place (the EEXIST path in
+    // `bundle/materialize.ts`) and so is not in its own `created` list. Adoption happens outside the
+    // publication lock, so the first publisher's lock-held RunState read cannot see it; before issue
+    // #3242 the first publisher's refusal removed the directory and the second went on to name it,
+    // leaving a `published-bundle` draft whose bundle path resolved to nothing.
+    //
+    // A signals from `beforeRunState` — which runs with the publication lock already HELD — so B is
+    // created only once A provably owns the lock and B must block at the acquire rather than race
+    // it. A's directory is on disk by then too: the rename precedes the acquire. B signals from
+    // `beforeLock` — after its own `verifyPublicBundle` of the adopted directory, before it can take
+    // the lock — so A's removal lands in exactly the window the issue describes and B reaches the
+    // under-lock gate instead of failing inside the verifier.
+    let signalAHasLock!: () => void;
+    const aHasLock = new Promise<void>((resolve) => { signalAHasLock = resolve; });
+    let signalBAtLock!: () => void;
+    const bAtLock = new Promise<void>((resolve) => { signalBAtLock = resolve; });
+
+    const a = runPublish(contextFor(clock), { draftId: "draft-1" }, {
+      beforeRunState: async () => {
+        signalAHasLock();
+        await bAtLock;
+        throw new Error("refused after a peer adopted this bundle");
+      },
+    });
+    await aHasLock;
+    const b = runPublish(contextFor(clock), { draftId: "draft-1" }, {
+      beforeLock: () => { signalBAtLock(); },
+    });
+    const [aOutcome, bOutcome] = await Promise.all([a, b]);
+
+    expect(aOutcome.ok).toBe(false);
+    // A's cleanup really did remove the directory B adopted — without this the assertion below
+    // could pass because nothing was ever deleted.
+    expect(digestNamedBundleDirs()).toHaveLength(0);
+    // The invariant: no RunState write ever names a directory that is gone.
+    expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity, JSON.stringify(bOutcome)).toBeUndefined();
+    expect(bOutcome.ok, JSON.stringify(bOutcome)).toBe(false);
+    if (bOutcome.ok) return;
+    expect(bOutcome.error.code).toBe("conflict");
+    expect(bOutcome.error.issues?.map((issue) => issue.path)).toEqual(["bundle.target"]);
+    // Pins WHICH `bundle.target` refusal: the sibling gate above it reports a RunState that already
+    // names a different bundle, which is a different fact about a directory that is still there.
+    expect(bOutcome.error.detail).toContain("disappeared before publication completed");
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
+    // Both refusals are retryable: a clean publish rebuilds and completes.
+    const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
+    expect(retry.ok, JSON.stringify(retry)).toBe(true);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
+    expect(digestNamedBundleDirs()).toHaveLength(1);
+  });
+
   test("workspace tampering refuses before staging and leaves the reported draft unchanged", async () => {
     const clock = makeClock();
     await setUpClosedRun(clock);
