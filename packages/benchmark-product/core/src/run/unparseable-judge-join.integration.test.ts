@@ -16,9 +16,10 @@
  * The bytes are checked-in fixtures under `test/fixtures/unparseable-judge-response/`; the live
  * shape is among them, byte-exact.
  *
- * The whole chain is production code: `runEvaluationHarness` over the real binary-judgment
- * evaluator registration writes the ResultEvaluation, `assembleMatrix` over `localAssemblyPorts`
- * classifies the cells, and the registered `binary-instrument@1` method reduces and projects them.
+ * Every component in the chain is production code, with the two declared seams below:
+ * `runEvaluationHarness` over the real binary-judgment evaluator registration writes the
+ * ResultEvaluation, `assembleMatrix` over `localAssemblyPorts` classifies the cells, and the
+ * registered `binary-instrument@1` method reduces and projects them.
  *
  * The join's only substantive seams are these two declared limits:
  * 1. Signing is stubbed. The harness writes an unsigned `out/verdict`; this test wraps it with
@@ -26,14 +27,21 @@
  *    on `MethodComputeInput` verifies a verdict envelope's signature (its one verifier port,
  *    `verifyAnchoredBenchmarkAnnouncement`, authenticates anchored announcements and is not
  *    consulted by `binary-instrument@1`), the aggregate only ever `parseDsseEnvelope`s the
- *    verdict bytes, and `localAssemblyPorts` is called without `trust`, so nothing on this path
- *    verifies a verdict signature. The production signer and attestation issuer are simply
- *    outside the join.
+ *    verdict bytes, and `localAssemblyPorts` is called without an explicit `trust`, so nothing on
+ *    this path verifies a verdict signature. The production signer and attestation issuer are
+ *    simply outside the join. Omitting `trust` is not the same as leaving it inert:
+ *    `localAssemblyPorts` substitutes `failClosedTrustResolver(unresolvedTrustResolver())` and
+ *    `assemble` still calls `ports.trust.resolveAgent` per verdict, which is benign here only
+ *    because this Run's policy is `independence: "disclosed"`. Tighten that policy and the
+ *    resolver, not the signature, is what starts refusing cells.
  * 2. Assemble is fed `InScopeCell`/`InScopeVerdict` literals, not the product's own
  *    `buildRunAssemblyPorts` projector, which is what sets `evaluationTerminal` from the folded
- *    run journal. Absent it, `deriveOutcome` can never reach `"unscorable"` — so the
- *    "never could-not-grade" claim below is guaranteed upstream by `expect(exitCode).toBe(0)`
- *    rather than re-derived by assemble.
+ *    run journal. These literals therefore never carry `evaluationTerminal` at all, so
+ *    `deriveOutcome` can never reach `"unscorable"` — and that absence, not the
+ *    `expect(exitCode).toBe(0)` above it, is what guarantees the "never could-not-grade" claim
+ *    below. `exitCode === 0` only establishes that every cell produced a verdict. Wire
+ *    `evaluationTerminal` in from a real folded journal and a cell may legitimately terminal
+ *    `could-not-grade` with the exit code still 0.
  */
 
 import { Buffer } from "node:buffer";
@@ -679,6 +687,11 @@ function falseAcceptCells(): readonly HarnessCellResult[] {
   return fixture.cells.filter((cell) => cell.itemKey === "gamma" && cell.armId === "arm-alpha");
 }
 
+/** The three cells where the judge correctly rejects a WRONG item (item gamma, arm arm-beta). */
+function correctRejectCells(): readonly HarnessCellResult[] {
+  return fixture.cells.filter((cell) => cell.itemKey === "gamma" && cell.armId === "arm-beta");
+}
+
 function firstUnparseableCell(): HarnessCellResult {
   return unparseableCells().find((cell) => cell.replicate === 1)!;
 }
@@ -776,6 +789,20 @@ describe("unparseable judge response, delivery joined to aggregate consumption",
     }
   });
 
+  // The other half of the same fixture item, pinned at the delivery leg rather than only through
+  // the arm-beta confusion row below: `parseable-wrong.txt` exists to drive a REJECT, and a
+  // REJECT on a WRONG item is the one combination that agrees.
+  test("the harness delivers a passing verdict when the judge correctly rejects a WRONG item", () => {
+    const correctRejects = correctRejectCells();
+    expect(correctRejects).toHaveLength(3);
+    for (const cell of correctRejects) {
+      expect(cell.predicate["verdict"]).toBe("pass");
+      expect(cell.predicate["measurements"]).toContainEqual({ name: "judgeDecision", value: "REJECT" });
+      expect(cell.predicate["measurements"]).toContainEqual({ name: "parseValid", value: true });
+      expect(cell.predicate["measurements"]).toContainEqual({ name: "agreement", value: true });
+    }
+  });
+
   test("the harness delivers a failing verdict when the judge accepts a WRONG item", () => {
     const falseAccepts = falseAcceptCells();
     expect(falseAccepts).toHaveLength(3);
@@ -867,15 +894,22 @@ describe("unparseable judge response, delivery joined to aggregate consumption",
     // zero-denominator branch: arm-alpha accepted it, arm-beta correctly rejected it.
     expect(result.arms["arm-alpha"]!.confusion)
       .toEqual({ correctAccepted: 1, correctRejected: 0, wrongAccepted: 1, wrongRejected: 0 });
-    // Exact, so the Wilson bounds and the ABSENCE of `withheldReason` are both pinned here rather
+    // Strict, so the Wilson bounds and the ABSENCE of `withheldReason` are both pinned here rather
     // than left to the closing validator, which re-derives them with `rateProjection` itself.
-    expect(result.arms["arm-alpha"]!.falseAccept).toEqual({
+    // `toStrictEqual`, not `toEqual`: the latter treats a present-but-`undefined` key as absent,
+    // which is the one thing these assertions are here to tell apart.
+    //
+    // The bounds are `rateProjection`'s own output, formatted with `toFixed(4)`: the Wilson
+    // interval at `DEFAULT_Z = 1.96` from `packages/benchmarking/aggregate/src/stats/wilson.ts`,
+    // clamped to [0, 1]. Note `PARAMETERS.intervalAlpha` does NOT drive it -- `rateProjection`
+    // passes no `z` -- so wiring alpha through to `z` is what would move these four literals.
+    expect(result.arms["arm-alpha"]!.falseAccept).toStrictEqual({
       numerator: 1,
       denominator: 1,
       estimate: "1.0000",
       wilsonInterval: { low: "0.2065", high: "1.0000" },
     });
-    expect(result.arms["arm-beta"]!.falseAccept).toEqual({
+    expect(result.arms["arm-beta"]!.falseAccept).toStrictEqual({
       numerator: 0,
       denominator: 1,
       estimate: "0.0000",
