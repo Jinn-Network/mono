@@ -68,7 +68,7 @@ describe("no already-published format's presentation bytes move", () => {
     // new, and a larger one would mean a ruling reached an asset no ruling names (design §6).
     // Two rulings reach the README, so it is listed alongside the page. Issue #3698 restates the
     // same wilson table there, and issue #2981 aliases protocol identifiers on HTML and README
-    // together -- leaving README on the sealed spelling would re-invite the unhosted origin.
+    // together -- leaving README on the sealed spelling would print names a reader cannot follow.
     // Sorted, not insertion order, so neither ruling's assertion depends on the other's position.
     // Badge, social card, and share text stay byte-identical.
     expect(changed).toEqual(["README.md", "index.html"]);

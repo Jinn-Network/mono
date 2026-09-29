@@ -505,11 +505,19 @@ implementation gets wrong:
 ## Identifier note
 
 The platform's sealed benchmarking record schemas declare canonical `$id`s
-in the protocol-schema namespace (`protocols/benchmarking/v1/schemas/`). Those
-identifiers are names, not addresses: verification fetches nothing from them.
-Schema bytes are retrievable from the source repository and from the published
-`@jinn-network/benchmarking-records` npm package (`schemas/`). The
-product-level schemas in this package (`schemas/`) deliberately carry no URL
-identity: they are non-normative for the platform, describe Colophon's tier-4
-bundle formats, and are identified by the format literals inside the documents
-they describe plus the digests of the schema files themselves.
+under `https://spec.jinn.network/protocols/benchmarking/v1/schemas/`. That
+origin serves the Jinn protocol spec release (`Jinn-Network/spec` `v0.1.0`),
+which does not carry these schemas, so those identifiers are names, not
+addresses: fetching one returns no document, and verification fetches nothing
+from them. The same holds for benchmarking's record kinds (`records/`), anchor
+profiles (`trust/anchor-profiles/`), and extensions (`extensions/`) under that
+origin. Schema bytes are retrievable from the source repository and from the
+published `@jinn-network/benchmarking-records` npm package (`schemas/`).
+Identifiers the spec release does serve, such as the task profile
+`https://spec.jinn.network/task-profiles/binary-judgment/2.0`, resolve to
+their documents; verification still reads the installed package bytes and
+fetches nothing. The product-level schemas in this package (`schemas/`)
+deliberately carry no URL identity: they are non-normative for the platform,
+describe Colophon's tier-4 bundle formats, and are identified by the format
+literals inside the documents they describe plus the digests of the schema
+files themselves.

@@ -65,7 +65,7 @@ describe("verification action presentation", () => {
     expect(markup).toContain("unresolved pending anchor evidence exists and `report` closes the anchoring window.");
   });
 
-  test("names declared anchor profiles without the unhosted origin", () => {
+  test("names declared anchor profiles, which the spec origin does not serve, without the origin", () => {
     actionState.current = {
       status: "success",
       result: {

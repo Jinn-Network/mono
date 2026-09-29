@@ -118,7 +118,7 @@ export function loadWorkspaceView() {
       authority: authority.ok ? authority : { ...authority, error: projectProductErrorForGui(authority.error) },
       // Profiles only, never endpoints: an endpoint is an operator-typed URL that can carry
       // userinfo or a key in its path or query, and this projection is rendered into the browser.
-      // Issue #2981: the profile URI's host is not hosted; the reader-facing line names the path.
+      // Issue #2981: the spec origin serves no anchor profile; the reader-facing line names the path.
       anchoringConfiguration: {
         available: configuration.anchorProviders !== undefined,
         providerProfiles: (configuration.anchorProviders ?? []).map((entry) =>

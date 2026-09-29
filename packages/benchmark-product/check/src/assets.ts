@@ -31,8 +31,9 @@ import { armDenominators, type ArmDenominators, type PlannedSlotAccounting } fro
  * `declared-strict-denominators` is the declared / all-slots pair on the wilson arm tables
  * (issue #3698): three adjacent numbers, derived from `armDenominators`, not a second arithmetic.
  *
- * `origin-free-identifiers` is issue #2981: reader-facing HTML and README print protocol names
- * without the unhosted origin, while sealed records keep the raw identifiers.
+ * `origin-free-identifiers` is issue #2981: reader-facing HTML and README print a protocol
+ * identifier whole only when the spec origin serves it, and otherwise its name without the origin,
+ * while sealed records keep the raw identifiers.
  */
 export type PresentationCapability =
   | "report-prose-singularity"
