@@ -124,17 +124,21 @@ jobs:
           npm publish --access public --tag canary
 
       - name: Validate canary gitHead
+        # npm processes a publish asynchronously ("Your package is being processed
+        # and may take a few minutes to become available"). Since 2026-09-03 the
+        # version reaches `npm view` 54 to 310 seconds after `npm publish` returns,
+        # so poll for up to 10 minutes.
         if: steps.meta.outputs.dist_tag == 'canary'
         shell: bash
         env:
           PACKAGE_SPEC: '@jinn-network/sdk@${{ steps.meta.outputs.publish_version }}'
         run: |
-          for _ in $(seq 1 30); do
+          for _ in $(seq 1 120); do
             PUBLISHED_HEAD="$(npm view "${PACKAGE_SPEC}" gitHead 2>/dev/null || true)"
             if [ "${PUBLISHED_HEAD}" = "${JINN_BUILD_COMMIT}" ]; then
               exit 0
             fi
-            sleep 2
+            sleep 5
           done
           echo "::error::${PACKAGE_SPEC} gitHead did not resolve to ${JINN_BUILD_COMMIT}"
           exit 1
