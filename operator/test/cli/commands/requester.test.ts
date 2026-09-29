@@ -215,6 +215,29 @@ describe('jinn requester init', () => {
     }
   });
 
+  // #4826: the verb handed the bootstrapper `config.rpcUrl`, the head of the
+  // resolved #592 chain, so a dead head slot failed `requester init` with four
+  // live providers behind it. The whole chain must reach the bootstrapper.
+  it('hands ensureRequesterSafe the whole RPC chain, not just its head', async () => {
+    const chain = ['http://127.0.0.1:1', 'http://127.0.0.1:8545'];
+    const ensure = vi.fn(
+      async (_input: Parameters<RequesterCommandDeps['ensureRequesterSafe']>[0]) => readyState(),
+    );
+    const cmd = createRequesterCommand(makeDeps(readyState(), ensure, {
+      loadConfig: () => ({
+        earningDir: '/tmp/jinn-requester',
+        network: 'testnet',
+        rpcUrl: chain[0],
+        rpcUrls: chain,
+      } as never),
+    }));
+    const { ctx, exits } = makeCommandCtx({ argv: ['init'], env: { JINN_PASSWORD: 'test' } });
+    await cmd.run(ctx);
+    expect(exits).toEqual([]);
+    expect(ensure).toHaveBeenCalledTimes(1);
+    expect(ensure.mock.calls[0]![0].rpcUrl).toEqual(chain);
+  });
+
   // Round-3 finding (#4271, non-blocking note): every test above injects
   // `ensureRequesterSafe` through `RequesterCommandDeps`, so nothing exercises
   // `PRODUCTION_DEPS` itself. Swapping the production wiring for
