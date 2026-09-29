@@ -404,12 +404,16 @@ export class FleetBootstrapper {
       minSafeEthWei: options.minSafeEthWei ?? this.env['JINN_MIN_SAFE_ETH_WEI'],
     });
 
+    // Omitted -> chain default. Supplied -> `parseRpcUrls`, which throws on a
+    // list that yields nothing: a caller that resolved an empty provider chain
+    // has a bug, and silently seating it on the single static default is how
+    // that bug would reach production as "one provider, no fallback" (#4826).
+    // An empty *string* keeps its long-standing "unset" meaning.
     const rpcUrlOption = options.rpcUrl;
-    const optionHasUrl =
-      typeof rpcUrlOption === 'string'
-        ? rpcUrlOption.trim().length > 0
-        : (rpcUrlOption?.some((u) => u.trim().length > 0) ?? false);
-    const rpcUrls = parseRpcUrls(optionHasUrl ? rpcUrlOption! : this.config.rpcUrl);
+    const optionIsUnset =
+      rpcUrlOption === undefined
+      || (typeof rpcUrlOption === 'string' && rpcUrlOption.trim().length === 0);
+    const rpcUrls = parseRpcUrls(optionIsUnset ? this.config.rpcUrl : rpcUrlOption!);
     this.config.rpcUrls = rpcUrls;
     this.config.rpcUrl = rpcUrls[0]!;
 
@@ -1753,7 +1757,7 @@ export class FleetBootstrapper {
 
     console.error(`[fleet-bootstrap] Service ${index}: deploying mech`);
     const result = await executeSafeTxDirect({
-      rpcUrl: this.config.rpcUrl,
+      rpcUrl: chainRpcUrls(this.config),
       signerKey: agentKey,
       safeAddress,
       to: this.config.mechMarketplace,
@@ -2467,7 +2471,7 @@ export class FleetBootstrapper {
 
     console.error(`[fleet-bootstrap] Service ${index}: staking service ${serviceId}`);
     const stakeResult = await executeSafeTxDirect({
-      rpcUrl: this.config.rpcUrl,
+      rpcUrl: chainRpcUrls(this.config),
       signerKey: agentKey,
       safeAddress,
       to: this.config.stakingContract,

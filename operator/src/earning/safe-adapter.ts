@@ -26,6 +26,8 @@ import {
 import { base, baseSepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { SAFE_ABI } from '../contracts/abis.js';
+import { buildFallbackTransport, parseRpcUrls } from '../rpc/transport.js';
+import type { RpcUrlInput } from './viem-clients.js';
 import {
   isNonceTooLowError,
   removeConflictingLegacyGasPrice,
@@ -108,6 +110,20 @@ async function resolveExecutionRpcUrl(rpcUrl: string): Promise<string> {
     /* fall through */
   }
   return rpcUrl;
+}
+
+/**
+ * Resolve a whole #592 provider chain for direct Safe execution (#4826).
+ *
+ * Every slot goes through {@link resolveExecutionRpcUrl}, so a Tenderly slot
+ * is swapped for its public substitute exactly as it was when this path took
+ * a single URL. The result is re-normalised because two Tenderly slots can
+ * collapse onto the same substitute, and a chain with a duplicate slot would
+ * spend a retry re-asking the provider that just failed.
+ */
+async function resolveExecutionRpcUrls(rpcUrl: RpcUrlInput): Promise<string[]> {
+  const resolved = await Promise.all(parseRpcUrls(rpcUrl).map(resolveExecutionRpcUrl));
+  return parseRpcUrls(resolved);
 }
 
 function chainForId(chainId: number, rpcUrl: string): Chain {
@@ -296,7 +312,8 @@ export async function executeSafeTxBatch(
  * Safe SDK gas estimation for calls that are known to misbehave under viem.
  */
 export async function executeSafeTxDirect(opts: {
-  rpcUrl: string;
+  /** Single URL or the full #592 provider chain (#4826). */
+  rpcUrl: RpcUrlInput;
   signerKey: Hex;
   safeAddress: string;
   to: string;
@@ -305,19 +322,17 @@ export async function executeSafeTxDirect(opts: {
   gasLimit?: bigint;
   ledger?: TxSubmissionLedger;
 }): Promise<{ hash: string }> {
-  const executionRpcUrl = await resolveExecutionRpcUrl(opts.rpcUrl);
-  const chainId = await createPublicClient({ transport: http(executionRpcUrl) }).getChainId();
-  const chain = chainForId(chainId, executionRpcUrl);
-  const publicClient = createPublicClient({
-    chain,
-    transport: http(executionRpcUrl),
-  });
+  // One fallback transport, shared by the chain-id probe and both clients, so
+  // a dead slot 0 cannot refuse the very first call of a Safe execution
+  // (#4826 — this path used to build three single-URL clients of its own and
+  // so never saw the #592 chain the rest of the bootstrap runs on).
+  const executionRpcUrls = await resolveExecutionRpcUrls(opts.rpcUrl);
+  const transport = buildFallbackTransport(executionRpcUrls);
+  const chainId = await createPublicClient({ transport }).getChainId();
+  const chain = chainForId(chainId, executionRpcUrls[0]!);
+  const publicClient = createPublicClient({ chain, transport });
   const account = privateKeyToAccount(opts.signerKey);
-  const walletClient = createWalletClient({
-    account,
-    chain,
-    transport: http(executionRpcUrl),
-  });
+  const walletClient = createWalletClient({ account, chain, transport });
 
   const safeAddress = opts.safeAddress as Address;
   const to = opts.to as Address;

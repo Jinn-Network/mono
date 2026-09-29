@@ -161,6 +161,10 @@ export async function planFleetFunding(
     minSafeEthWei: options.minSafeEthWei,
   });
   if (options.rpcUrl) {
+    // Head-only on purpose: this is the read-only `jinn fund-requirements`
+    // view, not the in-bootstrap funding gate. Leaving `rpcUrls` unset keeps
+    // `chainRpcUrls()` deriving the list from this head rather than serving a
+    // stale one (#4826).
     config.rpcUrl = options.rpcUrl;
   }
 

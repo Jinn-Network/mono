@@ -182,7 +182,7 @@ async function runOrphanSweepBody(params: OrphanSweepBodyParams): Promise<void> 
     if (agentBal >= minAgentReserveWei) {
       try {
         const { hash } = await executeSafeTxDirect({
-          rpcUrl,
+          rpcUrl: clientRpcUrls,
           signerKey: agentPrivateKey,
           safeAddress: abandonedSafeAddress,
           to: getAddress(masterNorm) as Address,
@@ -258,7 +258,7 @@ async function runOrphanSweepBody(params: OrphanSweepBodyParams): Promise<void> 
       }
 
       const { hash } = await executeSafeTxDirect({
-        rpcUrl,
+        rpcUrl: clientRpcUrls,
         signerKey: agentPrivateKey,
         safeAddress: abandonedSafeAddress,
         to: tokenAddress,

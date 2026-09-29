@@ -445,8 +445,14 @@ function applyRouterClaimDeliveryEnvOverride(config: ChainConfig): ChainConfig {
 }
 
 /**
- * The provider chain to build viem clients from. `rpcUrl` stays the head (slot
- * 0) for display and for the Safe SDK, which takes a single URL string.
+ * The provider chain to build viem clients from.
+ *
+ * `rpcUrl` stays the head (slot 0) for exactly two kinds of consumer, and no
+ * others: display, and the Safe SDK's `provider:` field, which takes one URL
+ * string or an EIP-1193 provider and so is irreducibly single-provider.
+ * Anything that builds its own viem clients reads this function — including
+ * `executeSafeTxDirect`, which despite the name is not Safe-SDK-backed for
+ * its transport (#4826).
  */
 export function chainRpcUrls(config: ChainConfig): readonly string[] {
   return config.rpcUrls ?? parseRpcUrls(config.rpcUrl);

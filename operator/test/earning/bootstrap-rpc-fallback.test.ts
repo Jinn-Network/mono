@@ -5,12 +5,17 @@
  * provider failed the whole bootstrap even when the operator had configured
  * four healthy backups.
  *
- * The AC4 cases are hermetic and loopback-only: the dead slot is a port
- * `allocateAnvilPort()` handed back after closing its probe socket (so the
- * connection is refused), and the live tail is a minimal JSON-RPC stub.
+ * The AC4 cases are hermetic and loopback-only. The dead slot is a socket we
+ * hold open and hang up on immediately, NOT a closed port: a port that
+ * `allocateAnvilPort()` released is re-allocatable, so a racing worker that
+ * bound it would quietly turn the "dead" slot live and flip these assertions.
+ * Owning the socket makes the failure a deterministic hangup that viem's
+ * fallback treats as a transport error, and no other allocator can steal it.
+ * The live tail is a minimal JSON-RPC stub.
  */
 
 import { createServer, type Server } from 'node:http';
+import { createServer as createTcpServer, type Server as TcpServer } from 'node:net';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,6 +23,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
 import { chainRpcUrls } from '../../src/earning/contracts.js';
 import { createJinnWalletClient } from '../../src/earning/viem-clients.js';
+import { executeSafeTxDirect } from '../../src/earning/safe-adapter.js';
+import { PRODUCTION_DEPS as SOLVER_PLUGINS_DEPS } from '../../src/cli/commands/solver-plugins.js';
 import { allocateAnvilPort } from '../_support/chain/port-allocator.js';
 import { privateKeyToAccount } from 'viem/accounts';
 
@@ -53,6 +60,22 @@ async function startRpcStub(): Promise<{ url: string; hits: () => number; close:
   };
 }
 
+/**
+ * A slot that is reachable but never answers: it accepts the connection and
+ * destroys it. Deterministically dead, and it owns its port for the lifetime
+ * of the test so nothing else can bind it.
+ */
+async function startDeadEndpoint(): Promise<{ url: string; close: () => Promise<void> }> {
+  const port = await allocateAnvilPort();
+  const server: TcpServer = createTcpServer((socket) => socket.destroy());
+  server.on('error', () => {});
+  await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
 describe('FleetBootstrapper RPC fallback chain (#4826)', () => {
   const dirs: string[] = [];
   const closers: Array<() => Promise<void>> = [];
@@ -71,12 +94,13 @@ describe('FleetBootstrapper RPC fallback chain (#4826)', () => {
   it('fails over to a healthy tail slot when the head provider is dead', async () => {
     const stub = await startRpcStub();
     closers.push(stub.close);
-    const deadUrl = `http://127.0.0.1:${await allocateAnvilPort()}`;
+    const dead = await startDeadEndpoint();
+    closers.push(dead.close);
 
     const bootstrapper = new FleetBootstrapper({
       earningDir: await earningDir(),
       chain: 'base-sepolia',
-      rpcUrl: [deadUrl, stub.url],
+      rpcUrl: [dead.url, stub.url],
     });
 
     const balance = await (bootstrapper as any).publicClient.getBalance({ address: PROBE_ADDRESS });
@@ -86,16 +110,18 @@ describe('FleetBootstrapper RPC fallback chain (#4826)', () => {
   });
 
   it('fails over on the wallet path the bootstrap steps build from', async () => {
-    // The step/wallet clients are the seam that actually regressed: they read
-    // the chain config, which used to carry the head URL alone.
+    // Shape check on the chain config the extracted `steps/*` read: they build
+    // their wallet clients from `chainRpcUrls(ctx.config)`, which used to be a
+    // head URL alone. This asserts the list is usable, not that a step ran.
     const stub = await startRpcStub();
     closers.push(stub.close);
-    const deadUrl = `http://127.0.0.1:${await allocateAnvilPort()}`;
+    const dead = await startDeadEndpoint();
+    closers.push(dead.close);
 
     const bootstrapper = new FleetBootstrapper({
       earningDir: await earningDir(),
       chain: 'base-sepolia',
-      rpcUrl: [deadUrl, stub.url],
+      rpcUrl: [dead.url, stub.url],
     });
     const wallet = createJinnWalletClient(
       chainRpcUrls((bootstrapper as any).config),
@@ -108,12 +134,13 @@ describe('FleetBootstrapper RPC fallback chain (#4826)', () => {
   });
 
   it('negative control: a dead head with no tail slot still fails', async () => {
-    const deadUrl = `http://127.0.0.1:${await allocateAnvilPort()}`;
+    const dead = await startDeadEndpoint();
+    closers.push(dead.close);
 
     const bootstrapper = new FleetBootstrapper({
       earningDir: await earningDir(),
       chain: 'base-sepolia',
-      rpcUrl: deadUrl,
+      rpcUrl: dead.url,
     });
 
     await expect(
@@ -166,5 +193,71 @@ describe('FleetBootstrapper RPC fallback chain (#4826)', () => {
     const config = (bootstrapper as any).config;
 
     expect(chainRpcUrls(config)).toEqual(['https://base-sepolia-rpc.publicnode.com']);
+  });
+
+  it('refuses a supplied-but-empty provider list instead of seating one default', async () => {
+    // Pre-fix this fell through to the single static chain default, which is
+    // how a caller that resolved an empty chain would have shipped as "one
+    // provider, no fallback" with no signal at all.
+    await expect(
+      (async () =>
+        new FleetBootstrapper({
+          earningDir: await earningDir(),
+          chain: 'base-sepolia',
+          rpcUrl: [],
+        }))(),
+    ).rejects.toThrow(/at least one RPC URL/i);
+  });
+
+  it('call site: the CLI bootstrapper factory forwards the whole chain, not the head', async () => {
+    // The defect was never inside FleetBootstrapper — the factories passed
+    // `config.rpcUrl`. Reverting any of them to the head string turns this red.
+    const bootstrapper = SOLVER_PLUGINS_DEPS.bootstrapperFactory({
+      earningDir: await earningDir(),
+      network: 'testnet',
+      rpcUrl: 'https://a.example',
+      rpcUrls: ['https://a.example', 'https://b.example'],
+      stakingMode: 'standard',
+    } as never);
+
+    expect(chainRpcUrls((bootstrapper as any).config)).toEqual([
+      'https://a.example',
+      'https://b.example',
+    ]);
+  });
+});
+
+describe('executeSafeTxDirect RPC fallback chain (#4826)', () => {
+  const closers: Array<() => Promise<void>> = [];
+
+  afterEach(async () => {
+    await Promise.all(closers.splice(0).map((close) => close()));
+  });
+
+  it('reaches a healthy tail slot when the head provider is dead', async () => {
+    // The Safe-execution path builds its own viem clients rather than using
+    // the Safe SDK transport, and used to build them from a single URL. Its
+    // very first call is a chain-id probe, so a dead slot 0 refused the whole
+    // step (mech deploy, stake, orphan sweep) before anything else ran.
+    //
+    // The call still rejects — the stub answers eth_chainId and nothing else,
+    // so there is no Safe to transact with — but WHERE it rejects is the
+    // point: pre-fix the stub was never contacted at all.
+    const stub = await startRpcStub();
+    closers.push(stub.close);
+    const dead = await startDeadEndpoint();
+    closers.push(dead.close);
+
+    await expect(
+      executeSafeTxDirect({
+        rpcUrl: [dead.url, stub.url],
+        signerKey: `0x${'11'.repeat(32)}`,
+        safeAddress: `0x${'cd'.repeat(20)}`,
+        to: `0x${'ef'.repeat(20)}`,
+        data: '0x',
+      }),
+    ).rejects.toThrow();
+
+    expect(stub.hits()).toBeGreaterThan(0);
   });
 });
