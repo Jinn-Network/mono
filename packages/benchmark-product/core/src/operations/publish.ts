@@ -1,4 +1,5 @@
 import { rmSync } from "node:fs";
+import { BUNDLE_V5_FORMAT } from "@colophon-claims/check";
 import type { DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
@@ -89,7 +90,7 @@ async function materializeAndVerifyBundle(
     onRenamed: (bundleDir) => { created.push(bundleDir); },
   });
   const verified = await verifyPublicBundle(materialized.bundleDir);
-  if (verified.format === "benchmark-product-public-bundle/5") {
+  if (verified.format === BUNDLE_V5_FORMAT) {
     refuse("conflict", "bundle.json", "managed publication must materialize its frozen legacy bundle profile");
   }
   if (verified.identity !== materialized.identity) {
@@ -204,7 +205,7 @@ export function runPublish(
         const bundleRelativePath = relativeBundlePath(input.draftId, runState.bundleIdentity);
         if (runState.bundleRelativePath !== bundleRelativePath) refuse("conflict", `runs.${input.draftId}`, "published draft has a non-canonical bundle target");
         const verified = await verifyPublicBundle(publicBundlePath(clockedContext.workspaceDir, input.draftId, runState.bundleIdentity));
-        if (verified.format === "benchmark-product-public-bundle/5") {
+        if (verified.format === BUNDLE_V5_FORMAT) {
           refuse("conflict", "bundle.json", "managed publication cannot adopt an evidence-native bundle identity");
         }
         if (verified.identity !== runState.bundleIdentity) {
@@ -218,7 +219,7 @@ export function runPublish(
             refuse("conflict", `runs.${input.draftId}`, `published draft has a non-canonical bundle target for "${entry.method}@${entry.version}"`);
           }
           const entryVerified = await verifyPublicBundle(publicBundlePath(clockedContext.workspaceDir, input.draftId, entry.bundleIdentity));
-          if (entryVerified.format === "benchmark-product-public-bundle/5") {
+          if (entryVerified.format === BUNDLE_V5_FORMAT) {
             refuse("conflict", "bundle.json", "managed publication cannot adopt an evidence-native bundle identity");
           }
           if (entryVerified.identity !== entry.bundleIdentity) {
