@@ -6,6 +6,13 @@ check it, public trust material, and five deterministic presentation assets.
 Its evidence remains verifiable after the originating product workspace and
 private keys are gone.
 
+The served public archive may also contain `/lock-index.json`, a generated
+listing of that workspace's announced locks with archive paths and carried
+anchors. The index is rewritten on regeneration; everything it points at is
+immutable. It is never a bundle member and is never part of portable
+verification. See
+[Serving the Colophon announcement source](../../docs/runbooks/colophon-announcement-source-serving.md).
+
 `publish` means local immutable emission, not hosting. It does **not** upload, host, deploy,
 register, release, or write remotely. Deployment status is none.
 
@@ -986,8 +993,10 @@ without the check saying so.
 The format is `colophon-freeze-repo/2`, and the determinism claim is stated for
 it exactly: for a given format version the rendered tree is a pure function of the
 bundle bytes. No clock, no locale, no filesystem enumeration order, and no tool
-version reaches the tree. A renderer change is therefore a format bump, not silent
-drift.
+version reaches the tree. A renderer change that alters the tree an already-acceptable
+bundle renders is therefore a format bump, not silent drift. Opening the projection
+to a previously refused closure does not bump the format: there is no prior tree
+for the new output to differ from.
 
 The layout:
 

@@ -56,7 +56,8 @@ export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
  * this format was when issue #4191 first allocated it for the report page the four operator
  * rulings on report prose direct (#3016 AC1/AC3). That page is unchanged and still belongs to this
  * format: `FORMAT_PRESENTATION_CAPABILITIES` in `assets.ts` seeds it with
- * `report-prose-singularity`. It took a format number rather than an edit because the page is
+ * `report-prose-singularity` and `declared-strict-denominators`. It took a format number rather
+ * than an edit because the page is
  * byte-pinned -- `verifyPublicBundleSnapshot` rebuilds every presentation asset and byte-compares
  * it, so changing a rendered string in place would break every already-published bundle under the
  * command printed on its own page.
@@ -66,9 +67,9 @@ export const BUNDLE_V10_FORMAT = "benchmark-product-public-bundle/10" as const;
  * Spans every lineage: the four frozen legacy closures, the evidence-native bundle, `/8`, and the
  * composed generation `/10`.
  *
- * `/9` is a DELIBERATE HOLE. It is allocated on an open branch (PR #4090, issue #3698) that has not
- * landed on the default branch, so this package must not claim to read it; both allocations are
- * additive and coexist once that branch merges.
+ * `/9` is a DELIBERATE HOLE. Issue #3698 registered the declared/strict denominator pair as a
+ * `/10` presentation capability rather than as `/9` (operator ruling 2026-09-24; PR #4090 closed
+ * unused). This package must not claim to read `/9`.
  */
 export const SUPPORTED_BUNDLE_FORMATS = [
   BUNDLE_FORMAT,

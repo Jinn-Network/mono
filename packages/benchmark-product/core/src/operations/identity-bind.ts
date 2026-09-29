@@ -62,8 +62,10 @@ export function identityBind(
   context: OperationContext,
   input: IdentityBindInput,
 ): OperationResult<IdentityBindResult> {
+  const at = context.clock();
+  const clocked: OperationContext = { ...context, clock: () => at };
   return operate({
-    context,
+    context: clocked,
     action: "identity.bind",
     subject: "workspace",
     inputs: input,
@@ -76,13 +78,13 @@ export function identityBind(
           `"${mechanism}" is not a self-served proof mechanism; use ${DOMAIN_BINDING_MECHANISMS.join(" or ")}`,
         );
       }
-      const key = loadOrCreateReportSigningKey(context.workspaceDir);
+      const key = loadOrCreateReportSigningKey(clocked.workspaceDir);
       const statement = DomainBindingStatementSchema.safeParse({
         format: DOMAIN_BINDING_FORMAT,
         domain: input.domain,
         keyId: key.keyId,
         mechanism,
-        statedAt: context.clock(),
+        statedAt: at,
       });
       if (!statement.success) {
         refuse(

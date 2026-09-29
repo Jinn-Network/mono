@@ -24,4 +24,20 @@ describe("same-workspace publication HTTP route", () => {
     expect(head.status).toBe(200); expect(head.headers.get("content-type")).toBe("application/example"); expect((await head.arrayBuffer()).byteLength).toBe(0);
     expect((await GET(new Request("http://example.test/publication/anything"), { params: Promise.resolve({ path: ["..", "private"] }) })).status).toBe(404);
   });
+
+  test("serves /lock-index.json with revalidate cache, not as an immutable artifact (#3398)", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "publication-route-lock-index-")); workspaces.push(workspace);
+    const root = join(workspace, "publication", "public"); mkdirSync(root, { recursive: true });
+    const bytes = Buffer.from('{"format":"colophon-archive-lock-index/1","locks":[]}\n');
+    writeFileSync(join(root, "lock-index.json"), bytes);
+    writeFileSync(join(root, "lock-index.json.content-type"), "application/json");
+    const agentDataDir = join(workspace, "agent-data"); mkdirSync(agentDataDir, { recursive: true });
+    process.env[WORKSPACE_ENV] = workspace; process.env[PRINCIPAL_ENV] = "sponsor"; process.env[AGENT_DATA_ENV] = agentDataDir;
+    const context = { params: Promise.resolve({ path: ["lock-index.json"] }) };
+    const get = await GET(new Request("http://example.test/publication/lock-index.json"), context);
+    expect(get.status).toBe(200);
+    expect(get.headers.get("content-type")).toBe("application/json");
+    expect(get.headers.get("cache-control")).toBe("no-cache");
+    expect(Buffer.from(await get.arrayBuffer())).toEqual(bytes);
+  });
 });
