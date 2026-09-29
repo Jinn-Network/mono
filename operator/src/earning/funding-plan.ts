@@ -16,6 +16,7 @@ import { getAddress, type Address, type PublicClient } from 'viem';
 import {
   type ChainConfig,
   applyChainGasOverrides,
+  chainRpcUrls,
   getChainConfig,
 } from './contracts.js';
 import { FleetStateStore } from './store.js';
@@ -30,7 +31,11 @@ import {
   type FundingRequirement,
   type StakingMode,
 } from './types.js';
-import { createJinnPublicClient, type JinnOnchainNetwork } from './viem-clients.js';
+import {
+  createJinnPublicClient,
+  type JinnOnchainNetwork,
+  type RpcUrlInput,
+} from './viem-clients.js';
 
 export interface FundingPlanOptions {
   earningDir?: string;
@@ -55,8 +60,8 @@ export interface FundingPlanOptions {
    * pre-init case, where nothing on disk yet says which persona is asking.
    */
   requester?: boolean;
-  /** Inject a public client (tests). Defaults to a viem client over rpcUrl. */
-  publicClientFactory?: (rpcUrl: string, network: JinnOnchainNetwork) => PublicClient;
+  /** Inject a public client (tests). Defaults to a viem client over the whole provider chain. */
+  publicClientFactory?: (rpcUrl: RpcUrlInput, network: JinnOnchainNetwork) => PublicClient;
   /** Inject the fleet store (tests). */
   storeFactory?: (earningDir?: string) => FleetStateStore;
   /** Inject chain config (tests). */
@@ -170,7 +175,7 @@ export async function planFleetFunding(
 
   const publicClientFactory =
     options.publicClientFactory ?? ((url, net) => createJinnPublicClient(url, net) as unknown as PublicClient);
-  const publicClient = publicClientFactory(config.rpcUrl, chain);
+  const publicClient = publicClientFactory(chainRpcUrls(config), chain);
 
   // Read-only fleet state probe. We deliberately call `tryLoadExisting`
   // (never `load`) — `load` writes a default file when the state is

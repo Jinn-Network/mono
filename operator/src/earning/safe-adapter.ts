@@ -20,6 +20,7 @@ import {
   zeroAddress,
   type Address,
   type Chain,
+  type EIP1193RequestFn,
   type Hex,
   type PublicClient,
 } from 'viem';
@@ -126,6 +127,31 @@ async function resolveExecutionRpcUrls(rpcUrl: RpcUrlInput): Promise<string[]> {
   return parseRpcUrls(resolved);
 }
 
+/**
+ * Build the EIP-1193 provider the Safe SDK's `provider:` field takes, backed
+ * by the whole #592 fallback chain (#4869).
+ *
+ * `SafeProviderConfig.provider` accepts `Eip1193Provider | HttpTransport |
+ * SocketTransport`, and protocol-kit branches on `typeof provider !== 'string'`
+ * to wrap a non-string provider in viem's `custom()`. A viem client is an
+ * `Eip1193Provider` (it has `request`), so handing the SDK a client built over
+ * `buildFallbackTransport` gives every SDK-internal call — `eth_chainId`,
+ * `eth_getCode`, `createTransaction`, `signTransaction`, `executeTransaction`
+ * — the same failover the rest of the earning stack has. Before this, a dead
+ * slot 0 killed the bootstrap at its very first on-chain touch
+ * (`stepFleetSafePredict`) and the healthy tail was never contacted.
+ *
+ * Unconditional: `custom()` over a one-slot fallback chain is equivalent to
+ * the `http()` the SDK would have built from a bare URL string, so the
+ * back-compat single-URL path is unchanged in behaviour.
+ */
+function safeSdkProvider(rpcUrl: RpcUrlInput): { request: EIP1193RequestFn } {
+  const client = createPublicClient({
+    transport: buildFallbackTransport(parseRpcUrls(rpcUrl)),
+  });
+  return { request: client.request };
+}
+
 function chainForId(chainId: number, rpcUrl: string): Chain {
   if (chainId === 8453) return base;
   if (chainId === 84532) return baseSepolia;
@@ -146,14 +172,14 @@ export interface PredictedSafeResult {
  * Initialise a Safe SDK instance for a not-yet-deployed Safe (CREATE2 prediction).
  */
 export async function initPredictedSafe(opts: {
-  rpcUrl: string;
+  rpcUrl: RpcUrlInput;
   signerKey: string;
   owners: string[];
   threshold: number;
 }): Promise<PredictedSafeResult> {
   const init = await resolveSafeInit();
   const safe = await init({
-    provider: opts.rpcUrl,
+    provider: safeSdkProvider(opts.rpcUrl),
     signer: opts.signerKey,
     predictedSafe: {
       safeAccountConfig: {
@@ -192,13 +218,13 @@ export interface DeployedSafe {
  * `SafeInstance` will sign and broadcast with, rather than trusting it blindly.
  */
 export async function initDeployedSafe(opts: {
-  rpcUrl: string;
+  rpcUrl: RpcUrlInput;
   signerKey: string;
   safeAddress: string;
 }): Promise<DeployedSafe> {
   const init = await resolveSafeInit();
   const safe = await init({
-    provider: opts.rpcUrl,
+    provider: safeSdkProvider(opts.rpcUrl),
     signer: opts.signerKey,
     safeAddress: opts.safeAddress,
   });

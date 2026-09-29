@@ -2069,7 +2069,7 @@ export class FleetBootstrapper {
     if (!svc.safe_address) {
       console.error(`[fleet-bootstrap] Service ${index}: predicting Safe for agent ${agentAddress}`);
       const { address } = await initPredictedSafe({
-        rpcUrl: this.config.rpcUrl,
+        rpcUrl: chainRpcUrls(this.config),
         signerKey: agentKey,
         owners: [agentAddress],
         threshold: 1,
@@ -2152,7 +2152,7 @@ export class FleetBootstrapper {
     if (code === undefined || code === '0x') {
       console.error(`[fleet-bootstrap] Service ${index}: deploying Safe at ${safeAddress}`);
       const { safe } = await initPredictedSafe({
-        rpcUrl: this.config.rpcUrl,
+        rpcUrl: chainRpcUrls(this.config),
         signerKey: agentKey,
         owners: [agentAddress],
         threshold: 1,
@@ -2205,7 +2205,7 @@ export class FleetBootstrapper {
     const safeAddress = svc.safe_address!;
 
     const safe = await initDeployedSafe({
-      rpcUrl: this.config.rpcUrl,
+      rpcUrl: chainRpcUrls(this.config),
       signerKey: agentKey,
       safeAddress,
     });
@@ -2269,7 +2269,7 @@ export class FleetBootstrapper {
     const agentKey = walletPrivateKeyAtIndex(mnemonic, index);
 
     const safe = await initDeployedSafe({
-      rpcUrl: this.config.rpcUrl,
+      rpcUrl: chainRpcUrls(this.config),
       signerKey: agentKey,
       safeAddress: svc.safe_address!,
     });
@@ -2323,7 +2323,7 @@ export class FleetBootstrapper {
     const agentKey = walletPrivateKeyAtIndex(mnemonic, index);
 
     const safe = await initDeployedSafe({
-      rpcUrl: this.config.rpcUrl,
+      rpcUrl: chainRpcUrls(this.config),
       signerKey: agentKey,
       safeAddress: svc.safe_address!,
     });
@@ -2385,7 +2385,7 @@ export class FleetBootstrapper {
     const safeAddress = svc.safe_address!;
 
     const safe = await initDeployedSafe({
-      rpcUrl: this.config.rpcUrl,
+      rpcUrl: chainRpcUrls(this.config),
       signerKey: agentKey,
       safeAddress,
     });
@@ -2440,7 +2440,7 @@ export class FleetBootstrapper {
     const safeAddress = svc.safe_address!;
 
     const safe = await initDeployedSafe({
-      rpcUrl: this.config.rpcUrl,
+      rpcUrl: chainRpcUrls(this.config),
       signerKey: agentKey,
       safeAddress,
     });

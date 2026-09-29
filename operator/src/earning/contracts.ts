@@ -447,9 +447,12 @@ function applyRouterClaimDeliveryEnvOverride(config: ChainConfig): ChainConfig {
 /**
  * The provider chain to build viem clients from.
  *
- * `rpcUrl` stays the head (slot 0) for exactly two kinds of consumer, and no
- * others: display, and the Safe SDK's `provider:` field, which takes one URL
- * string or an EIP-1193 provider and so is irreducibly single-provider.
+ * `rpcUrl` stays the head (slot 0) for display only. Nothing on an on-chain
+ * path is single-provider: the Safe SDK's `provider:` field also accepts an
+ * EIP-1193 provider, and `initPredictedSafe` / `initDeployedSafe` hand it a
+ * viem client over this chain (#4869), so `createTransaction`,
+ * `signTransaction` and `executeTransaction` fail over too.
+ *
  * Every consumer in this module tree that builds its own viem clients reads
  * this function — including `executeSafeTxDirect`, which despite the name is
  * not Safe-SDK-backed for its transport (#4826). Callers outside it take the

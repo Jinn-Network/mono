@@ -80,7 +80,7 @@ export async function stepFleetSafeDeploy(
 
   console.error(`[fleet-bootstrap] Stage 1: deploying fleet Safe at ${fleetSafe}`);
   const { safe } = await initPredictedSafe({
-    rpcUrl: ctx.config.rpcUrl,
+    rpcUrl: chainRpcUrls(ctx.config),
     signerKey: agentKey,
     owners: [agentAddress],
     threshold: 1,

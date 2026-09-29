@@ -23,7 +23,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
 import { chainRpcUrls } from '../../src/earning/contracts.js';
 import { createJinnWalletClient } from '../../src/earning/viem-clients.js';
-import { executeSafeTxDirect } from '../../src/earning/safe-adapter.js';
+import {
+  executeSafeTxDirect,
+  initDeployedSafe,
+  initPredictedSafe,
+} from '../../src/earning/safe-adapter.js';
+import { stepFleetSafePredict } from '../../src/earning/steps/fleet-safe-predict.js';
 import { PRODUCTION_DEPS as SOLVER_PLUGINS_DEPS } from '../../src/cli/commands/solver-plugins.js';
 import { allocateAnvilPort } from '../_support/chain/port-allocator.js';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -33,9 +38,15 @@ const STUB_BALANCE_WEI = 1_234_000_000_000_000_000n;
 const PROBE_ADDRESS = `0x${'ab'.repeat(20)}` as const;
 
 /** Minimal JSON-RPC responder for the two methods `getBalance` needs. */
-async function startRpcStub(): Promise<{ url: string; hits: () => number; close: () => Promise<void> }> {
+async function startRpcStub(): Promise<{
+  url: string;
+  hits: () => number;
+  methods: () => string[];
+  close: () => Promise<void>;
+}> {
   const port = await allocateAnvilPort();
   let hits = 0;
+  const methods: string[] = [];
   const server: Server = createServer((req, res) => {
     let body = '';
     req.on('data', (chunk) => {
@@ -44,6 +55,7 @@ async function startRpcStub(): Promise<{ url: string; hits: () => number; close:
     req.on('end', () => {
       hits += 1;
       const request = JSON.parse(body) as { id: number; method: string };
+      methods.push(request.method);
       const result =
         request.method === 'eth_chainId'
           ? BASE_SEPOLIA_CHAIN_ID_HEX
@@ -52,10 +64,17 @@ async function startRpcStub(): Promise<{ url: string; hits: () => number; close:
       res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }));
     });
   });
-  await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+  // Same EADDRINUSE race as `startDeadEndpoint` below: without this guard a
+  // lost bind leaves the listen promise unsettled and every case that uses the
+  // stub reads as an unexplained vitest timeout rather than a named error.
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', resolve);
+  });
   return {
     url: `http://127.0.0.1:${port}`,
     hits: () => hits,
+    methods: () => [...methods],
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }
@@ -230,6 +249,97 @@ describe('FleetBootstrapper RPC fallback chain (#4826)', () => {
       'https://a.example',
       'https://b.example',
     ]);
+  });
+});
+
+describe('Safe SDK provider RPC fallback chain (#4869)', () => {
+  const closers: Array<() => Promise<void>> = [];
+
+  afterEach(async () => {
+    await Promise.all(closers.splice(0).map((close) => close()));
+  });
+
+  async function deadHeadWithHealthyTail(): Promise<{
+    urls: [string, string];
+    methods: () => string[];
+  }> {
+    const stub = await startRpcStub();
+    closers.push(stub.close);
+    const dead = await startDeadEndpoint();
+    closers.push(dead.close);
+    return { urls: [dead.url, stub.url], methods: stub.methods };
+  }
+
+  /**
+   * Each case asserts WHERE the call fails, not that it succeeds: the stub
+   * answers `eth_chainId` and nothing else, so there is no real Safe
+   * deployment to read. Pre-fix the SDK built `http(<slot 0>)` from the head
+   * string and the stub was never contacted at all — `methods()` was empty.
+   */
+  it('step 1 of the fleet bootstrap reaches a healthy tail when slot 0 is dead', async () => {
+    // stepFleetSafePredict is the FIRST on-chain touch of `jinn bootstrap`.
+    // It reads only `ctx.config` and `ctx.store.patchFleet`, so a minimal ctx
+    // exercises the real call site: reverting it to `ctx.config.rpcUrl` turns
+    // this red.
+    const { urls, methods } = await deadHeadWithHealthyTail();
+    const ctx = {
+      config: { rpcUrls: urls, rpcUrl: urls[0] },
+      store: { patchFleet: async () => ({}) },
+    } as never;
+
+    await expect(
+      stepFleetSafePredict(ctx, {} as never, 'test test test test test test test test test test test junk'),
+    ).rejects.toThrow();
+    expect(methods()).toContain('eth_chainId');
+  });
+
+  it('initPredictedSafe reaches a healthy tail when slot 0 is dead', async () => {
+    const { urls, methods } = await deadHeadWithHealthyTail();
+
+    await expect(
+      initPredictedSafe({
+        rpcUrl: urls,
+        signerKey: `0x${'11'.repeat(32)}`,
+        owners: ['0x0000000000000000000000000000000000000001'],
+        threshold: 1,
+      }),
+    ).rejects.toThrow();
+    expect(methods()).toContain('eth_chainId');
+  });
+
+  it('initDeployedSafe reaches a healthy tail when slot 0 is dead', async () => {
+    // The five `executeSafeTxBatch` steps (service_created .. service_staked)
+    // all sign and broadcast through an instance from here.
+    // Unlike the two cases above this one RESOLVES: `Safe.init` for an
+    // already-deployed Safe needs only the chain id, which the stub answers.
+    // Pre-fix it threw the head's transport error.
+    const { urls, methods } = await deadHeadWithHealthyTail();
+
+    const { signerAddress } = await initDeployedSafe({
+      rpcUrl: urls,
+      signerKey: `0x${'11'.repeat(32)}`,
+      safeAddress: PROBE_ADDRESS,
+    });
+
+    expect(signerAddress).toMatch(/^0x[0-9a-fA-F]{40}$/);
+    expect(methods()).toContain('eth_chainId');
+  });
+
+  it('negative control: a dead head with no tail slot never contacts a stub', async () => {
+    const stub = await startRpcStub();
+    closers.push(stub.close);
+    const dead = await startDeadEndpoint();
+    closers.push(dead.close);
+
+    await expect(
+      initPredictedSafe({
+        rpcUrl: dead.url,
+        signerKey: `0x${'11'.repeat(32)}`,
+        owners: ['0x0000000000000000000000000000000000000001'],
+        threshold: 1,
+      }),
+    ).rejects.toThrow();
+    expect(stub.methods()).toEqual([]);
   });
 });
 

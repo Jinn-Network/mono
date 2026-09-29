@@ -67,7 +67,7 @@ export interface Erc20SweepToken {
 }
 
 export interface SweepOrphanedServiceFundsParams {
-  /** Head of the provider chain — the Safe SDK takes a single URL. */
+  /** Head of the provider chain, and the fallback source for `rpcUrls`. */
   rpcUrl: string;
   /**
    * Full provider chain, for the viem clients built here. Optional for the

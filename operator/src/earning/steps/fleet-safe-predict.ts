@@ -3,6 +3,7 @@ import type { StepContext } from './context.js';
 import type { FleetState } from '../types.js';
 import { deriveAgentAddress, walletPrivateKeyAtIndex } from '../wallet.js';
 import { initPredictedSafe } from '../safe-adapter.js';
+import { chainRpcUrls } from '../contracts.js';
 
 /** Deterministic Safe predict from the HD-index-1 agent EOA. */
 export async function stepFleetSafePredict(
@@ -17,7 +18,7 @@ export async function stepFleetSafePredict(
     `[fleet-bootstrap] Stage 1: predicting fleet Safe (owner=${agentAddress})`,
   );
   const { address } = await initPredictedSafe({
-    rpcUrl: ctx.config.rpcUrl,
+    rpcUrl: chainRpcUrls(ctx.config),
     signerKey: agentKey,
     owners: [agentAddress],
     threshold: 1,
