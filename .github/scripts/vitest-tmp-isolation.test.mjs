@@ -173,16 +173,17 @@ function enclosedLiterals(source, key, open, close) {
  *
  * It under-matches in the same breath, and that twin fails open (issue #3153). The match reads only
  * a bare identifier key written out in the file, so a quoted `'projects': [`, a computed
- * `['projects']: [`, and a key held in a variable (`[KEY]: [`) all miss it, yield no ranges, and
- * drop every allowance and seam path back to root scope — the same collapse the variable-held entry
- * above causes, reading green on the very shape #3123 closes. A spread of an object declared in the
- * same file is not one of these: it still writes `projects:` out somewhere in the file, and the scan
- * is over the whole file, so those entries are scoped normally. A spread of an object that reaches
- * the config from another module does miss, for the reason the rule above already gives: the key is
- * written nowhere in this file. The fail-closed argument above is what bounds the over-matching
- * direction to a false red; it says nothing about this one. Like the variable-held case this is
- * inherent to a text scanner, no worse than the pre-#3123 behavior, and recorded rather than closed:
- * anchoring or widening the key would trade one of these directions for the other, not remove both.
+ * `['projects']: [` in any of the three quote forms, and a key held in a variable (`[KEY]: [`) all
+ * miss it, yield no ranges, and drop every allowance and seam path back to root scope — the same
+ * collapse the variable-held entry above causes, reading green on the very shape #3123 closes. A
+ * spread of an object declared in the same file is not one of these: it still writes `projects:`
+ * out somewhere in the file, and the scan is over the whole file, so those entries are scoped
+ * normally. A spread of an object that reaches the config from another module does miss, for the
+ * reason the rule above already gives: the key is written nowhere in this file. The fail-closed
+ * argument above is what bounds the over-matching direction to a false red; it says nothing about
+ * this one. Like the variable-held case this is inherent to a text scanner, no worse than the
+ * pre-#3123 behavior, and recorded rather than closed: anchoring or widening the key would trade one
+ * of these directions for the other, not remove both.
  */
 export function projectEntryRanges(source) {
   const ranges = [];
@@ -1089,7 +1090,7 @@ test('which projects key forms the match sees decides whether scope collapses to
   ]);
 
   // A quoted or computed key misses the match and reads green on the same config.
-  for (const key of ["'projects'", '"projects"', "['projects']"]) {
+  for (const key of ["'projects'", '"projects"', "['projects']", '[`projects`]']) {
     assert.deepEqual(projectEntryRanges(withKey(key)), []);
     assert.deepEqual(unreachableWirings(withKey(key), config), []);
   }
