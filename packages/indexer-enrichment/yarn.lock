@@ -820,12 +820,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@hono/node-server@npm:^2.0.11":
-  version: 2.0.11
-  resolution: "@hono/node-server@npm:2.0.11"
+"@hono/node-server@npm:^2.1.1":
+  version: 2.1.1
+  resolution: "@hono/node-server@npm:2.1.1"
   peerDependencies:
     hono: ^4
-  checksum: 10c0/eedfff2122bcb23b368f4a785c2f8d93ecd653c14ecdbf47422fedeb559fb7201c183b10020c3cc01457d856cdda6868fdc5e8f60c3af1d6c6ddd77291689736
+  checksum: 10c0/7ef810ca647c56d8d9386fd81609e18443b3a5634aa5ecabdf357e7ca724613c535e863c15ded9b7ae89b935a073040fb11e6d59041f3b1c3e153d8ecb699880
   languageName: node
   linkType: hard
 
@@ -875,12 +875,12 @@ __metadata:
   dependencies:
     "@electric-sql/pglite": "npm:^0.5.8"
     "@jinn-network/indexer": "portal:../indexer"
-    "@types/node": "npm:^25.9.6"
+    "@types/node": "npm:^25.9.8"
     "@types/pg": "npm:^8.23.1"
-    drizzle-orm: "npm:0.45.2"
+    drizzle-orm: "npm:0.45.3"
     esbuild: "npm:^0.28.2"
     pg: "npm:^8.23.0"
-    tsx: "npm:^4.23.13"
+    tsx: "npm:^4.23.15"
     typescript: "npm:^5.4.0"
     vitest: "npm:^4.1.11"
   bin:
@@ -892,13 +892,13 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/indexer@portal:../indexer::locator=%40jinn-network%2Findexer-enrichment%40workspace%3A."
   dependencies:
-    "@hono/node-server": "npm:^2.0.11"
+    "@hono/node-server": "npm:^2.1.1"
     "@jinn-network/benchmarking-records": "portal:../benchmarking/records"
     "@jinn-network/contract-abis": "portal:../contract-abis"
-    drizzle-orm: "npm:^0.45.2"
-    hono: "npm:^4.12.31"
-    ponder: "npm:^0.17.1"
-    viem: "npm:^2.55.8"
+    drizzle-orm: "npm:^0.45.3"
+    hono: "npm:^4.13.8"
+    ponder: "npm:^0.17.10"
+    viem: "npm:^2.56.8"
   languageName: node
   linkType: soft
 
@@ -1397,12 +1397,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node@npm:^25.9.6":
-  version: 25.9.6
-  resolution: "@types/node@npm:25.9.6"
+"@types/node@npm:^25.9.8":
+  version: 25.9.8
+  resolution: "@types/node@npm:25.9.8"
   dependencies:
     undici-types: "npm:>=7.24.0 <7.24.7"
-  checksum: 10c0/1ee8d7cb629caa3906b0958200747c8d557c339b4cc4fb000eaf4be8715091394dc845f45302e76a96c715a16153b240dc7884cdd3e11d22c48273d244c5ecdf
+  checksum: 10c0/482b8f1d8532fb034d4b49b8c7a5942aee4bb21482d7e49a5d3fbc1dcb3f04fde0c312f91f6aeca185875a325e14e75f94b6171f1ef7a718a6d62c0862c2ab80
   languageName: node
   linkType: hard
 
@@ -2008,9 +2008,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"drizzle-orm@npm:0.45.2, drizzle-orm@npm:^0.45.2":
-  version: 0.45.2
-  resolution: "drizzle-orm@npm:0.45.2"
+"drizzle-orm@npm:0.45.3, drizzle-orm@npm:^0.45.3":
+  version: 0.45.3
+  resolution: "drizzle-orm@npm:0.45.3"
   peerDependencies:
     "@aws-sdk/client-rds-data": ">=3"
     "@cloudflare/workers-types": ">=4"
@@ -2018,6 +2018,7 @@ __metadata:
     "@libsql/client": ">=0.10.0"
     "@libsql/client-wasm": ">=0.10.0"
     "@neondatabase/serverless": ">=0.10.0"
+    "@netlify/db": ">=0.4.0"
     "@op-engineering/op-sqlite": ">=2"
     "@opentelemetry/api": ^1.4.1
     "@planetscale/database": ">=1.13"
@@ -2052,6 +2053,8 @@ __metadata:
     "@libsql/client-wasm":
       optional: true
     "@neondatabase/serverless":
+      optional: true
+    "@netlify/db":
       optional: true
     "@op-engineering/op-sqlite":
       optional: true
@@ -2099,7 +2102,7 @@ __metadata:
       optional: true
     sqlite3:
       optional: true
-  checksum: 10c0/deb4a0230a79b1ff8c61365808bdb06a78e9e32171625f1c61d791dec445fad5cd9bc4ce2e6175b0ff1be7fb913310b2fd07b94a2cbe8027581b7d99469b8060
+  checksum: 10c0/493919fae4431b3b360227b929fca27b2d220114d7ebd07c2f299efa2a968af52d35f39745daedf9ce2c8c52c6fa875d7a97cb970f144598ed7cd70bc3b1004b
   languageName: node
   linkType: hard
 
@@ -2613,10 +2616,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hono@npm:^4.12.31":
-  version: 4.12.31
-  resolution: "hono@npm:4.12.31"
-  checksum: 10c0/f80be65cd657cc353b3e478d55424a373d11801b2a1ffc96d94def813c6d852e76bea4437f5df252b15caca98742040d26950bc9c865d8720b89a00a9eac5249
+"hono@npm:^4.13.8":
+  version: 4.13.8
+  resolution: "hono@npm:4.13.8"
+  checksum: 10c0/9c420a6599e38242f78686c5ade10f2539c4e98451b0bd0778ab17e4311691d8d1263ed45cd7047a6274ddd3196db39188c6526a4c2c46dd1baf39f37266819c
   languageName: node
   linkType: hard
 
@@ -2999,9 +3002,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ox@npm:0.14.32":
-  version: 0.14.32
-  resolution: "ox@npm:0.14.32"
+"ox@npm:0.14.45":
+  version: 0.14.45
+  resolution: "ox@npm:0.14.45"
   dependencies:
     "@adraffy/ens-normalize": "npm:^1.11.0"
     "@noble/ciphers": "npm:^1.3.0"
@@ -3016,7 +3019,7 @@ __metadata:
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/e07c0b18f967f93bf9b52dd5f00cd72db38be435f06cb16e7852c08cc6f05730c031a3ae5dbe058682160ec25b8a8664df334e28fe0677f7848abd0b9a9b59f0
+  checksum: 10c0/d1d23e3b85a14d94ec0d608626c08e3dc1852fd90d22486827f1fbe300005958e004ac0db14a8168b2147001c493ff2eb344368513ee8fc82489e45b9115577a
   languageName: node
   linkType: hard
 
@@ -3275,9 +3278,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ponder@npm:^0.17.1":
-  version: 0.17.1
-  resolution: "ponder@npm:0.17.1"
+"ponder@npm:^0.17.10":
+  version: 0.17.10
+  resolution: "ponder@npm:0.17.10"
   dependencies:
     "@babel/code-frame": "npm:^7.23.4"
     "@commander-js/extra-typings": "npm:^12.0.1"
@@ -3324,7 +3327,7 @@ __metadata:
       optional: true
   bin:
     ponder: ./dist/esm/bin/ponder.js
-  checksum: 10c0/9d6f2438101e103dc98a647caf7b9c46dc942d43208160859af86eabed7d83f14be1b23aec2e044fd8f222dcc536f69601f490ab9332518563500a4a17e93819
+  checksum: 10c0/d6afd2eba8b47bfd9c11dfaca4dad9b25bcedb95599a7487705d9694655c0f44fd7723e8f518e0aaa2bba07c4a54e29708c2725747f084bf8ee187adec175103
   languageName: node
   linkType: hard
 
@@ -3877,9 +3880,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"tsx@npm:^4.23.13":
-  version: 4.23.13
-  resolution: "tsx@npm:4.23.13"
+"tsx@npm:^4.23.15":
+  version: 4.23.15
+  resolution: "tsx@npm:4.23.15"
   dependencies:
     esbuild: "npm:~0.28.0"
     fsevents: "npm:~2.3.3"
@@ -3888,7 +3891,7 @@ __metadata:
       optional: true
   bin:
     tsx: dist/cli.mjs
-  checksum: 10c0/dc99c8988b42ec2443963a0b9051f42d068bc7e2a44e82f3b94b40539a991c5c01ea3ee049cf317d1040b2245711dd4c64ace9ac875f3b07edee29f610702e3c
+  checksum: 10c0/3c5fc53e578da87d3a63565286b1ecbb0e01b9bb646daec1957294ef890d14f22cc67bb4b09b5daffab0e7ce0217b1e7645393feb0f524b1ddf26ae9595d7e75
   languageName: node
   linkType: hard
 
@@ -3961,9 +3964,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"viem@npm:^2.55.8":
-  version: 2.55.8
-  resolution: "viem@npm:2.55.8"
+"viem@npm:^2.56.8":
+  version: 2.56.8
+  resolution: "viem@npm:2.56.8"
   dependencies:
     "@noble/curves": "npm:1.9.1"
     "@noble/hashes": "npm:1.8.0"
@@ -3971,14 +3974,14 @@ __metadata:
     "@scure/bip39": "npm:1.6.0"
     abitype: "npm:1.2.3"
     isows: "npm:1.0.7"
-    ox: "npm:0.14.32"
+    ox: "npm:0.14.45"
     ws: "npm:8.21.0"
   peerDependencies:
     typescript: ">=5.0.4"
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/30457ab22c174e02680831f841cd27ba806346ea2099e6b091a53bb46f0bcd6406d93704ef1d91be0d21fd367e38fe81573a9a89a84906e469bdb9c12be7a0bb
+  checksum: 10c0/7ac525363f6032b32b7a2f2e18f922b8cf8e32fe1c12e855e7f995fdfbda978c7b4a7689a51d63a8d26fafd89804a2bab154943e9ffbee28496aee4b714e2b40
   languageName: node
   linkType: hard
 
