@@ -1166,7 +1166,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             publicClient: degradedPublicClient,
             masterWallet: degradedMasterWallet,
             mnemonic: degradedMnemonic,
-            rpcUrl: config.rpcUrl,
+            rpcUrl: config.rpcUrls,
             chainConfig: CHAIN_CONFIG,
             intervals: {
               evictionCheckIntervalMs: config.evictionCheckIntervalMs,

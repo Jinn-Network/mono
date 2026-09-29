@@ -68,8 +68,13 @@ async function startRpcStub(): Promise<{ url: string; hits: () => number; close:
 async function startDeadEndpoint(): Promise<{ url: string; close: () => Promise<void> }> {
   const port = await allocateAnvilPort();
   const server: TcpServer = createTcpServer((socket) => socket.destroy());
-  server.on('error', () => {});
-  await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+  // Surface an EADDRINUSE race as a named failure. `allocateAnvilPort` closes
+  // its probe socket before returning, so the bind can lose; swallowing that
+  // would leave the listen promise unsettled and read as a vitest timeout.
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', resolve);
+  });
   return {
     url: `http://127.0.0.1:${port}`,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
@@ -211,7 +216,8 @@ describe('FleetBootstrapper RPC fallback chain (#4826)', () => {
 
   it('call site: the CLI bootstrapper factory forwards the whole chain, not the head', async () => {
     // The defect was never inside FleetBootstrapper — the factories passed
-    // `config.rpcUrl`. Reverting any of them to the head string turns this red.
+    // `config.rpcUrl`. This pins one of them, the solver-plugins factory:
+    // reverting THAT site to the head string turns this red.
     const bootstrapper = SOLVER_PLUGINS_DEPS.bootstrapperFactory({
       earningDir: await earningDir(),
       network: 'testnet',

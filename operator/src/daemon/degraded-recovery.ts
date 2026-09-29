@@ -46,7 +46,7 @@
 import { getAddress, type PublicClient, type WalletClient } from 'viem';
 import type { ChainConfig } from '../earning/contracts.js';
 import { FleetStateStore } from '../earning/store.js';
-import type { JinnOnchainNetwork } from '../earning/viem-clients.js';
+import type { JinnOnchainNetwork, RpcUrlInput } from '../earning/viem-clients.js';
 import type { Store } from '../store/store.js';
 import { withEoaBroadcastLock } from '../tx-retry.js';
 import { EvictionLoop } from './eviction-loop.js';
@@ -70,7 +70,13 @@ export interface DegradedRecoveryDeps {
    * it for. No new persistence: never written to disk here.
    */
   mnemonic: string;
-  rpcUrl: string;
+  /**
+   * The whole #592 provider chain (#4826). `recoverEvictedService` builds two
+   * viem clients of its own, so a head URL alone leaves the degraded window —
+   * the very window that exists to self-heal an eviction — unable to reStake
+   * whenever slot 0 is the provider that is down.
+   */
+  rpcUrl: RpcUrlInput;
   chainConfig: Pick<
     ChainConfig,
     'distributorAddress' | 'eoaTopupTrigger' | 'minEoaGasEth' | 'safeTopupTrigger' | 'minSafeEth'
