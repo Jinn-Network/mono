@@ -410,7 +410,7 @@ export class FleetBootstrapper {
     // The head stays a plain string: the Safe SDK (`init({ provider })`) and
     // `rpcHostForDisplay` both take exactly one URL. A single-string option
     // still yields a one-element list, so this is byte-identical to the old
-    // behaviour for every existing caller.
+    // behavior for every existing caller.
     this.config.rpcUrl = this.rpcUrls[0]!;
 
     this.publicClient = createJinnPublicClient(this.rpcUrls, this.chain);
