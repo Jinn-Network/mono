@@ -1090,7 +1090,13 @@ test('which projects key forms the match sees decides whether scope collapses to
   ]);
 
   // A quoted or computed key misses the match and reads green on the same config.
-  for (const key of ["'projects'", '"projects"', "['projects']", '[`projects`]']) {
+  for (const key of [
+    "'projects'",
+    '"projects"',
+    "['projects']",
+    '["projects"]',
+    '[`projects`]',
+  ]) {
     assert.deepEqual(projectEntryRanges(withKey(key)), []);
     assert.deepEqual(unreachableWirings(withKey(key), config), []);
   }
