@@ -1008,15 +1008,10 @@ describe("portable public bundle", () => {
     if (replay.ok) expect(replay.result.bundleIdentity).toBe(published.result.bundleIdentity);
   });
 
-  test("a fault after rename or after RunState leaves a reported draft with a retryable immutable bundle", async () => {
+  test("a fault after RunState leaves a reported draft with a retryable immutable bundle", async () => {
     const clock = makeClock();
     await setUpClosedRun(clock);
     expect((await runReport(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
-    const afterRename = await runPublish(contextFor(clock), { draftId: "draft-1" }, {
-      afterRename: () => { throw new Error("fault after rename"); },
-    });
-    expect(afterRename.ok).toBe(false);
-    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
     const beforeTransition = await runPublish(contextFor(clock), { draftId: "draft-1" }, {
       beforeTransition: () => { throw new Error("fault before transition"); },
     });
@@ -1049,6 +1044,35 @@ describe("portable public bundle", () => {
     const retry = await runPublish(contextFor(clock), { draftId: "draft-1" });
     expect(retry.ok, JSON.stringify(retry)).toBe(true);
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("published-bundle");
+  });
+
+  test("a refusal after adopting an existing digest-addressed bundle leaves that directory in place", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    if (!reported.ok) return;
+    const runState = readRunState(workspaceDir, "draft-1");
+    expect(runState).toBeDefined();
+    if (runState === undefined) return;
+    materializePublicBundle({
+      workspaceDir,
+      draftId: "draft-1",
+      benchmarkSha256: reported.result.claimPackage.records.benchmarkSha256,
+      runState,
+    });
+    expect(digestNamedBundleDirs()).toHaveLength(1);
+    // Second publish hits the EEXIST path, adopts the existing target, then throws from
+    // `afterRename` — the seam that still runs on adoption. `onRenamed` must not fire for an
+    // adopted directory; if it did, refusal cleanup would delete a bundle this invocation did
+    // not create.
+    const refused = await runPublish(contextFor(clock), { draftId: "draft-1" }, {
+      afterRename: () => { throw new Error("fault after adopt"); },
+    });
+    expect(refused.ok).toBe(false);
+    expect(digestNamedBundleDirs()).toHaveLength(1);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("reported");
+    expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
   });
 
   test("a refusal that cannot take the publication lock for cleanup leaves the staged directory in place", async () => {
