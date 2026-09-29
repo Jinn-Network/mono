@@ -670,10 +670,18 @@ describe("the binding face is never emitted from an unchecked binding", () => {
   });
 
   // This [] is the documented bounded false-negative residue, not desired detection behavior.
+  // The sibling assertion is the positive control: without it, a scan that silently found
+  // nothing would pass exactly as loudly as one that found nothing because of the mispairing.
   test("pins positional quote mispairing as a known residue", () => {
     const IMPORTED = 'import { runBindingSentence } from "./report-face.js";\n';
     const source = `${IMPORTED}const re = /[']/u; const s = runBindingSentence(forged); const t = 'x';\n`;
     expect(emitterCallSites(source, "fixture.ts", new Map())).toEqual([]);
+    const control = `${IMPORTED}const re = /[x]/u; const s = runBindingSentence(forged); const t = 'x';\n`;
+    expect(emitterCallSites(control, "fixture.ts", new Map())[0]).toEqual({
+      site: "fixture.ts:runBindingSentence",
+      binding: "forged",
+      justified: false,
+    });
   });
 
   // The bare name is not unique in this tree, so the key is proven to discriminate before the scan

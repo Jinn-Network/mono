@@ -11,14 +11,37 @@
  * harness refused the evaluator's `inconclusive` delivery, and the cell terminaled
  * `could-not-grade` and was permanently lost. Every unparseable response lost its cell.
  *
- * `@colophon-claims/core` is the only package that depends on both halves, so the join lives here.
+ * `@colophon-claims/core` depends on both halves and owns the product's own run path across them
+ * (`src/run/drive.ts` drives, `src/run/assembly-ports.ts` assembles), so the join lives here.
  * The bytes are checked-in fixtures under `test/fixtures/unparseable-judge-response/`; the live
  * shape is among them, byte-exact.
  *
- * The whole chain is production code: `runEvaluationHarness` over the real binary-judgment
- * evaluator registration writes the ResultEvaluation, `assembleMatrix` over `localAssemblyPorts`
- * classifies the cells, and the registered `binary-instrument@1` method reduces and projects them.
- * Nothing between the fixture bytes and the published projection is hand-authored.
+ * Every component in the chain is production code, with the two declared seams below:
+ * `runEvaluationHarness` over the real binary-judgment evaluator registration writes the
+ * ResultEvaluation, `assembleMatrix` over `localAssemblyPorts` classifies the cells, and the
+ * registered `binary-instrument@1` method reduces and projects them.
+ *
+ * The join's only substantive seams are these two declared limits:
+ * 1. Signing is stubbed. The harness writes an unsigned `out/verdict`; this test wraps it with
+ *    `sealDsseEnvelope` under a placeholder signature. No verification is being skipped — no port
+ *    on `MethodComputeInput` verifies a verdict envelope's signature (its one verifier port,
+ *    `verifyAnchoredBenchmarkAnnouncement`, authenticates anchored announcements and is not
+ *    consulted by `binary-instrument@1`), the aggregate only ever `parseDsseEnvelope`s the
+ *    verdict bytes, and `localAssemblyPorts` is called without an explicit `trust`, so nothing on
+ *    this path verifies a verdict signature. The production signer and attestation issuer are
+ *    simply outside the join. Omitting `trust` is not the same as leaving it inert:
+ *    `localAssemblyPorts` substitutes `failClosedTrustResolver(unresolvedTrustResolver())` and
+ *    `assemble` still calls `ports.trust.resolveAgent` per verdict, which is benign here only
+ *    because this Run's policy is `independence: "disclosed"`. Tighten that policy and the
+ *    resolver, not the signature, is what starts refusing cells.
+ * 2. Assemble is fed `InScopeCell`/`InScopeVerdict` literals, not the product's own
+ *    `buildRunAssemblyPorts` projector, which is what sets `evaluationTerminal` from the folded
+ *    run journal. These literals therefore never carry `evaluationTerminal` at all, so
+ *    `deriveOutcome` can never reach `"unscorable"` — and that absence, not the
+ *    `expect(exitCode).toBe(0)` above it, is what guarantees the "never could-not-grade" claim
+ *    below. `exitCode === 0` only establishes that every cell produced a verdict. Wire
+ *    `evaluationTerminal` in from a real folded journal and a cell may legitimately terminal
+ *    `could-not-grade` with the exit code still 0.
  */
 
 import { Buffer } from "node:buffer";
@@ -79,10 +102,12 @@ import {
   sealBinaryJudgmentObservation,
   sealEvaluationSpec,
   type BinaryJudgmentInstrument,
+  type BinaryJudgmentPayload,
   type EvaluationSpec,
   type MeasurementMap,
 } from "@jinn-network/task-execution-profiles";
 import {
+  deriveAttemptUri,
   documentDigest,
   sealDelivery,
   sealTask,
@@ -97,6 +122,9 @@ const VERDICT_PAYLOAD_TYPE = "application/vnd.in-toto+json";
 const RUN_OWNER = "urn:uuid:77777777-7777-5777-8777-777777777777";
 const CLOSE_AT = "2026-08-15T01:00:00Z";
 const K = 3;
+
+/** This test's attempt-URI binding name: the frozen first component of every derived attempt. */
+const ATTEMPT_BINDING_NAME = "jinn.network/benchmarking/unparseable-judge-join";
 
 /**
  * The exact bytes preserved from the live cell-535 response, re-derived here as an inline literal
@@ -124,8 +152,33 @@ const PARAMETERS = {
 } as const;
 
 const ITEMS = [
-  { key: "alpha", itemId: "urn:uuid:11111111-1111-4111-8111-111111111111" },
-  { key: "beta", itemId: "urn:uuid:22222222-2222-4222-8222-222222222222" },
+  {
+    key: "alpha",
+    itemId: "urn:uuid:11111111-1111-4111-8111-111111111111",
+    candidateAnswer: "London.",
+    truthLabel: "CORRECT",
+    candidateClass: "factual",
+    stratum: "core",
+  },
+  {
+    key: "beta",
+    itemId: "urn:uuid:22222222-2222-4222-8222-222222222222",
+    candidateAnswer: "London.",
+    truthLabel: "CORRECT",
+    candidateClass: "factual",
+    stratum: "core",
+  },
+  // The one item that exercises the other half of every declared axis: a WRONG truth label gives
+  // the confusion matrix a wrong row (so falseAccept leaves the zero-denominator branch), and
+  // contradiction/stress are the declared-but-previously-unused candidate class and stratum.
+  {
+    key: "gamma",
+    itemId: "urn:uuid:44444444-4444-4444-8444-444444444444",
+    candidateAnswer: "Paris.",
+    truthLabel: "WRONG",
+    candidateClass: "contradiction",
+    stratum: "stress",
+  },
 ] as const;
 type ItemKey = typeof ITEMS[number]["key"];
 
@@ -162,7 +215,7 @@ interface ItemMaterial {
   readonly taskDigestHex: string;
   readonly specification: EvaluationSpec;
   readonly specificationDigest: `sha256:${string}`;
-  readonly payload: Record<string, unknown>;
+  readonly payload: BinaryJudgmentPayload;
   readonly analysisContext: { readonly digest: `sha256:${string}`; readonly bytes: Uint8Array };
   readonly labelResolution: { readonly digest: `sha256:${string}`; readonly bytes: Uint8Array };
 }
@@ -236,19 +289,19 @@ function buildItemMaterial(
     itemId: item.itemId,
     question: `Where was the ${item.key} subject born?`,
     referenceAnswer: "London.",
-    candidateAnswer: "London.",
+    candidateAnswer: item.candidateAnswer,
     provenance: { sourceCommitment: sha("4"), timestamp: "2026-08-14T22:00:00Z" },
     sources: [{ digest: { sha256: "4".repeat(64) } }],
-  };
+  } satisfies BinaryJudgmentPayload;
   const itemSha256 = recordDigest(canonicalJsonBytes(payload));
   const labelResolution = sealBinaryJudgmentLabelResolution({
     protocol: BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
     itemSha256,
     itemId: item.itemId,
     humanReviewEvaluationSpecSha256: sha("5"),
-    truthLabel: "CORRECT",
-    candidateClass: "factual",
-    stratum: "core",
+    truthLabel: item.truthLabel,
+    candidateClass: item.candidateClass,
+    stratum: item.stratum,
     truthAdmission: "two-human-unanimous",
     reviewVerdictSha256s: [sha("6"), sha("7")],
     reviewerRosterSha256: sha("8"),
@@ -261,9 +314,9 @@ function buildItemMaterial(
     itemSha256,
     itemId: item.itemId,
     labelResolutionSha256: labelResolution.digest,
-    truthLabel: "CORRECT",
-    candidateClass: "factual",
-    stratum: "core",
+    truthLabel: item.truthLabel,
+    candidateClass: item.candidateClass,
+    stratum: item.stratum,
   });
   const specification = buildBinaryJudgmentEvaluationSpecification(analysisContext.digest, "abstain");
   const sealedSpecification = sealEvaluationSpec(specification);
@@ -401,7 +454,7 @@ function harnessDeployment() {
   };
 }
 
-/** The plan of what each of the twelve scientific cells delivers. */
+/** The plan of what each of the eighteen scientific cells delivers. */
 const CELL_RESPONSES: Readonly<Record<ItemKey, Readonly<Record<ArmId, readonly string[]>>>> = {
   // Three genuinely unparseable shapes, the live one first: no side reaches the majority of two,
   // so this item-arm group must leave `itemDecisions` and surface as `no-valid-majority`.
@@ -412,6 +465,14 @@ const CELL_RESPONSES: Readonly<Record<ItemKey, Readonly<Record<ArmId, readonly s
   beta: {
     "arm-alpha": ["parseable-correct", "parseable-correct", "parseable-correct"],
     "arm-beta": ["parseable-correct", "parseable-correct", "parseable-correct"],
+  },
+  // gamma's truth label is WRONG, so arm-alpha's unanimous ACCEPT is a genuine false accept and
+  // arm-beta's unanimous REJECT is a correct rejection. arm-alpha's three cells are also the
+  // file's first `verdict: "fail"` cells: the adapter derives agreement = agrees(ACCEPT, WRONG)
+  // = false.
+  gamma: {
+    "arm-alpha": ["parseable-correct", "parseable-correct", "parseable-correct"],
+    "arm-beta": ["parseable-wrong", "parseable-wrong", "parseable-wrong"],
   },
 };
 
@@ -471,7 +532,7 @@ async function buildJoinFixture(): Promise<JoinFixture> {
           replicate,
           instrumentSha256: instruments[armId].digest,
           requestSha256: binaryJudgmentSemanticRequestDigest(
-            material.payload as never,
+            material.payload,
             buildInstrument(armId),
           ),
           response: { digest: responseDigest, mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE },
@@ -489,9 +550,11 @@ async function buildJoinFixture(): Promise<JoinFixture> {
         put(observation.bytes);
 
         const key = cellKey(material.taskDigestHex, armId, replicate);
-        const attemptUri = `urn:uuid:33333333-3333-4333-8333-${
-          Buffer.from(key).toString("hex").slice(0, 12).padEnd(12, "0")
-        }`;
+        // The production derivation, not a hand-rolled slice: `cellKey` carries the task digest,
+        // arm id and replicate, so every cell gets a distinct deterministic v5 UUID. The previous
+        // hex slice kept six ASCII characters, all inside the task digest, so all six cells of an
+        // item collided on one attempt URI.
+        const attemptUri = deriveAttemptUri(ATTEMPT_BINDING_NAME, [key]);
         const { paths, deliveryDigest } = await buildHarnessWorkspace({
           material,
           responseBytes,
@@ -544,7 +607,7 @@ async function buildJoinFixture(): Promise<JoinFixture> {
   const sealedBench = sealBenchmark({
     protocol: BENCHMARKING_PROTOCOL,
     name: "unparseable-judge-join",
-    description: "Two binary-judgment items driven through the real evaluation harness.",
+    description: "Three binary-judgment items driven through the real evaluation harness.",
     version: "1.0.0",
     items: ITEMS.map((item) => ({
       task: { digest: { sha256: materials[item.key].taskDigestHex } },
@@ -617,6 +680,16 @@ function binaryInstrumentMethod() {
 /** The three cells whose judge response is genuinely unparseable (item alpha, arm arm-alpha). */
 function unparseableCells(): readonly HarnessCellResult[] {
   return fixture.cells.filter((cell) => cell.itemKey === "alpha" && cell.armId === "arm-alpha");
+}
+
+/** The three cells where the judge accepts a WRONG item (item gamma, arm arm-alpha). */
+function falseAcceptCells(): readonly HarnessCellResult[] {
+  return fixture.cells.filter((cell) => cell.itemKey === "gamma" && cell.armId === "arm-alpha");
+}
+
+/** The three cells where the judge correctly rejects a WRONG item (item gamma, arm arm-beta). */
+function correctRejectCells(): readonly HarnessCellResult[] {
+  return fixture.cells.filter((cell) => cell.itemKey === "gamma" && cell.armId === "arm-beta");
 }
 
 function firstUnparseableCell(): HarnessCellResult {
@@ -694,6 +767,10 @@ describe("unparseable judge response, delivery joined to aggregate consumption",
       decision: "ACCEPT",
       parseValid: true,
     });
+    expect(parse(await readFixture("parseable-wrong"))).toEqual({
+      decision: "REJECT",
+      parseValid: true,
+    });
   });
 
   test("the hand-authored parameters are the registered method's own admitted set", () => {
@@ -708,6 +785,31 @@ describe("unparseable judge response, delivery joined to aggregate consumption",
       expect(cell.predicate["verdict"]).toBe("inconclusive");
       expect(cell.predicate["measurements"]).toContainEqual({ name: "judgeDecision", value: "INVALID" });
       expect(cell.predicate["measurements"]).toContainEqual({ name: "parseValid", value: false });
+      expect(cell.predicate["measurements"]).toContainEqual({ name: "agreement", value: false });
+    }
+  });
+
+  // The other half of the same fixture item, pinned at the delivery leg rather than only through
+  // the arm-beta confusion row below: `parseable-wrong.txt` exists to drive a REJECT, and a
+  // REJECT on a WRONG item is the one combination that agrees.
+  test("the harness delivers a passing verdict when the judge correctly rejects a WRONG item", () => {
+    const correctRejects = correctRejectCells();
+    expect(correctRejects).toHaveLength(3);
+    for (const cell of correctRejects) {
+      expect(cell.predicate["verdict"]).toBe("pass");
+      expect(cell.predicate["measurements"]).toContainEqual({ name: "judgeDecision", value: "REJECT" });
+      expect(cell.predicate["measurements"]).toContainEqual({ name: "parseValid", value: true });
+      expect(cell.predicate["measurements"]).toContainEqual({ name: "agreement", value: true });
+    }
+  });
+
+  test("the harness delivers a failing verdict when the judge accepts a WRONG item", () => {
+    const falseAccepts = falseAcceptCells();
+    expect(falseAccepts).toHaveLength(3);
+    for (const cell of falseAccepts) {
+      expect(cell.predicate["verdict"]).toBe("fail");
+      expect(cell.predicate["measurements"]).toContainEqual({ name: "judgeDecision", value: "ACCEPT" });
+      expect(cell.predicate["measurements"]).toContainEqual({ name: "parseValid", value: true });
       expect(cell.predicate["measurements"]).toContainEqual({ name: "agreement", value: false });
     }
   });
@@ -756,7 +858,23 @@ describe("unparseable judge response, delivery joined to aggregate consumption",
 
     const result = binaryInstrumentMethod().compute!(fixture.input).perSubject[0]!.results as {
       configuration: { parserInvalidPolicy: string };
-      arms: Record<string, { call: { evaluated: number; parseInvalid: number } }>;
+      arms: Record<string, {
+        call: { evaluated: number; parseInvalid: number };
+        confusion: {
+          correctAccepted: number;
+          correctRejected: number;
+          wrongAccepted: number;
+          wrongRejected: number;
+        };
+        falseAccept: {
+          numerator: number;
+          denominator: number;
+          estimate: string | null;
+          wilsonInterval: { low: string; high: string } | null;
+        };
+        byCandidateClass: Record<string, { item: { complete: number } }>;
+        byStratum: Record<string, { item: { complete: number } }>;
+      }>;
       itemDecisions: readonly unknown[];
       excluded: { count: number; items: readonly { armId: string; cellKeys: readonly string[]; reasons: readonly { reason: string; cellKeys: readonly string[] }[] }[] };
     };
@@ -769,8 +887,37 @@ describe("unparseable judge response, delivery joined to aggregate consumption",
     // The three abstained calls are counted, not dropped: they are admitted replicates that
     // simply produced no majority.
     expect(result.arms["arm-alpha"]!.call.parseInvalid).toBe(3);
-    // Three decided item-arm groups remain, so the projection below is not vacuous.
-    expect(result.itemDecisions).toHaveLength(3);
+    // `itemDecisions` is one entry per decided item-arm group: 3 items x 2 arms = 6, minus the
+    // one excluded group (alpha/arm-alpha, no valid majority).
+    expect(result.itemDecisions).toHaveLength(5);
+    // The WRONG-truth item gives the confusion matrix a wrong row, so falseAccept leaves the
+    // zero-denominator branch: arm-alpha accepted it, arm-beta correctly rejected it.
+    expect(result.arms["arm-alpha"]!.confusion)
+      .toEqual({ correctAccepted: 1, correctRejected: 0, wrongAccepted: 1, wrongRejected: 0 });
+    // Strict, so the Wilson bounds and the ABSENCE of `withheldReason` are both pinned here rather
+    // than left to the closing validator, which re-derives them with `rateProjection` itself.
+    // `toStrictEqual`, not `toEqual`: the latter treats a present-but-`undefined` key as absent,
+    // which is the one thing these assertions are here to tell apart.
+    //
+    // The bounds are `rateProjection`'s own output, formatted with `toFixed(4)`: the Wilson
+    // interval at `DEFAULT_Z = 1.96` from `packages/benchmarking/aggregate/src/stats/wilson.ts`,
+    // clamped to [0, 1]. Note `PARAMETERS.intervalAlpha` does NOT drive it -- `rateProjection`
+    // passes no `z` -- so wiring alpha through to `z` is what would move these four literals.
+    expect(result.arms["arm-alpha"]!.falseAccept).toStrictEqual({
+      numerator: 1,
+      denominator: 1,
+      estimate: "1.0000",
+      wilsonInterval: { low: "0.2065", high: "1.0000" },
+    });
+    expect(result.arms["arm-beta"]!.falseAccept).toStrictEqual({
+      numerator: 0,
+      denominator: 1,
+      estimate: "0.0000",
+      wilsonInterval: { low: "0.0000", high: "0.7935" },
+    });
+    // gamma is the only contradiction/stress item, so those declared slices are no longer all-zero.
+    expect(result.arms["arm-alpha"]!.byCandidateClass["contradiction"]!.item.complete).toBe(1);
+    expect(result.arms["arm-alpha"]!.byStratum["stress"]!.item.complete).toBe(1);
     expect(validateBinaryInstrumentQualificationProjection(result)).toEqual({ ok: true });
   });
 });

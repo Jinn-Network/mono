@@ -2,10 +2,10 @@
  * Public serving of this workspace's Record Discovery source.
  *
  * `createWorkspacePublicationHttpHandler` (publication-source.ts) already answers the archive
- * grammar; what did not exist was any way to put it on a socket. This module is that composition:
- * a headless `node:http` listener over the same handler, with no product UI, no workspace
- * selection, and no write route -- the served tree is append-only and digest-addressed, so
- * everything below is read-only by construction.
+ * grammar and `/lock-index.json`; what did not exist was any way to put it on a socket. This
+ * module is that composition: a headless `node:http` listener over the same handler, with no
+ * product UI, no workspace selection, and no write route -- the served tree is append-only and
+ * digest-addressed, so everything below is read-only by construction.
  *
  * Serving is deliberately not the only supported deployment. The layout is plain immutable files,
  * so an operator may equally publish `<workspace>/publication/public/` from any static host or
@@ -20,7 +20,7 @@ import {
   createWorkspacePublicationHttpHandler,
   refreshWorkspacePublicationWellKnown,
 } from "./publication-source.js";
-import { createPublicationLockIndexHttpHandler, refreshWorkspacePublicationLockIndex } from "./publication-lock-index.js";
+import { refreshWorkspacePublicationLockIndex } from "./publication-lock-index.js";
 
 /** Loopback by default: a public deployment is an explicit act, never a side effect of serving. */
 export const DEFAULT_PUBLICATION_SERVE_HOST = "127.0.0.1";
@@ -154,9 +154,7 @@ export async function startPublicationArchiveServer(
   } catch (cause) {
     progress(`the lock index was not refreshed (${cause instanceof Error ? cause.message : String(cause)}); any earlier index is served unchanged`);
   }
-  const archive = createWorkspacePublicationHttpHandler(options.workspaceDir);
-  const lockIndex = createPublicationLockIndexHttpHandler(options.workspaceDir);
-  const handler = async (request: Request): Promise<Response> => (await lockIndex(request)) ?? archive(request);
+  const handler = createWorkspacePublicationHttpHandler(options.workspaceDir);
 
   const server = createServer((request, response) => {
     const method = request.method ?? "GET";
