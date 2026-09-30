@@ -6,7 +6,7 @@ Jinn is an open protocol and network for work and the data it produces: records 
 
 **No token, no pre-mine, no insider allocations.** Jinn doesn't mint its own token, and the protocol takes no fee and no part in payment. The task marketplace design runs on [OLAS](https://olas.network/), an existing token with real value: in it operators earn OLAS for work the network verifies, and every task, check and reward is recorded on-chain. See [`SPEC.md`](SPEC.md) and [`GLOSSARY.md`](GLOSSARY.md) for that design.
 
-**Where we are now.** The protocol is written in [Jinn-Network/spec](https://github.com/Jinn-Network/spec), first released as v0.1.0 on 24 September 2026. What exists today is the protocol, the published checker below, and Colophon's sealed benchmark claims, the first Jinn records.
+**Where we are now.** The protocol is written in [Jinn-Network/spec](https://github.com/Jinn-Network/spec), first released as v0.1.0 on 24 September 2026. What exists today is the protocol, the published checker below, and Colophon's sealed benchmark claims.
 
 ## What you can do here
 
