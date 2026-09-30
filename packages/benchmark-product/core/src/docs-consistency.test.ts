@@ -31,6 +31,7 @@ import {
   SUPPORTED_BUNDLE_FORMATS,
   BEACON_SOURCES,
   MAX_BEACON_ROUND,
+  OWNER_CONTROLLED_PUBLICATION_LIMIT,
   expectedChecks,
 } from "@colophon-claims/check";
 import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
@@ -39,6 +40,7 @@ import {
   BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE,
 } from "@jinn-network/benchmarking-protocol";
 import { PRODUCT_ERROR_CODES } from "./errors.js";
+import { LOCAL_VENUE_LIMITS } from "./operations/run-results.js";
 import { PRODUCT_BRANDING } from "./branding.js";
 
 const coreRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -325,6 +327,14 @@ describe("product documentation consistency", () => {
       .filter((line) => line.includes("npx "))
       .map(readerLine);
     expect([...new Set(stated)].sort()).toEqual(["@0.2"]);
+  });
+
+  it("mirrors the sealed venue sentences verbatim, the sixth included (issue #3401)", () => {
+    const guide = read(externalVerificationPath);
+    for (const sentence of [...LOCAL_VENUE_LIMITS, OWNER_CONTROLLED_PUBLICATION_LIMIT]) {
+      expect(guide, sentence).toContain(`\n- ${sentence}\n`);
+    }
+    expect(read(bundleReadmePath)).toContain(`\n> ${OWNER_CONTROLLED_PUBLICATION_LIMIT}\n`);
   });
 
   it("files the domain-publication lookup under tools the reader can run (issue #3692)", () => {

@@ -76,6 +76,8 @@ composed `/10` generation. An imported run's `report` / `publish` path:
 - Rebuilds `venueHonesty.limits[2]` as `IMPORTED_RUN_PINNING_LIMIT` in both
   claim-consistency implementations, so the sealed disclosure says pinning is
   unverifiable rather than admission-gated.
+- Declares `owner-controlled-publication`, as every composed run does (issue
+  #3401), so the sixth venue sentence follows the import-aware five.
 - Hashes `--file` and `--from inspect` pointing at a file by those file bytes;
   a directory (`--from harbor`, `--from inspect` at a dir) hashes the canonical
   JSON of the normalized records. In-memory tests hash the records.
@@ -83,7 +85,8 @@ composed `/10` generation. An imported run's `report` / `publish` path:
 
 `colophon publish` and the GUI's `run.publish` succeed. Managed signed Report
 v2 publication (`colophon publication report`) seals the same import-aware
-venue limits. Both durable signals are still consulted so a crash after the
+five venue sentences; the sixth is a `/10` bundle capability and Report v2
+does not carry it. Both durable signals are still consulted so a crash after the
 journal marker but before `RunState.externalImportSha256` still reads as
 imported. The public reader accepts the published bundle; the extra check is
 `external-import`. Proven in `core/src/operations/run-import.bundle.test.ts`.

@@ -576,9 +576,9 @@ Every token is **must-understand**. A reader that does not implement a token in
 the vector refuses the bundle whole, naming the token, before it reads any
 member. There is no tier of tokens a reader may ignore.
 
-Four capabilities are registered. Each one's members, checks, and claim section
-are exactly what the closure it came from carries, except `external-import`,
-which is new with this generation:
+Five capabilities are registered. Each one's members, checks, and claim section
+are exactly what the closure it came from carries, except `external-import` and
+`owner-controlled-publication`, which are new with this generation:
 
 | Token | Adds | Check it appends | Claim section |
 | --- | --- | --- | --- |
@@ -586,6 +586,7 @@ which is new with this generation:
 | `anchoring` | `anchors/<sha256>.bin`, which may be empty under the declared-but-absent rule stated for v6 | `integrity-anchors` | `anchors` |
 | `disclosure-specification` | no member of its own; the sealed record travels at `records/<sha256>.bin`, named by the Report extension stated for v8 | `disclosure-specification` | `disclosure` |
 | `external-import` | `external-import.json`, the dump digest plus one row per sealed Matrix cell | `external-import` | `externalImport` |
+| `owner-controlled-publication` | no member; a sixth sealed venue sentence, stated below | none; `claim-consistency` rebuilds the sentence and the section | `ownerControlledPublication` |
 
 `disclosure-specification` requires `binary-qualification`, because the evidence
 role that carries its record exists only in the v4 grammar. It does not require
@@ -597,7 +598,28 @@ capability's in the order of the table above --- so `["anchoring"]` runs v6's
 seven and all three pre-composition tokens run v8's eight. The vector naming `anchoring` alone
 is v6's closure exactly, the vector naming `anchoring` and
 `binary-qualification` is v7's, and the vector naming those three is v8's.
-`external-import` is additive and has no pre-composition cell.
+`external-import` and `owner-controlled-publication` are additive and have no
+pre-composition cell. `owner-controlled-publication` appends no check, so a
+vector keeps its check list with or without it.
+
+`owner-controlled-publication` states where the publication source stands. The
+[interoperability profile](../../docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md)
+(section 9.3) requires a self-run publisher to disclose
+that its publication source, not only its dispatch source, is owner-controlled,
+and the five sealed venue sentences cover dispatch. A bundle that declares it
+seals a sixth sentence right after the five, in the Report `limitations` (and so
+in the claim's copy of them) and in `venueHonesty.limits`, and its claim carries
+the same sentence as the `ownerControlledPublication` section:
+
+> This venue's publication source is owner-controlled and has no witness: the owner holds its signing key and hosts its archive, so it can rewrite what it published before a reader first fetches it, and only a reader who kept an earlier copy can detect a later rewrite.
+
+It composes with the other rewrites of the venue sentences: on an imported run
+it follows the import-aware five, and on an anchored run the anchor lines follow
+it. A bundle that does not declare the capability keeps the five sentences byte
+for byte: every earlier format, and a v10 bundle whose vector omits it.
+`claim-consistency` refuses the sentence in the Report, the venue sentences, or
+the claim without the declaration, and the declaration without the sentence in
+each of them.
 
 Declaration is authoritative, and presence is derived from it, never the
 reverse. A member of a capability the vector does not declare --- an
@@ -656,7 +678,10 @@ the composed generation, so a run that does not ask otherwise publishes on
 facts: an anchored run declares `anchoring`, a run projecting a binary qualification
 declares `binary-qualification`, a qualification run with a sealed disclosure
 declaration declares `disclosure-specification`, anchored or not, and a run whose
-evidence was imported (`run import`) declares `external-import`. The enumerated v2, v4,
+evidence was imported (`run import`) declares `external-import`. Every run declares
+`owner-controlled-publication`, imported runs included: this product publishes only
+from its self-run venue, whose workspace mints the key that signs the Report and whose
+owner hosts the bundle. The enumerated v2, v4,
 v6, v7, and v8 producer paths remain behind `composedFormat: false` on `report` --- that is
 the rollback. The verifier's legacy path for those formats remains forever.
 
