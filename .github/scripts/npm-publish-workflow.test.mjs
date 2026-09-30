@@ -7,6 +7,7 @@ import path from 'node:path';
 const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 const workflowsDir = path.resolve(scriptsDir, '..', 'workflows');
 const publish = readFileSync(path.join(workflowsDir, 'npm-publish.yml'), 'utf8');
+const sdkPublish = readFileSync(path.join(workflowsDir, 'sdk-npm-publish.yml'), 'utf8');
 const monitorPath = path.join(workflowsDir, 'npm-publish-monitor.yml');
 const monitor = readFileSync(monitorPath, 'utf8');
 
@@ -533,4 +534,30 @@ test('canary patch pins the bundled SDK dependency to the rewritten workspace ve
   const pinAt = patch.indexOf("pkg.dependencies['@jinn-network/sdk'] = sdk.version");
   const writePkgAt = patch.lastIndexOf("fs.writeFileSync('package.json'");
   assert.ok(pinAt > -1 && writePkgAt > pinAt, 'package.json must be written after the SDK dependency pin');
+});
+
+test('SDK canary gitHead validation waits out npm asynchronous publish processing', () => {
+  // `npm publish` returns before the registry has processed the version: it prints "Your
+  // package is being processed and may take a few minutes to become available". Since
+  // 2026-09-03 the version reaches `npm view` 54-310s after publish returns, so a 60s poll
+  // failed most runs whose publish had already succeeded (runs 36594403460, 36604078688).
+  const stepAt = sdkPublish.indexOf('name: Validate canary gitHead');
+  assert.notEqual(stepAt, -1, 'SDK canary gitHead validation step must exist');
+  const nextStepAt = sdkPublish.indexOf('- name:', stepAt);
+  const step = sdkPublish.slice(stepAt, nextStepAt === -1 ? undefined : nextStepAt);
+
+  const iterations = Number(step.match(/seq 1 (\d+)/)?.[1]);
+  const sleepSeconds = Number(step.match(/sleep (\d+)/)?.[1]);
+  assert.ok(iterations > 0, 'the validation must poll in a bounded `seq 1 N` loop');
+  assert.ok(sleepSeconds > 0, 'the validation must sleep between polls');
+  assert.ok(
+    iterations * sleepSeconds >= 600,
+    `retry budget is ${iterations} x ${sleepSeconds}s = ${iterations * sleepSeconds}s; npm processes ` +
+      'a publish asynchronously and the version can take minutes to become visible, so the ' +
+      'budget must be at least 600s',
+  );
+
+  // A longer wait must still fail loudly when the version never resolves.
+  assert.match(step, /::error::\$\{PACKAGE_SPEC\} gitHead did not resolve to \$\{JINN_BUILD_COMMIT\}/);
+  assert.match(step, /exit 1/);
 });

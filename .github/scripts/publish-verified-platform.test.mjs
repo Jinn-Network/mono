@@ -414,6 +414,28 @@ test('a fully disabled catalog group reaches no provenance or npm command', asyn
   }
 });
 
+test('a canary-only group off the platform stack publishes its unsigned receipt on the canary lane', async () => {
+  const fixture = publicationFixture({
+    mutateCatalog(catalog) {
+      catalog.releaseGroups['platform-v1'].stackPublished = false;
+    },
+  });
+  const fake = registryExec(fixture);
+  try {
+    // Built for the receipt but never signed: the root is not served at the protocol origin.
+    assert.equal(fixture.receipt.surfaces.profile.signature, null);
+    const receipt = await publishVerifiedPlatform(publisherArgs(fixture, { exec: fake.exec }));
+    assert.deepEqual(
+      publishCalls(fake.calls).map(({ args }) => tarballByName(fixture, args[1])),
+      fixture.receipt.packageOrder,
+    );
+    assert.equal(receipt.trustedPublishers.registrationCount, fixture.receipt.packageOrder.length);
+    assert.equal(receipt.distTag, 'canary');
+  } finally {
+    cleanup(fixture);
+  }
+});
+
 function tarballByName(fixture, path) {
   return fixture.receipt.tarballs.find(({ filename }) => join(fixture.packRoot, filename) === path)?.name;
 }

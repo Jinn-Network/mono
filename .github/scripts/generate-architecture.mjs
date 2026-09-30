@@ -308,7 +308,7 @@ export function renderArchitectureMarkdown(report) {
       `| ${groupId} | ${group.packages.length} | ${cell(group.requiredGateIds)} | ${cell(group.publishPolicies)} | ${group.stackPublished} | ${group.canary} | ${group.stable} |`
     )),
     '',
-    `The exact ${report.release.stackPublished.packages.length}-package trusted-publisher set is the union of stack-published groups. Receipt-gated canary publication is enabled for every stack-published group. **Stable publication is disabled until live \`spec.jinn.network\` profile hosting verification passes.** The ${report.release.experimentalPolicy.packages.length} \`experimental-policy\` packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.`,
+    `The exact ${report.release.stackPublished.trustedPublishers.length}-package trusted-publisher set is the union of canary-eligible groups: the ${report.release.stackPublished.packages.length} stack-published packages plus every canary-only group, which publishes npm canaries but is never stack-published or served at \`spec.jinn.network\`. Receipt-gated canary publication is enabled for every canary-eligible group. **Stable publication is disabled until live \`spec.jinn.network\` profile hosting verification passes.** The ${report.release.experimentalPolicy.packages.length} \`experimental-policy\` packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.`,
     '',
     '| Package | Workflow | Environment field |',
     '| --- | --- | --- |',

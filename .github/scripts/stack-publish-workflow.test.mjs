@@ -71,7 +71,30 @@ test('the publisher verifies strict GitHub provenance policy before its receipt-
   assert.ok(block.includes('--release-group ${{ matrix.release_group }}'));
   assert.ok(block.includes('--verification-receipt ".platform-verification-receipt/${{ matrix.release_group }}/verification-receipt.json"'));
   assert.match(block, /--lane canary/u);
-  assert.match(block, /matrix:\n\s+release_group:\n\s+- sealed-platform-v1\n\s+- implementations-v1/u);
+  assert.match(
+    block,
+    /matrix:\n\s+release_group:\n\s+- sealed-platform-v1\n\s+- implementations-v1\n\s+- benchmarking-product-v1\n/u,
+  );
+});
+
+test('the canary publisher leaves the implementations leg four hours to reach its wave tail', () => {
+  const publishAt = workflow.indexOf('canary-publish:');
+  const refreshAt = workflow.indexOf('canary-host-refresh:');
+  const block = workflow.slice(publishAt, refreshAt);
+  assert.match(block, /^ {4}timeout-minutes: 240$/mu);
+});
+
+test('only stack-published groups reach the protocol origin, never the canary-only group', () => {
+  const stackSelector = 'stackPublishedReleaseGroupIds(loadPlatformCatalog(process.cwd()))';
+  const refreshAt = workflow.indexOf('canary-host-refresh:');
+  const stableAt = workflow.indexOf('resolve-stable-source:');
+  const liveAt = workflow.indexOf('stable-live-host-verification:\n    name:');
+  const liveEnd = workflow.indexOf('stable-live-host-attestation:\n    name:');
+  assert.ok(refreshAt > -1 && stableAt > refreshAt && liveAt > stableAt && liveEnd > liveAt);
+  for (const block of [workflow.slice(refreshAt, stableAt), workflow.slice(liveAt, liveEnd)]) {
+    assert.ok(block.includes(stackSelector));
+    assert.doesNotMatch(block, /laneReleaseGroupIds|benchmarking-product-v1/u);
+  }
 });
 
 test('the final deterministic publication receipt is attested and uploaded', () => {

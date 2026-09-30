@@ -18,7 +18,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { canonicalJsonBytes, catalogSha256 } from './build-prepublication-bundle.mjs';
-import { loadCatalogPackages, loadPlatformCatalog, loadStackPublishedCatalogPackages, requireStackPublishedReleaseGroup } from './platform-catalog.mjs';
+import { loadCatalogPackages, loadPlatformCatalog, loadStackPublishedCatalogPackages, requireLaneReleaseGroup } from './platform-catalog.mjs';
 import {
   deriveNativeVerticalRoleClosures,
   loadNativeVerticalRoleFixtures,
@@ -178,7 +178,7 @@ function validateBundle(repoRoot, manifestPath) {
     }
   } else {
     catalogPackages = allCatalogPackages.filter(({ catalog }) => catalog.releaseGroup === manifest.releaseGroup);
-    requireStackPublishedReleaseGroup(loadPlatformCatalog(repoRoot), manifest.releaseGroup);
+    requireLaneReleaseGroup(loadPlatformCatalog(repoRoot), manifest.releaseGroup, manifest.lane);
   }
   const catalogNames = catalogPackages.map(({ name }) => name);
   const order = manifest.packageOrder;
@@ -511,7 +511,7 @@ export async function runTarballConsumer({
   const bundles = paths.map((path) => validateBundle(root, path));
   const names = bundles.flatMap((bundle) => bundle.catalogPackages.map(({ name }) => name));
   if (new Set(names).size !== names.length) {
-    throw new Error('stack-published prepublication manifests contain overlapping packages');
+    throw new Error('platform prepublication manifests contain overlapping packages');
   }
   const identities = new Set(bundles.map((bundle) => JSON.stringify({
     sourceSha: bundle.manifest.sourceSha,
@@ -519,7 +519,7 @@ export async function runTarballConsumer({
     packageVersion: bundle.manifest.packageVersion,
   })));
   if (identities.size !== 1) {
-    throw new Error('stack-published prepublication manifests do not share one exact source identity');
+    throw new Error('platform prepublication manifests do not share one exact source identity');
   }
   const validated = {
     manifest: bundles[0].manifest,

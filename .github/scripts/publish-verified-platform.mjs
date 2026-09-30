@@ -22,8 +22,8 @@ import {
 } from './build-prepublication-bundle.mjs';
 import { createVerificationReceipt } from './platform-verification-receipt.mjs';
 import {
+  loadLanePublishableCatalogPackages,
   loadPublishableCatalogPackages,
-  loadStackPublishedCatalogPackages,
   resolveRequestedReleaseGroup,
   stackPublishedGroupArtifactPaths,
   loadPlatformCatalog,
@@ -223,13 +223,13 @@ function validateTrustedPublishers(verificationRoot, receipt, catalogNames, repo
     throw new Error('trusted-publisher registration JSON must be an array');
   }
   const names = registrations.map((registration) => registration?.package);
-  const stackNames = loadStackPublishedCatalogPackages(repoRoot, { lane: receipt.lane })
+  const laneNames = loadLanePublishableCatalogPackages(repoRoot, receipt.lane)
     .map((pkg) => pkg.name)
     .sort();
   const receiptNames = [...receipt.packageOrder].sort();
   const catalogSorted = [...catalogNames].sort();
   if (new Set(names).size !== names.length
-    || JSON.stringify([...names].sort()) !== JSON.stringify(stackNames)
+    || JSON.stringify([...names].sort()) !== JSON.stringify(laneNames)
     || JSON.stringify(receiptNames) !== JSON.stringify(catalogSorted)
     || receiptNames.some((name) => !names.includes(name))) {
     throw new Error('trusted-publisher package set does not exactly match the catalog and verification receipt');

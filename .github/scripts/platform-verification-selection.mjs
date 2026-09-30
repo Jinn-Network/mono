@@ -1,6 +1,6 @@
 // Decides whether a pull request needs platform verification to run.
 //
-// `platform-verification.yml` fans into the union of stack-published domain lanes
+// `platform-verification.yml` fans into the union of canary-lane domain lanes
 // through `workflow_call`, and GitHub does not evaluate `paths:` filters for
 // `workflow_call` invocations. Every pull request therefore pays for those lanes
 // regardless of what changed.
@@ -17,9 +17,10 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadCatalogPackages, loadPlatformCatalog, RUNTIME_DEPENDENCY_SECTIONS, stackPublishedReleaseGroupIds } from './platform-catalog.mjs';
+import { laneReleaseGroupIds, loadCatalogPackages, loadPlatformCatalog, RUNTIME_DEPENDENCY_SECTIONS } from './platform-catalog.mjs';
 
 export const GATE_DOMAINS = new Map([
+  ['benchmarking-ci', 'benchmarking'],
   ['contracts-ci', 'contracts'],
   ['environments-ci', 'environments'],
   ['evidence-ci', 'evidence'],
@@ -63,13 +64,13 @@ function isUnder(path, prefix) {
 function requireGateCoverage(repoRoot) {
   const catalog = loadPlatformCatalog(repoRoot);
   const declared = [...new Set(
-    stackPublishedReleaseGroupIds(catalog)
+    laneReleaseGroupIds(catalog, 'canary')
       .flatMap((groupId) => catalog.releaseGroups[groupId].requiredGateIds),
   )].sort();
   const mapped = [...GATE_DOMAINS.keys()].sort();
   if (declared.join(',') !== mapped.join(',')) {
     throw new Error(
-      `GATE_DOMAINS does not cover stack-published requiredGateIds: declared=${declared.join(',')} mapped=${mapped.join(',')}`,
+      `GATE_DOMAINS does not cover canary-lane requiredGateIds: declared=${declared.join(',')} mapped=${mapped.join(',')}`,
     );
   }
   return new Set(mapped.map((gateId) => GATE_DOMAINS.get(gateId)));
