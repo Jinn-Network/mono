@@ -19,4 +19,6 @@ This document will be filled in closer to Phase 2 launch with:
 - The mainnet equivalent of the stOLAS distributor seed dependency (short
   answer: there isn't one — real stakers provide the pool).
 
-Track Phase 2 readiness via the protocol team's release channel.
+Watch the repository's
+[releases page](https://github.com/Jinn-Network/mono/releases) for the release
+that ships the mainnet operator flow.
