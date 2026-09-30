@@ -1,7 +1,10 @@
 # Platform stack npm publishing runbook
 
 **Scope:** the catalog-derived stack-published release groups `sealed-platform-v1` (11 packages)
-and `implementations-v1` (53 packages). Their exact package sets, runtime waves,
+and `implementations-v1` (53 packages), plus the canary-only product group
+`benchmarking-product-v1` (11 packages), which publishes npm canaries from the same workflow but
+is never stack-published or served at `spec.jinn.network`
+([DR-2026-09-03](../../log/decisions/2026-09-03-protocol-spec-repository.md) section 3). Their exact package sets, runtime waves,
 trusted-publisher inputs, and policy are generated in the
 [live platform topology](../../architecture/generated/platform-topology.md#release-and-trusted-publishers).
 Workflow: `.github/workflows/stack-npm-publish.yml`. Verified publisher:
@@ -13,14 +16,18 @@ The count contract is pinned by `.github/scripts/stack-trusted-publishers.test.m
 - Both stack-published groups are catalog-permitted for receipt-gated canary and for a later
   stable cut (`canary-and-stable`, `stable: true`). A push to `integration/evidence-v1` or `next`
   uses the `canary` dist-tag and the `npm-publish` GitHub environment, and the canary job is a
-  matrix over both groups.
+  matrix over both groups and `benchmarking-product-v1`.
+- `benchmarking-product-v1` is `canary-only` (`stackPublished: false`, `stable: false`). Its
+  verification receipt requires `benchmarking-ci`. Its profile root is built and attested for that
+  receipt but never signed, and the host refresh and stable jobs never select it.
 - Canary publication is **operationally enabled** as of 2026-08-17
   ([DR-2026-08-17-d](../../log/decisions/2026-08-17-platform-canary-publish-enabled.md)):
   repository variable `PLATFORM_CANARY_PUBLISH_ENABLED=true`. The next push to `next` or
   `integration/evidence-v1` whose same-run verification succeeds will publish
   `0.1.0-canary.sha.<fullSha>` under dist-tag `canary`. That is not `latest` and not a
   `stack-v*` cut.
-- The trusted-publisher set is the union of both groups: **64** rows, one registration each,
+- The trusted-publisher set is the union of the canary-eligible groups (both stack-published groups
+  and `benchmarking-product-v1`): **75** rows, one registration each,
   bound to `stack-npm-publish.yml` and `npm-publish`. Per-group publication receipts are a subset
   of that list. The generated topology is authoritative for membership.
 - The two `experimental-policy` packages remain disabled and are not part of either
@@ -146,10 +153,10 @@ and [`npm trust`](https://docs.npmjs.com/cli/v11/commands/npm-trust/).
 An npm scope owner must complete this once for every generated registration:
 
 - [x] Confirm the operator belongs to a team in the `@jinn-network` npm organization. (`ritsukai` / `@jinn-network:developers`)
-- [ ] Regenerate the list and compare it with the generated release view (64 names;
+- [ ] Regenerate the list and compare it with the generated release view (75 names;
   topology union), then add every registration using the CLI path above (or the npmjs
   web UI with the same fields), including Environment `npm-publish`. **Incomplete**: 61
-  of the 64 generated names are registered; three are not: `@jinn-network/contract-abis`,
+  of the 64 stack-published names are registered; three are not: `@jinn-network/contract-abis`,
   `@jinn-network/evidence-gate`, and `@jinn-network/record-discovery-facts-offers`
   (`npm view <name> version` returns `E404` for each). The `implementations-v1` canary is
   currently truncated at the first of them in wave order, `@jinn-network/contract-abis`
@@ -174,9 +181,8 @@ Never repair the mismatch by repacking, moving a tag, or weakening receipt verif
 from npmjs or has no trusted-publisher row bound to `stack-npm-publish.yml` / `npm-publish`.
 `publish-verified-platform.mjs`'s `publishMissingTarballs` throws out of both the per-wave
 and the per-package loop, so every later package in that release group's walk (the rest of
-the wave and all later waves) is not published; the other matrix group (`sealed-platform-v1`
-or `implementations-v1`, whichever did not fail) is unaffected, since `canary-publish` runs
-both release groups as a `fail-fast: false` matrix. Register the missing package with the CLI
+the wave and all later waves) is not published; every other matrix group is unaffected,
+since `canary-publish` runs its release groups as a `fail-fast: false` matrix. Register the missing package with the CLI
 path above, then rerun. Rerunning only works while this run's `platform-verification-artifacts`
 artifact still exists (`retention-days: 1` in `platform-verification.yml`); once that window
 passes, the next push to `next` is the retry, not a manual rerun of the old run. Do not treat

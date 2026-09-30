@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 import {
   loadPlatformCatalog,
+  releaseGroupRewriteNames,
   resolveRequestedReleaseGroup,
-  stackPublishedRewriteNames,
 } from './platform-catalog.mjs';
 import {
   buildDependencyGraph,
@@ -58,7 +58,7 @@ export class EmptyPackageSetError extends Error {}
 export function buildPublishPlan({ repoRoot, mode, sha, releaseTag, releaseGroup } = {}) {
   const catalog = loadPlatformCatalog(repoRoot);
   const groupId = resolveRequestedReleaseGroup(catalog, releaseGroup);
-  const packages = discoverStackPackages(repoRoot, { releaseGroup: groupId });
+  const packages = discoverStackPackages(repoRoot, { releaseGroup: groupId, lane: mode });
   if (packages.length === 0) {
     throw new EmptyPackageSetError(`no packages found in catalog release group ${groupId}`);
   }
@@ -85,7 +85,7 @@ export function buildPublishPlan({ repoRoot, mode, sha, releaseTag, releaseGroup
     distTag,
     waves,
     releaseGroup: groupId,
-    inSetNames: stackPublishedRewriteNames(catalog, groupId),
+    inSetNames: releaseGroupRewriteNames(catalog, groupId, mode),
   };
 }
 

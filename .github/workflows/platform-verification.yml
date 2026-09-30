@@ -46,6 +46,14 @@ jobs:
           test "${#digest}" -eq 64
           echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
 
+  benchmarking:
+    needs: catalog
+    permissions:
+      contents: read
+    uses: ./.github/workflows/benchmarking-ci.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
+
   contracts:
     needs: catalog
     permissions:
@@ -135,8 +143,8 @@ jobs:
           LANE: ${{ inputs.lane }}
         run: |
           groups="$(node --input-type=module <<'NODE'
-          import { loadPlatformCatalog, stackPublishedReleaseGroupIds } from './.github/scripts/platform-catalog.mjs';
-          process.stdout.write(stackPublishedReleaseGroupIds(loadPlatformCatalog(process.cwd())).join('\n'));
+          import { laneReleaseGroupIds, loadPlatformCatalog } from './.github/scripts/platform-catalog.mjs';
+          process.stdout.write(laneReleaseGroupIds(loadPlatformCatalog(process.cwd()), process.env.LANE).join('\n'));
           NODE
           )"
           mkdir -p .platform-verification
@@ -156,6 +164,9 @@ jobs:
               --lane "${LANE}" \
               --out ".platform-verification/${group}/profile-root"
           done <<< "${groups}"
+      # Stack-published groups only. A canary-only group's profile root is built and attested
+      # for its verification receipt but never signed, so it is never served at the protocol
+      # origin.
       - name: Sign the profile manifest
         env:
           JINN_PROFILE_MANIFEST_SIGNING_KEY: ${{ secrets.JINN_PROFILE_MANIFEST_SIGNING_KEY }}
@@ -177,11 +188,13 @@ jobs:
           CATALOG_DIGEST: ${{ needs.catalog.outputs.catalog_digest }}
           LANE: ${{ inputs.lane }}
         run: |
-          # Sequential pack follows stackPublishedReleaseGroupIds so sealed
-          # packages write dist/ before implementations compile against them.
+          # Sequential pack follows laneReleaseGroupIds, callee groups first, so a
+          # group's packages write dist/ before a dependent group compiles against
+          # them: sealed, then implementations, then (canary lane only)
+          # benchmarking-product-v1.
           groups="$(node --input-type=module <<'NODE'
-          import { loadPlatformCatalog, stackPublishedReleaseGroupIds } from './.github/scripts/platform-catalog.mjs';
-          process.stdout.write(stackPublishedReleaseGroupIds(loadPlatformCatalog(process.cwd())).join('\n'));
+          import { laneReleaseGroupIds, loadPlatformCatalog } from './.github/scripts/platform-catalog.mjs';
+          process.stdout.write(laneReleaseGroupIds(loadPlatformCatalog(process.cwd()), process.env.LANE).join('\n'));
           NODE
           )"
           while IFS= read -r group; do
@@ -260,10 +273,12 @@ jobs:
           name: platform-verification-artifacts
           path: .platform-verification
       - name: Clean external tarball consumer
+        env:
+          LANE: ${{ inputs.lane }}
         run: |
           groups="$(node --input-type=module <<'NODE'
-          import { loadPlatformCatalog, stackPublishedReleaseGroupIds } from './.github/scripts/platform-catalog.mjs';
-          process.stdout.write(stackPublishedReleaseGroupIds(loadPlatformCatalog(process.cwd())).join('\n'));
+          import { laneReleaseGroupIds, loadPlatformCatalog } from './.github/scripts/platform-catalog.mjs';
+          process.stdout.write(laneReleaseGroupIds(loadPlatformCatalog(process.cwd()), process.env.LANE).join('\n'));
           NODE
           )"
           manifest_args=()
@@ -278,6 +293,7 @@ jobs:
   verification_receipt:
     needs:
       - catalog
+      - benchmarking
       - contracts
       - discovery
       - evidence
@@ -313,6 +329,7 @@ jobs:
           CATALOG_DIGEST: ${{ needs.catalog.outputs.catalog_digest }}
           LANE: ${{ inputs.lane }}
           CATALOG_RESULT: ${{ needs.catalog.result }}
+          BENCHMARKING_RESULT: ${{ needs.benchmarking.result }}
           CONTRACTS_RESULT: ${{ needs.contracts.result }}
           DISCOVERY_RESULT: ${{ needs.discovery.result }}
           EVIDENCE_RESULT: ${{ needs.evidence.result }}
@@ -326,8 +343,8 @@ jobs:
           EXTERNAL_CONSUMER_RESULT: ${{ needs.external_consumer.result }}
         run: |
           groups="$(node --input-type=module <<'NODE'
-          import { loadPlatformCatalog, stackPublishedReleaseGroupIds } from './.github/scripts/platform-catalog.mjs';
-          process.stdout.write(stackPublishedReleaseGroupIds(loadPlatformCatalog(process.cwd())).join('\n'));
+          import { laneReleaseGroupIds, loadPlatformCatalog } from './.github/scripts/platform-catalog.mjs';
+          process.stdout.write(laneReleaseGroupIds(loadPlatformCatalog(process.cwd()), process.env.LANE).join('\n'));
           NODE
           )"
           mkdir -p .platform-verification-receipt
@@ -343,6 +360,7 @@ jobs:
               --public-manifest ".platform-verification/${group}/public-surface-manifest.json" \
               --profile-manifest ".platform-verification/${group}/profile-root/manifest.json" \
               --gate "catalog=${CATALOG_RESULT}" \
+              --gate "benchmarking=${BENCHMARKING_RESULT}" \
               --gate "contracts=${CONTRACTS_RESULT}" \
               --gate "record-discovery=${DISCOVERY_RESULT}" \
               --gate "evidence=${EVIDENCE_RESULT}" \

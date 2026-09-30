@@ -4,23 +4,15 @@ import { fileURLToPath } from 'node:url';
 import { mkdirSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { loadPlatformCatalog, loadPublishableCatalogPackages, stackPublishedReleaseGroupIds } from './platform-catalog.mjs';
+import { loadLanePublishableCatalogPackages } from './platform-catalog.mjs';
 
 export const PUBLISHER_WORKFLOW = 'stack-npm-publish.yml';
 
 export function buildRegistrationList(repoRoot) {
-  const catalog = loadPlatformCatalog(repoRoot);
-  const groups = stackPublishedReleaseGroupIds(catalog);
-  if (groups.length === 0) {
-    throw new Error('no stack-published release group is eligible for canary publication');
-  }
-  const packages = groups.flatMap((releaseGroup) => loadPublishableCatalogPackages(repoRoot, {
-    releaseGroup,
-    lane: 'canary',
-  }));
+  const packages = loadLanePublishableCatalogPackages(repoRoot, 'canary');
   const names = packages.map((pkg) => pkg.name).sort();
   if (new Set(names).size !== names.length) {
-    throw new Error('stack-published groups contain duplicate package names');
+    throw new Error('canary-lane groups contain duplicate package names');
   }
   return names.map((name) => ({
     package: name,
@@ -52,7 +44,7 @@ export function renderRegistrationMarkdown(registrations) {
     '| Environment | `npm-publish` |',
     '',
     'The npmjs **Environment field MUST equal `npm-publish`** and the **Allowed action MUST be exactly `npm publish`**.',
-    'Receipt-gated canary publication is enabled for every stack-published group.',
+    'Receipt-gated canary publication is enabled for every canary-eligible group.',
     '**Stable publication is gated on `stable-publish-gate`, which requires live',
     '`spec.jinn.network` host verification of the same run; no stable job invokes npm.**',
     '',

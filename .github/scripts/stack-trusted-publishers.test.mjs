@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
-import { loadCatalogPackages, loadPlatformCatalog, loadStackPublishedCatalogPackages } from './platform-catalog.mjs';
+import { laneReleaseGroupIds, loadCatalogPackages, loadPlatformCatalog } from './platform-catalog.mjs';
 import {
   disableReleaseGroup,
   fixtureCatalog,
@@ -33,20 +33,39 @@ test('catalog-disabled platform groups cannot generate trusted-publisher registr
   try {
     assert.throws(
       () => buildRegistrationList(root),
-      /no stack-published release group is eligible for canary publication/u,
+      /no release group is eligible for canary publication/u,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('every canonical stack-published package gets one registration bound to this repo and workflow', () => {
-  const registrations = buildRegistrationList(repoRoot);
-  const expectedPackages = loadStackPublishedCatalogPackages(repoRoot)
+function canaryLanePackageNames(root) {
+  return laneReleaseGroupIds(loadPlatformCatalog(root), 'canary')
+    .flatMap((releaseGroup) => loadCatalogPackages(root, { releaseGroup }))
     .map((pkg) => pkg.name)
     .sort();
+}
+
+test('a canary-only group off the platform stack still gets trusted-publisher registrations', () => {
+  const catalog = fixtureCatalog();
+  catalog.releaseGroups['platform-v1'].stackPublished = false;
+  const root = fixtureRepo({ catalog });
+  try {
+    assert.deepEqual(
+      buildRegistrationList(root).map((registration) => registration.package),
+      loadCatalogPackages(root, { releaseGroup: 'platform-v1' }).map((pkg) => pkg.name).sort(),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('every canonical canary-lane package gets one registration bound to this repo and workflow', () => {
+  const registrations = buildRegistrationList(repoRoot);
+  const expectedPackages = canaryLanePackageNames(repoRoot);
   assert.deepEqual(registrations.map((registration) => registration.package), expectedPackages);
-  assert.equal(registrations.length, 64);
+  assert.equal(registrations.length, 75);
   assert.equal(registrations.length, expectedPackages.length);
   assert.equal(new Set(registrations.map((r) => r.package)).size, registrations.length);
   for (const registration of registrations) {
@@ -60,16 +79,22 @@ test('every canonical stack-published package gets one registration bound to thi
   }
 });
 
-test('registrations exclude every experimental, legacy, and product package', () => {
+test('registrations exclude every experimental, legacy, and product package outside the canary lane', () => {
   const registered = new Set(buildRegistrationList(repoRoot).map((registration) => registration.package));
+  const canaryGroups = new Set(laneReleaseGroupIds(loadPlatformCatalog(repoRoot), 'canary'));
   const excluded = loadPlatformCatalog(repoRoot).packages.filter((pkg) => (
     pkg.releaseGroup === 'experimental-policy'
     || pkg.releaseGroup === 'legacy-product-lines'
-    || pkg.classification === 'product'
-    || pkg.classification === 'product-support'
+    || ((pkg.classification === 'product' || pkg.classification === 'product-support')
+      && !canaryGroups.has(pkg.releaseGroup))
   ));
   assert.ok(excluded.length > 0);
   assert.deepEqual(excluded.filter((pkg) => registered.has(pkg.name)).map((pkg) => pkg.name), []);
+  // The one product group on the canary lane is the canary-only benchmarking group.
+  const registeredProduct = loadPlatformCatalog(repoRoot).packages
+    .filter((pkg) => pkg.classification === 'product' && registered.has(pkg.name));
+  assert.equal(registeredProduct.length, 11);
+  assert.ok(registeredProduct.every((pkg) => pkg.releaseGroup === 'benchmarking-product-v1'));
 });
 
 test('the markdown rendering requires the protected environment and publish-only action', () => {
@@ -90,7 +115,7 @@ test('the CLI writes both artifact files', () => {
     const result = spawnSync(process.execPath, [script, '--out', out, '--root', repoRoot], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     const json = JSON.parse(readFileSync(join(out, 'trusted-publishers.json'), 'utf8'));
-    assert.equal(json.length, loadStackPublishedCatalogPackages(repoRoot).length);
+    assert.equal(json.length, canaryLanePackageNames(repoRoot).length);
     assert.ok(json.every((entry) => entry.environment === 'npm-publish'));
     assert.ok(json.every((entry) => JSON.stringify(entry.allowedActions) === '["npm publish"]'));
     assert.match(
@@ -108,8 +133,11 @@ test('the stack publishing runbook tracks the generated set, CLI registration, a
   const implementationsCount = loadCatalogPackages(repoRoot, {
     releaseGroup: 'implementations-v1',
   }).length;
+  const benchmarkingCount = loadCatalogPackages(repoRoot, {
+    releaseGroup: 'benchmarking-product-v1',
+  }).length;
   const registrations = buildRegistrationList(repoRoot);
-  assert.equal(registrations.length, sealedCount + implementationsCount);
+  assert.equal(registrations.length, sealedCount + implementationsCount + benchmarkingCount);
   assert.match(
     runbook,
     new RegExp(`sealed-platform-v1\` \\(${sealedCount} packages\\)`),
@@ -117,6 +145,10 @@ test('the stack publishing runbook tracks the generated set, CLI registration, a
   assert.match(
     runbook,
     new RegExp(`implementations-v1\` \\(${implementationsCount} packages\\)`),
+  );
+  assert.match(
+    runbook,
+    new RegExp(`benchmarking-product-v1\` \\(${benchmarkingCount} packages\\)`),
   );
   assert.match(runbook, new RegExp(`\\*\\*${registrations.length}\\*\\* rows`));
   assert.match(runbook, new RegExp(`${registrations.length} names`));

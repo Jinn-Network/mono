@@ -130,6 +130,26 @@ test('installs every catalog tarball transiently behind exact version roots with
   }
 });
 
+test('a canary-only group off the platform stack is consumable on the canary lane only', async () => {
+  const catalog = fixtureCatalog();
+  catalog.releaseGroups['platform-v1'].stackPublished = false;
+  const root = fixtureRepo({ catalog });
+  const { bundle, manifest, manifestPath } = bundleFixture(root);
+  const exec = () => ({ status: 0, stdout: '', stderr: '' });
+  try {
+    const result = await runTarballConsumer({ repoRoot: root, manifestPath, exec });
+    assert.equal(result.packageCount, manifest.packageOrder.length);
+    writeFileSync(manifestPath, canonicalJsonBytes({ ...manifest, lane: 'stable' }), 'utf8');
+    await assert.rejects(
+      runTarballConsumer({ repoRoot: root, manifestPath, exec }),
+      /release group platform-v1 is not verified on the stable lane/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(bundle, { recursive: true, force: true });
+  }
+});
+
 test('a missing tarball fails before npm or the probe can run', async () => {
   const root = fixtureRepo();
   const { bundle, manifest, manifestPath } = bundleFixture(root);

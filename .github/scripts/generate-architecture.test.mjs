@@ -108,12 +108,17 @@ test('release, public-surface, ownership, and transition views reuse their canon
     .map(({ name }) => name)
     .sort();
   const expectedStack = [...expectedSealed, ...expectedImplementations].sort();
+  const expectedBenchmarking = loadCatalogPackages(repoRoot, { releaseGroup: 'benchmarking-product-v1' })
+    .map(({ name }) => name);
 
   assert.deepEqual(report.release.stackPublished.packages, expectedStack);
+  // Trusted publishers cover the whole npm canary lane: the stack-published groups plus the
+  // canary-only benchmarking group, which publishes to npm but is never stack-published.
   assert.deepEqual(
     report.release.stackPublished.trustedPublishers.map(({ package: name }) => name),
-    expectedStack,
+    [...expectedStack, ...expectedBenchmarking].sort(),
   );
+  assert.equal('benchmarking-product-v1' in report.release.stackPublished.groups, false);
   assert.deepEqual(report.release.stackPublished.groups['sealed-platform-v1'].packages, expectedSealed);
   assert.deepEqual(report.release.stackPublished.groups['implementations-v1'].packages, expectedImplementations);
   for (const groupId of ['sealed-platform-v1', 'implementations-v1']) {

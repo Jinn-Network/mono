@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 
-import { loadPlatformCatalog, stackPublishedReleaseGroupIds } from './platform-catalog.mjs';
+import { laneReleaseGroupIds, loadPlatformCatalog } from './platform-catalog.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
 const workflowsRoot = resolve(import.meta.dirname, '../workflows');
@@ -19,8 +19,10 @@ function jobBlock(source, jobId) {
   return next === -1 ? rest : rest.slice(0, next + 1);
 }
 
+// Canary verification is the superset: every stack-published group plus the canary-only
+// benchmarking group, so every one of their gates must be a static reusable job here.
 const platformGateIds = [...new Set(
-  stackPublishedReleaseGroupIds(catalog)
+  laneReleaseGroupIds(catalog, 'canary')
     .flatMap((groupId) => catalog.releaseGroups[groupId].requiredGateIds),
 )].sort();
 const platformJobIds = [...platform.matchAll(/^  ([a-zA-Z0-9_-]+):$/gmu)]
@@ -200,6 +202,30 @@ test('artifacts build and upload public/profile/pack outputs without OIDC', () =
     /uses: actions\/upload-artifact@v4[\s\S]*?include-hidden-files: true/u,
     'the dot-directory artifact must opt in to hidden files',
   );
+});
+
+test('every per-group loop follows the lane, and only stack-published profile roots are signed', () => {
+  const laneSelector = 'laneReleaseGroupIds(loadPlatformCatalog(process.cwd()), process.env.LANE)';
+  const stackSelector = 'stackPublishedReleaseGroupIds(loadPlatformCatalog(process.cwd()))';
+  const artifacts = jobBlock(platform, 'artifacts');
+  const signAt = artifacts.indexOf('- name: Sign the profile manifest');
+  const packAt = artifacts.indexOf('- name: Pack exact prepublication bundle');
+  assert.ok(signAt > -1 && packAt > signAt);
+  const build = artifacts.slice(0, signAt);
+  const sign = artifacts.slice(signAt, packAt);
+  const pack = artifacts.slice(packAt);
+  assert.ok(build.includes(laneSelector), 'the surface and profile-root build must follow the lane');
+  assert.ok(pack.includes(laneSelector), 'the pack must follow the lane');
+  // A canary-only group is built and attested for its receipt, but its profile root is never
+  // signed, so it can never be served at the protocol origin.
+  assert.ok(sign.includes(stackSelector), 'signing must stay on the stack-published groups');
+  assert.ok(!sign.includes('laneReleaseGroupIds'), 'signing must not follow the lane');
+  for (const jobId of ['external_consumer', 'verification_receipt']) {
+    const block = jobBlock(platform, jobId);
+    assert.ok(block.includes(laneSelector), `${jobId} must follow the lane`);
+    assert.match(block, /LANE: \$\{\{ inputs\.lane \}\}/u, `${jobId} must receive the lane`);
+    assert.ok(!block.includes('stackPublishedReleaseGroupIds'), `${jobId} must not select by stack publication`);
+  }
 });
 
 test('artifact attestation downloads immutable build outputs without executing repository code', () => {

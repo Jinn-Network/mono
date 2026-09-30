@@ -1,6 +1,6 @@
 name: Stack npm Publish
 
-# The catalog-selected stack-published groups publish as receipt-bound coherent sets. Canary
+# The catalog's canary-eligible groups publish as receipt-bound coherent sets. Canary
 # publication consumes only the exact tarballs and immutable receipts produced by
 # the same run's reusable platform verification workflow.
 on:
@@ -46,14 +46,23 @@ jobs:
       needs.canary-verification.result == 'success' &&
       vars.PLATFORM_CANARY_PUBLISH_ENABLED == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # The implementations-v1 leg walks 53 packages in waves and has run into the former
+    # 120-minute limit since 2026-09-26: about 118 and 120 minutes on the last two successes, then
+    # cancelled at 120 on 2026-09-29 before its later waves. A product release receipt pins one
+    # canary sha across groups, and @colophon-claims/check's closure needs trust-testing from this
+    # leg at that sha, so the leg gets room to finish.
+    timeout-minutes: 240
     environment: npm-publish
     strategy:
       fail-fast: false
+      # Every canary-eligible group. benchmarking-product-v1 is canary-only and never
+      # stack-published: it publishes npm canaries here but is never served at the protocol
+      # origin (canary-host-refresh and the stable jobs select stackPublishedReleaseGroupIds).
       matrix:
         release_group:
           - sealed-platform-v1
           - implementations-v1
+          - benchmarking-product-v1
     permissions:
       contents: read
       id-token: write

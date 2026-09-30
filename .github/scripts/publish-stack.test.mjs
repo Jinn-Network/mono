@@ -92,6 +92,25 @@ test('--dry-run prints the ordered plan and exits 0 without touching the working
   assert.equal(after.stdout, before.stdout, 'a dry run must leave the working tree unchanged');
 });
 
+test('--dry-run plans the canary-only benchmarking group and rewrites its stack dependencies in set', () => {
+  const result = spawnSync(process.execPath, [script, '--mode', 'canary', '--sha', SHA, '--dry-run', '--root', repoRoot, '--release-group', 'benchmarking-product-v1'], {
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /11 packages in 3 waves/);
+  assert.match(result.stdout, new RegExp(`publish version 0\\.1\\.0-canary\\.sha\\.${SHA} at canary`));
+  const plan = buildPublishPlan({ repoRoot, mode: 'canary', sha: SHA, releaseGroup: 'benchmarking-product-v1' });
+  for (const name of [
+    '@jinn-network/benchmarking-records',
+    '@jinn-network/trust-core',
+    '@jinn-network/task-admission',
+  ]) assert.ok(plan.inSetNames.has(name), `${name} must be rewritten to the canary version`);
+  assert.throws(
+    () => buildPublishPlan({ repoRoot, mode: 'stable', releaseTag: 'stack-v0.1.0', releaseGroup: 'benchmarking-product-v1' }),
+    /release group benchmarking-product-v1 is not verified on the stable lane/u,
+  );
+});
+
 function runNonDryWithInjectedCommands(mode) {
   const toolsRoot = mkdtempSync(join(tmpdir(), 'jinn-legacy-publisher-tools-'));
   const callLog = join(toolsRoot, 'npm-calls.jsonl');
