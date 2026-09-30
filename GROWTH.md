@@ -1,6 +1,6 @@
 # GROWTH
 
-**What this doc is / is not.** This is the canonical statement of how Jinn grows: the strategy (what we distribute, to whom, with what call to action) and the engine (how growth attempts are measured and evolved). It is not a campaign log, an asset library, or a tactical playbook — those live in [`growth/.local/`](growth/.local/) (operator-private) and accrete as the engine runs. It is also not the thesis (see [`THESIS.md`](THESIS.md)), the voice canon (see [`BRAND.md`](BRAND.md)), or the product positioning (see the [GTM plan](docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md) §4); growth derives from all three and does not restate them.
+**What this doc is / is not.** This is the canonical statement of how Jinn grows: the strategy (what we distribute, to whom, with what call to action) and the engine (how growth attempts are measured and evolved). It is not a campaign log, an asset library, or a tactical playbook; those live in [`growth/.local/`](growth/.local/) (operator-private) and accrete as the engine runs. It is also not the thesis (see [`THESIS.md`](THESIS.md)), the voice canon (see [`BRAND.md`](BRAND.md)), or Colophon's product positioning (see the [GTM plan](docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md) §4); growth derives from all three and does not restate them.
 
 **Revision note (2026-09-29).** This revision replaces the product-led strategy with growth through the data market: §1, and step 3 of the §3 funnel, are rewritten, and §2 and §3 each gain one line saying they describe the first application, Colophon. It was proposed in [Discussion #4903](https://github.com/Jinn-Network/mono/discussions/4903) and supersedes decision 1 of [DR-2026-08-10](log/decisions/2026-08-10-product-led-gtm-and-first-market.md), which made §1–§3 product-led. Decisions 2 and 3 of that DR (the default beachhead and the commitment gate) still stand. The document as it stood before this revision is archived at [`growth/archive/2026-09-29-GROWTH.md`](growth/archive/2026-09-29-GROWTH.md). The engine (§4–§8) is retained.
 
@@ -78,7 +78,7 @@ The first two are created by the skill on first PLAN call if absent. The skill i
 
 ## 7. Non-negotiables
 
-- **Every outward surface derives from the positioning in §1** and respects the GTM plan's what-the-product-is-not list. A surface that contradicts it is a bug.
+- **Every outward surface derives from the positioning in §1**, and Colophon's surfaces also respect the GTM plan's what-the-product-is-not list. A surface that contradicts it is a bug.
 - **No written prediction → the attempt logs as inconclusive.** Hindsight verdicts are how loadouts get reverted on noise.
 - **One knob varies per attempt** unless explicitly overridden in the log entry.
 - **At least two attempts on the same rung-knob pair before EVOLVE acts.** N=1 is a data point, not a verdict.

@@ -42,7 +42,7 @@ These properties compound. More of every unit of capital reaches compute. More p
 
 The structural advantage runs in two directions. **Against centralised systems**, the decentralised architecture has none of the structural drains: no shareholder returns to fund, no organisational overhead, no jurisdictional friction, no data silos. **Against other decentralised networks**, the network that maximises all four properties wins the field. The least extractive retains the most capital. The most neutral attracts the broadest participation. The most composable has the largest search space. The most efficient wastes the least. These are competitive dimensions; the network that leads on all four compounds fastest.
 
-Openness is not a moral preference layered on top of the economic argument. It is a structural prerequisite for the scale claim to hold. Decentralised agentic AI becomes the dominant platform not because it is fairer — though it is — but because its architecture is structurally better aligned with the force that drives AI advancement.
+Openness is not a moral preference layered on top of the economic argument. It is a structural prerequisite for that argument to hold. Decentralized agentic AI becomes the dominant platform not because it is fairer, though it is, but because its architecture is structurally better aligned with the force that drives AI advancement.
 
 ## 6. The degree of decentralisation we aim for
 
