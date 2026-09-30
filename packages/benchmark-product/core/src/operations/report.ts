@@ -66,7 +66,13 @@ import {
   DISCLOSURE_SPECIFICATION_EXTENSION,
   DISCLOSURE_SPECIFICATION_MEDIA_TYPE,
 } from "@jinn-network/benchmarking-records";
-import { DISCLOSURE_SPECIFICATION_CAPABILITY, EXTERNAL_IMPORT_CAPABILITY, activeCapabilityVector } from "@colophon-claims/check";
+import {
+  DISCLOSURE_SPECIFICATION_CAPABILITY,
+  EXTERNAL_IMPORT_CAPABILITY,
+  OWNER_CONTROLLED_PUBLICATION_CAPABILITY,
+  OWNER_CONTROLLED_PUBLICATION_LIMIT,
+  activeCapabilityVector,
+} from "@colophon-claims/check";
 import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { buildClaimPackage, writeClaimPackage, type ClaimPackage } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
@@ -269,7 +275,6 @@ export function runReport(
       const previewLimitation = previewLog !== undefined && previewLog.count > 0
         ? previewDisclosureLine(previewLog)
         : undefined;
-      const venueLimits = localVenueLimitsForRun(runRecord, importedRun);
       const inspectLimits = document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
         && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
         ? INSPECT_SEPARATE_ASSURANCE_LIMITATIONS
@@ -346,12 +351,6 @@ export function runReport(
       // so rather than silently reprojecting a document the operator already read. Computed once —
       // method-independent, so every entry's claim package shares it.
       const carriage = readRunAnchorCarriage(clockedContext.workspaceDir, runState);
-      const venueHonesty = buildLocalVenueHonesty(
-        matrixRecord.cells,
-        runRecord,
-        carriage.anchors,
-        importedRun,
-      );
       // issue #2839: the sealed disclosure declaration, if this run has one. Read once for the same
       // reason the anchors are -- it is method-independent, so every entry's Report carries the same
       // extension and every entry's claim the same section. Absent for every run that never
@@ -392,27 +391,6 @@ export function runReport(
             );
           }
         }
-        // paired-majority-delta@1 carries the same PAIRED_ESTIMATE_LIMITATION as paired-delta@1
-        // (coordinator ruling, packet #2837): the line describes the method's SHAPE -- an
-        // estimator rather than a gate -- not its unit, and both methods are estimators. The
-        // withheld-interval case (fewer than 5 paired tasks, or fewer than two source clusters)
-        // gets NO extra limitation line here: §7.2's frozen reporting rule makes the withholding a
-        // registry-verified OUTPUT already printed from the method's own `reasons`, explicitly
-        // "not a gap" -- a disclosure line here would publish that same fact at a second
-        // disclosure level.
-        const limitations = entry.method === BENCHMARKING_METHOD_IDS.pairedDelta
-          || entry.method === BENCHMARKING_METHOD_IDS.pairedMajorityDelta
-          ? [
-              ...venueLimits,
-              ...inspectLimits,
-              ...suiteLimits,
-              PAIRED_ESTIMATE_LIMITATION,
-              ...(previewLimitation === undefined ? [] : [previewLimitation]),
-            ]
-          : previewLimitation === undefined
-            ? [...venueLimits, ...inspectLimits, ...binaryLimits, ...suiteLimits]
-            : [...venueLimits, ...inspectLimits, ...binaryLimits, ...suiteLimits, previewLimitation];
-
         // ONE predicate for both halves of the binding (issue #2839). The Report extension and the
         // claim section have to agree: G0 refuses a Report carrying the extension on any closure
         // other than `/8`, and `/8` is the anchored binary-qualification cell. A run's sibling
@@ -437,6 +415,40 @@ export function runReport(
             && entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument;
         const entryIsImported = composedCapabilities !== undefined
           && composedCapabilities.includes(EXTERNAL_IMPORT_CAPABILITY);
+        // issue #3401: the sixth venue sentence follows the vector exactly as the section does, so the
+        // sealed Report, the claim's venue sentences, and the section cannot disagree. Without the
+        // declaration -- every rollback entry -- the Report and the claim keep the five byte for byte.
+        const entryPublicationDisclosed = composedCapabilities !== undefined
+          && composedCapabilities.includes(OWNER_CONTROLLED_PUBLICATION_CAPABILITY);
+        const venueLimits = localVenueLimitsForRun(runRecord, importedRun, entryPublicationDisclosed);
+        const venueHonesty = buildLocalVenueHonesty(
+          matrixRecord.cells,
+          runRecord,
+          carriage.anchors,
+          importedRun,
+          entryPublicationDisclosed,
+        );
+        // paired-majority-delta@1 carries the same PAIRED_ESTIMATE_LIMITATION as paired-delta@1
+        // (coordinator ruling, packet #2837): the line describes the method's SHAPE -- an
+        // estimator rather than a gate -- not its unit, and both methods are estimators. The
+        // withheld-interval case (fewer than 5 paired tasks, or fewer than two source clusters)
+        // gets NO extra limitation line here: §7.2's frozen reporting rule makes the withholding a
+        // registry-verified OUTPUT already printed from the method's own `reasons`, explicitly
+        // "not a gap" -- a disclosure line here would publish that same fact at a second
+        // disclosure level.
+        const limitations = entry.method === BENCHMARKING_METHOD_IDS.pairedDelta
+          || entry.method === BENCHMARKING_METHOD_IDS.pairedMajorityDelta
+          ? [
+              ...venueLimits,
+              ...inspectLimits,
+              ...suiteLimits,
+              PAIRED_ESTIMATE_LIMITATION,
+              ...(previewLimitation === undefined ? [] : [previewLimitation]),
+            ]
+          : previewLimitation === undefined
+            ? [...venueLimits, ...inspectLimits, ...binaryLimits, ...suiteLimits]
+            : [...venueLimits, ...inspectLimits, ...binaryLimits, ...suiteLimits, previewLimitation];
+
         let produced: ProducedReport;
         try {
           produced = await produceReport(
@@ -505,6 +517,7 @@ export function runReport(
           ...(carriage.anchoredClosure ? { anchors: carriage.anchors } : {}),
           ...(entryIsDisclosed ? { disclosure: disclosureCarriage!.disclosure } : {}),
           ...(entryIsImported ? { externalImport: importedCarriage!.claim } : {}),
+          ...(entryPublicationDisclosed ? { ownerControlledPublication: OWNER_CONTROLLED_PUBLICATION_LIMIT } : {}),
           ...(composedCapabilities === undefined ? {} : { composedCapabilities }),
           ...(previewLog !== undefined && previewLog.count > 0
             ? { previewDisclosure: { previewCount: previewLog.count, timestamps: previewLog.previews.map((preview) => preview.at) } }

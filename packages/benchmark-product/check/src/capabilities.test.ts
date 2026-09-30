@@ -66,12 +66,13 @@ function entry(token: string, order: number, overrides: Partial<CapabilityEntry>
 }
 
 describe("the registered capabilities", () => {
-  test("exactly four, under their stable wire tokens", () => {
+  test("exactly five, under their stable wire tokens", () => {
     expect(CAPABILITY_REGISTRY.map((capability) => capability.token)).toEqual([
       "binary-qualification",
       "anchoring",
       "disclosure-specification",
       "external-import",
+      "owner-controlled-publication",
     ]);
   });
 
@@ -132,6 +133,23 @@ describe("the registered capabilities", () => {
     expect(imported.refines).toEqual([]);
     expect(imported.checks).toEqual(["external-import"]);
     expect(imported.claimSection).toBe("externalImport");
+  });
+
+  test("owner-controlled-publication adds a sealed sentence and nothing else (issue #3401)", () => {
+    // No member, no grammar, no role, and no check of its own: the sentence and the section are
+    // rebuilt by claim-consistency from the declared vector, so a sixth top-level check would add
+    // a denominator without adding a fact.
+    const publication = CAPABILITY_REGISTRY.find((capability) => capability.token === "owner-controlled-publication")!;
+    expect(publication.order).toBe(6);
+    expect(publication.mandatoryFiles).toEqual([]);
+    expect(publication.memberPatterns).toEqual([]);
+    expect(publication.requires).toEqual([]);
+    expect(publication.conflicts).toEqual([]);
+    expect(publication.refines).toEqual([]);
+    expect(publication.roleDerivations).toEqual([]);
+    expect(publication.checks).toEqual([]);
+    expect(publication.claimSection).toBe("ownerControlledPublication");
+    expect(expectedChecks(["owner-controlled-publication"])).toEqual(expectedChecks([]));
   });
 });
 
@@ -390,8 +408,9 @@ describe("reader instructions", () => {
       "binary-qualification": "verify@0.1.0",
       anchoring: "verify@0.1.0",
       "disclosure-specification": "verify@0.2.1",
-      // New with the composed generation: no verify release implements it.
+      // New with the composed generation: no verify release implements either.
       "external-import": "check@0.2.1",
+      "owner-controlled-publication": "check@0.2.1",
     });
   });
 
@@ -410,45 +429,50 @@ describe("producer-side activation", () => {
     declaresDisclosure: false,
     importedRun: false,
   };
+  // Interoperability profile section 9.3: a self-run publisher's publication source is
+  // owner-controlled. Every bundle this product builds is self-run, so every composed vector
+  // declares it, whatever the run's other facts (issue #3401).
+  const PUBLICATION = "owner-controlled-publication";
 
   test("each predicate turns on exactly its own token, in canonical wire order", () => {
-    expect(activeCapabilityVector(NONE)).toEqual([]);
-    expect(activeCapabilityVector({ ...NONE, anchoredClosure: true })).toEqual(["anchoring"]);
+    expect(activeCapabilityVector(NONE)).toEqual([PUBLICATION]);
+    expect(activeCapabilityVector({ ...NONE, anchoredClosure: true })).toEqual(["anchoring", PUBLICATION]);
     expect(activeCapabilityVector({ ...NONE, projectsBinaryQualification: true }))
-      .toEqual(["binary-qualification"]);
-    expect(activeCapabilityVector({ ...NONE, importedRun: true })).toEqual(["external-import"]);
+      .toEqual(["binary-qualification", PUBLICATION]);
+    expect(activeCapabilityVector({ ...NONE, importedRun: true })).toEqual(["external-import", PUBLICATION]);
     expect(activeCapabilityVector({
       anchoredClosure: true,
       projectsBinaryQualification: true,
       declaresDisclosure: true,
       importedRun: false,
-    })).toEqual(["anchoring", "binary-qualification", "disclosure-specification"]);
+    })).toEqual(["anchoring", "binary-qualification", "disclosure-specification", PUBLICATION]);
     expect(activeCapabilityVector({
       anchoredClosure: true,
       projectsBinaryQualification: true,
       declaresDisclosure: true,
       importedRun: true,
-    })).toEqual(["anchoring", "binary-qualification", "disclosure-specification", "external-import"]);
+    })).toEqual(["anchoring", "binary-qualification", "disclosure-specification", "external-import", PUBLICATION]);
   });
 
   test("a declaration rides the qualification analysis alone, and needs no anchor", () => {
     // A run publishes one bundle per analysis. The record is named by the qualification Report's
     // own extension, so a sibling headline or comparison analysis never carried it (issue #2839).
-    expect(activeCapabilityVector({ ...NONE, declaresDisclosure: true })).toEqual([]);
+    expect(activeCapabilityVector({ ...NONE, declaresDisclosure: true })).toEqual([PUBLICATION]);
     expect(activeCapabilityVector({ ...NONE, anchoredClosure: true, declaresDisclosure: true }))
-      .toEqual(["anchoring"]);
+      .toEqual(["anchoring", PUBLICATION]);
     // The cell the closure model never allocated: disclosed and qualified, unanchored.
     expect(activeCapabilityVector({ ...NONE, projectsBinaryQualification: true, declaresDisclosure: true }))
-      .toEqual(["binary-qualification", "disclosure-specification"]);
+      .toEqual(["binary-qualification", "disclosure-specification", PUBLICATION]);
   });
 
-  test("every activated vector resolves", () => {
+  test("every activated vector resolves, and declares owner-controlled-publication", () => {
     for (const anchoredClosure of [false, true]) {
       for (const projectsBinaryQualification of [false, true]) {
         for (const declaresDisclosure of [false, true]) {
           for (const importedRun of [false, true]) {
             const facts = { anchoredClosure, projectsBinaryQualification, declaresDisclosure, importedRun };
             expect(() => composeClosure(activeCapabilityVector(facts)), JSON.stringify(facts)).not.toThrow();
+            expect(activeCapabilityVector(facts), JSON.stringify(facts)).toContain(PUBLICATION);
           }
         }
       }

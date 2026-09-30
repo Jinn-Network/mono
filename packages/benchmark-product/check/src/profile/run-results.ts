@@ -4,6 +4,7 @@ import { anchoredPreRegistration, anchoredVenueLimits, type ClaimAnchor } from "
 import { runBoundVenueLimits } from "../binding/report-face.js";
 import type { VerifiedRunBinding } from "../binding/beacon-binding.js";
 import { IMPORTED_RUN_PINNING_LIMIT } from "./external-import.js";
+import { OWNER_CONTROLLED_PUBLICATION_LIMIT } from "./owner-controlled-publication.js";
 
 export const LOCAL_VENUE_LIMITS: readonly string[] = [
   "This is a local, self-run venue: the same operator controls task dispatch, execution, and evaluation.",
@@ -13,9 +14,12 @@ export const LOCAL_VENUE_LIMITS: readonly string[] = [
   "Distinct solver and evaluator identities prove agent-distinctness only — each evaluator identity is backed by its own workspace-minted signing key, whose verdict signature this product verifies — not that they are independent real-world parties.",
 ];
 const MULTI = "Run pinning on the harness, model, and loadout axes is enforced by an admission gate at dispatch time. The isolation axis is unverifiable: this configured venue admits both unrestricted and OCI-container execution, so its multi-policy inventory cannot establish containment from admission alone.";
-export function localVenueLimitsForRun(run: Pick<RunRecord, "policy">, imported = false): readonly string[] {
+/** `ownerControlledPublication` appends the sixth sentence after the five (issue #3401); omitted,
+ * every run keeps its exact five. */
+export function localVenueLimitsForRun(run: Pick<RunRecord, "policy">, imported = false, ownerControlledPublication = false): readonly string[] {
   const limits = venueIsolationPostureForPolicy(run.policy.submissionBaseline?.isolationPolicy).inventory.length === 1 ? LOCAL_VENUE_LIMITS : [LOCAL_VENUE_LIMITS[0]!, LOCAL_VENUE_LIMITS[1]!, MULTI, ...LOCAL_VENUE_LIMITS.slice(3)];
-  return imported ? [limits[0]!, limits[1]!, IMPORTED_RUN_PINNING_LIMIT, ...limits.slice(3)] : limits;
+  const venue = imported ? [limits[0]!, limits[1]!, IMPORTED_RUN_PINNING_LIMIT, ...limits.slice(3)] : limits;
+  return ownerControlledPublication ? [...venue, OWNER_CONTROLLED_PUBLICATION_LIMIT] : venue;
 }
 /** `anchors` is the same derived section the producer used (anchor-evidence §7.4); the conditional
  * copy is the same pure function on both sides, so claim-consistency stays an exact byte-compare.
@@ -30,6 +34,7 @@ export function buildLocalVenueHonesty(
   anchors: readonly ClaimAnchor[] = [],
   binding?: VerifiedRunBinding,
   imported = false,
+  ownerControlledPublication = false,
 ) {
   const counts = { harness: 0, model: 0, loadout: 0, isolation: 0 };
   for (const cell of cells) for (const axis of Object.keys(counts) as Array<keyof typeof counts>) if (cell.verification[axis] === "unverifiable") counts[axis] += 1;
@@ -37,5 +42,5 @@ export function buildLocalVenueHonesty(
   // so the obligation stays with whoever supplies it -- `readRunBindingCarriage` workspace-side,
   // step 2c of EXTERNAL-VERIFICATION.md for a reader. `binding-face-carriage.test.ts` pins that
   // this is the only such site.
-  return { venue: "self-run" as const, preRegistration: anchoredPreRegistration(anchors), limits: runBoundVenueLimits(anchoredVenueLimits(localVenueLimitsForRun(run, imported), anchors), binding), unverifiableAxisCounts: counts };
+  return { venue: "self-run" as const, preRegistration: anchoredPreRegistration(anchors), limits: runBoundVenueLimits(anchoredVenueLimits(localVenueLimitsForRun(run, imported, ownerControlledPublication), anchors), binding), unverifiableAxisCounts: counts };
 }

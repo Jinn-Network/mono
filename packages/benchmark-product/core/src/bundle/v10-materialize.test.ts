@@ -18,6 +18,11 @@
  * asserted here is that the producer emits what the verifier accepts, cell by cell.
  * The sixth is a combination no format number was ever allocated for.
  *
+ * Every vector also declares `owner-controlled-publication` (issue #3401): this product publishes
+ * only from its self-run venue, whose publication source is owner-controlled, so every composed
+ * bundle seals the sixth venue sentence. It adds no member and no check, so each cell's check list
+ * is still its legacy closure's.
+ *
  * The flag is an operation input, not a CLI switch. Rollback is flipping the default back.
  */
 
@@ -30,12 +35,14 @@ import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import {
   BUNDLE_V10_FORMAT,
   CAPABILITY_REGISTRY,
+  OWNER_CONTROLLED_PUBLICATION_LIMIT,
   composeClosure,
   verifyPublicBundle,
 } from "@colophon-claims/check";
 import type { OperationContext } from "../operations/context.js";
 import { runVerify } from "../operations/verify.js";
 import { COMPOSED_CLAIM_PACKAGE_SCHEMA_ID } from "../report/claim.js";
+import { LOCAL_VENUE_LIMITS } from "../operations/run-results.js";
 import {
   PUBLIC_BUNDLE_V6_CHECKS,
   PUBLIC_BUNDLE_V7_CHECKS,
@@ -84,34 +91,34 @@ function once(label: string, build: (workspaceDir: string) => Promise<{ workspac
 const CELLS = [
   {
     cell: "/2",
-    vector: [],
+    vector: ["owner-controlled-publication"],
     checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
     run: () => once("base", (workspaceDir) => createSyntheticV6BundleFixture({ workspaceDir, composedFormat: true })),
   },
   {
     cell: "/4",
-    vector: ["binary-qualification"],
+    vector: ["binary-qualification", "owner-controlled-publication"],
     checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
     run: () => once("qualified", (workspaceDir) =>
       createSyntheticV4BundleFixture({ workspaceDir, truthAdmission: "operator-only", composedFormat: true })),
   },
   {
     cell: "/6",
-    vector: ["anchoring"],
+    vector: ["anchoring", "owner-controlled-publication"],
     checks: PUBLIC_BUNDLE_V6_CHECKS,
     run: () => once("anchored", (workspaceDir) =>
       createSyntheticV6BundleFixture({ workspaceDir, plans: [{ kind: "rfc3161-lock" }], composedFormat: true })),
   },
   {
     cell: "/7",
-    vector: ["anchoring", "binary-qualification"],
+    vector: ["anchoring", "binary-qualification", "owner-controlled-publication"],
     checks: PUBLIC_BUNDLE_V7_CHECKS,
     run: () => once("anchored-qualified", (workspaceDir) =>
       createSyntheticV4BundleFixture({ workspaceDir, truthAdmission: "operator-only", anchorLock: true, composedFormat: true })),
   },
   {
     cell: "/8",
-    vector: ["anchoring", "binary-qualification", "disclosure-specification"],
+    vector: ["anchoring", "binary-qualification", "disclosure-specification", "owner-controlled-publication"],
     checks: [...PUBLIC_BUNDLE_V7_CHECKS, "disclosure-specification"],
     run: () => once("disclosed", (workspaceDir) =>
       createSyntheticV4BundleFixture({
@@ -128,7 +135,7 @@ const CELLS = [
     // anchored. Composed, the registry lets the record ride any qualification bundle, so the
     // combination costs nothing: no format number, no claim-package id, no check array.
     cell: "no legacy cell",
-    vector: ["binary-qualification", "disclosure-specification"],
+    vector: ["binary-qualification", "disclosure-specification", "owner-controlled-publication"],
     checks: [...PUBLIC_BUNDLE_VERIFICATION_CHECKS, "disclosure-specification"],
     run: () => once("disclosed-unanchored", (workspaceDir) =>
       createSyntheticV4BundleFixture({
@@ -212,6 +219,20 @@ describe("composed bundle v10 — producer, one run per pre-composition cell", (
       // The Report extension is the disclosure capability's one edge, present exactly when declared.
       expect(json(built.bundleDir, "report.json")[DISCLOSURE_SPECIFICATION_EXTENSION] !== undefined)
         .toBe((expected.vector as readonly string[]).includes("disclosure-specification"));
+      // The sixth venue sentence (issue #3401), right after the five, once, in each sealed copy.
+      const reportLimitations = json(built.bundleDir, "report.json")["limitations"] as string[];
+      // The five are the run's own (the qualification cells' venue is multi-policy), then the sixth.
+      expect(reportLimitations.slice(0, 2)).toEqual(LOCAL_VENUE_LIMITS.slice(0, 2));
+      expect(reportLimitations.slice(3, 5)).toEqual(LOCAL_VENUE_LIMITS.slice(3, 5));
+      expect(reportLimitations[5]).toBe(OWNER_CONTROLLED_PUBLICATION_LIMIT);
+      expect(reportLimitations.filter((line) => line === OWNER_CONTROLLED_PUBLICATION_LIMIT)).toHaveLength(1);
+      expect(claim["limitations"]).toEqual(reportLimitations);
+      // Anchoring rewrites the second sentence and appends its own lines after the sixth.
+      expect(claim["venueHonesty"]["limits"][5]).toBe(OWNER_CONTROLLED_PUBLICATION_LIMIT);
+      expect(claim["ownerControlledPublication"]).toBe(OWNER_CONTROLLED_PUBLICATION_LIMIT);
+      // The page renders the sealed copies; the report page escapes the apostrophe.
+      const page = readFileSync(join(built.bundleDir, "index.html"), "utf8");
+      expect(page).toContain(OWNER_CONTROLLED_PUBLICATION_LIMIT.replace("'", "&#39;"));
 
       // The standalone reader, handed a detached copy, runs the legacy cell's checks in its order.
       const verified = await verifyPublicBundle(detach(built.bundleDir, "verified"));
@@ -239,14 +260,14 @@ describe("composed bundle v10 — a real bundle under another declaration", () =
     // `disclosure-specification` has no member of its own, so the member closure has nothing to
     // object to. The Report still names the record, and the closure-independent guard refuses it.
     const undisclosed = detach(disclosed.bundleDir, "undisclosed");
-    redeclare(undisclosed, ["anchoring", "binary-qualification"]);
+    redeclare(undisclosed, ["anchoring", "binary-qualification", "owner-controlled-publication"]);
     expect(await refusal(undisclosed)).toEqual({
       path: "report.json",
       message: expect.stringContaining("publishable only on"),
     });
 
     const unanchored = detach(disclosed.bundleDir, "unanchored");
-    redeclare(unanchored, ["binary-qualification", "disclosure-specification"]);
+    redeclare(unanchored, ["binary-qualification", "disclosure-specification", "owner-controlled-publication"]);
     expect(await refusal(unanchored)).toEqual({
       path: expect.stringMatching(/^anchors\/[a-f0-9]{64}\.bin$/u),
       message: expect.stringContaining("non-allowlisted"),
@@ -258,7 +279,7 @@ describe("composed bundle v10 — a real bundle under another declaration", () =
     // from the undisclosed cell, so the closure-independent guard above is not what fires.
     const qualified = await cell("/7").run();
     const unqualified = detach(qualified.bundleDir, "unqualified");
-    redeclare(unqualified, ["anchoring"]);
+    redeclare(unqualified, ["anchoring", "owner-controlled-publication"]);
     expect(await refusal(unqualified)).toEqual({
       path: "evidence.json",
       message: "evidence.json does not satisfy its public bundle schema",
@@ -289,9 +310,56 @@ describe("composed bundle v10 — a real bundle under another declaration", () =
     const paths = [...(json(smuggled, "bundle.json")["files"] as { path: string }[]).map((file) => file.path), recordPath];
     writeFileSync(
       join(smuggled, "bundle.json"),
-      buildBundleManifest(smuggled, paths, { format: BUNDLE_V10_FORMAT, capabilities: ["anchoring", "binary-qualification"] }).bytes,
+      buildBundleManifest(smuggled, paths, {
+        format: BUNDLE_V10_FORMAT,
+        capabilities: ["anchoring", "binary-qualification", "owner-controlled-publication"],
+      }).bytes,
     );
     expect((await refusal(smuggled)).path).toBe("evidence-closure");
+  }, 300_000);
+
+  test("the sixth sentence without its declaration is refused (issue #3401)", async () => {
+    const base = await cell("/2").run();
+
+    // The whole bundle as sealed, redeclared without the capability: the claim's section is the
+    // first thing the rebuild no longer derives.
+    const redeclared = detach(base.bundleDir, "undeclared-publication");
+    redeclare(redeclared, []);
+    expect(await refusal(redeclared)).toEqual({
+      path: "claim-consistency",
+      message: "claim package ownerControlledPublication is not the exact projection of verified facts",
+    });
+
+    // The claim rewritten to the five as well, so it matches the undeclared rebuild exactly. The
+    // signed Report still seals the sentence, and that alone is refused.
+    const rewritten = detach(base.bundleDir, "undeclared-publication-claim");
+    const claim = json(rewritten, "claim-package.json");
+    delete claim["ownerControlledPublication"];
+    claim["venueHonesty"]["limits"] = [...LOCAL_VENUE_LIMITS];
+    writeFileSync(join(rewritten, "claim-package.json"), canonicalJsonBytes(claim as never));
+    redeclare(rewritten, []);
+    expect(await refusal(rewritten)).toEqual({
+      path: "claim-consistency",
+      message: "Report limitations carry the publication-source sentence, but the bundle does not declare owner-controlled-publication",
+    });
+  }, 300_000);
+
+  test("the declaration without the sixth sentence in the claim is refused (issue #3401)", async () => {
+    const base = await cell("/2").run();
+    for (const [label, strip] of [
+      ["section", (claim: Record<string, any>) => { delete claim["ownerControlledPublication"]; }],
+      ["venue sentences", (claim: Record<string, any>) => { claim["venueHonesty"]["limits"] = [...LOCAL_VENUE_LIMITS]; }],
+    ] as const) {
+      const stripped = detach(base.bundleDir, `stripped-${label.replace(" ", "-")}`);
+      const claim = json(stripped, "claim-package.json");
+      strip(claim);
+      writeFileSync(join(stripped, "claim-package.json"), canonicalJsonBytes(claim as never));
+      redeclare(stripped, ["owner-controlled-publication"]);
+      expect(await refusal(stripped), label).toEqual({
+        path: "claim-consistency",
+        message: expect.stringMatching(/^claim package (ownerControlledPublication|venueHonesty\.limits) is not the exact projection/u),
+      });
+    }
   }, 300_000);
 
   test("declaring a capability the bundle does not carry is refused", async () => {
@@ -299,7 +367,7 @@ describe("composed bundle v10 — a real bundle under another declaration", () =
 
     // Declared without its record: nothing on this Report names a disclosure-specification record.
     const overdeclared = detach(qualified.bundleDir, "overdeclared");
-    redeclare(overdeclared, ["anchoring", "binary-qualification", "disclosure-specification"]);
+    redeclare(overdeclared, ["anchoring", "binary-qualification", "disclosure-specification", "owner-controlled-publication"]);
     expect(await refusal(overdeclared)).toEqual({
       path: "disclosure-specification",
       message: expect.stringContaining(`must carry ${DISCLOSURE_SPECIFICATION_EXTENSION}`),
@@ -308,7 +376,7 @@ describe("composed bundle v10 — a real bundle under another declaration", () =
     // Declared without its members, on the base cell: there is no qualification document.
     const base = await cell("/2").run();
     const unbacked = detach(base.bundleDir, "unbacked");
-    redeclare(unbacked, ["binary-qualification"]);
+    redeclare(unbacked, ["binary-qualification", "owner-controlled-publication"]);
     expect(await refusal(unbacked)).toEqual({
       path: "qualification.json",
       message: expect.stringContaining("is missing"),

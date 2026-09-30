@@ -5,7 +5,8 @@ import { buildClaimPackage, type BuildClaimPackageInput, type ClaimPackage } fro
 import type { ClaimAnchor } from "./anchor-claims.js";
 import type { ClaimDisclosureSection } from "./disclosure.js";
 import type { ClaimExternalImportSection } from "./external-import.js";
-import { EXTERNAL_IMPORT_CAPABILITY } from "../capabilities.js";
+import { EXTERNAL_IMPORT_CAPABILITY, OWNER_CONTROLLED_PUBLICATION_CAPABILITY } from "../capabilities.js";
+import { OWNER_CONTROLLED_PUBLICATION_LIMIT, assertOwnerControlledPublicationLimitations } from "./owner-controlled-publication.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "./run-results.js";
 import { previewDisclosureSummaryLine } from "./preview-log.js";
 import { venueIsolationPostureForPolicy } from "./isolation.js";
@@ -56,7 +57,9 @@ export function assertClaimConsistency(input: { readonly claim: ClaimPackage; re
   // bundle, and an omitted one to every unanchored bundle.
   const anchors = input.anchors;
   const imported = input.composedCapabilities?.includes(EXTERNAL_IMPORT_CAPABILITY) === true;
-  const expected = buildClaimPackage({ draftId: input.draftId, benchmarkSha256: identities.benchmarkSha256, runRecord, runSha256: identities.runSha256, matrixRecord, matrixSha256: identities.matrixSha256, reportRecord, reportSha256: identities.reportSha256, reportEnvelopeSha256: identities.reportEnvelopeSha256, venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, anchors ?? [], undefined, imported), verificationCommandVerb: "bundle verify", assurance: { preset: input.assurancePreset, resolved: { independence: runRecord.policy.independence, minVerdicts, distinctEvaluator, verdictRule } }, ...(input.rehearsal === undefined ? {} : { previewDisclosure: input.rehearsal }), ...(anchors === undefined ? {} : { anchors }), ...(input.composedCapabilities === undefined ? {} : { composedCapabilities: input.composedCapabilities }), ...(input.disclosure === undefined ? {} : { disclosure: input.disclosure }), ...(input.externalImport === undefined ? {} : { externalImport: input.externalImport }) });
+  // issue #3401: the sixth venue sentence and its section, rebuilt from the declared vector.
+  const ownerControlledPublication = input.composedCapabilities?.includes(OWNER_CONTROLLED_PUBLICATION_CAPABILITY) === true;
+  const expected = buildClaimPackage({ draftId: input.draftId, benchmarkSha256: identities.benchmarkSha256, runRecord, runSha256: identities.runSha256, matrixRecord, matrixSha256: identities.matrixSha256, reportRecord, reportSha256: identities.reportSha256, reportEnvelopeSha256: identities.reportEnvelopeSha256, venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, anchors ?? [], undefined, imported, ownerControlledPublication), verificationCommandVerb: "bundle verify", assurance: { preset: input.assurancePreset, resolved: { independence: runRecord.policy.independence, minVerdicts, distinctEvaluator, verdictRule } }, ...(input.rehearsal === undefined ? {} : { previewDisclosure: input.rehearsal }), ...(anchors === undefined ? {} : { anchors }), ...(input.composedCapabilities === undefined ? {} : { composedCapabilities: input.composedCapabilities }), ...(input.disclosure === undefined ? {} : { disclosure: input.disclosure }), ...(input.externalImport === undefined ? {} : { externalImport: input.externalImport }), ...(ownerControlledPublication ? { ownerControlledPublication: OWNER_CONTROLLED_PUBLICATION_LIMIT } : {}) });
   if (!equal(canonicalJsonBytes(claim), canonicalJsonBytes(expected))) refuse("record-integrity", "claim-consistency", `claim package ${firstDifference(claim, expected) ?? "claim"} is not the exact projection of verified facts`);
   const rehearsalLine = input.rehearsal === undefined ? undefined : previewDisclosureSummaryLine(input.rehearsal);
   const binaryLimitations = reportRecord.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument
@@ -72,13 +75,15 @@ export function assertClaimConsistency(input: { readonly claim: ClaimPackage; re
     || reportRecord.method.id === BENCHMARKING_METHOD_IDS.pairedMajorityDelta
       ? [PAIRED_ESTIMATE_LIMITATION]
       : [];
+  const venueLimits = localVenueLimitsForRun(runRecord, imported, ownerControlledPublication);
   const expectedLimitations = [
-    ...localVenueLimitsForRun(runRecord, imported),
+    ...venueLimits,
     ...(input.additionalLimitations ?? []),
     ...binaryLimitations,
     ...pairedEstimateLimitation,
     ...(rehearsalLine === undefined ? [] : [rehearsalLine]),
   ];
+  assertOwnerControlledPublicationLimitations({ reportLimitations: reportRecord.limitations ?? [], venueLimits, declared: ownerControlledPublication });
   const posture = venueIsolationPostureForPolicy(runRecord.policy.submissionBaseline?.isolationPolicy);
   // The gate itself is UNCHANGED by the paired-estimate addition (still isolation posture,
   // caller-supplied additionalLimitations, or the existing binary-instrument arm). Deliberately

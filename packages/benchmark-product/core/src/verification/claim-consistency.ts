@@ -1,5 +1,12 @@
 import { BENCHMARKING_METHOD_IDS, type BenchmarkRecord, type MatrixRecord, type ReportRecord, type RunRecord } from "@jinn-network/benchmarking-records";
-import { firstDifference, type ClaimAnchor, type ClaimDisclosureSection, type ClaimExternalImportSection } from "@colophon-claims/check";
+import {
+  OWNER_CONTROLLED_PUBLICATION_LIMIT,
+  assertOwnerControlledPublicationLimitations,
+  firstDifference,
+  type ClaimAnchor,
+  type ClaimDisclosureSection,
+  type ClaimExternalImportSection,
+} from "@colophon-claims/check";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "../operations/run-results.js";
@@ -7,7 +14,7 @@ import { buildClaimPackage, type BuildClaimPackageInput, type ClaimPackage } fro
 import { binaryInstrumentReportLimitations } from "../run/binary-instrument-profile.js";
 import { previewDisclosureSummaryLine } from "../run/preview-log.js";
 import { venueIsolationPostureForPolicy } from "../venue/isolation.js";
-import { EXTERNAL_IMPORT_CAPABILITY } from "@colophon-claims/check";
+import { EXTERNAL_IMPORT_CAPABILITY, OWNER_CONTROLLED_PUBLICATION_CAPABILITY } from "@colophon-claims/check";
 
 /** Mirrors `operations/report.ts`'s own (unexported) copy of this exact string -- see the comment
  * at its use below. Not shared via export: `operations/publication-report.ts` already carries its
@@ -84,6 +91,9 @@ export function assertClaimConsistency(input: {
     refuse("record-integrity", "claim-consistency", "sealed Run carries no complete evaluation-assurance primitives");
   }
   const imported = input.composedCapabilities?.includes(EXTERNAL_IMPORT_CAPABILITY) === true;
+  // issue #3401: the sixth venue sentence and its section, rebuilt from the declared vector.
+  const ownerControlledPublication =
+    input.composedCapabilities?.includes(OWNER_CONTROLLED_PUBLICATION_CAPABILITY) === true;
   const expected = buildClaimPackage({
     draftId: input.draftId,
     benchmarkSha256: identities.benchmarkSha256,
@@ -94,7 +104,13 @@ export function assertClaimConsistency(input: {
     reportRecord,
     reportSha256: identities.reportSha256,
     reportEnvelopeSha256: identities.reportEnvelopeSha256,
-    venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, input.anchors ?? [], imported),
+    venueHonesty: buildLocalVenueHonesty(
+      matrixRecord.cells,
+      runRecord,
+      input.anchors ?? [],
+      imported,
+      ownerControlledPublication,
+    ),
     verificationCommandVerb: "bundle verify",
     assurance: {
       preset: input.assurancePreset,
@@ -110,6 +126,7 @@ export function assertClaimConsistency(input: {
     ...(input.composedCapabilities === undefined ? {} : { composedCapabilities: input.composedCapabilities }),
     ...(input.disclosure === undefined ? {} : { disclosure: input.disclosure }),
     ...(input.externalImport === undefined ? {} : { externalImport: input.externalImport }),
+    ...(ownerControlledPublication ? { ownerControlledPublication: OWNER_CONTROLLED_PUBLICATION_LIMIT } : {}),
     ...(input.suiteComparability === undefined ? {} : { suiteComparability: input.suiteComparability }),
   });
   if (!bytesEqual(canonicalJsonBytes(claim), canonicalJsonBytes(expected))) {
@@ -138,13 +155,19 @@ export function assertClaimConsistency(input: {
     || reportRecord.method.id === BENCHMARKING_METHOD_IDS.pairedMajorityDelta
       ? [PAIRED_ESTIMATE_LIMITATION]
       : [];
+  const venueLimits = localVenueLimitsForRun(runRecord, imported, ownerControlledPublication);
   const expectedLimitations = [
-    ...localVenueLimitsForRun(runRecord, imported),
+    ...venueLimits,
     ...(input.additionalLimitations ?? []),
     ...binaryLimitations,
     ...pairedEstimateLimitation,
     ...(rehearsalLine === undefined ? [] : [rehearsalLine]),
   ];
+  assertOwnerControlledPublicationLimitations({
+    reportLimitations,
+    venueLimits,
+    declared: ownerControlledPublication,
+  });
   const isolationPosture = venueIsolationPostureForPolicy(
     runRecord.policy.submissionBaseline?.["isolationPolicy"],
   );

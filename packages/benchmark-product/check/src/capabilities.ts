@@ -147,6 +147,7 @@ export const BINARY_QUALIFICATION_CAPABILITY = "binary-qualification" as const;
 export const ANCHORING_CAPABILITY = "anchoring" as const;
 export const DISCLOSURE_SPECIFICATION_CAPABILITY = "disclosure-specification" as const;
 export const EXTERNAL_IMPORT_CAPABILITY = "external-import" as const;
+export const OWNER_CONTROLLED_PUBLICATION_CAPABILITY = "owner-controlled-publication" as const;
 
 /**
  * Every capability this build implements, in `order`.
@@ -233,6 +234,31 @@ export const CAPABILITY_REGISTRY = [
     checks: ["external-import"],
     minimumReaderRelease: "check@0.2.1",
     activation: (facts) => facts.importedRun,
+  },
+  {
+    // Issue #3401, operator ruling of 2026-09-24. Additive and memberless: a sixth sealed venue
+    // sentence, appended after the five in the Report limitations and `venueHonesty.limits`, and
+    // carried again as the claim section. It appends no check: both claim-consistency copies
+    // rebuild the sentence and the section from the declared vector and refuse the sentence
+    // without the declaration, or the declaration without the sentence, so a check of its own
+    // would add a denominator without adding a fact. Its first reader is the first `check` release.
+    token: OWNER_CONTROLLED_PUBLICATION_CAPABILITY,
+    order: 6,
+    requires: [],
+    conflicts: [],
+    mandatoryFiles: [],
+    memberPatterns: [],
+    refines: [],
+    roleDerivations: [],
+    claimSection: "ownerControlledPublication",
+    checks: [],
+    minimumReaderRelease: "check@0.2.1",
+    // Interoperability profile section 9.3 requires a self-run publisher to disclose that its
+    // publication source is owner-controlled. Every bundle this product builds is self-run (the
+    // claim's `scope.venue` admits no other value): the workspace mints the key that signs the
+    // Report and the owner hosts the bundle. So every composed bundle declares it, imported runs
+    // included, whatever the run's other facts.
+    activation: () => true,
   },
 ] as const satisfies readonly CapabilityEntry[];
 

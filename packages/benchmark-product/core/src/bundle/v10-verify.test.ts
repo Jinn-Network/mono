@@ -29,6 +29,7 @@ import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import {
   BUNDLE_V10_FORMAT,
   COMPOSED_CLAIM_PACKAGE_SCHEMA_ID,
+  OWNER_CONTROLLED_PUBLICATION_LIMIT,
   readerInstructions,
   verifyPublicBundle,
   verifyPublicBundleSnapshot,
@@ -193,6 +194,14 @@ describe("composed bundle v10 — portable verification", () => {
     expect(page).not.toContain("Open a cell to inspect its evidence");
     expect(page.split('<p class="about">').length - 1).toBe(1);
     expect(page.split("values below are copied without reconciliation").length - 1).toBe(1);
+    // A /10 bundle that does not declare `owner-controlled-publication` keeps the five venue
+    // sentences byte for byte, and neither its records nor its page carry the sixth (issue #3401).
+    const undeclared = json(bundleDir, "claim-package.json");
+    expect(undeclared["ownerControlledPublication"]).toBeUndefined();
+    expect(undeclared["venueHonesty"]["limits"]).toHaveLength(5);
+    expect([...undeclared["limitations"], ...undeclared["venueHonesty"]["limits"]])
+      .not.toContain(OWNER_CONTROLLED_PUBLICATION_LIMIT);
+    expect(page).not.toContain("publication source is owner-controlled");
 
     // ── The same real bundle, under every other declaration ─────────────────────────────────────
     //
@@ -237,6 +246,30 @@ describe("composed bundle v10 — portable verification", () => {
     expect(await refusal(bundleDir)).toEqual({
       path: "claim-consistency",
       message: expect.stringContaining("claimSchema"),
+    });
+  }, 180_000);
+
+  test("declaring owner-controlled-publication over a Report sealed with the five is refused (issue #3401)", async () => {
+    // The claim is made exactly what the declaration derives -- the section, and the sixth sentence
+    // after the five venue sentences -- so the one thing left to disagree is the signed Report,
+    // which was sealed without the sentence and cannot be edited without breaking its signature.
+    const workspaceDir = mkdtempSync(join(tmpdir(), "composed-v10-publication-"));
+    roots.push(workspaceDir);
+    const built = await createSyntheticV6BundleFixture({ workspaceDir, plans: [{ kind: "rfc3161-lock" }] });
+    const bundleDir = detach(built.bundle.bundleDir);
+    const comparison = sixComparison((await verifyPublicBundleSnapshot(bundleDir)).comparison);
+
+    const claim = json(bundleDir, "claim-package.json");
+    const limits = claim["venueHonesty"]["limits"] as string[];
+    expect(limits).toHaveLength(5);
+    claim["venueHonesty"]["limits"] = [...limits, OWNER_CONTROLLED_PUBLICATION_LIMIT];
+    claim["ownerControlledPublication"] = OWNER_CONTROLLED_PUBLICATION_LIMIT;
+    writeFileSync(join(bundleDir, "claim-package.json"), canonicalJsonBytes(claim));
+    convertToComposed(bundleDir, comparison, { capabilities: [...ANCHORED, "owner-controlled-publication"] });
+
+    expect(await refusal(bundleDir)).toEqual({
+      path: "claim-consistency",
+      message: "a bundle declaring owner-controlled-publication must seal the publication-source sentence in its Report limitations, right after the venue sentences",
     });
   }, 180_000);
 });

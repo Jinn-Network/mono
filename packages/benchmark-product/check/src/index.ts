@@ -100,6 +100,7 @@ export {
   CapabilityVectorSchema,
   DISCLOSURE_SPECIFICATION_CAPABILITY,
   EXTERNAL_IMPORT_CAPABILITY,
+  OWNER_CONTROLLED_PUBLICATION_CAPABILITY,
   activeCapabilityVector,
   composeClosure,
   expectedChecks,
@@ -145,6 +146,14 @@ export type {
   ClaimExternalImportSection,
   ExternalImportMarker,
 } from "./profile/external-import.js";
+// The sixth sealed venue sentence (issue #3401). Single-sourced here so the producer's sealed copy
+// and the verifier's rebuild are the same bytes.
+export {
+  ClaimOwnerControlledPublicationSectionSchema,
+  OWNER_CONTROLLED_PUBLICATION_LIMIT,
+  assertOwnerControlledPublicationLimitations,
+} from "./profile/owner-controlled-publication.js";
+export type { ClaimOwnerControlledPublicationSection } from "./profile/owner-controlled-publication.js";
 export type { BundleManifest, SupportedBundleFormat, VerifiedBundleSnapshot } from "./manifest.js";
 export * from "./admission/index.js";
 export * from "./schema.js";

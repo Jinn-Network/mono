@@ -129,7 +129,7 @@ function rewriteManifest(bundleDir: string): void {
   }
   const capabilities = Array.isArray(prior.capabilities)
     ? (prior.capabilities as readonly string[])
-    : ["binary-qualification"];
+    : ["binary-qualification", "owner-controlled-publication"];
   writeFileSync(
     join(bundleDir, "bundle.json"),
     buildBundleManifest(bundleDir, [...paths], { format: BUNDLE_V10_FORMAT, capabilities }).bytes,
@@ -207,7 +207,7 @@ describe("packet P8 judge rehearsal (#2847)", () => {
     const verified = await verifyPublicBundle(copied);
     expect(verified.format).toBe(BUNDLE_V10_FORMAT);
     if (verified.format !== BUNDLE_V10_FORMAT || verified.qualification === undefined) throw new Error("expected V10 qualification bundle");
-    expect(verified.capabilities).toEqual(["binary-qualification"]);
+    expect(verified.capabilities).toEqual(["binary-qualification", "owner-controlled-publication"]);
     expect(verified.qualification.armCount).toBe(4);
     expect(verified.qualification.strata).toEqual(["core", "stress"]);
 
@@ -338,7 +338,7 @@ describe("packet P8 judge rehearsal (#2847)", () => {
       if (bundle.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {
         expect(verified.format).toBe(BUNDLE_V10_FORMAT);
         if (verified.format !== BUNDLE_V10_FORMAT || verified.qualification === undefined) throw new Error("primary rehearsal bundle must stay on the V10 qualification path");
-        expect(verified.capabilities).toEqual(["binary-qualification"]);
+        expect(verified.capabilities).toEqual(["binary-qualification", "owner-controlled-publication"]);
         expect(verified.qualification.armCount).toBe(6);
         expect(verified.qualification.truthAdmission).toBe("screened-operator-sampled");
         expect(verified.qualification.exclusionCount).toBe(1);
