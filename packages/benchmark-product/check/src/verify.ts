@@ -94,7 +94,7 @@ import {
   parseExternalImportMarker,
   type ClaimExternalImportSection,
 } from "./profile/external-import.js";
-import { assertTaskSelectionConsistency } from "./profile/task-selection.js";
+import { assertTaskSelectionConsistency, assertTaskSelectionDeclaration } from "./profile/task-selection.js";
 import { buildPublicAssets } from "./assets.js";
 import { derivePublicComparison, type PublicComparisonView } from "./comparison.js";
 import {
@@ -114,6 +114,7 @@ import {
   BINARY_QUALIFICATION_CAPABILITY,
   DISCLOSURE_SPECIFICATION_CAPABILITY,
   EXTERNAL_IMPORT_CAPABILITY,
+  TASK_SELECTION_CAPABILITY,
   assertMemberClosure,
   composeClosure,
 } from "./capabilities.js";
@@ -722,6 +723,19 @@ export async function verifyPublicBundleSnapshot(
       + ` declares ${carriesQualification ? "a qualifying" : "a non-qualifying"} closure, but its sealed`
       + ` Report declares method ${report.method.id}`,
     );
+  }
+  // ── The task-selection axis is BOUND to the sealed Run (issue #3416) ────────────────────────
+  //
+  // The operator ruling of 2026-09-24: a `/10` bundle whose Run carries `task-selection/v1` must
+  // declare `task-selection`, and a bundle declaring it must have a Run that does. The capability
+  // has no member, so the member closure cannot see either direction; refused here, on the vector,
+  // before any check runs over the wrong closure. Earlier formats carry no vector and are
+  // untouched: their pages never render the declaration.
+  if (composed !== undefined) {
+    assertTaskSelectionDeclaration({
+      declared: composed.capabilities.includes(TASK_SELECTION_CAPABILITY),
+      runRecord: run,
+    });
   }
   const identities = {
     benchmarkSha256: sha256(benchmarkBytes),
@@ -2006,7 +2020,8 @@ export async function verifyPublicBundleSnapshot(
   // Task-selection provenance (#2980). Runs under the `claim-consistency` check because that is
   // exactly the question it answers -- does the claim's declared selection survive contact with
   // the records? -- and because the claim pins the check list byte-for-byte, so a new named check
-  // would be a bundle-format bump rather than an addition.
+  // would be a bundle-format bump rather than an addition. The `/10` capability `task-selection`
+  // (issue #3416) keeps it here for the first reason, and appends no check of its own.
   assertTaskSelectionConsistency({ benchmarkRecord: benchmark, runRecord: run });
   assertClaimConsistency({
     claim,

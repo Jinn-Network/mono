@@ -1053,12 +1053,34 @@ function neutralClaimHtml(facts: MethodFacts): string {
   return '<p class="neutral">Verified binary-instrument qualification. Facts are presented per instrument without comparative conclusions.</p>';
 }
 
-// Task-selection provenance (issue #2980) is sealed into the Run and verified under
-// `claim-consistency`, but deliberately renders NOTHING here, and no asset below projects it.
-// The classic and anchored allocations pin `@colophon-claims/verify@0.1.0`, whose
-// `verifyPublicBundleSnapshot` byte-compares every presentation asset against its own rebuild, so
-// a bundle that rendered the sentence would carry an instruction to run a verifier that refuses
-// it. Restoring the render is issue #3416, once the reader line that derives it is re-pinned.
+/**
+ * Task-selection provenance at headline weight (issue #3416, operator ruling 2026-09-24): a header
+ * fact row stating the Run's declared mode as its own token, so a claimant-chosen selection reads
+ * "claimant-chosen" and is never softened into prose.
+ *
+ * Projected from `claim.taskSelection`, the section a composed claim carries exactly when its
+ * bundle declares the `task-selection` capability, and which `claim-consistency` has already rebuilt
+ * from the sealed Run. Keyed on that verified fact rather than on a format test, as the disclosure
+ * table is: every earlier claim id refuses the section, and a `/10` vector without the token refuses
+ * a Run that carries the declaration, so every other page renders exactly what it rendered before
+ * the capability existed. Earlier formats pin readers that byte-compare this page and predate the
+ * row, which is why it never reaches them: the classic and anchored allocations pin
+ * `@colophon-claims/verify@0.1.0`, whose rebuild would refuse a page carrying it.
+ *
+ * The badge and social card do not carry it: their geometry is fixed, and each links to the page
+ * that does.
+ */
+function taskSelectionFactHtml(input: PublicAssetInput): string {
+  const section = input.claim.taskSelection;
+  return section === undefined
+    ? ""
+    : `\n<dl class="facts"><div><dt>Task selection</dt><dd>${escapeMarkup(section.mode)}</dd></div></dl>`;
+}
+
+function taskSelectionFactText(input: PublicAssetInput): string | undefined {
+  const section = input.claim.taskSelection;
+  return section === undefined ? undefined : `Task selection: ${section.mode}.`;
+}
 
 function buildIndex(
   input: PublicAssetInput,
@@ -1125,7 +1147,7 @@ ${embeddedFontCss()}
 <p class="eyebrow">${escapeMarkup(PRODUCT_BRANDING.categoryDescriptor)}</p>
 <p class="status" data-run-outcome="${outcome}">${escapeMarkup(status)}</p>
 <h1>Colophon report</h1>
-<p class="lede">${escapeMarkup(scopeLine(input))}</p>
+<p class="lede">${escapeMarkup(scopeLine(input))}</p>${taskSelectionFactHtml(input)}
 ${neutralClaimHtml(reportFacts)}
 </header>
 <main>
@@ -1165,7 +1187,7 @@ function pairedCompactFragment(facts: Exclude<MethodFacts, BinaryFacts>): string
 
 // The retired verdict word (issue #2982) is ruled out of the binary branch of every asset this file
 // renders -- the index prose above, the badge, the social card, the README status line, and the
-// share sentence -- and then held, exactly as #2980 above is held. The ruling:
+// share sentence -- and then held. The ruling:
 // `PRINCIPLES.md` Legible requires an artifact that carries a claim to state what it does not
 // prove, and a badge or a social card travels detached from `index.html`, so the caveats the CLI
 // prints under its verdict cannot travel with it; `verified=true` in the SVG `<metadata>` is an
@@ -1369,11 +1391,12 @@ function buildReadme(
     ? `${qualificationOutcomeLabel(input.matrix.completeness.runOutcome)}. Verified binary-instrument qualification.`
     : `${outcomeLabel(input.matrix.completeness.runOutcome)}. No comparative winner is stated.`;
   const pair = pageDenominators(input, reportFacts, claimFacts, capabilities);
+  const taskSelection = taskSelectionFactText(input);
   return `# Colophon report
 
 **${documentStatus}**
 
-Scope: ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${escapeMarkdown(input.claim.scope.venue)}.
+Scope: ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${escapeMarkdown(input.claim.scope.venue)}.${taskSelection === undefined ? "" : `\n\n${escapeMarkdown(taskSelection)}`}
 
 Report SHA-256: \`${input.reportSha256}\`
 
@@ -1497,14 +1520,16 @@ ${FONT_LICENSES.map(([name, path]) => `## ${name} font license\n\n\`\`\`text\n${
 }
 
 function buildShareText(input: PublicAssetInput, reportFacts: MethodFacts): string {
+  const taskSelection = taskSelectionFactText(input);
+  const taskSelectionClause = taskSelection === undefined ? "" : ` ${plainText(taskSelection)}`;
   if (reportFacts.kind === "binary") {
-    return `Colophon · verified qualification. ${plainText(scopeLine(input))}. Report ${input.reportSha256}. Full evidence: index.html; verify: index.html#verification with ${plainText(input.claim.verification.command)}.\n`;
+    return `Colophon · verified qualification. ${plainText(scopeLine(input))}.${taskSelectionClause} Report ${input.reportSha256}. Full evidence: index.html; verify: index.html#verification with ${plainText(input.claim.verification.command)}.\n`;
   }
   // Paired branch only (P4b Task 6): empty string for wilson keeps this sentence byte-identical
   // to before this dispatch existed.
   const pairedFragment = pairedCompactFragment(reportFacts);
   const pairedClause = pairedFragment === "" ? "" : ` ${plainText(pairedFragment)}.`;
-  return `Colophon · ${outcomeLabel(input.matrix.completeness.runOutcome)}; no comparative winner stated. ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${plainText(input.claim.scope.venue)}. ${plainText(compactStatus(input, reportFacts))}. Report ${input.reportSha256}.${pairedClause} Full report: index.html; limitations: index.html#limitations; verify: index.html#verification with ${plainText(input.claim.verification.command)}. ${PRODUCT_BRANDING.attribution}\n`;
+  return `Colophon · ${outcomeLabel(input.matrix.completeness.runOutcome)}; no comparative winner stated. ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${plainText(input.claim.scope.venue)}.${taskSelectionClause} ${plainText(compactStatus(input, reportFacts))}. Report ${input.reportSha256}.${pairedClause} Full report: index.html; limitations: index.html#limitations; verify: index.html#verification with ${plainText(input.claim.verification.command)}. ${PRODUCT_BRANDING.attribution}\n`;
 }
 
 /** Fixed, deterministic presentation bytes for the format `input.format` names. The builder only

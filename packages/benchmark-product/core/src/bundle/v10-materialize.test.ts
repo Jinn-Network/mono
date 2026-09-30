@@ -12,11 +12,12 @@
  * keep proving against the same fixtures.
  *
  * One real run per pre-composition cell, each driven through the production operations with the
- * flag set, then handed to the standalone reader as a detached copy. Five of the six vectors are the
- * five cells the closure model hand-allocated, so each of those cases also states which legacy
+ * flag set, then handed to the standalone reader as a detached copy. Five of the eight vectors are
+ * the five cells the closure model hand-allocated, so each of those cases also states which legacy
  * closure the composed bundle must reproduce -- the full equivalence proof is issue #3404; what is
  * asserted here is that the producer emits what the verifier accepts, cell by cell.
- * The sixth is a combination no format number was ever allocated for.
+ * The sixth is a combination no format number was ever allocated for, and the last two declare a
+ * capability that exists only in the composed generation (issue #3416).
  *
  * The flag is an operation input, not a CLI switch. Rollback is flipping the default back.
  */
@@ -135,6 +136,30 @@ const CELLS = [
         workspaceDir,
         truthAdmission: "operator-only",
         declareDisclosure: true,
+        composedFormat: true,
+      })),
+  },
+  {
+    // Issue #3416: a Run that declares who chose its tasks. The capability has no member and no
+    // check of its own; what it adds is the claim section and the report face's header fact row.
+    // On the rollback path the same run publishes `/2` with neither (`v6-verify.test.ts`).
+    cell: "task selection",
+    vector: ["task-selection"],
+    checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
+    run: () => once("task-selection", (workspaceDir) =>
+      createSyntheticV6BundleFixture({ workspaceDir, taskSelection: "claimant-chosen", composedFormat: true })),
+  },
+  {
+    // The same declaration on a qualification run: the capability composes with a refining one,
+    // and the binary claim's control-shape gate admits the section.
+    cell: "task selection, qualified",
+    vector: ["binary-qualification", "task-selection"],
+    checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
+    run: () => once("task-selection-qualified", (workspaceDir) =>
+      createSyntheticV4BundleFixture({
+        workspaceDir,
+        truthAdmission: "operator-only",
+        taskSelection: "claimant-chosen",
         composedFormat: true,
       })),
   },
@@ -312,6 +337,91 @@ describe("composed bundle v10 — a real bundle under another declaration", () =
     expect(await refusal(unbacked)).toEqual({
       path: "qualification.json",
       message: expect.stringContaining("is missing"),
+    });
+  }, 300_000);
+});
+
+/**
+ * Issue #3416 (operator ruling 2026-09-24): task selection renders as the declared `/10`
+ * capability `task-selection`, and a bundle cannot pass while hiding who chose its tasks.
+ */
+describe("composed bundle v10: task selection at headline weight", () => {
+  const ROW = '<dl class="facts"><div><dt>Task selection</dt><dd>claimant-chosen</dd></div></dl>';
+  const LINE = "Task selection: claimant-chosen.";
+  const read = (bundleDir: string, path: string): string => readFileSync(join(bundleDir, path), "utf8");
+
+  test("the report face states the declared mode as a header fact row", async () => {
+    const declared = await cell("task selection").run();
+    const html = read(declared.bundleDir, "index.html");
+    expect(html.slice(html.indexOf("<header>"), html.indexOf("</header>"))).toContain(ROW);
+    expect(read(declared.bundleDir, "README.md")).toContain(`\n\n${LINE}\n\n`);
+    expect(read(declared.bundleDir, "share.txt")).toContain(` self-run. ${LINE} `);
+    expect(json(declared.bundleDir, "claim-package.json")["taskSelection"]).toEqual({ mode: "claimant-chosen" });
+
+    // The qualification page carries the same row, and its share sentence the same clause.
+    const qualified = await cell("task selection, qualified").run();
+    const qualifiedHtml = read(qualified.bundleDir, "index.html");
+    expect(qualifiedHtml.slice(qualifiedHtml.indexOf("<header>"), qualifiedHtml.indexOf("</header>"))).toContain(ROW);
+    expect(read(qualified.bundleDir, "README.md")).toContain(`\n\n${LINE}\n\n`);
+    expect(read(qualified.bundleDir, "share.txt")).toMatch(/^Colophon · verified qualification\. [^\n]+ self-run\. Task selection: claimant-chosen\. Report [a-f0-9]{64}\. /u);
+
+    // A run that declares nothing states nothing, on any asset.
+    const base = await cell("/2").run();
+    for (const asset of ["index.html", "README.md", "share.txt", "badge.svg", "social-card.svg"]) {
+      expect(read(base.bundleDir, asset), asset).not.toContain("Task selection");
+    }
+  }, 300_000);
+
+  test("hiding the declaration is refused, even with the section and the row stripped to match", async () => {
+    // The whole hiding edit: the token, the claim section, and the row, each removed as a producer
+    // that wanted a quieter page would remove them. The Run still says who chose its tasks, and it
+    // is under the report author's signature, so the vector is refused against it.
+    const declared = await cell("task selection").run();
+    const hidden = detach(declared.bundleDir, "hidden");
+    const claim = json(hidden, "claim-package.json");
+    delete claim["taskSelection"];
+    writeFileSync(join(hidden, "claim-package.json"), canonicalJsonBytes(claim as never));
+    writeFileSync(join(hidden, "index.html"), read(hidden, "index.html").replace(`\n${ROW}`, ""));
+    writeFileSync(join(hidden, "README.md"), read(hidden, "README.md").replace(`\n\n${LINE}`, ""));
+    writeFileSync(join(hidden, "share.txt"), read(hidden, "share.txt").replace(` ${LINE}`, ""));
+    redeclare(hidden, []);
+    expect(await refusal(hidden)).toEqual({
+      path: "bundle.manifest.capabilities",
+      message: expect.stringContaining("cannot pass while hiding who chose its tasks"),
+    });
+  }, 300_000);
+
+  test("declaring task-selection over a Run that declares nothing is refused", async () => {
+    const base = await cell("/2").run();
+    const overclaimed = detach(base.bundleDir, "overclaimed");
+    redeclare(overclaimed, ["task-selection"]);
+    expect(await refusal(overclaimed)).toEqual({
+      path: "bundle.manifest.capabilities",
+      message: expect.stringContaining("carries no task-selection/v1 declaration"),
+    });
+  }, 300_000);
+
+  test("a softened section is refused at the claim, though the schema admits it", async () => {
+    const declared = await cell("task selection").run();
+    const softened = detach(declared.bundleDir, "softened");
+    const claim = json(softened, "claim-package.json");
+    claim["taskSelection"] = { mode: "fixed-public-set" };
+    writeFileSync(join(softened, "claim-package.json"), canonicalJsonBytes(claim as never));
+    redeclare(softened, ["task-selection"]);
+    expect(await refusal(softened)).toEqual({
+      path: "claim-consistency",
+      message: expect.stringContaining("taskSelection.mode"),
+    });
+  }, 300_000);
+
+  test("a page that drops the row is refused on the page", async () => {
+    const declared = await cell("task selection").run();
+    const rowless = detach(declared.bundleDir, "rowless");
+    writeFileSync(join(rowless, "index.html"), read(rowless, "index.html").replace(`\n${ROW}`, ""));
+    redeclare(rowless, ["task-selection"]);
+    expect(await refusal(rowless)).toEqual({
+      path: "index.html",
+      message: expect.stringContaining("not the exact projection"),
     });
   }, 300_000);
 });

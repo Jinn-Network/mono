@@ -66,12 +66,13 @@ function entry(token: string, order: number, overrides: Partial<CapabilityEntry>
 }
 
 describe("the registered capabilities", () => {
-  test("exactly four, under their stable wire tokens", () => {
+  test("exactly five, under their stable wire tokens", () => {
     expect(CAPABILITY_REGISTRY.map((capability) => capability.token)).toEqual([
       "binary-qualification",
       "anchoring",
       "disclosure-specification",
       "external-import",
+      "task-selection",
     ]);
   });
 
@@ -112,7 +113,7 @@ describe("the registered capabilities", () => {
     // The role name is the one the evidence catalog spells, and the deriving fact is the Report
     // extension: the only edge that reaches the record. A derivation is additive, never a
     // refinement target, so contributing one does not make the capability a refiner.
-    const [qualification, anchoring, disclosure, imported] = CAPABILITY_REGISTRY;
+    const [qualification, anchoring, disclosure, imported, selection] = CAPABILITY_REGISTRY;
     expect(disclosure!.roleDerivations).toEqual([{
       role: "disclosure-specification",
       derivedFrom: "https://spec.jinn.network/extensions/disclosure-specification/v1",
@@ -121,6 +122,7 @@ describe("the registered capabilities", () => {
     expect(qualification!.roleDerivations).toEqual([]);
     expect(anchoring!.roleDerivations).toEqual([]);
     expect(imported!.roleDerivations).toEqual([]);
+    expect(selection!.roleDerivations).toEqual([]);
   });
 
   test("external-import adds a mandatory marker member, a check, and no grammar", () => {
@@ -132,6 +134,24 @@ describe("the registered capabilities", () => {
     expect(imported.refines).toEqual([]);
     expect(imported.checks).toEqual(["external-import"]);
     expect(imported.claimSection).toBe("externalImport");
+  });
+
+  test("task-selection adds a claim section and nothing else: no member, no grammar, no check", () => {
+    // Issue #3416. The declaration is the Run's own `task-selection/v1` extension, and `run.json` is
+    // a base member, so there is nothing to carry. Its refusals answer the question
+    // `claim-consistency` asks, so it appends no check, and the check list every reader surface
+    // shows for a vector is unchanged by declaring it.
+    const selection = CAPABILITY_REGISTRY[4]!;
+    expect(selection.token).toBe("task-selection");
+    expect(selection.order).toBe(5);
+    expect(selection.mandatoryFiles).toEqual([]);
+    expect(selection.memberPatterns).toEqual([]);
+    expect(selection.requires).toEqual([]);
+    expect(selection.conflicts).toEqual([]);
+    expect(selection.refines).toEqual([]);
+    expect(selection.checks).toEqual([]);
+    expect(selection.claimSection).toBe("taskSelection");
+    expect(expectedChecks(["task-selection"])).toEqual(expectedChecks([]));
   });
 });
 
@@ -392,6 +412,8 @@ describe("reader instructions", () => {
       "disclosure-specification": "verify@0.2.1",
       // New with the composed generation: no verify release implements it.
       "external-import": "check@0.2.1",
+      // Issue #3416: the render ships inside the first checker release (operator ruling 2026-09-24).
+      "task-selection": "check@0.2.1",
     });
   });
 
@@ -409,6 +431,7 @@ describe("producer-side activation", () => {
     projectsBinaryQualification: false,
     declaresDisclosure: false,
     importedRun: false,
+    declaresTaskSelection: false,
   };
 
   test("each predicate turns on exactly its own token, in canonical wire order", () => {
@@ -417,18 +440,30 @@ describe("producer-side activation", () => {
     expect(activeCapabilityVector({ ...NONE, projectsBinaryQualification: true }))
       .toEqual(["binary-qualification"]);
     expect(activeCapabilityVector({ ...NONE, importedRun: true })).toEqual(["external-import"]);
+    expect(activeCapabilityVector({ ...NONE, declaresTaskSelection: true })).toEqual(["task-selection"]);
     expect(activeCapabilityVector({
       anchoredClosure: true,
       projectsBinaryQualification: true,
       declaresDisclosure: true,
       importedRun: false,
+      declaresTaskSelection: false,
     })).toEqual(["anchoring", "binary-qualification", "disclosure-specification"]);
     expect(activeCapabilityVector({
       anchoredClosure: true,
       projectsBinaryQualification: true,
       declaresDisclosure: true,
       importedRun: true,
-    })).toEqual(["anchoring", "binary-qualification", "disclosure-specification", "external-import"]);
+      declaresTaskSelection: true,
+    })).toEqual(["anchoring", "binary-qualification", "disclosure-specification", "external-import", "task-selection"]);
+  });
+
+  test("a task-selection declaration rides every analysis of the run, whatever it projects", () => {
+    // The declaration is a fact about the Run, not about one Report, so a run's headline,
+    // comparison, and qualification bundles each state who chose its tasks.
+    for (const projectsBinaryQualification of [false, true]) {
+      expect(activeCapabilityVector({ ...NONE, projectsBinaryQualification, declaresTaskSelection: true }))
+        .toContain("task-selection");
+    }
   });
 
   test("a declaration rides the qualification analysis alone, and needs no anchor", () => {
@@ -447,8 +482,10 @@ describe("producer-side activation", () => {
       for (const projectsBinaryQualification of [false, true]) {
         for (const declaresDisclosure of [false, true]) {
           for (const importedRun of [false, true]) {
-            const facts = { anchoredClosure, projectsBinaryQualification, declaresDisclosure, importedRun };
-            expect(() => composeClosure(activeCapabilityVector(facts)), JSON.stringify(facts)).not.toThrow();
+            for (const declaresTaskSelection of [false, true]) {
+              const facts = { anchoredClosure, projectsBinaryQualification, declaresDisclosure, importedRun, declaresTaskSelection };
+              expect(() => composeClosure(activeCapabilityVector(facts)), JSON.stringify(facts)).not.toThrow();
+            }
           }
         }
       }

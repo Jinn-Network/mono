@@ -111,6 +111,8 @@ export interface CapabilityActivationFacts {
   readonly declaresDisclosure: boolean;
   /** The run's evidence was imported (`run import`) rather than dispatched on a venue. */
   readonly importedRun: boolean;
+  /** The sealed Run carries a `task-selection/v1` declaration (issue #3416). */
+  readonly declaresTaskSelection: boolean;
 }
 
 /** The uniform per-entry contract (design §4). */
@@ -147,6 +149,7 @@ export const BINARY_QUALIFICATION_CAPABILITY = "binary-qualification" as const;
 export const ANCHORING_CAPABILITY = "anchoring" as const;
 export const DISCLOSURE_SPECIFICATION_CAPABILITY = "disclosure-specification" as const;
 export const EXTERNAL_IMPORT_CAPABILITY = "external-import" as const;
+export const TASK_SELECTION_CAPABILITY = "task-selection" as const;
 
 /**
  * Every capability this build implements, in `order`.
@@ -233,6 +236,29 @@ export const CAPABILITY_REGISTRY = [
     checks: ["external-import"],
     minimumReaderRelease: "check@0.2.1",
     activation: (facts) => facts.importedRun,
+  },
+  {
+    // Issue #3416 (operator ruling 2026-09-24). Additive and member-free: the declaration is the
+    // Run's own `task-selection/v1` extension, and `run.json` is a base member. It adds a claim
+    // section, projected from the Run by the claim builder, and the report face's header fact row,
+    // projected from that section. It appends no check. Its refusals bind the vector to the Run
+    // both ways and rebuild the section from the Run, which answers the question
+    // `claim-consistency` asks, where the contradiction rules of issue #2980 already run. The
+    // binding is what makes declaring it more than optional: a `/10` Run carrying the declaration
+    // under a vector without this token is refused, so no bundle passes hiding who chose its tasks.
+    token: TASK_SELECTION_CAPABILITY,
+    order: 5,
+    requires: [],
+    conflicts: [],
+    mandatoryFiles: [],
+    memberPatterns: [],
+    refines: [],
+    roleDerivations: [],
+    claimSection: "taskSelection",
+    checks: [],
+    minimumReaderRelease: "check@0.2.1",
+    // A fact about the Run, not about one Report, so every analysis of a declaring run carries it.
+    activation: (facts) => facts.declaresTaskSelection,
   },
 ] as const satisfies readonly CapabilityEntry[];
 
