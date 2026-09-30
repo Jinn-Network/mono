@@ -420,10 +420,6 @@ describe('packed client workflow coverage', () => {
 
   it.each([
     [
-      '.github/workflows/sdk-npm-publish.yml',
-      'Validate canary gitHead',
-    ],
-    [
       '.github/workflows/npm-publish.yml',
       'Validate client canary gitHead',
     ],
@@ -432,6 +428,13 @@ describe('packed client workflow coverage', () => {
 
     expect(run).toContain('for _ in $(seq 1 30); do');
     expect(run).toContain('sleep 2');
+  });
+
+  it('.github/workflows/sdk-npm-publish.yml waits up to ten minutes for npm to process a canary publish', () => {
+    const run = workflowStep('.github/workflows/sdk-npm-publish.yml', 'Validate canary gitHead');
+
+    expect(run).toContain('for _ in $(seq 1 120); do');
+    expect(run).toContain('sleep 5');
   });
 
   it('waits for the client canary archive before registry consumer acceptance', () => {
