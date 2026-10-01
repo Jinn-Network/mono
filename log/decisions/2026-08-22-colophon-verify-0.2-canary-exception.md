@@ -92,7 +92,7 @@ packages with it, so the three receipts carry one sha. The verify 0.2.0 and
 Why the pin is not 0533a22 (#4886): the checker sets
 `extendedKeyUsageCritical`, a field `@jinn-network/trust-core` gained in
 436fe2368c, after 0533a22, so it does not compile against that canary. No
-later sha had the checker's closure published until the
+sha after 436fe2368c had the checker's closure published until the
 `benchmarking-product-v1` release group regained a canary lane (#4909).
 1c023eb is on `next` after both.
 
