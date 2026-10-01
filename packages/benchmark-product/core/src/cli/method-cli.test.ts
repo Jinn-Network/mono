@@ -111,7 +111,9 @@ describe("method and verb help", () => {
     expect(result.stdout).toContain("--host");
     expect(result.stdout).toContain("swe-bench-verified");
     expect(result.stdout).toContain("homemade");
-    expect(result.stdout).not.toContain("draft create");
+    // Not the full USAGE. `draft create` is no longer the marker for that: the help now names it
+    // as the step that creates the draft `method` needs (issue #4943).
+    expect(result.stdout).not.toContain("authority grant");
   });
 
   test("help method prints the same method help, not the full USAGE", async () => {
@@ -121,13 +123,15 @@ describe("method and verb help", () => {
     expect(result.stdout).toContain("--host");
     expect(result.stdout).toContain("swe-bench-verified");
     expect(result.stdout).toContain("homemade");
-    expect(result.stdout).not.toContain("draft create");
+    expect(result.stdout).not.toContain("authority grant");
+    expect(result.stdout).toBe((await runCli(["method", "--help"], context())).stdout);
   });
 
   test("--help still contains the full USAGE including draft create", async () => {
     const result = await runCli(["--help"], context());
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("draft create");
+    expect(result.stdout).toContain("authority grant");
   });
 
   test("other verbs' --help print that verb's USAGE stanza, not the full dump", async () => {
