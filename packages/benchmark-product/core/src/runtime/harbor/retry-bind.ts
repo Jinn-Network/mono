@@ -49,10 +49,19 @@ export function harborRetryUnscorablePath(workspaceDir: string, attemptUri: stri
   return join(artifactsDir(workspaceDir), "harbor", "retry-unscorable", sha256Hex(new TextEncoder().encode(attemptUri)));
 }
 
+/**
+ * The exception type a finished Harbor Trial records. Official Harbor 0.21 nests it as
+ * `exception_info.exception_type` (and writes `exception_info: null` on a clean Trial); the
+ * top-level spellings are the earlier flat shape. Both are read, top level first.
+ */
 export function harborTrialExceptionType(result: Readonly<Record<string, unknown>>): string | undefined {
-  return typeof result.exception_type === "string" ? result.exception_type
-    : typeof result.exceptionType === "string" ? result.exceptionType
-    : undefined;
+  if (typeof result.exception_type === "string") return result.exception_type;
+  if (typeof result.exceptionType === "string") return result.exceptionType;
+  const info = result.exception_info;
+  if (typeof info === "object" && info !== null && "exception_type" in info && typeof info.exception_type === "string") {
+    return info.exception_type;
+  }
+  return undefined;
 }
 
 export function harborTrialRetryable(result: Readonly<Record<string, unknown>>, maxRetries: number): boolean {

@@ -186,6 +186,8 @@ function dispatchReady() {
     if (trialTerminal(result)) return true;
     if (typeof result.exception_type === "string" && excluded.has(result.exception_type)) return true;
     if (typeof result.exceptionType === "string" && excluded.has(result.exceptionType)) return true;
+    const info = result.exception_info;
+    if (typeof info === "object" && info !== null && typeof info.exception_type === "string" && excluded.has(info.exception_type)) return true;
   } catch { return false; }
   return false;
 }

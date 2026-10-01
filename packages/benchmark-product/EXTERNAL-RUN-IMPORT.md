@@ -280,8 +280,10 @@ verifier reward or a prediction artifact is imported as `ungradeable`: Harbor's
 grader is not the subject Task's sealed EvaluationSpec, and this reader does
 not invent measurements for that spec. `AgentTimeoutError` /
 `VerifierTimeoutError` are `timeout`. Other terminal Harbor failures are
-`error`. A slot the jobs directory did not contain is written as `unrun` with
-a reason so it stays in the denominator. There is no exclude flag.
+`error`. The exception type is read from `exception_info.exception_type`, where
+Harbor 0.21 writes it, or from a top-level `exception_type`. A slot the jobs
+directory did not contain is written as `unrun` with a reason so it stays in
+the denominator. There is no exclude flag.
 
 Timings (`started_at` / `finished_at`) and evidence paths (`result.json`,
 `config.json`, `verifier/reward.txt`, prediction and trajectory artifacts) are
@@ -298,12 +300,30 @@ the same expected coordinate are likewise the validator's `duplicate-slot`.
 Missing, unknown, extra, and duplicate slots are refused together, with the
 whole problem list, exactly as a JSONL dump is.
 
-When a locked run has no Harbor suite-protocol selection, Harbor task names
-are recovered from each Task's `payload.forecast.marketId`. The Terminal-Bench
-2.1 intake stores `terminal-bench-2-1/<taskName>` there; other prediction-shaped
-intake (including the bundled sample) uses the market id as the Harbor task
-name. A Harbor suite-protocol selection, including the official Terminal-Bench
-2.1 pin (#4678), is the name table when present.
+Task names come from the locked run. A draft bound with
+`method terminal-bench-2.1` carries the official Terminal-Bench 2.1 slate, and
+each of its Tasks seals `payload.taskName`, the name Harbor writes as
+`terminal-bench/<taskName>`. A name alone does not place a trial on that
+slate. The trial's `task.ref` must equal the `packageRef` its Task seals, and a
+job `config.json` that records a dataset `ref` must record the sealed
+`datasetRevision`. A mismatch is refused with both values, so run Harbor
+against the revision the slate seals:
+`harbor run -d 'terminal-bench/terminal-bench-2-1@<datasetRevision>'`.
+Prediction-shaped intake, including the bundled sample, uses each Task's
+`payload.forecast.marketId` as the Harbor task name. A Harbor suite-protocol
+selection is the name table when the locked run has one. A draft whose Tasks
+carry none of these is refused by `--from harbor`; bring that run as a generic
+dump with `--file`.
+
+Each trial is placed on an arm by its Harbor agent: the arm whose id equals
+the Harbor agent name, or whose pinning carries `agent.id` and `model.id` equal
+to the Harbor agent name and `model_name`. The agent is read per trial, from
+the trial `result.json` (`config.agent`), then the trial `config.json`, then
+the job `lock.json` (`trials[].agent`), and last the job `config.json` when it
+names exactly one agent. Harbor leaves its default agent out of the job
+`config.json`, so that file alone cannot name the arm. The Harbor version
+recorded as the import source is the one the job `lock.json` states
+(`harbor.version`).
 
 Inspect is the second named reader. Bringing a completed Inspect evaluation is
 the product path; orchestrating Inspect per cell is the service's.

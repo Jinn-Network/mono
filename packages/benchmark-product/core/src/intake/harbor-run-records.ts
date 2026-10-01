@@ -11,11 +11,16 @@
  * evidence paths are carried. Missing expected slots are written as `unrun` with a reason so the
  * denominator does not shrink. Extra or duplicate trials are left for the sealed-slate validator
  * (#2979) to refuse.
+ *
+ * On a draft bound by `method terminal-bench-2.1` the task names are the ones the official slate
+ * seals, and a name is not enough to place a trial (#4937): the trial must carry the package ref
+ * the Task seals, and its job must not name another dataset revision. The agent is resolved per
+ * trial, because Harbor 0.21 leaves its default agent out of the job `config.json`.
  */
 
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative as relativePath, sep } from "node:path";
+import { basename, join, relative as relativePath, sep } from "node:path";
 import {
   cellKey,
   expectedCellSet,
@@ -45,11 +50,19 @@ import type { ExternalRunImportSource } from "../run/external-import.js";
 import { requireRunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import type { ExternalRunEvidenceRef, ExternalRunRecord } from "./external-run-records.js";
+import { TERMINAL_BENCH_21_ITEM_PROFILE_URI } from "./terminal-bench-2-1.js";
 
 export interface HarborImportArm {
   readonly armId: string;
   readonly agentName?: string;
   readonly modelName?: string;
+}
+
+/** What the official Terminal-Bench 2.1 slate seals about one task (`sealOfficialItem`). */
+export interface HarborOfficialTaskPin {
+  readonly datasetId: string;
+  readonly datasetRevision: string;
+  readonly packageRef: string;
 }
 
 export interface ReadHarborRunRecordsInput {
@@ -58,6 +71,11 @@ export interface ReadHarborRunRecordsInput {
   readonly digestByTaskName: Readonly<Record<string, string>>;
   readonly arms: readonly HarborImportArm[];
   readonly expected: readonly CellCoord[];
+  /**
+   * Official-slate pins by task digest. A trial that lands on a pinned task must carry the sealed
+   * package ref, and its job must not name another dataset revision.
+   */
+  readonly officialPins?: Readonly<Record<string, HarborOfficialTaskPin>>;
 }
 
 export interface HarborRunImportDump {
@@ -118,21 +136,69 @@ function harborJobRoots(jobsDir: string): readonly string[] {
   return nested;
 }
 
-function jobAgent(config: Record<string, unknown> | undefined): { name?: string; modelName?: string } {
-  const agents = config?.["agents"];
-  if (!Array.isArray(agents) || agents.length === 0) return {};
-  const agent = agents[0];
-  if (typeof agent !== "object" || agent === null) return {};
-  const record = agent as Record<string, unknown>;
-  return {
+interface HarborAgent {
+  readonly name?: string;
+  readonly modelName?: string;
+}
+
+function harborAgent(value: unknown): HarborAgent | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  const agent = {
     ...(typeof record["name"] === "string" ? { name: record["name"] } : {}),
     ...(typeof record["model_name"] === "string" ? { modelName: record["model_name"] } : {}),
   };
+  return agent.name === undefined && agent.modelName === undefined ? undefined : agent;
+}
+
+/** The job `config.json` agent speaks for a trial only when the job names exactly one. */
+function jobAgent(config: Record<string, unknown> | undefined): HarborAgent | undefined {
+  const agents = config?.["agents"];
+  return Array.isArray(agents) && agents.length === 1 ? harborAgent(agents[0]) : undefined;
+}
+
+/** The job `lock.json` lists each planned trial with its agent, keyed by task and not by trial. */
+function lockAgent(lock: Record<string, unknown> | undefined, taskName: string): HarborAgent | undefined {
+  const trials = lock?.["trials"];
+  if (!Array.isArray(trials)) return undefined;
+  const agents = new Map<string, HarborAgent>();
+  for (const entry of trials) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const planned = entry as Record<string, unknown>;
+    if (harborTrialTaskName(planned) !== taskName) continue;
+    const agent = harborAgent(planned["agent"]);
+    if (agent !== undefined) agents.set(JSON.stringify([agent.name, agent.modelName]), agent);
+  }
+  return agents.size === 1 ? [...agents.values()][0] : undefined;
+}
+
+/**
+ * The agent that ran one trial. Harbor 0.21 omits defaults from what it saves, so a job run with
+ * the default agent has no `agents` in its `config.json` and no `agent` in a trial `config.json`.
+ * The trial `result.json` echoes the full trial config, and the job `lock.json` lists the agent
+ * of every planned trial, so those are read before the job-level agent.
+ */
+function trialAgent(input: {
+  readonly trial: Record<string, unknown>;
+  readonly result: Record<string, unknown> | undefined;
+  readonly lock: Record<string, unknown> | undefined;
+  readonly jobConfig: Record<string, unknown> | undefined;
+  readonly taskName: string;
+}): HarborAgent {
+  const echoed = input.result?.["config"];
+  return (typeof echoed === "object" && echoed !== null
+    ? harborAgent((echoed as Record<string, unknown>)["agent"])
+    : undefined)
+    ?? harborAgent(input.trial["agent"])
+    ?? lockAgent(input.lock, input.taskName)
+    ?? jobAgent(input.jobConfig)
+    ?? {};
 }
 
 function resolveArmId(
-  agent: { name?: string; modelName?: string },
+  agent: HarborAgent,
   arms: readonly HarborImportArm[],
+  where: string,
 ): string {
   if (arms.length === 1) return arms[0]!.armId;
   const matched = arms.filter((arm) => {
@@ -148,11 +214,76 @@ function resolveArmId(
     const byId = arms.filter((arm) => arm.armId === agent.name);
     if (byId.length === 1) return byId[0]!.armId;
   }
+  const who = agent.name === undefined
+    ? "An unnamed Harbor agent"
+    : `Harbor agent "${agent.name}"${agent.modelName === undefined ? "" : ` with model "${agent.modelName}"`}`;
   refuse(
     "validation",
     "harbor-arm",
-    "Harbor job agent does not match exactly one locked arm — name the arm on the Harbor AgentConfig",
+    `${who} in trial ${where} does not match exactly one locked arm (locked arms: `
+      + `${arms.map((arm) => arm.armId).join(", ")}). A trial is placed on the arm whose id is the `
+      + "Harbor agent name, or whose pinning carries agent.id and model.id equal to the Harbor "
+      + "agent name and model_name.",
   );
+}
+
+function trialTaskField(trial: Record<string, unknown>, field: string): string | undefined {
+  const task = trial["task"];
+  if (typeof task !== "object" || task === null) return undefined;
+  const value = (task as Record<string, unknown>)[field];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * A trial placed on an official-slate task must be a trial of that task, not of one that shares
+ * its name. The sealed Task names the dataset revision and the task's package ref; Harbor records
+ * the dataset ref on the job and the package ref on the trial. A mismatch is refused with both
+ * values. A job that records no dataset ref is accepted: the package ref still binds each trial.
+ */
+function assertOfficialTaskPin(input: {
+  readonly pin: HarborOfficialTaskPin;
+  readonly trial: Record<string, unknown>;
+  readonly jobConfig: Record<string, unknown> | undefined;
+  readonly jobName: string;
+  readonly where: string;
+  readonly taskName: string;
+}): void {
+  const { pin, trial, jobConfig, jobName, where } = input;
+  const rerun = `Run Harbor against the sealed revision (harbor run -d '${pin.datasetId}@${pin.datasetRevision}') `
+    + "and import that jobs directory.";
+  const source = trialTaskField(trial, "source");
+  const datasets = jobConfig?.["datasets"];
+  for (const entry of Array.isArray(datasets) ? datasets : []) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const dataset = entry as Record<string, unknown>;
+    if (source !== undefined && typeof dataset["name"] === "string" && dataset["name"] !== source) continue;
+    const ref = dataset["ref"];
+    if (typeof ref !== "string" || ref.length === 0 || ref === pin.datasetRevision) continue;
+    refuse(
+      "validation",
+      "harbor-dataset-ref",
+      `Harbor job ${jobName} ran dataset ${typeof dataset["name"] === "string" ? dataset["name"] : "(unnamed)"} at ${ref}, `
+        + `but the locked slate seals ${pin.datasetId} at ${pin.datasetRevision}. ${rerun}`,
+    );
+  }
+  const name = trialTaskField(trial, "name") ?? input.taskName;
+  const ref = trialTaskField(trial, "ref");
+  if (ref === undefined) {
+    refuse(
+      "validation",
+      "harbor-task-ref",
+      `Harbor trial ${where} records no package ref for task ${name}, and the locked slate seals `
+        + `${pin.packageRef} for it: a task name alone does not say which task ran. ${rerun}`,
+    );
+  }
+  if (ref !== pin.packageRef) {
+    refuse(
+      "validation",
+      "harbor-task-ref",
+      `Harbor trial ${where} ran task ${name} at package ref ${ref}, but the locked slate seals `
+        + `${pin.packageRef} for that task. ${rerun}`,
+    );
+  }
 }
 
 function extraCellKey(taskName: string, attempt: number): string {
@@ -253,7 +384,7 @@ function withTimings(
  * Missing expected slots are emitted as `unrun` with a required reason.
  */
 export function readHarborRunRecords(input: ReadHarborRunRecordsInput): ExternalRunRecord[] {
-  const { jobsDir, digestByTaskName, arms, expected } = input;
+  const { jobsDir, digestByTaskName, arms, expected, officialPins } = input;
   if (arms.length === 0) refuse("validation", "harbor-arm", "Harbor import requires at least one locked arm");
   const nextAttemptByArmTask = new Map<string, Map<string, number>>();
   const directoryAttempt = new Map<string, number>();
@@ -262,17 +393,25 @@ export function readHarborRunRecords(input: ReadHarborRunRecordsInput): External
 
   for (const jobRoot of harborJobRoots(jobsDir)) {
     const jobConfig = readJsonObject(join(jobRoot, "config.json"));
-    const armId = resolveArmId(jobAgent(jobConfig), arms);
-    let nextAttemptByTask = nextAttemptByArmTask.get(armId);
-    if (nextAttemptByTask === undefined) {
-      nextAttemptByTask = new Map<string, number>();
-      nextAttemptByArmTask.set(armId, nextAttemptByTask);
-    }
+    const jobLock = readJsonObject(join(jobRoot, "lock.json"));
+    const jobName = typeof jobConfig?.["job_name"] === "string" ? jobConfig["job_name"] : basename(jobRoot);
     for (const directory of trialDirectoryNames(jobRoot)) {
       const trialDir = join(jobRoot, directory);
+      const where = relativeEvidencePath(jobsDir, trialDir);
       const trial = readJsonObject(join(trialDir, "config.json"));
       if (!isHarborTrialConfig(trial)) {
         refuse("validation", trialDir, `Harbor trial config at ${join(trialDir, "config.json")} is missing or not a JSON object`);
+      }
+      const result = readJsonObject(join(trialDir, "result.json"));
+      const armId = resolveArmId(
+        trialAgent({ trial, result, lock: jobLock, jobConfig, taskName: harborTrialTaskName(trial) }),
+        arms,
+        where,
+      );
+      let nextAttemptByTask = nextAttemptByArmTask.get(armId);
+      if (nextAttemptByTask === undefined) {
+        nextAttemptByTask = new Map<string, number>();
+        nextAttemptByArmTask.set(armId, nextAttemptByTask);
       }
       const assigned = assignHarborTrialAttempt({
         trial,
@@ -284,10 +423,13 @@ export function readHarborRunRecords(input: ReadHarborRunRecordsInput): External
         refuse("validation", trialDir, `Harbor trial at ${trialDir} has no task name`);
       }
       const digest = digestByTaskName[assigned.taskName];
+      const pin = digest === undefined ? undefined : officialPins?.[digest];
+      if (pin !== undefined) {
+        assertOfficialTaskPin({ pin, trial, jobConfig, jobName, where, taskName: assigned.taskName });
+      }
       const mappedKey = digest === undefined
         ? extraCellKey(assigned.taskName, assigned.attempt)
         : cellKey(digest, armId, assigned.attempt);
-      const result = readJsonObject(join(trialDir, "result.json"));
       const evidence = trialEvidence(jobsDir, trialDir);
       const shape = harborTrialRecordShape(result, evidence);
       row += 1;
@@ -354,44 +496,83 @@ function marketIdTaskName(task: Record<string, unknown>): string | undefined {
   return marketId;
 }
 
+/** The task name and pins an official Terminal-Bench 2.1 item seals in its payload. */
+function officialSlateTask(
+  task: Record<string, unknown>,
+): { readonly taskName: string; readonly pin: HarborOfficialTaskPin } | undefined {
+  const profile = task["profile"];
+  if (typeof profile !== "object" || profile === null) return undefined;
+  if ((profile as Record<string, unknown>)["uri"] !== TERMINAL_BENCH_21_ITEM_PROFILE_URI) return undefined;
+  const payload = task["payload"];
+  if (typeof payload !== "object" || payload === null) return undefined;
+  const { taskName, packageRef, datasetId, datasetRevision } = payload as Record<string, unknown>;
+  if (
+    typeof taskName !== "string" || taskName.length === 0
+    || typeof packageRef !== "string" || typeof datasetId !== "string" || typeof datasetRevision !== "string"
+  ) return undefined;
+  return { taskName, pin: { datasetId, datasetRevision, packageRef } };
+}
+
+interface HarborImportSlate {
+  readonly taskNameByDigest: Readonly<Record<string, string>>;
+  readonly officialPins: Readonly<Record<string, HarborOfficialTaskPin>>;
+}
+
 /**
  * Task names for a locked run. Prefers the suite-protocol mapping already used by the
- * orchestrated Harbor path (`from-harbor.ts`). Until the official Terminal-Bench 2.1 pin
- * (#4678) lands, intake shims encode the Harbor task name in `payload.forecast.marketId`.
+ * orchestrated Harbor path (`from-harbor.ts`). Otherwise the names come from the sealed Tasks:
+ * the official Terminal-Bench 2.1 slate (`method terminal-bench-2.1`) seals `payload.taskName`,
+ * which is Harbor's `terminal-bench/<taskName>`, beside the package ref and dataset revision a
+ * trial is then held to. Prediction-shaped intake encodes the name in `payload.forecast.marketId`.
  */
-export function taskNameByDigestForHarborImport(
-  workspaceDir: string,
-  document: DraftDocument,
-): Readonly<Record<string, string>> {
+function harborImportSlate(workspaceDir: string, document: DraftDocument): HarborImportSlate {
   const runtime = document.spec.evaluationRuntime;
   if (isHarborCompatibleEvaluationRuntime(runtime)) {
     const manifest = HarborSelectionManifestSchema.parse(
       JSON.parse(UTF8.decode(getSealedBytes(workspaceDir, runtime.selectionManifestSha256))),
     );
     const suite = suiteSelectionFromHarbor(manifest);
-    if (suite !== undefined) return taskNameByDigestFromSuite(suite);
+    if (suite !== undefined) return { taskNameByDigest: taskNameByDigestFromSuite(suite), officialPins: {} };
   }
   if (document.spec.taskSet.kind !== "benchmark") {
     refuse("conflict", `drafts.${document.draftId}.taskSet`, `draft ${document.draftId} has no attached benchmark`);
   }
   const benchmark = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
   const names: Record<string, string> = {};
+  const pins: Record<string, HarborOfficialTaskPin> = {};
   for (const item of benchmark.items) {
     const digest = itemTaskDigest(item);
     const task = JSON.parse(UTF8.decode(getSealedBytes(workspaceDir, digest))) as Record<string, unknown>;
+    const official = officialSlateTask(task);
+    if (official !== undefined) {
+      names[digest] = official.taskName;
+      pins[digest] = official.pin;
+      continue;
+    }
     const name = marketIdTaskName(task);
     if (name !== undefined) names[digest] = name;
   }
-  if (Object.keys(names).length !== benchmark.items.length) {
+  const named = Object.keys(names).length;
+  if (named !== benchmark.items.length) {
     refuse(
       "conflict",
       `drafts.${document.draftId}.harbor`,
-      "Harbor import needs suite-protocol task names on the locked run (Harbor selection profile), "
-        + "or Terminal-Bench 2.1 intake that encodes each Harbor task name. Full official 89-name "
-        + "coverage is issue #4678.",
+      `Harbor import cannot name ${benchmark.items.length - named} of the ${benchmark.items.length} tasks `
+        + `on draft ${document.draftId}, so it cannot tell which Harbor trial belongs to which cell. `
+        + "`run import --from harbor` reads a draft bound with `method terminal-bench-2.1`, whose tasks "
+        + "seal their Harbor task names. Bind a draft that way before running Harbor, or bring this run "
+        + "as a generic dump with `run import --file <records.jsonl> --source harbor` "
+        + "(`run import --template` prints the slate to fill in).",
     );
   }
-  return names;
+  return { taskNameByDigest: names, officialPins: pins };
+}
+
+export function taskNameByDigestForHarborImport(
+  workspaceDir: string,
+  document: DraftDocument,
+): Readonly<Record<string, string>> {
+  return harborImportSlate(workspaceDir, document).taskNameByDigest;
 }
 
 export function harborImportArmsForDraft(workspaceDir: string, document: DraftDocument): HarborImportArm[] {
@@ -405,8 +586,14 @@ export function harborImportArmsForDraft(workspaceDir: string, document: DraftDo
   return armsFromDraft(document);
 }
 
+/** Harbor records its own version in the job `lock.json`; the job `config.json` does not carry it. */
 function harborVersionFromJobs(jobsDir: string): string {
   for (const jobRoot of harborJobRoots(jobsDir)) {
+    const harbor = readJsonObject(join(jobRoot, "lock.json"))?.["harbor"];
+    if (typeof harbor === "object" && harbor !== null) {
+      const locked = (harbor as Record<string, unknown>)["version"];
+      if (typeof locked === "string" && locked.length > 0) return locked;
+    }
     const config = readJsonObject(join(jobRoot, "config.json"));
     const version = config?.["harbor_version"] ?? config?.["harborVersion"];
     if (typeof version === "string" && version.length > 0) return version;
@@ -432,7 +619,7 @@ export function readHarborRunImport(input: {
   const benchmark = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
   const run = parseRun(getSealedBytes(workspaceDir, runState.runSha256));
   const expected = expectedCellSet(benchmark, run);
-  const taskNameByDigest = taskNameByDigestForHarborImport(workspaceDir, document);
+  const { taskNameByDigest, officialPins } = harborImportSlate(workspaceDir, document);
   const digestByTaskName: Record<string, string> = {};
   for (const [digest, name] of Object.entries(taskNameByDigest)) digestByTaskName[name] = digest;
   // Keep the from-harbor inverse in the same path the orchestrated adapter uses when a suite is present.
@@ -452,6 +639,7 @@ export function readHarborRunImport(input: {
       digestByTaskName,
       arms: harborImportArmsForDraft(workspaceDir, document),
       expected,
+      officialPins,
     }),
     source: { harness: "harbor", version: harborVersionFromJobs(jobsDir) },
     evidenceRoot: jobsDir,
