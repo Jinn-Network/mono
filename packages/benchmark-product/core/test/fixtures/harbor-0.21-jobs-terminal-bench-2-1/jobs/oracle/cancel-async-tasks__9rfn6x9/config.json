@@ -1,0 +1,10 @@
+{
+    "task": {
+        "name": "terminal-bench/cancel-async-tasks",
+        "ref": "sha256:a3d048d351136e48070696cda8bb79660dfd74db1fea3b6da88559f0332699c1",
+        "source": "terminal-bench/terminal-bench-2-1"
+    },
+    "trial_name": "cancel-async-tasks__9rfn6x9",
+    "trials_dir": "jobs/oracle",
+    "job_id": "d757374f-2bef-4842-a361-7a6b512fdbbd"
+}

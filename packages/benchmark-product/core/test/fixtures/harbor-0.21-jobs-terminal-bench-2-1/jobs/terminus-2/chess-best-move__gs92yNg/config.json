@@ -1,0 +1,14 @@
+{
+    "task": {
+        "name": "terminal-bench/chess-best-move",
+        "ref": "sha256:9ab8e4b3674282e751edafbd9b5bd551fef995fd6601585a2cdb04fd70c520da",
+        "source": "terminal-bench/terminal-bench-2-1"
+    },
+    "trial_name": "chess-best-move__gs92yNg",
+    "trials_dir": "jobs/terminus-2",
+    "agent": {
+        "name": "terminus-2",
+        "model_name": "openrouter/deepseek/deepseek-v4.1-flash"
+    },
+    "job_id": "7ee2cf9e-f730-4ce3-9c7d-aa665e2bb46d"
+}
