@@ -34,6 +34,7 @@ export {
   type BenchmarkInspection,
   type BenchmarkInspectionItem,
   type DraftInspection,
+  type OfficialSlateInspection,
 } from "./inspect.js";
 
 export { sampleInit, type SampleInitInput, type SampleInitResult, type SampleInitTaskSummary } from "./sample.js";

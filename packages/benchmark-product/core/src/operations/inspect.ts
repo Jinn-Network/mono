@@ -26,6 +26,8 @@ import {
   parseBenchmark,
 } from "@jinn-network/benchmarking-records";
 import { resolveAssurance, type DraftSpec, type ResolvedAssurance } from "../domain/draft.js";
+import { TERMINAL_BENCH_21_OFFICIAL_SLATE_EXTENSION } from "../intake/terminal-bench-2-1.js";
+import { TERMINAL_BENCH_21_OFFICIAL_TASKS } from "../intake/terminal-bench-2-1-slate.js";
 import type { LifecycleState } from "../domain/lifecycle.js";
 import { getSealedBytes, hasSealedBytes } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";
@@ -49,12 +51,30 @@ export interface BenchmarkInspectionItem {
   readonly evaluationSha256?: string;
 }
 
+/**
+ * What a claimant passes to Harbor to run exactly the tasks an official suite slate sealed (issue
+ * #4953). The sealed Task records name each task without its organisation, and `items` shows only
+ * digests, so without this a claimant has to open sealed records by hand and then learn the prefix
+ * from a Harbor filter error.
+ */
+export interface OfficialSlateInspection {
+  readonly protocol: string;
+  readonly datasetId: string;
+  readonly datasetRevision: string;
+  /** `<datasetId>@<datasetRevision>`: the dataset and the revision as one Harbor dataset argument. */
+  readonly harborDataset: string;
+  /** `<org>/<name>` per selected task, in the slate's own order: the form Harbor's task filter matches. */
+  readonly harborTaskNames: readonly string[];
+}
+
 export interface BenchmarkInspection {
   readonly benchmarkSha256: string;
   readonly name: string;
   readonly version: string;
   readonly itemCount: number;
   readonly items: readonly BenchmarkInspectionItem[];
+  /** Present only when the Benchmark is an official suite slate (`method terminal-bench-2.1`). */
+  readonly officialSlate?: OfficialSlateInspection;
 }
 
 export interface DraftInspection {
@@ -82,6 +102,32 @@ export interface DraftInspection {
   readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
 }
 
+/** `undefined` for any Benchmark that carries no official-slate extension, or one whose selected
+ * names this build's task table does not hold: a name with no known organisation is not guessed. */
+function officialSlateInspection(record: Readonly<Record<string, unknown>>): OfficialSlateInspection | undefined {
+  const slate = record[TERMINAL_BENCH_21_OFFICIAL_SLATE_EXTENSION];
+  if (typeof slate !== "object" || slate === null) return undefined;
+  const { protocol, datasetId, datasetRevision, selectedTaskNames } = slate as Readonly<Record<string, unknown>>;
+  if (typeof protocol !== "string" || typeof datasetId !== "string" || typeof datasetRevision !== "string") {
+    return undefined;
+  }
+  if (!Array.isArray(selectedTaskNames)) return undefined;
+  const orgByName = new Map<string, string>(TERMINAL_BENCH_21_OFFICIAL_TASKS.map((task) => [task.name, task.org]));
+  const harborTaskNames: string[] = [];
+  for (const name of selectedTaskNames) {
+    const org = typeof name === "string" ? orgByName.get(name) : undefined;
+    if (org === undefined) return undefined;
+    harborTaskNames.push(`${org}/${name}`);
+  }
+  return {
+    protocol,
+    datasetId,
+    datasetRevision,
+    harborDataset: `${datasetId}@${datasetRevision}`,
+    harborTaskNames,
+  };
+}
+
 function resolveBenchmarkInspection(workspaceDir: string, benchmarkSha256: string): BenchmarkInspection {
   const bytes = getSealedBytes(workspaceDir, benchmarkSha256);
   const record = parseBenchmark(bytes);
@@ -99,12 +145,14 @@ function resolveBenchmarkInspection(workspaceDir: string, benchmarkSha256: strin
     return evaluationSha256 === undefined ? { taskSha256, stored } : { taskSha256, stored, evaluationSha256 };
   });
 
+  const officialSlate = officialSlateInspection(record);
   return {
     benchmarkSha256,
     name: record.name,
     version: record.version,
     itemCount: record.items.length,
     items,
+    ...(officialSlate === undefined ? {} : { officialSlate }),
   };
 }
 

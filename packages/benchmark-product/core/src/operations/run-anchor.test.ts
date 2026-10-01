@@ -32,7 +32,7 @@ import {
 } from "@jinn-network/trust-testing";
 import { readAuditEntries } from "../audit/journal.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
-import { OPENTIMESTAMPS_PROOF_MEDIA_TYPE, RFC3161_TOKEN_MEDIA_TYPE } from "../anchor/profiles.js";
+import { OPENTIMESTAMPS_PROOF_MEDIA_TYPE, PRODUCIBLE_ANCHOR_PROFILES, RFC3161_TOKEN_MEDIA_TYPE } from "../anchor/profiles.js";
 import { parseDetachedOtsProof, toHex } from "../anchor/opentimestamps.js";
 import type { AnchorHttpFetch } from "../anchor/sources.js";
 import { readRunState, writeRunState } from "../run/state.js";
@@ -461,6 +461,10 @@ describe("runAnchor — refusal matrix", () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("venue-unavailable");
+    // Issue #4951: the refusal a claimant meets first has to say what to supply. No endpoint ships
+    // as a default, so it says one must be given, and it names every provider value that works.
+    expect(outcome.error.detail).toContain("an endpoint must be supplied");
+    for (const profile of PRODUCIBLE_ANCHOR_PROFILES) expect(outcome.error.detail).toContain(profile);
   }, 60_000);
 
   test("refuses venue-unavailable when the draft disables anchoring and the caller names nothing", async () => {
@@ -497,6 +501,9 @@ describe("runAnchor — refusal matrix", () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("venue-unavailable");
+    // Issue #4951: a guessed provider is answered with the values that are accepted, the same list
+    // the `anchoring configure` refusal gives.
+    for (const profile of PRODUCIBLE_ANCHOR_PROFILES) expect(outcome.error.detail).toContain(profile);
   }, 60_000);
 
   test("verify-before-store: a tampered proof is refused venue-unverifiable and nothing is written", async () => {
