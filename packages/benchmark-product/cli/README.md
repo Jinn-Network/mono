@@ -78,7 +78,7 @@ publication gates. Colophon never copies an ordinary Claude or Codex home as a s
 doctor proves configuration, not provider acceptance.
 
 For this release, `@jinn-network/*` is pinned to the exact
-`0.1.0-canary.sha.0533a224cf99f06d7facf0c23455f2781a5b9e62` receipt.
+`0.1.0-canary.sha.1c023eb4c24201435e665ddae9d297f286a196bc` receipt.
 It is not a floating `@canary` dependency and is not a stable stack release.
 
 For a received bundle, the smaller reader surface is:

@@ -35,6 +35,10 @@ const V2_PIN_SHA = 'e00b2fc47fc5635b007eb349fb1e41aa81bb3c50';
 const V2_PIN_VERSION = `0.1.0-canary.sha.${V2_PIN_SHA}`;
 const V21_PIN_SHA = '0533a224cf99f06d7facf0c23455f2781a5b9e62';
 const V21_PIN_VERSION = `0.1.0-canary.sha.${V21_PIN_SHA}`;
+// The platform canary check 0.2.1, core 0.1.0 and cli 0.1.0 release against (issues #4733, #4886).
+const CHECK_PIN_SHA = '1c023eb4c24201435e665ddae9d297f286a196bc';
+const CHECK_PIN_VERSION = `0.1.0-canary.sha.${CHECK_PIN_SHA}`;
+const CHECK_PIN_RUN_URL = 'https://github.com/Jinn-Network/mono/actions/runs/36838465494/attempts/1';
 
 /** The checker, under the name it publishes as today. */
 function checkerManifest() {
@@ -100,33 +104,51 @@ test('the verifier 0.2 patch release selects its attested parser-capable closure
   assert.equal(loadFirstCutPlatformPin(repoRoot).platformVersion, PIN_VERSION);
 });
 
-test('the shipped README states the pin the selected receipt actually applies', () => {
-  const readme = readFileSync(join(repoRoot, 'packages/benchmark-product/check/README.md'), 'utf8');
-  assert.match(readme, new RegExp(V21_PIN_VERSION, 'u'));
-  assert.doesNotMatch(readme, /e00b2fc47fc5635b007eb349fb1e41aa81bb3c50/u);
+test('each shipped README states the pin its selected receipt actually applies', () => {
+  // The three READMEs ship in the tarballs, so a receipt re-pinned without them would publish a
+  // package whose own README names a platform version it was not built against (issue #4886).
+  for (const product of ['check', 'core', 'cli']) {
+    const manifest = JSON.parse(readFileSync(join(repoRoot, `packages/benchmark-product/${product}/package.json`), 'utf8'));
+    const pin = loadProductReleasePlatformPin(repoRoot, manifest);
+    const readme = readFileSync(join(repoRoot, `packages/benchmark-product/${product}/README.md`), 'utf8');
+    assert.equal(pin.platformVersion, CHECK_PIN_VERSION, product);
+    assert.match(readme, new RegExp(`\`${pin.platformVersion}\` receipt`, 'u'), product);
+    assert.doesNotMatch(readme, /e00b2fc47fc5635b007eb349fb1e41aa81bb3c50/u, product);
+    assert.doesNotMatch(readme, new RegExp(V21_PIN_SHA, 'u'), product);
+  }
 });
 
-test('core 0.1.0 and cli 0.1.0 select the attested 0.2.1 stack-canary receipt, not a new pin scheme', () => {
+test('core 0.1.0 and cli 0.1.0 select the same attested stack-canary receipt as the checker they depend on', () => {
   const core = JSON.parse(readFileSync(join(repoRoot, 'packages/benchmark-product/core/package.json'), 'utf8'));
   const cli = JSON.parse(readFileSync(join(repoRoot, 'packages/benchmark-product/cli/package.json'), 'utf8'));
+  // core depends on the checker and shares eleven Jinn packages with it. A core pinned to another
+  // platform sha would install a second copy of each, so the three receipts move together.
+  const checkPin = loadProductReleasePlatformPin(repoRoot, checkerManifest());
   const corePin = loadProductReleasePlatformPin(repoRoot, core);
   assert.equal(corePin.decision, 'DR-2026-08-22-a');
   assert.equal(corePin.product.packageName, '@colophon-claims/core');
   assert.equal(corePin.product.version, '0.1.0');
-  assert.equal(corePin.platformSourceSha, V21_PIN_SHA);
-  assert.equal(corePin.platformVersion, V21_PIN_VERSION);
+  assert.equal(corePin.platformSourceSha, CHECK_PIN_SHA);
+  assert.equal(corePin.platformVersion, CHECK_PIN_VERSION);
+  assert.equal(corePin.stackPublishRunUrl, CHECK_PIN_RUN_URL);
+  assert.equal(corePin.platformSourceSha, checkPin.platformSourceSha);
   assert.equal(corePin.platformPackages.length, 27);
+  for (const row of checkPin.platformPackages) {
+    const shared = corePin.platformPackages.find((pkg) => pkg.name === row.name);
+    if (shared !== undefined) assert.deepEqual(shared, row, row.name);
+  }
   const patchedCore = transformColophonManifestForPublish(core, corePin);
   const coreJinn = Object.entries(patchedCore.dependencies).filter(([name]) => name.startsWith('@jinn-network/'));
   assert.equal(coreJinn.length, 27);
   for (const [name, version] of coreJinn) {
-    assert.equal(version, V21_PIN_VERSION, name);
+    assert.equal(version, CHECK_PIN_VERSION, name);
   }
   const cliPin = loadProductReleasePlatformPin(repoRoot, cli);
   assert.equal(cliPin.decision, 'DR-2026-08-22-a');
   assert.equal(cliPin.product.packageName, '@colophon-claims/cli');
   assert.equal(cliPin.product.version, '0.1.0');
-  assert.equal(cliPin.platformSourceSha, V21_PIN_SHA);
+  assert.equal(cliPin.platformSourceSha, CHECK_PIN_SHA);
+  assert.equal(cliPin.stackPublishRunUrl, CHECK_PIN_RUN_URL);
   assert.equal(cliPin.platformPackages.length, 0);
   const patchedCli = transformColophonManifestForPublish(cli, cliPin);
   assert.equal(patchedCli.dependencies['@colophon-claims/core'], '0.1.0');
@@ -141,7 +163,7 @@ test('the published CLI README names the claimant verbs and documents launch as 
   }
   assert.match(readme, /launch/u);
   assert.match(readme, /service/u);
-  assert.match(readme, new RegExp(V21_PIN_VERSION, 'u'));
+  assert.match(readme, new RegExp(CHECK_PIN_VERSION, 'u'));
   assert.match(readme, /Protocol identifiers[\s\S]{0,64}are names, not addresses/u);
   assert.match(readme, /What this does not yet prove/u);
   assert.doesNotMatch(readme, /spec\.jinn\.network/u);
@@ -291,14 +313,47 @@ test('Increment 2 moves cli and core onto the demand-gated independent product l
   assert.equal(catalog.releaseGroups['transitional-or-private'].expectedPackageCount, 10);
 });
 
-test('neither newly published name may borrow a receipt for a publish run that never happened', () => {
+test('the checker 0.2.1 selects its own receipt at the platform canary it builds against', () => {
   // A receipt attests one stack-canary publish: its run URL, per-package integrity and provenance
-  // cannot be fabricated. Registering one for the checker is an operator step after this change, so
-  // until it exists `--apply` refuses and the checker cannot be published (issue #4188).
-  assert.throws(
-    () => loadProductReleasePlatformPin(repoRoot, checkerManifest()),
-    /no immutable platform receipt is registered for @colophon-claims\/check@0\.2\.1/u,
+  // cannot be fabricated. The checker's receipt is its own row, recorded on operator authorization
+  // (issue #4733). It walks to the same 15 package names verify 0.2.1 recorded, at a later platform
+  // sha: the 0.2.1 canary predates a trust-core field the checker now compiles against, so that
+  // pin cannot build it (issue #4886). The verify 0.2.1 row itself is left untouched.
+  const manifest = checkerManifest();
+  const pin = loadProductReleasePlatformPin(repoRoot, manifest);
+  assert.equal(pin.decision, 'operator-authorization-2026-09-23-issue-4733');
+  assert.equal(pin.product.packageName, '@colophon-claims/check');
+  assert.equal(pin.product.version, '0.2.1');
+  assert.equal(pin.platformSourceSha, CHECK_PIN_SHA);
+  assert.equal(pin.platformVersion, CHECK_PIN_VERSION);
+  assert.equal(pin.stackPublishRunUrl, CHECK_PIN_RUN_URL);
+  assert.equal(pin.platformPackages.length, 15);
+  const legacy = loadProductReleasePlatformPin(repoRoot, legacyVerifyManifest());
+  assert.equal(legacy.decision, 'operator-authorization-2026-08-26');
+  assert.equal(legacy.platformSourceSha, V21_PIN_SHA);
+  assert.deepEqual(
+    pin.platformPackages.map((pkg) => pkg.name),
+    legacy.platformPackages.map((pkg) => pkg.name),
   );
+  for (const pkg of pin.platformPackages) {
+    assert.equal(pkg.version, CHECK_PIN_VERSION, pkg.name);
+    assert.equal(pkg.gitHead, CHECK_PIN_SHA, pkg.name);
+    assert.match(pkg.integrity, /^sha512-/u, pkg.name);
+  }
+  const patched = transformColophonManifestForPublish(manifest, pin);
+  assert.equal(patched.name, '@colophon-claims/check');
+  assert.equal(patched.version, '0.2.1');
+  for (const section of ['dependencies', 'devDependencies']) {
+    for (const [name, version] of Object.entries(patched[section])) {
+      if (name.startsWith('@jinn-network/')) assert.equal(version, CHECK_PIN_VERSION, `${section}.${name}`);
+    }
+  }
+  assert.doesNotMatch(JSON.stringify(patched), /portal:/u);
+});
+
+test('the alias may not borrow a receipt for a publish run that never happened', () => {
+  // The alias declares no Jinn dependency, so the workflow never runs `--apply` on it and it has
+  // no receipt to select (issue #4188).
   assert.throws(
     () => loadProductReleasePlatformPin(repoRoot, aliasManifest()),
     /no immutable platform receipt is registered for @colophon-claims\/verify@0\.2\.2/u,
@@ -311,6 +366,7 @@ test('neither newly published name may borrow a receipt for a publish run that n
       '@colophon-claims/verify@0.2.1',
       '@colophon-claims/core@0.1.0',
       '@colophon-claims/cli@0.1.0',
+      '@colophon-claims/check@0.2.1',
     ],
     'a receipt names the publish run it attests, so re-keying one onto another name would forge it',
   );
