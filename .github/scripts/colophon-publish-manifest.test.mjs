@@ -432,6 +432,50 @@ test('the publish workflow guards each package, and releases the alias only afte
   assert.match(workflow, /options:\n(?:[^\n]*\n)*? {10}- check\n {10}- core\n {10}- cli/u);
 });
 
+// `npm publish` returns before the registry serves the version: npm processes a provenance publish
+// asynchronously. The SDK lane measured 54 to 310 seconds (#4900) and the stack lane 1 to 10
+// minutes with one version at about 29 minutes (#4919), so a single `npm view` straight after the
+// checker publish fails a run whose immutable publish has already succeeded. The gate is held to
+// the stack lane's 45 minutes as an invariant, not as exact loop strings.
+test('the alias gate waits out npm asynchronous publish processing, and still refuses a checker npm never serves (issue #4931)', () => {
+  const workflow = readFileSync(join(repoRoot, '.github/workflows', COLOPHON_PUBLISH_WORKFLOW), 'utf8');
+  const stepAt = workflow.indexOf('- name: Require the pinned checker version to resolve before releasing the alias');
+  assert.notEqual(stepAt, -1, 'the alias gate step must exist');
+  const nextStepAt = workflow.indexOf('- name:', stepAt + 1);
+  const step = workflow.slice(stepAt, nextStepAt);
+  assert.ok(
+    workflow.startsWith('- name: Publish the passthrough alias from the public registry', nextStepAt),
+    'the gate is the step directly before the alias publish',
+  );
+
+  const queries = Number(step.match(/seq 1 (\d+)/u)?.[1]);
+  const sleepSeconds = Number(step.match(/sleep (\d+)/u)?.[1]);
+  assert.ok(queries > 0, 'the gate must poll in a bounded `seq 1 N` loop');
+  assert.ok(sleepSeconds > 0, 'the gate must sleep between polls');
+  const waitSeconds = queries * sleepSeconds;
+  assert.ok(
+    waitSeconds >= 45 * 60,
+    `the gate waits ${queries} x ${sleepSeconds}s = ${waitSeconds}s; npm took about 29 minutes to serve ` +
+      'one accepted version, so the budget must be at least 45 minutes',
+  );
+
+  // A longer wait is not a weaker gate. The step succeeds early only when npm serves the pinned
+  // version, and an exhausted wait fails the run before the alias publish instead of falling through.
+  assert.match(step, /if npm view "@colophon-claims\/check@\$\{pinned\}" version[^\n]*; then\n\s+exit 0\n/u);
+  assert.equal((step.match(/exit 0/gu) ?? []).length, 1, 'serving the pinned version is the only early success');
+  assert.match(step, /::error::[^\n]*@colophon-claims\/check@\$\{pinned\}/u);
+  assert.match(step, /\n\s+exit 1\n/u);
+  assert.doesNotMatch(step, /\|\| true|continue-on-error/u);
+
+  // The former 30 minute timeout covered install, build and both publishes with no wait at all.
+  const timeoutMinutes = Number(workflow.match(/^ {4}timeout-minutes: (\d+)$/mu)?.[1]);
+  assert.ok(
+    timeoutMinutes * 60 >= waitSeconds + 30 * 60,
+    `timeout-minutes is ${timeoutMinutes}; the job must outlast the ${waitSeconds}s wait with 30 minutes ` +
+      'left for install, build and both publishes',
+  );
+});
+
 test('the guard reads what npm actually serves, and fails closed when it cannot', async () => {
   const ok = (body) => async () => ({ ok: true, status: 200, json: async () => body });
   assert.deepEqual(
