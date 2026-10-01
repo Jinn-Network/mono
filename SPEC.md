@@ -1,6 +1,6 @@
 # SPEC
 
-**What this doc is / is not.** This is the canonical specification of the Jinn protocol — the loop, roles, on-chain primitives, and current phase boundaries. It is not a changelog of design exploration, an implementation plan, or a place for ratified material to be silently restated; ratified material is consolidated here. Changes go through CODEOWNERS review with a linked [GitHub Discussion](https://github.com/Jinn-Network/mono/discussions); see [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md).
+**What this doc is / is not.** This is the canonical design of the Base network and its parked task marketplace: the loop, roles, on-chain primitives, and current phase boundaries. It is not the protocol specification; the protocol is written only in [Jinn-Network/spec](https://github.com/Jinn-Network/spec). It is also not a changelog of design exploration, an implementation plan, or a place for ratified material to be silently restated; ratified material is consolidated here. Changes go through CODEOWNERS review with a linked [GitHub Discussion](https://github.com/Jinn-Network/mono/discussions); see [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md).
 
 <!-- Other sections to be populated as they ratify; see GitHub Discussions for upstream proposals. -->
 
