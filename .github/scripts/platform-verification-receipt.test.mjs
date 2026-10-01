@@ -211,6 +211,26 @@ test('failed, skipped, neutral, cancelled, and missing gates cannot produce a re
   }
 });
 
+test('a skipped gate the release group does not require neither refuses nor enters its receipt', () => {
+  // The stable lane skips the canary-only benchmarking job, so platform-verification.yml hands
+  // every stable group `--gate benchmarking=skipped`. No stable group requires that gate.
+  const fixture = receiptFixture();
+  try {
+    assert.equal(
+      verificationGateConclusionIds(fixtureCatalog(), 'platform-v1').includes('benchmarking'),
+      false,
+    );
+    const args = receiptArgs(fixture, 'receipt-unrequired-skipped.json');
+    args.conclusions.benchmarking = 'skipped';
+    const receipt = createVerificationReceipt(args);
+    assert.deepEqual(receipt.conclusions, successfulConclusions());
+    assert.equal(readFileSync(args.outputPath, 'utf8'), canonicalJsonBytes(receipt));
+  } finally {
+    rmSync(fixture.repoRoot, { recursive: true, force: true });
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('receipt conclusion keys strip a validated -ci suffix from catalog group gates', () => {
   assert.deepEqual(
     verificationGateConclusionIds(fixtureCatalog(), 'platform-v1'),

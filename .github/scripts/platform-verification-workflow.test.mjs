@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { test } from 'node:test';
 
 import { laneReleaseGroupIds, loadPlatformCatalog } from './platform-catalog.mjs';
+import { verificationGateConclusionIds } from './platform-verification-receipt.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
 const workflowsRoot = resolve(import.meta.dirname, '../workflows');
@@ -176,6 +177,56 @@ test('the static reusable workflow set exactly equals the platform release-group
     sorted(reusablePaths),
     sorted(platformGateIds.map((gateId) => catalog.gateDefinitions[gateId].path)),
   );
+});
+
+test('a domain gate runs on the stable lane only when a stable group requires it', () => {
+  const stableGroupIds = laneReleaseGroupIds(catalog, 'stable');
+  const stableGateIds = new Set(
+    stableGroupIds.flatMap((groupId) => catalog.releaseGroups[groupId].requiredGateIds),
+  );
+  const canaryOnlyJobs = [];
+  for (const [jobId, { gateId }] of domains) {
+    const conditions = [...jobBlock(platform, jobId).matchAll(/^    if: (.+)$/gmu)]
+      .map(([, condition]) => condition);
+    if (stableGateIds.has(gateId)) {
+      assert.deepEqual(conditions, [], `${gateId} gates a stable group, so it must run on every lane`);
+    } else {
+      // No stable group requires this gate, so a stable cut neither runs it nor can be refused
+      // by it. It keeps running on the canary lane, where a group does require it.
+      assert.deepEqual(
+        conditions,
+        ["inputs.lane == 'canary'"],
+        `${gateId} gates no stable group, so it must run on the canary lane only`,
+      );
+      canaryOnlyJobs.push(jobId);
+    }
+  }
+  assert.deepEqual(canaryOnlyJobs, ['benchmarking']);
+
+  // A skipped gate job reaches the receipt as `skipped`. That is safe only because no stable
+  // group's receipt names the gate, and unsafe for any canary group that does.
+  for (const jobId of canaryOnlyJobs) {
+    const { gate } = domains.get(jobId);
+    for (const groupId of stableGroupIds) {
+      assert.ok(
+        !verificationGateConclusionIds(catalog, groupId).includes(gate),
+        `${groupId} must not require the ${gate} conclusion`,
+      );
+    }
+    assert.ok(
+      laneReleaseGroupIds(catalog, 'canary')
+        .some((groupId) => verificationGateConclusionIds(catalog, groupId).includes(gate)),
+      `a canary-lane group must still require the ${gate} conclusion`,
+    );
+    // A job that needs a skipped job is itself skipped unless it runs under always(), so the
+    // receipt job is the only one allowed to depend on a lane-conditional gate.
+    const dependents = platformJobIds.filter((otherId) => {
+      const block = jobBlock(platform, otherId);
+      return new RegExp(`^    needs: ${jobId}$|^      - ${jobId}$`, 'mu').test(block);
+    });
+    assert.deepEqual(dependents, ['verification_receipt']);
+  }
+  assert.match(jobBlock(platform, 'verification_receipt'), /^    if: always\(\)$/mu);
 });
 
 test('artifacts build and upload public/profile/pack outputs without OIDC', () => {

@@ -52,7 +52,8 @@ jobs:
     # canary sha across groups, and @colophon-claims/check's closure needs trust-testing from this
     # leg at that sha, so the leg gets room to finish. A normal walk takes about three hours, and
     # one version npm is slow to expose can add most of an hour (see the registry wait below), so
-    # the job runs to GitHub's 360-minute ceiling: room for the walk plus three exhausted waits.
+    # the job runs to GitHub's 360-minute ceiling: room for the walk plus three waits that each
+    # run close to the limit and still succeed. An exhausted wait ends the leg.
     timeout-minutes: 360
     environment: npm-publish
     strategy:

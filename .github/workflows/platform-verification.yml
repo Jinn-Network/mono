@@ -48,6 +48,12 @@ jobs:
 
   benchmarking:
     needs: catalog
+    # Canary lane only. benchmarking-ci is required by the canary-only benchmarking-product-v1
+    # group and by neither stable group, so on the stable lane this job is skipped and a
+    # product-side failure cannot fail the reusable call that stable-publish-gate requires.
+    # A skipped job does not fail the call, verification_receipt runs under always(), and the
+    # stable groups' receipts never name this gate, so they stay valid without it.
+    if: inputs.lane == 'canary'
     permissions:
       contents: read
     uses: ./.github/workflows/benchmarking-ci.yml
