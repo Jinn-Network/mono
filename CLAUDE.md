@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Jinn Network monorepo. Phase 0 is complete (Base mainnet). Phase 1a shipped a JINN token + DAO + distribution on Sepolia/Base Sepolia, but that token stack is **superseded by DR-2026-06-30 (tokenless, OLAS-native)** — Jinn no longer launches its own token or runs its own chain; OLAS (Base) is the permanent unit of both stake and reward, and operators earn OLAS for verified completed-loop work. See `spec/2026-06-30-tokenless-olas-native.md` and `log/decisions/2026-06-30-tokenless-olas-native-pivot.md` (DR-2026-06-30). Forward roadmap is the **Phase A umbrella** under the knowledge-market substrate framing — see `spec/2026-04-30-phase-a-umbrella.md`, `docs/superpowers/plans/2026-04-30-phase-a-umbrella-plan.md`, `log/decisions/2026-04-30-knowledge-market-vision-framing.md` (DR-2026-04-30), and GitHub Discussions [#59](https://github.com/Jinn-Network/mono/discussions/59) (substrate vision) + [#57](https://github.com/Jinn-Network/mono/discussions/57) (paired GTM). The original Phase 1b roadmap (`spec/2026-04-06-phase-1a-design.md` §9, `docs/superpowers/plans/2026-04-06-phase-1a-tokenomics.md`) is subsumed: anti-farming decay and ve-JINN are shipped, evidence-schema work executes through Phase A.1, the residual challenge mechanism is re-homed to Phase B.2.
 
-Jinn is a training protocol for agentic intents. It defines a loop (Creation → Execution → Evaluation → Knowledge) where intents are published with fees, participants attempt fulfillment, evaluators verify results, and knowledge accumulates to improve future attempts.
+Jinn is an open protocol and network for work and the data it produces: records kept in Jinn's standard formats or the producer's own, checkable by anyone, findable, and bought or sold with payment going straight to whoever holds the record. The protocol is written only in [Jinn-Network/spec](https://github.com/Jinn-Network/spec). It says how work is described, done, evidenced, judged, trusted and found. It takes no fee and no part in payment, and there is no Jinn token. The loop is Creation → Execution → Evaluation → Knowledge: how work is described, done, judged, and kept as a record.
+
+What exists and what is direction stay separate. The protocol, the published checker (`@colophon-claims/verify`) and Colophon's sealed benchmark claims exist today. Buying and selling records is the direction, not a working market. The task marketplace, where operators solved funded tasks for OLAS, is parked and is not running tasks now; its design is [`SPEC.md`](SPEC.md).
 
 ## Canonical Docs
 
@@ -16,7 +18,7 @@ Canonical docs are the repo's stable sources of truth. They change only via appr
 
 Other canonical docs:
 
-- `SPEC.md` — read before reasoning about the protocol loop, roles, contracts, or phase boundaries
+- `SPEC.md`: the design of the Base network and its parked task marketplace; read before reasoning about that design's loop, roles, contracts, or phase boundaries. The protocol itself is written in [Jinn-Network/spec](https://github.com/Jinn-Network/spec).
 - `THESIS.md` — read before writing positioning, pitch, strategic copy, or any "why Jinn" framing
 - `BRAND.md` — read before producing any user-facing artifact (UI, slides, docs, marketing copy)
 - `GROWTH.md` — read before planning distribution, campaigns, channel strategy, or growth experiments
@@ -576,10 +578,10 @@ Read first:
 - [`PRINCIPLES.md`](PRINCIPLES.md) — every public claim must satisfy Legibility (independently verifiable, on-chain where possible) and stay coherent with Neutral, Learning Maximised, Governance Minimal, Permissionless, Prestige.
 - [`THESIS.md`](THESIS.md) — why Jinn exists.
 - [`BRAND.md`](BRAND.md) — voice, headless-brand posture, protocol-vs-narrative split, content non-negotiables.
-- [`GROWTH.md`](GROWTH.md) — product-led distribution; positioning derives from the GTM plan and `BRAND.md`.
-- [`docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md`](docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md) — current product and go-to-market framing.
+- [`GROWTH.md`](GROWTH.md): growth through the data market; Jinn's positioning, claims, and copy derive from `THESIS.md` and `BRAND.md`.
+- [`docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md`](docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md): Colophon's product positioning; Colophon's surfaces also respect its what-the-product-is-not list.
 
-When the artifact is release-shaped, apply the External Communication canon named above (`BRAND.md`, `GROWTH.md`, the GTM plan) and enforce the rules above by hand; there is no skill for it.
+When the artifact is release-shaped, apply the External Communication canon named above (`THESIS.md`, `BRAND.md`, `GROWTH.md`, and the GTM plan for Colophon's surfaces) and enforce the rules above by hand; there is no skill for it.
 
 ### Framing and structure
 
@@ -589,12 +591,11 @@ When the artifact is release-shaped, apply the External Communication canon name
 
 ### Verbs
 
-- **Never use `paid` / `pays` / `payment for` / `compensation`** in protocol-action context. The contract does not pay anyone. Use, in order of preference:
-  - `mints to` — when the contract is literally minting (most accurate for JinnDistributor)
-  - `emits tokens to` — when describing the protocol pattern abstractly
-  - `settles with` / `settles for` — for the cross-chain settlement frame
-  - `distributes to` / `issues to` — for governance / treasury framings
-- `Earned` (operator-side, active voice) is acceptable and matches the dashboard label `TESTNET JINN EARNED`. Avoid `earned` for the protocol's action ("the protocol earned the operator…" — wrong).
+- **Never use `paid` / `pays` / `payment for` / `compensation`** in protocol-action context. The contract does not pay anyone, and the protocol takes no fee and no part in payment. Use the canonical docs' own verbs:
+  - `payment goes straight to the holder, outside the protocol`: for a record and its offer; the protocol carries offers and does not settle payment
+  - `distributes to`: for OLAS staking emissions in the task marketplace design (the staking contract distributes OLAS to operators)
+  - `settles to`: for Curator funding in that design (the delivery fee a Curator escrows per task settles to the operator on delivery)
+- `Earned` (operator-side, active voice) is acceptable and matches the operator app's Rewards state (`lifetime OLAS earned`, [`apps/operator-console/OPERATOR-APP-SPEC.md`](apps/operator-console/OPERATOR-APP-SPEC.md) §2.7). Avoid `earned` for the protocol's action ("the protocol earned the operator…" is wrong).
 
 ### Claim discipline (Legibility)
 
