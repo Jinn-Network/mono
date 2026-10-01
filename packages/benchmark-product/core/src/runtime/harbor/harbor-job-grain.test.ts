@@ -18,6 +18,7 @@ import {
   harborTrialTaskName,
   type HarborSelectionManifest,
 } from "./manifest.js";
+import { harborTrialExceptionType, harborTrialRetryable } from "./retry-bind.js";
 
 const manifest: HarborSelectionManifest = {
   schema: "jinn.network/benchmark-product/harbor-selection/1",
@@ -192,5 +193,41 @@ describe("Harbor planned-trial grain", () => {
     } finally {
       await rm(workspaceDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("Harbor trial exception type", () => {
+  // What Harbor 0.21.0 writes for a trial that hit its agent timeout: no `status`, and the type
+  // nested under `exception_info` (see test/fixtures/harbor-0.21-jobs-terminal-bench-2-1).
+  const realTimeout = {
+    exception_info: {
+      exception_type: "AgentTimeoutError",
+      exception_message: "Agent execution timed out after 900.0 seconds",
+      occurred_at: "2026-10-01T13:29:04.493781Z",
+    },
+    finished_at: "2026-10-01T13:31:19.179759Z",
+  };
+
+  test("is read from the top level and from exception_info", () => {
+    expect(harborTrialExceptionType({ exception_type: "RuntimeError" })).toBe("RuntimeError");
+    expect(harborTrialExceptionType({ exceptionType: "RuntimeError" })).toBe("RuntimeError");
+    expect(harborTrialExceptionType(realTimeout)).toBe("AgentTimeoutError");
+    expect(harborTrialExceptionType({ exception_info: null, finished_at: "2026-10-01T13:35:57.746726Z" })).toBeUndefined();
+    expect(harborTrialExceptionType({ exception_info: { exception_message: "no type" } })).toBeUndefined();
+    // The top level wins when a result carries both.
+    expect(harborTrialExceptionType({ exception_type: "RuntimeError", exception_info: { exception_type: "AgentTimeoutError" } }))
+      .toBe("RuntimeError");
+  });
+
+  test("decides retry the same way for both shapes", () => {
+    // A Harbor-excluded exception is never an in-job retry, however the result spells it.
+    expect(harborTrialRetryable({ status: "error", exception_type: "AgentTimeoutError" }, 3)).toBe(false);
+    expect(harborTrialRetryable(realTimeout, 3)).toBe(false);
+    // Any other exception is one Harbor retries in the job.
+    expect(harborTrialRetryable({ status: "error", exception_type: "RuntimeError" }, 3)).toBe(true);
+    expect(harborTrialRetryable({ exception_info: { exception_type: "RuntimeError" }, finished_at: "2026-10-01T13:31:19Z" }, 3)).toBe(true);
+    expect(harborTrialRetryable({ exception_info: { exception_type: "RuntimeError" } }, 0)).toBe(false);
+    // A finished trial with no exception is not a retry.
+    expect(harborTrialRetryable({ exception_info: null, finished_at: "2026-10-01T13:35:57.746726Z" }, 3)).toBe(false);
   });
 });
