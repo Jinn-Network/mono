@@ -476,6 +476,115 @@ test('the alias gate waits out npm asynchronous publish processing, and still re
   );
 });
 
+/** One job's steps, each as its own lines with comments and blank lines dropped. */
+function jobSteps(workflowName, job) {
+  const workflow = readFileSync(join(repoRoot, '.github/workflows', workflowName), 'utf8');
+  const jobAt = workflow.indexOf(`\n  ${job}:\n`);
+  assert.notEqual(jobAt, -1, `${workflowName} must declare the ${job} job`);
+  const nextJobAt = workflow.slice(jobAt + 1).search(/\n {2}[A-Za-z_][\w-]*:\n/u);
+  const body = nextJobAt === -1 ? workflow.slice(jobAt) : workflow.slice(jobAt, jobAt + 1 + nextJobAt);
+  return body
+    .split(/\n(?= {6}- )/u)
+    .slice(1)
+    .map((step) => step.split('\n').filter((line) => line.trim() && !line.trimStart().startsWith('#')));
+}
+
+function stepNamed(steps, name) {
+  const found = steps.filter((step) => step[0] === `      - name: ${name}`);
+  assert.equal(found.length, 1, `exactly one step must be named "${name}"`);
+  return found[0];
+}
+
+/** The commands of a step's `run:`, whether it is a one-line scalar or a block. */
+function runLines(step) {
+  const at = step.findIndex((line) => /^ {8}run:/u.test(line));
+  assert.notEqual(at, -1, `${step[0].trim()} must run something`);
+  const inline = step[at].replace(/^ {8}run:\s*/u, '');
+  return inline === '|' ? step.slice(at + 1).map((line) => line.trim()) : [inline];
+}
+
+// The cli tarball carries the private web application: cli's build script compiles
+// packages/benchmark-product/web and copies its standalone output into `dist/local-web`. The web
+// package resolves core, the checker and the platform packages through Yarn portals to the
+// checkout, so that build needs the whole closure built from source first. Product CI prepares it
+// ahead of its own cli step. The publish job did not, and a cli dispatch died in its build on a
+// missing node_modules state file. These assertions hold the publish job to product CI's own
+// commands instead of a second recipe that could drift from the one CI verifies.
+test('the cli dispatch prepares the private web build input the way product CI does, before the cli build (issue #4933)', () => {
+  const publish = jobSteps(COLOPHON_PUBLISH_WORKFLOW, 'publish-colophon');
+  const product = jobSteps('benchmark-product-ci.yml', 'product');
+  const cliOnly = "        if: ${{ github.event.inputs.package == 'cli' }}";
+  const installAndBuild = (directory) => `(cd ${directory} && yarn install --immutable && yarn build)`;
+
+  const prepared = [
+    'Enable Corepack before the Yarn cache lookup',
+    'Set up Node with the Yarn cache for the private web build input',
+    'Enable Yarn 4.13.0',
+    'Build portal dependencies from source',
+    'Build the checker and core from source',
+    'Prepare private Colophon web build input',
+  ].map((name) => stepNamed(publish, name));
+  for (const step of prepared) {
+    // Skipped on the check and core dispatches, so those two paths run exactly what they ran before.
+    assert.ok(step.includes(cliOnly), `${step[0].trim()} must run for the cli dispatch only`);
+    // The manifest the receipt step pins, and the registry install of the pinned core and checker,
+    // belong to the cli step. Nothing here may reach into that directory or run npm.
+    assert.doesNotMatch(step.join('\n'), /benchmark-product\/cli|\bnpm\b/u, step[0].trim());
+  }
+
+  const build = publish.findIndex((step) =>
+    step.includes('        working-directory: packages/benchmark-product/${{ github.event.inputs.package }}'));
+  assert.notEqual(build, -1, 'the core and cli install, build and publish step must exist');
+  assert.deepEqual(runLines(publish[build]), ['unset NODE_AUTH_TOKEN', 'npm install', 'npm run build', 'npm publish --access public']);
+  const order = prepared.map((step) => publish.indexOf(step));
+  assert.deepEqual(order, [...order].sort((a, b) => a - b), 'the web build input is prepared in product CI order');
+  assert.ok(order.at(-1) < build, 'the web build input must be ready before the cli build runs');
+
+  // Corepack and the pinned Yarn: the same commands as product CI.
+  for (const name of ['Enable Corepack before the Yarn cache lookup', 'Enable Yarn 4.13.0']) {
+    assert.deepEqual(runLines(stepNamed(publish, name)), runLines(stepNamed(product, name)), name);
+  }
+
+  // The portal closure: the same directories in the same dependency order, each installed from its
+  // lockfile and built. The one test product CI runs inside that block stays in product CI.
+  const portalDirectories = runLines(stepNamed(product, 'Build portal dependencies from source')).map((line) => {
+    const directory = line.match(/^\(cd (\S+) && yarn install --immutable && (?:.+ && )?yarn build\)$/u)?.[1];
+    assert.ok(directory, `product CI portal build line is not an install-and-build: ${line}`);
+    return directory;
+  });
+  assert.ok(portalDirectories.length > 0, 'product CI must build its portal dependencies from source');
+  assert.deepEqual(
+    runLines(stepNamed(publish, 'Build portal dependencies from source')),
+    portalDirectories.map(installAndBuild),
+  );
+
+  // Then the checker and core, which web reaches through its portal to core, where product CI
+  // builds them: after the portal closure and before the web install.
+  const family = ['check', 'core'].map((name) => `packages/benchmark-product/${name}`);
+  assert.deepEqual(runLines(stepNamed(publish, 'Build the checker and core from source')), family.map(installAndBuild));
+  const productSteps = ['Build portal dependencies from source', 'Verify public bundle checker', 'Verify Colophon core',
+    'Prepare private Colophon web build input', 'Verify Colophon CLI'].map((name) => stepNamed(product, name));
+  const productOrder = productSteps.map((step) => product.indexOf(step));
+  assert.deepEqual(productOrder, [...productOrder].sort((a, b) => a - b), 'product CI prepares the same input in this order');
+  assert.ok(productSteps[1].includes(`        working-directory: ${family[0]}`));
+  assert.ok(productSteps[2].includes(`        working-directory: ${family[1]}`));
+
+  // Then the web install itself: product CI's step, with only the cli condition added.
+  const web = stepNamed(publish, 'Prepare private Colophon web build input');
+  assert.deepEqual(web.filter((line) => line !== cliOnly), productSteps[3]);
+
+  // The cached Node setup names the lockfile of every project these steps install, and no other.
+  const setup = stepNamed(publish, 'Set up Node with the Yarn cache for the private web build input');
+  assert.ok(setup.includes('        uses: actions/setup-node@v7'));
+  assert.ok(setup.includes('          cache: yarn'));
+  const pathsAt = setup.indexOf('          cache-dependency-path: |');
+  assert.notEqual(pathsAt, -1, 'the cached Node setup must declare its lockfiles');
+  assert.deepEqual(
+    setup.slice(pathsAt + 1).map((line) => line.trim()),
+    [...portalDirectories, ...family, 'packages/benchmark-product/web'].map((directory) => `${directory}/yarn.lock`),
+  );
+});
+
 test('the guard reads what npm actually serves, and fails closed when it cannot', async () => {
   const ok = (body) => async () => ({ ok: true, status: 200, json: async () => body });
   assert.deepEqual(

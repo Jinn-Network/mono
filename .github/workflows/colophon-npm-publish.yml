@@ -62,6 +62,127 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
+      # cli only. The cli build compiles the private web application in packages/benchmark-product/web
+      # and copies its standalone output into the tarball. web resolves core, the checker and the
+      # platform packages through Yarn portals to this checkout, so that build needs the whole closure
+      # built from source, and the cli dispatch used to die in its build on a missing node_modules
+      # state file (#4933). These steps prepare that input with the commands the `product` job of
+      # benchmark-product-ci.yml runs ahead of its own cli step: Corepack and Yarn 4.13.0, the portal
+      # dependencies in dependency order, the checker and core, then the web install. They install and
+      # build with Yarn in those directories only. None of them touches the cli package, so the
+      # manifest the receipt step rewrites and the registry install of the pinned core and checker
+      # are left to the cli step below, and the build needs no package npm does not serve.
+      # They sit ahead of the shared Node setup because a setup-node step that precedes a Yarn install
+      # must carry that install's cache mapping (workflow-yarn-cache.test.mjs). Giving the cli
+      # dispatch its own cached setup leaves the check and core dispatches exactly as they were.
+      - name: Enable Corepack before the Yarn cache lookup
+        if: ${{ github.event.inputs.package == 'cli' }}
+        run: corepack enable
+
+      - name: Set up Node with the Yarn cache for the private web build input
+        if: ${{ github.event.inputs.package == 'cli' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: |
+            packages/task-execution/protocol/yarn.lock
+            packages/trust/core/yarn.lock
+            packages/trust/testing/yarn.lock
+            packages/discovery/protocol/yarn.lock
+            packages/discovery/client/yarn.lock
+            packages/discovery/serve/yarn.lock
+            packages/discovery/transport-http/yarn.lock
+            packages/discovery/publication/yarn.lock
+            packages/environments/record/yarn.lock
+            packages/task-execution/profiles/yarn.lock
+            packages/benchmarking/records/yarn.lock
+            packages/benchmarking/aggregate/yarn.lock
+            packages/benchmarking/publication/yarn.lock
+            packages/task-execution/backend/yarn.lock
+            packages/task-execution/backend-local/supervisor/yarn.lock
+            packages/task-execution/backend-local/workspace/yarn.lock
+            packages/task-execution/backend-local/launchers/yarn.lock
+            packages/task-supply/admission/yarn.lock
+            packages/benchmarking/interop/yarn.lock
+            packages/evidence/protocol/yarn.lock
+            packages/evidence/repository/yarn.lock
+            packages/evidence/discovery/yarn.lock
+            packages/evidence/execution-evidence-builder/yarn.lock
+            packages/evidence/execution-recorder/yarn.lock
+            packages/evidence/attestation-issuer/yarn.lock
+            packages/benchmarking/protocol/yarn.lock
+            packages/benchmarking/evidence/yarn.lock
+            packages/benchmarking/native-capture/yarn.lock
+            packages/benchmarking/evaluation/yarn.lock
+            packages/task-execution/evaluation-harness/yarn.lock
+            packages/task-execution/evaluator-adapters/yarn.lock
+            packages/task-execution/oci-grader/yarn.lock
+            packages/task-execution/backend-local/assembly/yarn.lock
+            packages/benchmarking/run/yarn.lock
+            packages/benchmarking/local/yarn.lock
+            packages/benchmark-product/check/yarn.lock
+            packages/benchmark-product/core/yarn.lock
+            packages/benchmark-product/web/yarn.lock
+
+      - name: Enable Yarn 4.13.0
+        if: ${{ github.event.inputs.package == 'cli' }}
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+
+      # The same directories, in the same order, as the step of this name in benchmark-product-ci.yml.
+      # Each one's `dist/` is what the next one's type resolution reads.
+      - name: Build portal dependencies from source
+        if: ${{ github.event.inputs.package == 'cli' }}
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/trust/testing && yarn install --immutable && yarn build)
+          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
+          (cd packages/discovery/client && yarn install --immutable && yarn build)
+          (cd packages/discovery/serve && yarn install --immutable && yarn build)
+          (cd packages/discovery/transport-http && yarn install --immutable && yarn build)
+          (cd packages/discovery/publication && yarn install --immutable && yarn build)
+          (cd packages/environments/record && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/publication && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
+          (cd packages/task-supply/admission && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/interop && yarn install --immutable && yarn build)
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-evidence-builder && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
+          (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/protocol && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/evidence && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/native-capture && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/evaluation && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluation-harness && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluator-adapters && yarn install --immutable && yarn build)
+          (cd packages/task-execution/oci-grader && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/run && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/local && yarn install --immutable && yarn build)
+
+      - name: Build the checker and core from source
+        if: ${{ github.event.inputs.package == 'cli' }}
+        run: |
+          (cd packages/benchmark-product/check && yarn install --immutable && yarn build)
+          (cd packages/benchmark-product/core && yarn install --immutable && yarn build)
+
+      - name: Prepare private Colophon web build input
+        if: ${{ github.event.inputs.package == 'cli' }}
+        working-directory: packages/benchmark-product/web
+        run: yarn install --immutable
+
       - uses: actions/setup-node@v7
         with:
           node-version: 22
