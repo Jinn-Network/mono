@@ -6,7 +6,7 @@
 
 ### Lead from structure, not from fear
 
-The problem Jinn solves is a structural gap: the internet has no native productive economy. Block space is abundant, AI is increasingly capable, the connective tissue between them is missing. That is the headline.
+The problem Jinn addresses is a structural gap: the world keeps the answers and throws away the work, and that record of work is becoming valuable exactly as it becomes uncheckable. That is the headline.
 
 The problem is *not* a threat. We do not lead with "centralised AI will capture all value", "platforms will own the next economy", "value will accrue to a small number of actors". That framing is available to anyone who wants it; the market can supply it. Supplying it is not our job.
 
@@ -41,9 +41,8 @@ Crowded territory — avoid leading copy with these phrases:
 
 White space Jinn plants in:
 
-- **Economy** as the category noun (not marketplace, stack, layer, or network).
-- **Solve** as the verb (not train, predict, aggregate, or orchestrate).
-- **Outcomes** as the noun for what gets solved.
+- **Protocol**, **network** and **market** as the category nouns (not stack or layer): an open protocol and network for work and the data it produces. *Market* names the direction and must not be presented as working; *marketplace* stays the name of the parked task marketplace.
+- **Records** as the noun for what work leaves behind, and **check** and **find** as the verbs for what anyone can do with one (not predict, aggregate, or orchestrate).
 - The **network-runs-without-us** property — only Jinn can credibly stress-test this; the six competitors above are all VC-backed companies, multisigs, or hedge funds.
 
 How to apply: when writing positioning copy, run a thirty-second collision check against the territory above. If the lead phrase belongs to a competitor, refactor before publishing. If a desired claim sits in their territory, demote it — subordinate clause, second sentence, or move it to a downstream artifact entirely. The competitive landscape moves; revisit this list on the same cadence as canonical-doc reviews.
@@ -54,12 +53,12 @@ Where you've worked, why you left, who you know — none of this belongs in deck
 
 Total claims ("no one else has bet on X") need softening or named specifics on demand. Default in writing: soften.
 
-### Replace "training" in external contexts
+### "Training" in external contexts
 
-"Training" reads as LLM training in a builder's head. Use **learning** (the broader Bitter Lesson term) in any external context where the LLM frame would confuse the reader.
+"Training" reads as LLM training in a builder's head. Use **learning** (the broader Bitter Lesson term) in any external context where the LLM frame would confuse the reader, such as how a network or an agent improves by doing. Use **training** where it names what buyers do with the data: someone training a model on Jinn records is training in exactly the LLM sense, and saying so is plain speech.
 
 - Internal / technical writing where the context is unambiguous: "training" is fine.
-- Pitch decks, marketing copy, external docs, growth content: **learning**.
+- Pitch decks, marketing copy, external docs, growth content: **learning** for how a network or an agent improves; **training** for what a buyer does with records.
 - Headline framing of the Bitter Lesson in Jinn material: "learning over hand-coded structure."
 
 ### Sanctioned strong language
@@ -82,7 +81,7 @@ Subtitles like "boring on purpose" add a register a builder audience reads as to
 
 The smallest user-facing artifact Jinn ships is its self-description in ≤160 characters. Treat the canonical line as a Schelling point in the same sense the loop and the lexicon are: forkable surfaces converge on it because the cost of fragmentation outweighs the upside of a personal variant, not because anyone is enforcing it. The line is canon, not protocol — proposing a replacement is a normal canonical-doc PR, not a structural change.
 
-> The decentralised economy where agents learn to solve. As your agent learns, the network learns.
+> An open protocol and network for work and the data it produces: checkable by anyone, findable, and sold straight by whoever holds it.
 
 This line travels everywhere Jinn is introduced in compressed form: X bio, link previews, conference chyrons, slide footers, the first sentence of cold outreach, the lede of explainer posts. Operators producing user-facing surfaces should converge on it; if a community-driven variant gains real adoption, propose it as a replacement here rather than ship a quiet alternative.
 
@@ -102,7 +101,7 @@ Coherence in a headless brand comes from *consensus across competing narratives 
 
 ### Protocol — immutable; don't fork without a proposal
 
-- **The loop.** Creation → Execution → Evaluation → Knowledge. This is the whole shape of Jinn.
+- **The loop.** Creation → Execution → Evaluation → Knowledge: how work is described, done, judged, and kept as a record. The market step that follows it is direction, not yet a working market: a holder offers a record, free or priced, a buyer finds it, and payment goes straight to the holder.
 - **The lexicon.** *summon, bind, vow, vessel, wish, smoke, seer, wane, release, scrying, ether, bound, broken.* These are the coordination vocabulary. Definitions live in `GLOSSARY.md` (the canonical dictionary). New terms are proposals, not unilateral additions.
 - **The content non-negotiables.** No emoji. No decorative gradients. No uncoined vow-language without proposal. Plain speech on money, safety, and legal consent.
 - **The role structure.** Creator, restorer, evaluator, curator. What they do, not how they're depicted. Definitions in `GLOSSARY.md`.

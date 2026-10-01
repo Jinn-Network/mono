@@ -294,8 +294,10 @@ describe("anchored public bundle v6 — portable verification", () => {
  * this product re-authors the Benchmark under the workspace key that is also the Run owner, so a
  * verifier rule keyed on that relationship would make them dead letters.
  *
- * The face renders nothing for any of it -- that is held for issue #3416 -- and the last test here
- * is what keeps the hold honest end to end.
+ * These runs publish on the rollback path, the enumerated `/2` cell, whose face renders nothing for
+ * any of it, and the last test here keeps that true end to end. The composed generation states the
+ * declaration on the face as the `task-selection` capability (issue #3416); that half is proven in
+ * `v10-materialize.test.ts`.
  */
 describe("task-selection provenance round trip", () => {
   for (const mode of ["claimant-chosen", "fixed-public-set"] as const) {
@@ -317,20 +319,22 @@ describe("task-selection provenance round trip", () => {
   }, 120_000);
 
   /**
-   * The reader-compatibility invariant, end to end (issue #3416).
+   * The reader-compatibility invariant for every format before `/10`, end to end (issue #3416).
    *
-   * The render is held, so a declaring bundle must publish a face that a task-selection-unaware
+   * A declaring bundle on an enumerated cell must publish a face that a task-selection-unaware
    * builder reproduces exactly -- which is what the pinned `@colophon-claims/verify@0.1.0` this
    * bundle's own claim package instructs a reader to run actually does. Two things prove it here:
-   * no asset carries the held sentences, and cold verification passes, and passing IS the
+   * no asset carries the declaration, and cold verification passes, and passing IS the
    * byte-comparison of all five assets against a rebuild.
    */
-  test("a declaring bundle publishes a face carrying no trace of the declaration", async () => {
+  test("a declaring bundle on the rollback path publishes a face carrying no trace of the declaration", async () => {
     const { bundle } = await declaringFixture("claimant-chosen");
     const held = [
       "The claimant chose which tasks",
       "the complete, publicly declared set",
       "drawn by a fixed rule after the run was locked",
+      // The composed generation's header fact row (issue #3416).
+      "Task selection",
     ];
     for (const asset of ["index.html", "README.md", "share.txt", "badge.svg", "social-card.svg"]) {
       const text = readFileSync(join(bundle.bundleDir, asset), "utf8");
@@ -342,6 +346,8 @@ describe("task-selection provenance round trip", () => {
     // rebuilds these exact assets. Byte-comparing them is what `verifyPublicBundle` does below.
     expect(json(bundle.bundleDir, "claim-package.json").verification.command)
       .toBe("npx @colophon-claims/verify@0.1.0 <bundle-dir>");
+    // Its claim id admits no task-selection section, so the claim is the one it always was.
+    expect(json(bundle.bundleDir, "claim-package.json").taskSelection).toBeUndefined();
     const verified = await verifyPublicBundle(detach(bundle.bundleDir));
     expect(verified.checks).toContain("claim-consistency");
   }, 120_000);

@@ -13,7 +13,7 @@
 >
 > Retained as the historical record of the 2026-04-29 deploy — the addresses, tx
 > hashes, and verify gates below are what actually ran that day, so nothing beneath
-> this banner is retro-edited. For the current operator path see
+> this banner is retro-edited. For the record of how operators ran on testnet see
 > [`docs/operator-testnet.md`](../operator-testnet.md); for the current daemon loop set
 > see [`operator/ARCHITECTURE.md`](../../operator/ARCHITECTURE.md) §6.
 

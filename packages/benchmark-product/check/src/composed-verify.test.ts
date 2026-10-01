@@ -178,4 +178,33 @@ describe("declaration is authoritative", () => {
       message: expect.stringContaining("anchors"),
     });
   });
+
+  test("declared without the fact: task-selection over a Run that declares no selection is refused", async () => {
+    // Issue #3416. The capability has no member, so the member closure has nothing to miss; the
+    // golden Run carries no task-selection/v1 declaration, so there is nothing for the section or
+    // the header row to project. Refused on the vector, before any claim is rebuilt.
+    const bundleDir = await composedGolden();
+    reseal(bundleDir, ["task-selection"]);
+    expect(await refusal(bundleDir)).toEqual({
+      path: "bundle.manifest.capabilities",
+      message: expect.stringContaining("carries no task-selection/v1 declaration"),
+    });
+  });
+
+  test("a task-selection section and header row with no declaration behind them are refused", async () => {
+    // The claim and page of a declaring bundle, grafted onto an undeclared vector over a Run that
+    // declares nothing. The section is schema-valid on the composed claim id, so what refuses it is
+    // the rebuild, which projects the section from the Run and finds none.
+    const bundleDir = await composedGolden();
+    const claim = json(bundleDir, "claim-package.json");
+    claim["taskSelection"] = { mode: "claimant-chosen" };
+    writeFileSync(join(bundleDir, "claim-package.json"), canonicalJsonBytes(claim as never));
+    const assets = buildPublicAssets({ ...(await goldenInput(BUNDLE_V10_FORMAT)), claim: claim as never });
+    for (const [path, bytes] of Object.entries(assets)) writeFileSync(join(bundleDir, path), bytes);
+    reseal(bundleDir, []);
+    expect(await refusal(bundleDir)).toEqual({
+      path: "claim-consistency",
+      message: expect.stringContaining("taskSelection"),
+    });
+  });
 });

@@ -576,9 +576,9 @@ Every token is **must-understand**. A reader that does not implement a token in
 the vector refuses the bundle whole, naming the token, before it reads any
 member. There is no tier of tokens a reader may ignore.
 
-Five capabilities are registered. Each one's members, checks, and claim section
-are exactly what the closure it came from carries, except `external-import` and
-`owner-controlled-publication`, which are new with this generation:
+Six capabilities are registered. Each one's members, checks, and claim section
+are exactly what the closure it came from carries, except `external-import`,
+`task-selection`, and `owner-controlled-publication`, which are new with this generation:
 
 | Token | Adds | Check it appends | Claim section |
 | --- | --- | --- | --- |
@@ -586,6 +586,7 @@ are exactly what the closure it came from carries, except `external-import` and
 | `anchoring` | `anchors/<sha256>.bin`, which may be empty under the declared-but-absent rule stated for v6 | `integrity-anchors` | `anchors` |
 | `disclosure-specification` | no member of its own; the sealed record travels at `records/<sha256>.bin`, named by the Report extension stated for v8 | `disclosure-specification` | `disclosure` |
 | `external-import` | `external-import.json`, the dump digest plus one row per sealed Matrix cell | `external-import` | `externalImport` |
+| `task-selection` | no member of its own; the declaration is the Run's `task-selection/v1` extension, and the report face states it as a header fact row (see [Task-selection provenance](#task-selection-provenance)) | none; its refusals run under `claim-consistency` | `taskSelection` |
 | `owner-controlled-publication` | no member; a sixth sealed venue sentence, stated below | none; `claim-consistency` rebuilds the sentence and the section | `ownerControlledPublication` |
 
 `disclosure-specification` requires `binary-qualification`, because the evidence
@@ -598,9 +599,10 @@ capability's in the order of the table above --- so `["anchoring"]` runs v6's
 seven and all three pre-composition tokens run v8's eight. The vector naming `anchoring` alone
 is v6's closure exactly, the vector naming `anchoring` and
 `binary-qualification` is v7's, and the vector naming those three is v8's.
-`external-import` and `owner-controlled-publication` are additive and have no
-pre-composition cell. `owner-controlled-publication` appends no check, so a
-vector keeps its check list with or without it.
+`external-import`, `task-selection`, and `owner-controlled-publication` are additive
+and have no pre-composition cell. Neither `task-selection` nor
+`owner-controlled-publication` appends a check, so a vector keeps its check list with
+or without them.
 
 `owner-controlled-publication` states where the publication source stands. The
 [interoperability profile](../../docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md)
@@ -626,7 +628,10 @@ reverse. A member of a capability the vector does not declare --- an
 `anchors/...` file, a `qualification.json` --- is a non-allowlisted file. A
 declared capability whose members were stripped fails as a missing member.
 Stripping a declaration never produces a quieter bundle that still passes; it
-produces a different bundle identity that is refused.
+produces a different bundle identity that is refused. `task-selection` has no
+member to strip, so it is bound to the Run instead: a v10 bundle whose Run
+carries `task-selection/v1` must declare it, and a bundle declaring it must have
+a Run that carries it. Either mismatch is refused on the vector.
 
 Its claim package is `benchmark-product.claim-package/7`, one id for every
 vector: `claim-package/1`'s base plus one section per capability, present
@@ -677,8 +682,9 @@ the composed generation, so a run that does not ask otherwise publishes on
 `benchmark-product-public-bundle/10` with the capability vector derived from the run's own
 facts: an anchored run declares `anchoring`, a run projecting a binary qualification
 declares `binary-qualification`, a qualification run with a sealed disclosure
-declaration declares `disclosure-specification`, anchored or not, and a run whose
-evidence was imported (`run import`) declares `external-import`. Every run declares
+declaration declares `disclosure-specification`, anchored or not, a run whose
+evidence was imported (`run import`) declares `external-import`, and a run that sealed a
+task-selection declaration at lock declares `task-selection` on every bundle it publishes. Every run declares
 `owner-controlled-publication`, imported runs included: this product publishes only
 from its self-run venue, whose workspace mints the key that signs the Report and whose
 owner hosts the bundle. The enumerated v2, v4,
@@ -932,23 +938,56 @@ only the far side of the comparison is sound: a `notBefore` at or after `closeAt
 is provably after the lock, while one before it settles nothing. A schedule that
 opens mid-run is therefore not refused under either mode.
 
-**Nothing about the declaration reaches the published face.** `index.html`,
-`README.md`, `share.txt`, `badge.svg`, and `social-card.svg` carry no projection
-of it: the asset builder is never given the mode, so a declaring bundle's five
-assets are exactly what a reader that has never heard of `task-selection/v1`
-rebuilds from the same records. (Its Run *digest* still differs, as it would for
-any other Run field, and every reader derives that digest from the bundle's own
-Run.) This is a compatibility requirement rather than an editorial choice. Every
-allocation pins a reader release, and each of those releases byte-compares every
-presentation asset against its own rebuild; a bundle that rendered the sentence
-would therefore instruct its reader to run a verifier that refuses it. Rendering
-the declaration is held for issue #3416, to land once the reader line the bundle
-pins derives the sentence too. Until then the declaration is readable where it is
-sealed — in the Run record — and enforced where it is checked, under
-`claim-consistency`.
+**On v10 the declaration is on the report face, at headline weight.** The
+composed generation carries it as the capability `task-selection` (issue #3416,
+operator ruling of 2026-09-24). A run whose Run carries `task-selection/v1`
+declares the capability on every bundle it publishes. The bundle's
+`claim-package/7` then carries a `taskSelection` section holding the declared
+mode, `{ "mode": "claimant-chosen" }`, and the report face states that mode as
+a header fact row, printed as its own token so a claimant-chosen selection reads
+`claimant-chosen`:
 
-The declaration is also not a claim-package field, and will not become one:
-`claim-package.json` pins its own key set byte-for-byte.
+- `index.html` renders a `Task selection` fact directly under the scope line in
+  the page header;
+- `README.md` renders `Task selection: claimant-chosen.` directly under its
+  `Scope:` line;
+- `share.txt` renders the same sentence directly after the scope.
+
+`badge.svg` and `social-card.svg` do not carry it: their layout is fixed, and
+each links to the page that does. The declaration adds no member and no check,
+and the claim pins the same reader line, `@colophon-claims/check@0.2.1`, as the
+undeclared vector.
+
+On v10 the declaration cannot be hidden. The verifier binds the vector to the Run both
+ways and refuses either mismatch on `bundle.manifest.capabilities`, before any
+check runs:
+
+- a v10 bundle whose Run carries `task-selection/v1` but whose vector does not
+  declare `task-selection` is refused, so a bundle cannot pass while hiding who
+  chose its tasks, even with the claim section and the header row stripped to
+  match;
+- a v10 bundle declaring `task-selection` over a Run that carries no
+  declaration is refused, because there is nothing for the section or the row
+  to state.
+
+`claim-consistency` rebuilds the section from the sealed Run, never from the
+claim under test, so a section naming another mode is refused on
+`taskSelection.mode`. The report face is byte-compared like every other page, so
+a page that drops or rewrites the row is refused on that asset.
+
+**Earlier formats are unchanged.** On v2, v4, v6, v7, and v8, nothing about the
+declaration reaches the published face: `index.html`, `README.md`, `share.txt`,
+`badge.svg`, and `social-card.svg` are exactly what a reader that has never
+heard of `task-selection/v1` rebuilds from the same records. (A declaring
+bundle's Run *digest* still differs, as it would for any other Run field.) This is a compatibility
+requirement rather than an editorial choice: each of those formats pins a reader
+release that byte-compares every presentation asset against its own rebuild and
+predates the row, so a bundle that rendered it would instruct its reader to run
+a verifier that refuses it. Only `claim-package/7` carries a `taskSelection`
+section, so their claims are unchanged, and so are the per-allocation checks on
+their pinned reader lines. On those formats the declaration is
+readable where it is sealed, in the Run record, and enforced where it is
+checked, under `claim-consistency`.
 
 ## Presentation and citation
 

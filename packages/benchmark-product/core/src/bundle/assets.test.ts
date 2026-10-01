@@ -837,16 +837,18 @@ describe("Task 6: paired-delta@1 bundle asset dispatch", () => {
 });
 
 /**
- * Task-selection provenance is NOT projected onto the face (issues #2980, #3416).
+ * Task-selection provenance is NOT projected from anything but the claim section (issues #2980,
+ * #3416).
  *
- * The declaration is sealed into the Run and checked under `claim-consistency`, but the render was
- * held back: the classic and anchored allocations pin `@colophon-claims/verify@0.1.0`, whose
- * `verifyPublicBundleSnapshot` byte-compares every presentation asset against its own rebuild. A
- * bundle that rendered the mode would carry an instruction to run a verifier that refuses it.
+ * The declaration is sealed into the Run and checked under `claim-consistency`. The classic and
+ * anchored allocations pin `@colophon-claims/verify@0.1.0`, whose `verifyPublicBundleSnapshot`
+ * byte-compares every presentation asset against its own rebuild, so their pages must never carry
+ * it. The face states it only through the composed claim's `taskSelection` section, which a `/10`
+ * bundle carries exactly when it declares the `task-selection` capability (the checker's
+ * `assets-task-selection.test.ts`, and end to end in `v10-materialize.test.ts`).
  *
- * So the property under test is the builder's INSENSITIVITY to the declaration. That is not a
- * weaker statement than the render tests it replaces -- it is the exact reader-compatibility
- * invariant the hold exists to preserve, and it is what must keep holding until #3416 lands.
+ * So the property under test here is the builder's INSENSITIVITY to the declaration arriving any
+ * other way: this fixture's claim carries no section, and a stray mode beside it is not one.
  */
 describe("task-selection provenance is not projected onto the face", () => {
   /** The three sentences the held render would have emitted. */

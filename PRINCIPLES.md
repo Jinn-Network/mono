@@ -1,12 +1,12 @@
 # PRINCIPLES
 
-**What this doc is / is not.** This is the canonical statement of the principles that govern every design and operational decision in Jinn. It is not a values manifesto, a marketing artifact, or a list of preferences — each principle is load-bearing on legitimacy and constrains real choices. It is upstream of `SPEC.md` (which encodes how the protocol implements these principles), `THESIS.md` (which says why the protocol exists), and every downstream doc. Changes go through CODEOWNERS review with a linked [GitHub Discussion](https://github.com/Jinn-Network/mono/discussions); see [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md).
+**What this doc is / is not.** This is the canonical statement of the principles that govern every design and operational decision in Jinn. It is not a values manifesto, a marketing artifact, or a list of preferences; each principle is load-bearing on legitimacy and constrains real choices. It is upstream of `THESIS.md` (which says why the protocol exists), `SPEC.md` (the design of the Base network and its parked task marketplace), and every downstream doc. The protocol itself is written in [Jinn-Network/spec](https://github.com/Jinn-Network/spec). Changes go through CODEOWNERS review with a linked [GitHub Discussion](https://github.com/Jinn-Network/mono/discussions); see [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md).
 
 > Provenance: GitHub Discussion [#222](https://github.com/Jinn-Network/mono/discussions/222) (launch gating + principles re-establishment).
 
 ## Meta-principle — Legitimacy
 
-The over-arching principle is that Jinn aims to become the most legitimate decentralised agentic AI network. This is legitimate as originally defined by Vitalik Buterin. In this sense, legitimacy essentially means that all participants of the network, even at the very edges, believes that Jinn is and will continue to be the right decentralised agentic AI network to coordinate around.
+The over-arching principle is that Jinn aims to become the most legitimate open protocol and network for work and the data it produces. This is legitimate as originally defined by Vitalik Buterin. In this sense, legitimacy essentially means that all participants of the network, even at the very edges, believe that Jinn is and will continue to be the right open protocol and network to coordinate around.
 
 The following principles spring from that.
 

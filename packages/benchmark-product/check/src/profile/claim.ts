@@ -67,6 +67,7 @@ import { ClaimDisclosureSectionSchema } from "./disclosure.js";
 import type { ClaimDisclosureSection } from "./disclosure.js";
 import { ClaimExternalImportSectionSchema } from "./external-import.js";
 import type { ClaimExternalImportSection } from "./external-import.js";
+import { ClaimTaskSelectionSectionSchema, deriveClaimTaskSelection } from "./task-selection.js";
 import { ClaimOwnerControlledPublicationSectionSchema } from "./owner-controlled-publication.js";
 import type { ClaimOwnerControlledPublicationSection } from "./owner-controlled-publication.js";
 import { PROMPTED_SCREENING_PROFILE } from "../admission/contracts.js";
@@ -354,6 +355,10 @@ const ClaimPackageWireSchema = z.object({
    * below refuses it on every earlier allocation. Contents are the marker's projection, never a
    * second opinion. */
   externalImport: ClaimExternalImportSectionSchema.optional(),
+  /** issue #3416: present exactly when the composed vector declares `task-selection`. The refine
+   * below refuses it on every earlier allocation, so no pre-composition claim changes shape.
+   * Contents are the sealed Run's declared mode, never a second opinion. */
+  taskSelection: ClaimTaskSelectionSectionSchema.optional(),
   /** issue #3401: present exactly when the composed vector declares `owner-controlled-publication`,
    * and then the ruled sentence verbatim. The refine below refuses it on every earlier allocation. */
   ownerControlledPublication: ClaimOwnerControlledPublicationSectionSchema.optional(),
@@ -391,6 +396,13 @@ const ClaimPackageWireSchema = z.object({
       code: "custom",
       message: "only the composed claim-package/7 allocation carries an externalImport section",
       path: ["externalImport"],
+    });
+  }
+  if (!composedClosure && claim.taskSelection !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "only the composed claim-package/7 allocation carries a taskSelection section",
+      path: ["taskSelection"],
     });
   }
   if (!composedClosure && claim.ownerControlledPublication !== undefined) {
@@ -666,7 +678,7 @@ function exactBinaryClaimControls(input: Record<string, unknown>): boolean {
   // control-shape failure. Neither judge field is ever set on an actual binary-instrument claim
   // (`methodProjection`'s dispatch is exclusive), so admitting them here is defense in depth, not
   // a widening any real claim exercises.
-  return exactKeys(input, ["claimSchema", "scope", "records", "method", "results", "completeness", "attrition", "conflicted", "assurance", "disclosures", "limitations", "venueHonesty", "verification", "rehearsal", "qualification", "anchors", "disclosure", "externalImport", "ownerControlledPublication", "pairwiseDisagreement", "pairedMajorityDelta"])
+  return exactKeys(input, ["claimSchema", "scope", "records", "method", "results", "completeness", "attrition", "conflicted", "assurance", "disclosures", "limitations", "venueHonesty", "verification", "rehearsal", "qualification", "anchors", "disclosure", "externalImport", "taskSelection", "ownerControlledPublication", "pairwiseDisagreement", "pairedMajorityDelta"])
     && exactKeys(scope, ["draftId", "benchmarkSha256", "taskCount", "arms", "replicates", "venue"])
     && Array.isArray((scope as { arms?: unknown }).arms)
     && ((scope as { arms: unknown[] }).arms).every((arm) => exactKeys(arm, ["armId", "pinning"]))
@@ -766,6 +778,8 @@ export interface BuildClaimPackageInput {
   /** issue #3417: the projected external-import section, already derived from the authenticated
    * marker. Absent for every driven run, which is what keeps every existing claim byte-identical. */
   readonly externalImport?: ClaimExternalImportSection;
+  // issue #3416: there is no `taskSelection` input. The section is projected from `runRecord`
+  // above by `deriveClaimTaskSelection`, the one projection the producer and both rebuilds share.
   /** issue #3401: the ruled sentence, supplied exactly when the vector declares
    * `owner-controlled-publication`. The caller supplies the same sentence after the venue
    * sentences in `venueHonesty`, and the Report it projects already seals it. */
@@ -1146,6 +1160,10 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     checks: composeClosure(input.composedCapabilities).checks,
     ...readerInstructions(input.composedCapabilities),
   };
+  // Issue #3416: projected here from the sealed Run rather than supplied beside it, because the Run
+  // is already this builder's input. Composed only: every earlier claim stays byte-identical, and
+  // the biconditional below makes a vector that hides the Run's declaration a refusal.
+  const taskSelection = composed === undefined ? undefined : deriveClaimTaskSelection(input.runRecord);
   if (composed !== undefined) {
     // Total over the registry's sections: a capability registered without stating here how its
     // section is supplied is a compile error, not a composed claim that can no longer be built.
@@ -1154,6 +1172,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
       anchors: anchored,
       disclosure: disclosure !== undefined,
       externalImport: input.externalImport !== undefined,
+      taskSelection: taskSelection !== undefined,
       ownerControlledPublication: input.ownerControlledPublication !== undefined,
     };
     for (const capability of CAPABILITY_REGISTRY) {
@@ -1256,6 +1275,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     // about what that record says (issue #2839, design §6.6).
     ...(disclosure === undefined ? {} : { disclosure }),
     ...(input.externalImport === undefined ? {} : { externalImport: input.externalImport }),
+    ...(taskSelection === undefined ? {} : { taskSelection }),
     ...(input.ownerControlledPublication === undefined ? {} : { ownerControlledPublication: input.ownerControlledPublication }),
     ...(input.previewDisclosure !== undefined
       ? {

@@ -4,7 +4,7 @@ This is **the one documented deploy path** for a headless, hosted `jinn run`
 daemon. Per-harness recipes are thin overlays on a single container-native base
 image; everything they share lives here.
 
-> Local operators do not need any of this — `npm install -g @jinn-network/operator@latest && jinn run` (see the root `CLAUDE.md`). This directory is only for headless, hosted (Railway) deployments.
+> The task marketplace these deployments served is parked and is not running tasks, so an operator started today, hosted or local, finds no work and earns nothing. This directory covers only headless, hosted (Railway) deployments; the record of how operators ran is [`docs/operator-testnet.md`](../docs/operator-testnet.md).
 
 > To mirror the reference frontend (the operator dashboard SPA) specifically, see [../DEPLOY.md](../DEPLOY.md).
 
@@ -194,18 +194,20 @@ Every recipe shares the same runtime contract:
 
 There is **no claim-relayer service** and no JINN token. Per
 [DR-2026-06-30](../log/decisions/2026-06-30-tokenless-olas-native-pivot.md),
-OLAS (Base) is the unit of both stake and reward. The operator daemon's
-`reward-claim` loop periodically pulls pending rewards from the stOLAS
-`ExternalStakingDistributor` for staked fleet services. Activity counters
-on the Jinn recorder (TaskCoordinator behind the live
+OLAS (Base) is the unit of both stake and reward. In the marketplace design,
+the operator daemon's `reward-claim` loop periodically pulls pending rewards
+from the stOLAS `ExternalStakingDistributor` for staked fleet services.
+Activity counters on the Jinn recorder (TaskCoordinator behind the live
 [`JinnUpgradeableProxy`](../contracts/src/proxy/JinnUpgradeableProxy.sol))
 count completed-loop work toward OLAS staking liveness; they do not mint a
-separate token and they do not need a sidecar relayer.
+separate token and they do not need a sidecar relayer. That marketplace is
+parked and is not running tasks, so there is no completed-loop work to count
+and a deployment started today earns nothing.
 
 The token-era L2→L1 claim stack (`TaskClaimEmitter`, `JinnDistributor`,
 `packages/claim-relayer`) is deleted. Do not deploy it. Historical steps
 are in [`docs/runbooks/v0-testnet-deploy.md`](../docs/runbooks/v0-testnet-deploy.md)
-(superseded; do not run). Current operator path:
+(superseded; do not run). The record of how operators ran on testnet:
 [`docs/operator-testnet.md`](../docs/operator-testnet.md). Economics:
 [`SPEC.md`](../SPEC.md) §Economics.
 
