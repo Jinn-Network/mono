@@ -64,7 +64,7 @@ test('the publisher verifies strict GitHub provenance policy before its receipt-
   assert.match(block, /GITHUB_REPOSITORY/u);
   assert.match(block, /GH_TOKEN: \$\{\{ github\.token \}\}/u);
   assert.match(block, /SOURCE_SHA: \$\{\{ github\.sha \}\}/u);
-  assert.match(block, /JINN_NPM_REGISTRY_RETRY_ATTEMPTS: 181/u);
+  assert.match(block, /JINN_NPM_REGISTRY_RETRY_ATTEMPTS: 541/u);
   assert.match(block, /JINN_NPM_TLOG_CONFLICT_RETRY_ATTEMPTS: 3/u);
   assert.match(block, /--source-sha "\$\{SOURCE_SHA\}"/u);
   assert.match(block, /--registry https:\/\/registry\.npmjs\.org\//u);
@@ -77,11 +77,23 @@ test('the publisher verifies strict GitHub provenance policy before its receipt-
   );
 });
 
-test('the canary publisher leaves the implementations leg four hours to reach its wave tail', () => {
+test('the canary publisher waits 45 minutes for npm to expose a version it has accepted', () => {
   const publishAt = workflow.indexOf('canary-publish:');
   const refreshAt = workflow.indexOf('canary-host-refresh:');
   const block = workflow.slice(publishAt, refreshAt);
-  assert.match(block, /^ {4}timeout-minutes: 240$/mu);
+  const attempts = Number(/^ {10}JINN_NPM_REGISTRY_RETRY_ATTEMPTS: (\d+)$/mu.exec(block)?.[1]);
+  const delayMs = Number(/^ {10}JINN_NPM_REGISTRY_RETRY_DELAY_MS: (\d+)$/mu.exec(block)?.[1]);
+  // The publisher sleeps between queries, so N attempts leave N - 1 waits. npm took about
+  // 29 minutes to expose one accepted version on 2026-09-30 (#4919); a 15-minute wait gave up
+  // on it and left the rest of the implementations walk unpublished.
+  assert.equal((attempts - 1) * delayMs, 45 * 60 * 1000);
+});
+
+test('the canary publisher leaves the implementations leg six hours to reach its wave tail', () => {
+  const publishAt = workflow.indexOf('canary-publish:');
+  const refreshAt = workflow.indexOf('canary-host-refresh:');
+  const block = workflow.slice(publishAt, refreshAt);
+  assert.match(block, /^ {4}timeout-minutes: 360$/mu);
 });
 
 test('only stack-published groups reach the protocol origin, never the canary-only group', () => {
