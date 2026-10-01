@@ -177,6 +177,22 @@ and dist-tag. Matching bytes are skipped; missing bytes are published in receipt
 version already exists with different bytes, stop and cut a new version—npm versions are immutable.
 Never repair the mismatch by repacking, moving a tag, or weakening receipt verification.
 
+**`post-publish registry query failed for <name>@<version> version` with `E404`:** npm accepted
+the publish and had not exposed the version when the wait ran out. This is registry latency, not a
+missing registration. After each publish the lane queries the registry until the exact version,
+integrity, and `canary` tag are visible: `JINN_NPM_REGISTRY_RETRY_ATTEMPTS: 541` queries with
+`JINN_NPM_REGISTRY_RETRY_DELAY_MS: 5000` between them, which is 45 minutes of waiting and close to
+an hour of wall-clock once the queries themselves are counted. Versions normally appear within one
+to ten minutes; the slowest observed took about 29 minutes (2026-09-30,
+[#4919](https://github.com/Jinn-Network/mono/issues/4919)), which the earlier 15-minute wait gave
+up on. An exhausted wait stops the walk the same way a failed publish does, so later packages in
+that release group are not published. Confirm the version has landed with
+`npm view <name> time --json`, then rerun the failed job: the preflight skips every version that
+already has the receipt integrity and `canary` tag and publishes only the missing ones. The same
+one-day artifact window described below applies. The `stack-canary` job timeout is 360 minutes,
+GitHub's ceiling for a hosted job: a normal `implementations-v1` walk takes about three hours,
+which leaves room for three exhausted waits.
+
 **`ENEEDAUTH`, `E404`, or HTTP `403` during `npm publish`:** a generated catalog name is missing
 from npmjs or has no trusted-publisher row bound to `stack-npm-publish.yml` / `npm-publish`.
 `publish-verified-platform.mjs`'s `publishMissingTarballs` throws out of both the per-wave

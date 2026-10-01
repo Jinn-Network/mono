@@ -455,6 +455,25 @@ test('an exact-integrity existing catalog publication is an idempotent no-op', a
   }
 });
 
+test('a rerun after a partial walk publishes only the packages the registry is missing', async () => {
+  const fixture = publicationFixture();
+  const missingNames = fixture.receipt.packageOrder.slice(-4);
+  const fake = registryExec(fixture, {
+    existingNames: fixture.receipt.packageOrder.slice(0, -4),
+  });
+  try {
+    const receipt = await publishVerifiedPlatform(publisherArgs(fixture, { exec: fake.exec }));
+    assert.deepEqual(
+      publishCalls(fake.calls).map(({ args }) => tarballByName(fixture, args[1])),
+      missingNames,
+    );
+    assert.deepEqual(receipt.observedRegistry.map(({ name }) => name), fixture.receipt.packageOrder);
+    assert.equal(readFileSync(fixture.outputPath, 'utf8'), canonicalJsonBytes(receipt));
+  } finally {
+    cleanup(fixture);
+  }
+});
+
 test('every non-success or missing verification conclusion blocks npm', async () => {
   for (const conclusion of ['failure', 'skipped', 'neutral', 'cancelled', 'stale', 'in_progress', '<missing>']) {
     const fixture = publicationFixture();
@@ -742,6 +761,34 @@ test('post-publish version and tag propagation use bounded injected retries', as
     } finally {
       cleanup(fixture);
     }
+  }
+});
+
+test('an exhausted post-publish wait fails loudly and publishes nothing further', async () => {
+  const fixture = publicationFixture();
+  const sleeps = [];
+  const fake = registryExec(fixture, {
+    viewOverride: ({ field, name, publishedNames }) => (
+      field === 'version' && publishedNames.has(name)
+        ? { status: 1, stdout: '', stderr: 'npm error code E404' }
+        : undefined
+    ),
+  });
+  try {
+    await assert.rejects(
+      publishVerifiedPlatform(publisherArgs(fixture, {
+        exec: fake.exec,
+        registryRetryAttempts: 3,
+        registryRetryDelayMs: 1,
+        sleep: (ms) => sleeps.push(ms),
+      })),
+      /post-publish registry query failed for .* version: .*E404/us,
+    );
+    assert.equal(publishCalls(fake.calls).length, 1);
+    assert.deepEqual(sleeps, [1, 1]);
+    assert.equal(existsSync(fixture.outputPath), false);
+  } finally {
+    cleanup(fixture);
   }
 });
 

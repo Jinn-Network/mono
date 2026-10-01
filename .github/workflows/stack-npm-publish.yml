@@ -50,8 +50,10 @@ jobs:
     # 120-minute limit since 2026-09-26: about 118 and 120 minutes on the last two successes, then
     # cancelled at 120 on 2026-09-29 before its later waves. A product release receipt pins one
     # canary sha across groups, and @colophon-claims/check's closure needs trust-testing from this
-    # leg at that sha, so the leg gets room to finish.
-    timeout-minutes: 240
+    # leg at that sha, so the leg gets room to finish. A normal walk takes about three hours, and
+    # one version npm is slow to expose can add most of an hour (see the registry wait below), so
+    # the job runs to GitHub's 360-minute ceiling: room for the walk plus three exhausted waits.
+    timeout-minutes: 360
     environment: npm-publish
     strategy:
       fail-fast: false
@@ -96,9 +98,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ github.sha }}
           # npm has accepted a publish, returned success, and then taken about
-          # ten minutes to expose the exact version publicly. Keep the retry
-          # bounded while allowing a fifteen-minute finalization window.
-          JINN_NPM_REGISTRY_RETRY_ATTEMPTS: 181
+          # 29 minutes to expose the exact version publicly (2026-09-30, #4919).
+          # Keep the retry bounded while allowing a 45-minute finalization
+          # window: 541 queries leave 540 five-second waits between them. The
+          # queries themselves take about 1.4 seconds each, so an exhausted
+          # wait is close to an hour of wall-clock.
+          JINN_NPM_REGISTRY_RETRY_ATTEMPTS: 541
+          JINN_NPM_REGISTRY_RETRY_DELAY_MS: 5000
           # A fresh npm process signs a fresh envelope. Retry only the exact
           # transparency-log duplicate outcome, and cap it at three attempts.
           JINN_NPM_TLOG_CONFLICT_RETRY_ATTEMPTS: 3
