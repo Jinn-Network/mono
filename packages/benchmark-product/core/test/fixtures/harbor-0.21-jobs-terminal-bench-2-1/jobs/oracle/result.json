@@ -1,0 +1,50 @@
+{
+    "id": "d757374f-2bef-4842-a361-7a6b512fdbbd",
+    "started_at": "2026-10-01T13:31:51.090071",
+    "updated_at": "2026-10-01T13:41:32.350265",
+    "finished_at": "2026-10-01T13:41:32.350265",
+    "n_total_trials": 10,
+    "stats": {
+        "n_completed_trials": 10,
+        "n_errored_trials": 0,
+        "n_running_trials": 0,
+        "n_pending_trials": 0,
+        "n_cancelled_trials": 0,
+        "n_retries": 0,
+        "evals": {
+            "oracle__terminal-bench/terminal-bench-2-1": {
+                "n_trials": 10,
+                "n_errors": 0,
+                "metrics": [
+                    {
+                        "mean": 0.8
+                    }
+                ],
+                "pass_at_k": {},
+                "reward_stats": {
+                    "reward": {
+                        "1.0": [
+                            "caffe-cifar-10__PrQaXCN",
+                            "circuit-fibsqrt__txekQGU",
+                            "adaptive-rejection-sampler__TL84P8G",
+                            "cancel-async-tasks__9rfn6x9",
+                            "break-filter-js-from-html__XtBz5oJ",
+                            "chess-best-move__5FuHvzp",
+                            "build-pmars__BfPXGam",
+                            "bn-fit-modify__RFfGuqb"
+                        ],
+                        "0.0": [
+                            "build-pov-ray__eDSVMAS",
+                            "build-cython-ext__gdtKcHT"
+                        ]
+                    }
+                },
+                "exception_stats": {}
+            }
+        },
+        "n_input_tokens": null,
+        "n_cache_tokens": null,
+        "n_output_tokens": null,
+        "cost_usd": null
+    }
+}
