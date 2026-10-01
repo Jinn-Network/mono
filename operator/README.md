@@ -426,8 +426,10 @@ operates beneath both.
 **do not hold a bond token themselves**. The stOLAS distributor pools JINN
 contributed by stakers and stakes on behalf of operators; your service gets
 created against that shared pool. `jinn fund-requirements` surfaces only the
-per-wallet ETH you need. If the distributor pool is drained, `jinn doctor`
-will warn you — the fix is a protocol-team refill, not operator action.
+per-wallet ETH you need. While the testnet marketplace ran, a drained
+distributor pool showed up as a failed `distributor_reachable` check in
+`jinn doctor`. An operator could not fix it locally: bootstrap worked again
+only once the pool was refilled.
 
 ## Switching to mainnet
 
@@ -446,33 +448,38 @@ point a mainnet daemon at a testnet-derived master wallet.
 
 ## Troubleshooting
 
-Quick answers to the things that typically surprise new operators:
+The task marketplace on Base Sepolia is parked, so this section is a record:
+the failures operators hit while it ran, and what resolved them at the time.
+Do not fund any account because of it. The fuller record is the
+troubleshooting section of the testnet runbook:
+<https://github.com/Jinn-Network/mono/blob/next/docs/operator-testnet.md#troubleshooting>
 
-- **Bootstrap loops for a minute then exits with `funding_required`** —
-  the CDP faucet drip is small (~0.0001 ETH per call) and the bootstrap
-  floor is 0.005 ETH. The client now drains the faucet up to 60 times per
-  invocation automatically; if you still see `funding_required`, CDP rate-
-  limited your master address. Wait 24h or fund manually:
-  <https://portal.cdp.coinbase.com/products/faucet>.
-- **Claude session exits in ~18 seconds with no trades** — usually means
-  the daemon ran from source (via `tsx`) instead of the compiled `dist/`,
-  so the MCP wrapper couldn't load `mcp-tools.js`. Run `yarn build && yarn
-  dev` (dev) or reinstall via `npm install -g @jinn-network/operator@latest`
-  (operator). `jinn doctor` flags this as `daemon_runtime_ready`.
-- **Bootstrap fails with `Overflow(20, 0)` at `distributor.stake()`** —
-  the testnet stOLAS distributor pool is drained. Operators cannot fix
-  this; the Jinn protocol team has to refill it. Report to the testnet
-  status channel and re-run `jinn bootstrap` once the pool is topped up.
-- **Position auto-closed within seconds of opening** — most likely
-  a competing trading bot is active on the same Hyperliquid master. Use a
-  fresh HL master per protocol test; do not share master accounts between
-  experiments.
-- **`jinn doctor` passes but `jinn run` fails** — check the specific
-  check names in doctor's output vs the specific error from `run`. The
-  most common mismatch is auth-context: if you're in the `client/` git
-  checkout dir, `detectAuthContext` infers `docker-compose` mode even on
-  a bare host. Run the daemon from `$HOME` or any directory without a
-  `docker-compose.yml` that names `jinn-daemon`.
+- **Bootstrap looped for a minute, then exited with `funding_required`.**
+  The CDP faucet drip was small (about 0.0001 ETH per call) and the
+  bootstrap floor was 0.005 ETH, so the client drained the faucet in a
+  loop on each invocation. A `funding_required` after that loop meant CDP
+  had rate-limited the master address. The faucet recovered after 24h, or
+  the operator funded the address by hand.
+- **Claude session exited in about 18 seconds with no trades.** This
+  usually meant the daemon ran from source (via `tsx`) instead of the
+  compiled `dist/`, so the MCP wrapper could not load `mcp-tools.js`.
+  `jinn doctor` flagged it as `daemon_runtime_ready`. The fix was a
+  `yarn build` before the run in a git checkout, or a reinstall of the
+  npm package.
+- **Bootstrap failed with `Overflow(20, 0)` at `distributor.stake()`.**
+  The testnet stOLAS distributor pool was drained. Operators could not fix
+  this locally; `jinn bootstrap` worked again only once the pool was
+  topped up.
+- **Position auto-closed within seconds of opening.** Most likely a
+  competing trading bot was active on the same Hyperliquid master. A fresh
+  master, used only for that test run, avoided it.
+- **`jinn doctor` passed but `jinn run` failed.** The most common mismatch
+  was auth-context detection: an earlier client inferred `docker-compose`
+  mode from a `docker-compose.yml` in the working directory, so a daemon
+  started inside the repository checkout misdetected its context on a bare
+  host. Running the daemon from `$HOME`, or from any directory without a
+  `docker-compose.yml` that named `jinn-daemon`, avoided it. That heuristic
+  has since been removed from `detectAuthContext`.
 
 ## How it works
 
