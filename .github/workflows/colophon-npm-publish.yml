@@ -45,7 +45,8 @@ jobs:
   publish-colophon:
     name: publish-colophon
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Sized for the alias gate's 45 minute wait on the registry, plus install, build and both publishes.
+    timeout-minutes: 90
     environment: npm-publish
     permissions:
       contents: read
@@ -105,12 +106,29 @@ jobs:
             npm publish --access public
           fi
 
+      # npm processes a publish asynchronously, so `npm publish` returns before `npm view` serves the
+      # version. The other lanes measured 1 to 10 minutes and one version at about 29 minutes
+      # (#4919), so ask every 15 seconds for 45 minutes, the stack lane's budget, instead of failing
+      # a run whose checker publish has already succeeded. The gate is unchanged: the alias step is
+      # reached only once npm serves the pinned version, and the last query shows npm's own error.
       - name: Require the pinned checker version to resolve before releasing the alias
         if: ${{ github.event.inputs.package == 'check' }}
         working-directory: packages/benchmark-product/verify
         run: |
           pinned="$(node -p 'require("./package.json").dependencies["@colophon-claims/check"]')"
-          npm view "@colophon-claims/check@${pinned}" version
+          for query in $(seq 1 180); do
+            if npm view "@colophon-claims/check@${pinned}" version 2>/dev/null; then
+              exit 0
+            fi
+            if [ "$((query % 20))" -eq 1 ]; then
+              echo "npm does not serve @colophon-claims/check@${pinned} yet (query ${query} of 181); asking again every 15s"
+            fi
+            sleep 15
+          done
+          if ! npm view "@colophon-claims/check@${pinned}" version; then
+            echo "::error::npm did not serve @colophon-claims/check@${pinned} after 45 minutes of waiting; the alias was not published"
+            exit 1
+          fi
 
       - name: Publish the passthrough alias from the public registry
         if: ${{ github.event.inputs.package == 'check' }}
