@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { test } from 'node:test';
 
 import { laneReleaseGroupIds, loadPlatformCatalog } from './platform-catalog.mjs';
+import { verificationGateConclusionIds } from './platform-verification-receipt.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
 const workflowsRoot = resolve(import.meta.dirname, '../workflows');
@@ -48,6 +49,33 @@ const domains = new Map(platformGateIds.map((gateId) => {
 
 function sorted(values) {
   return [...values].sort();
+}
+
+function jobConditions(jobId) {
+  return [...jobBlock(platform, jobId).matchAll(/^    if: (.+)$/gmu)]
+    .map(([, condition]) => condition);
+}
+
+function jobNeeds(jobId) {
+  const block = jobBlock(platform, jobId);
+  const inline = block.match(/^    needs: (.+)$/mu);
+  if (inline) return inline[1].replace(/^\[|\]$/gu, '').split(',').map((id) => id.trim());
+  const list = block.match(/^    needs:\n((?:      - [a-zA-Z0-9_-]+\n)+)/mu);
+  return list ? [...list[1].matchAll(/^      - ([a-zA-Z0-9_-]+)$/gmu)].map(([, id]) => id) : [];
+}
+
+function transitiveDependents(jobId) {
+  const found = new Set();
+  const queue = [jobId];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    for (const otherId of platformJobIds) {
+      if (found.has(otherId) || !jobNeeds(otherId).includes(current)) continue;
+      found.add(otherId);
+      queue.push(otherId);
+    }
+  }
+  return sorted(found);
 }
 
 test('the reusable interface grants OIDC only to artifact-only attestation jobs', () => {
@@ -176,6 +204,80 @@ test('the static reusable workflow set exactly equals the platform release-group
     sorted(reusablePaths),
     sorted(platformGateIds.map((gateId) => catalog.gateDefinitions[gateId].path)),
   );
+});
+
+test('a domain gate runs on the stable lane only when a stable group requires it', () => {
+  const stableGroupIds = laneReleaseGroupIds(catalog, 'stable');
+  const stableGateIds = new Set(
+    stableGroupIds.flatMap((groupId) => catalog.releaseGroups[groupId].requiredGateIds),
+  );
+  const canaryOnlyJobs = [];
+  for (const [jobId, { gateId }] of domains) {
+    const conditions = jobConditions(jobId);
+    if (stableGateIds.has(gateId)) {
+      assert.deepEqual(conditions, [], `${gateId} gates a stable group, so it must run on every lane`);
+    } else {
+      // No stable group requires this gate, so a stable cut neither runs it nor can be refused
+      // by it. It keeps running on the canary lane, where a group does require it.
+      assert.deepEqual(
+        conditions,
+        ["inputs.lane == 'canary'"],
+        `${gateId} gates no stable group, so it must run on the canary lane only`,
+      );
+      canaryOnlyJobs.push(jobId);
+    }
+  }
+  assert.deepEqual(canaryOnlyJobs, ['benchmarking']);
+
+  // A skipped gate job reaches the receipt as `skipped`. That is safe only because no stable
+  // group's receipt names the gate, and unsafe for any canary group that does.
+  for (const jobId of canaryOnlyJobs) {
+    const { gate } = domains.get(jobId);
+    for (const groupId of stableGroupIds) {
+      assert.ok(
+        !verificationGateConclusionIds(catalog, groupId).includes(gate),
+        `${groupId} must not require the ${gate} conclusion`,
+      );
+    }
+    assert.ok(
+      laneReleaseGroupIds(catalog, 'canary')
+        .some((groupId) => verificationGateConclusionIds(catalog, groupId).includes(gate)),
+      `a canary-lane group must still require the ${gate} conclusion`,
+    );
+    // A skip is inherited by every job further down the needs chain, not only by the next one,
+    // unless that job's own condition uses a status function. So the receipt job is the only
+    // one allowed to depend on a lane-conditional gate directly, and every job behind it, such
+    // as receipt_attestation behind verification_receipt, needs a condition of its own.
+    const dependents = platformJobIds.filter((otherId) => jobNeeds(otherId).includes(jobId));
+    assert.deepEqual(dependents, ['verification_receipt']);
+    const downstream = transitiveDependents(jobId);
+    assert.ok(
+      downstream.includes('receipt_attestation'),
+      `the needs walk from ${jobId} must reach receipt_attestation through verification_receipt`,
+    );
+    for (const otherId of downstream) {
+      const conditions = jobConditions(otherId);
+      assert.equal(conditions.length, 1, `${otherId} sits behind ${jobId}, so it needs one job condition`);
+      assert.match(
+        conditions[0],
+        /(?:always|cancelled|failure)\(\)/u,
+        `${otherId} sits behind ${jobId}, so without a status function it is skipped on the stable lane`,
+      );
+    }
+  }
+  assert.match(jobBlock(platform, 'verification_receipt'), /^    if: always\(\)$/mu);
+  // The attestation must survive the skipped gate, and must still refuse a receipt job that did
+  // not succeed or a run that was cancelled.
+  const [attestationCondition] = jobConditions('receipt_attestation');
+  assert.match(attestationCondition, /^\$\{\{ .+ \}\}$/u);
+  const attestationTerms = attestationCondition.slice(3, -2).split('&&').map((term) => term.trim());
+  assert.ok(
+    attestationTerms.includes("needs.verification_receipt.result == 'success'"),
+    'receipt_attestation must require verification_receipt to have succeeded',
+  );
+  assert.ok(attestationTerms.includes('!cancelled()'), 'receipt_attestation must not run in a cancelled run');
+  assert.ok(attestationTerms.includes('!failure()'), 'receipt_attestation must not run after a failed ancestor');
+  assert.doesNotMatch(attestationCondition, /\|\||always\(\)/u);
 });
 
 test('artifacts build and upload public/profile/pack outputs without OIDC', () => {

@@ -48,6 +48,16 @@ jobs:
 
   benchmarking:
     needs: catalog
+    # Canary lane only. benchmarking-ci is required by the canary-only benchmarking-product-v1
+    # group and by neither stable group, so on the stable lane this job is skipped and a
+    # product-side failure cannot fail the reusable call that stable-publish-gate requires.
+    # A skipped job does not fail the call, but the skip is inherited by every job further down
+    # the needs chain that has no status function in its own condition. verification_receipt
+    # runs under always() and the stable groups' receipts never name this gate, so they are
+    # still written. receipt_attestation sits behind this job through verification_receipt, so
+    # it carries its own condition; without one the stable receipts would be written but not
+    # attested.
+    if: inputs.lane == 'canary'
     permissions:
       contents: read
     uses: ./.github/workflows/benchmarking-ci.yml
@@ -387,6 +397,13 @@ jobs:
   receipt_attestation:
     name: receipt-attestation
     needs: verification_receipt
+    # This job sits behind the lane-conditional benchmarking job through verification_receipt.
+    # On the stable lane that job is skipped, and the default success() check would pass the
+    # skip on to this job: the receipts would be uploaded and never attested, and the call
+    # would still conclude success. Attest whenever the receipt job itself succeeded, which it
+    # does only when every gate a lane group requires concluded success. A cancelled run or a
+    # failed ancestor still withholds the attestation.
+    if: ${{ !cancelled() && !failure() && needs.verification_receipt.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

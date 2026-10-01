@@ -20,6 +20,20 @@ The count contract is pinned by `.github/scripts/stack-trusted-publishers.test.m
 - `benchmarking-product-v1` is `canary-only` (`stackPublished: false`, `stable: false`). Its
   verification receipt requires `benchmarking-ci`. Its profile root is built and attested for that
   receipt but never signed, and the host refresh and stable jobs never select it.
+- `benchmarking-ci` runs on the canary lane only. Neither stable group lists it in
+  `requiredGateIds`, so on the stable lane the `benchmarking` job in
+  `.github/workflows/platform-verification.yml` is skipped (`if: inputs.lane == 'canary'`). A
+  failure in `packages/benchmarking/*` therefore cannot fail `stable-verification`, so it cannot
+  leave `stable-live-host-verification` skipped or `stable-publish-gate` refusing. The stable
+  groups' receipts never name the gate.
+- On the canary lane the coupling is intended. `canary-verification` is one call for all three
+  groups, so a `benchmarking-ci` failure withholds every canary leg and `canary-host-refresh`
+  for that push, and no group's receipt is uploaded. The reason is that a canary sha is meant
+  to be whole: a product release receipt pins one sha across the three groups, so a sha where
+  the product group is missing is one it cannot pin. The cost is small. The merge queue runs the
+  same canary-lane verification before a change that reaches a verified package lands on `next`,
+  and the retry for a missed canary is the next push to `next`. Decoupling the legs would need a
+  separate verification call and receipt per group.
 - Canary publication is **operationally enabled** as of 2026-08-17
   ([DR-2026-08-17-d](../../log/decisions/2026-08-17-platform-canary-publish-enabled.md)):
   repository variable `PLATFORM_CANARY_PUBLISH_ENABLED=true`. The next push to `next` or
@@ -88,12 +102,13 @@ receipt waves in order and throws on that failure, so every subsequent package i
 the walk is not published. Between 2026-08-29 and 2026-09-01, unregistered
 `@jinn-network/evidence-offer` failed mid-walk and truncated that canary walk;
 `evidence-offer` was registered 2026-09-01 and that failure is resolved. The same
-failure is recurring now: `@jinn-network/contract-abis`, `@jinn-network/evidence-gate`,
-and `@jinn-network/record-discovery-facts-offers` have no npm registration, and the
-`implementations-v1` canary has failed with `ENEEDAUTH` on every push since
-2026-09-01T17:34Z, currently truncated at `@jinn-network/contract-abis` (the first of
-the three in wave order). Complete the CLI (or web UI) registration **before** merging a
-catalog addition; see the completion checklist below for the three still outstanding.
+failure recurred for `@jinn-network/contract-abis`, `@jinn-network/evidence-gate`, and
+`@jinn-network/record-discovery-facts-offers`: from 2026-09-01T17:34Z the
+`implementations-v1` canary failed with `ENEEDAUTH` on every push, truncated at
+`@jinn-network/contract-abis` (the first of the three in wave order), until all three were
+reserved on 2026-09-25. That failure is resolved too. Complete the CLI (or web UI)
+registration **before** merging a catalog addition; the completion checklist below records
+the current state.
 
 npm trusted-publisher configuration requires the package to already exist on the
 registry. For each generated name that is not yet on npmjs, reserve it first with a
@@ -153,16 +168,18 @@ and [`npm trust`](https://docs.npmjs.com/cli/v11/commands/npm-trust/).
 An npm scope owner must complete this once for every generated registration:
 
 - [x] Confirm the operator belongs to a team in the `@jinn-network` npm organization. (`ritsukai` / `@jinn-network:developers`)
-- [ ] Regenerate the list and compare it with the generated release view (75 names;
+- [x] Regenerate the list and compare it with the generated release view (75 names;
   topology union), then add every registration using the CLI path above (or the npmjs
-  web UI with the same fields), including Environment `npm-publish`. **Incomplete**: 61
-  of the 64 stack-published names are registered; three are not: `@jinn-network/contract-abis`,
-  `@jinn-network/evidence-gate`, and `@jinn-network/record-discovery-facts-offers`
-  (`npm view <name> version` returns `E404` for each). The `implementations-v1` canary is
-  currently truncated at the first of them in wave order, `@jinn-network/contract-abis`
-  (wave 1), and stays truncated until a scope owner reserves and binds all three, using
-  the reservation method above. Reserving and binding these names is an operator action;
-  it is not performed by this runbook change.
+  web UI with the same fields), including Environment `npm-publish`. **Complete as of
+  2026-10-01**: all 75 names exist on npm and carry a `canary` dist-tag
+  (`npm view <name> dist-tags`), and each of those canary versions has SLSA provenance naming
+  `stack-npm-publish.yml`. That is the 64 stack-published names and the 11
+  `benchmarking-product-v1` names. `@jinn-network/contract-abis`,
+  `@jinn-network/evidence-gate`, and `@jinn-network/record-discovery-facts-offers` were
+  reserved on 2026-09-25 and have published canaries since. npm does not expose a
+  trusted-publisher row to readers; a publish from this workflow with no long-lived token is
+  the evidence that the row exists. The `canary` tags can name different shas across packages
+  after a leg ends early (see Recovery); that is a partial walk, not a missing registration.
 - [x] `@jinn-network/evidence-offer` registered 2026-09-01 by `ritsukai` via CLI: bootstrap `0.0.0` (`npm publish --tag bootstrap`) then `npm trust github` (GitHub Actions / `Jinn-Network/mono` / `stack-npm-publish.yml` / environment `npm-publish` / allow publish). The package joined the release catalog on 2026-08-29 (#3217).
 - [ ] Protect the `npm-publish` GitHub environment with required reviewers and allowed branches. **Explicitly skipped 2026-08-17** — shared with operator/client canary; see [DR-2026-08-17-d](../../log/decisions/2026-08-17-platform-canary-publish-enabled.md).
 - [x] Add no `NODE_AUTH_TOKEN` or other long-lived npm credential.
@@ -188,10 +205,14 @@ to ten minutes; the slowest observed took about 29 minutes (2026-09-30,
 up on. An exhausted wait stops the walk the same way a failed publish does, so later packages in
 that release group are not published. Confirm the version has landed with
 `npm view <name> time --json`, then rerun the failed job: the preflight skips every version that
-already has the receipt integrity and `canary` tag and publishes only the missing ones. The same
-one-day artifact window described below applies. The `stack-canary` job timeout is 360 minutes,
-GitHub's ceiling for a hosted job: a normal `implementations-v1` walk takes about three hours,
-which leaves room for three exhausted waits.
+already has the receipt integrity and `canary` tag and publishes only the missing ones. The rerun
+is refused at preflight (`preflight canary mismatch for <name>`) once a later run has moved the
+`canary` tag for any package in the group that the failed leg already published. A tag is never
+moved back, so that sha stays partial and a later sha is the retry. The same one-day artifact
+window described below applies. The `stack-canary` job timeout is 360 minutes, GitHub's ceiling
+for a hosted job: a normal `implementations-v1` walk takes about three hours, which leaves room
+for three waits that each run close to the limit and still succeed. An exhausted wait ends the
+leg, so it never uses that room.
 
 **`ENEEDAUTH`, `E404`, or HTTP `403` during `npm publish`:** a generated catalog name is missing
 from npmjs or has no trusted-publisher row bound to `stack-npm-publish.yml` / `npm-publish`.

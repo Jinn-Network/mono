@@ -163,19 +163,32 @@ test('the stack publishing runbook tracks the generated set, CLI registration, a
   assert.match(runbook, /ENEEDAUTH/);
   assert.match(runbook, /truncat(?:e|es|ed|ion)/i);
 
-  // The three names still missing npm registration (issue #3521 recurrence): the runbook
-  // must name each one and record that `npm view <name> version` returns E404, not just
-  // assert a generic "some names are missing" statement.
-  for (const unregistered of [
+  // The three names that went without npm registration (issue #3521 recurrence) were reserved
+  // on 2026-09-25 and publish canaries. The runbook must name each one as resolved, record the
+  // checklist item as complete for the whole generated set, and not carry the earlier claim
+  // that they are outstanding.
+  for (const registered of [
     '@jinn-network/contract-abis',
     '@jinn-network/evidence-gate',
     '@jinn-network/record-discovery-facts-offers',
   ]) {
-    const escaped = unregistered.replace(/[/]/gu, '\\/');
-    assert.match(runbook, new RegExp(escaped), `runbook must name ${unregistered}`);
+    const escaped = registered.replace(/[/]/gu, '\\/');
+    assert.match(runbook, new RegExp(escaped), `runbook must name ${registered}`);
   }
   assert.match(runbook, /E404/);
-  assert.match(runbook, /\[ \] Regenerate the list and compare it with the generated release view/);
+  assert.match(runbook, /\[x\] Regenerate the list and compare it with the generated release view/);
+  assert.match(runbook, new RegExp(`all ${registrations.length} names exist on npm`));
+  assert.match(runbook, new RegExp(`the ${benchmarkingCount}\\s+\`benchmarking-product-v1\` names`));
+  assert.match(runbook, /were\s+reserved on 2026-09-25 and have published canaries since/);
+  assert.doesNotMatch(
+    runbook,
+    /\*\*Incomplete\*\*|three are not|have no npm registration|currently truncated|still outstanding/,
+  );
+
+  // The lane coupling: the stable lane skips the product gate with the exact condition the
+  // verification workflow carries, and the canary coupling is stated as intended.
+  assert.match(runbook, /is skipped \(`if: inputs\.lane == 'canary'`\)/);
+  assert.match(runbook, /On the canary lane the coupling is intended/);
 
   // The bootstrap placeholder method: an empty temporary directory, not the workspace
   // package directory (which is 0.1.0 with a build step and, for four packages,
@@ -200,4 +213,10 @@ test('the stack publishing runbook tracks the generated set, CLI registration, a
   assert.match(runbook, /platform-verification-artifacts/);
   assert.match(runbook, /retention-days: 1/);
   assert.match(runbook, /next push to `next` is the retry/);
+
+  // An exhausted wait ends the leg, so the timeout arithmetic is about waits that succeed, and
+  // a rerun stops at preflight once a later run owns the tag.
+  assert.doesNotMatch(runbook, /three exhausted waits/);
+  assert.match(runbook, /three waits that each run close to the limit and still succeed/);
+  assert.match(runbook, /refused at preflight/);
 });
