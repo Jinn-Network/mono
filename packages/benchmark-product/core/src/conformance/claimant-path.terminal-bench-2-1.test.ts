@@ -162,7 +162,7 @@ describe("claimant path: method terminal-bench-2.1 to an imported Harbor 0.21 ru
     expect(result!.exitCode, result!.stdout + result!.stderr).toBe(0);
   });
 
-  test("the lock seals one cell per official task and arm", () => {
+  test("the catalog method binds the official slate and the lock seals a Run on it", () => {
     expect(resultOf("method terminal-bench-2.1")).toMatchObject({ catalogId: "terminal-bench-2.1", official: true });
     expect(resultOf("lock")["runSha256"]).toMatch(/^[a-f0-9]{64}$/u);
   });
