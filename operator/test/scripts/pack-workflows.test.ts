@@ -418,23 +418,26 @@ describe('packed client workflow coverage', () => {
     expect(sdkPublish).toContain("'.github/workflows/npm-publish.yml'");
   });
 
+  // npm processes a publish asynchronously, so the version can take minutes to
+  // reach `npm view`. The budget is pinned as an invariant (tries x sleep), not
+  // as exact loop strings, so retuning the loop cannot quietly shrink the wait.
   it.each([
-    [
-      '.github/workflows/npm-publish.yml',
-      'Validate client canary gitHead',
-    ],
-  ])('%s allows a full minute for npm registry propagation', (path, stepName) => {
+    ['.github/workflows/sdk-npm-publish.yml', 'Validate canary gitHead'],
+    ['.github/workflows/npm-publish.yml', 'Validate client canary gitHead'],
+    ['.github/workflows/npm-publish.yml', 'Validate stable client gitHead'],
+  ])('%s step "%s" waits at least ten minutes for npm to process a publish', (path, stepName) => {
     const run = workflowStep(path, stepName);
+    const tries = Number(run.match(/seq 1 (\d+)/)?.[1]);
+    const sleepSeconds = Number(run.match(/sleep (\d+)/)?.[1]);
 
-    expect(run).toContain('for _ in $(seq 1 30); do');
-    expect(run).toContain('sleep 2');
-  });
-
-  it('.github/workflows/sdk-npm-publish.yml waits up to ten minutes for npm to process a canary publish', () => {
-    const run = workflowStep('.github/workflows/sdk-npm-publish.yml', 'Validate canary gitHead');
-
-    expect(run).toContain('for _ in $(seq 1 120); do');
-    expect(run).toContain('sleep 5');
+    expect(tries).toBeGreaterThan(0);
+    expect(sleepSeconds).toBeGreaterThan(0);
+    expect(tries * sleepSeconds).toBeGreaterThanOrEqual(600);
+    // A longer wait must still fail loudly when the version never resolves.
+    expect(run).toContain(
+      'echo "::error::${PACKAGE_SPEC} gitHead did not resolve to ${JINN_BUILD_COMMIT}"',
+    );
+    expect(run).toMatch(/^exit 1$/m);
   });
 
   it('waits for the client canary archive before registry consumer acceptance', () => {

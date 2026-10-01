@@ -536,28 +536,36 @@ test('canary patch pins the bundled SDK dependency to the rewritten workspace ve
   assert.ok(pinAt > -1 && writePkgAt > pinAt, 'package.json must be written after the SDK dependency pin');
 });
 
-test('SDK canary gitHead validation waits out npm asynchronous publish processing', () => {
-  // `npm publish` returns before the registry has processed the version: it prints "Your
-  // package is being processed and may take a few minutes to become available". Since
-  // 2026-09-03 the version reaches `npm view` 54-310s after publish returns, so a 60s poll
-  // failed most runs whose publish had already succeeded (runs 36594403460, 36604078688).
-  const stepAt = sdkPublish.indexOf('name: Validate canary gitHead');
-  assert.notEqual(stepAt, -1, 'SDK canary gitHead validation step must exist');
-  const nextStepAt = sdkPublish.indexOf('- name:', stepAt);
-  const step = sdkPublish.slice(stepAt, nextStepAt === -1 ? undefined : nextStepAt);
+// `npm publish` returns before the registry has processed the version: it prints "Your
+// package is being processed and may take a few minutes to become available". Since
+// 2026-09-03 the version reaches `npm view` 54-310s after publish returns, so a 60s poll
+// failed most runs whose publish had already succeeded (SDK runs 36594403460, 36604078688;
+// operator runs 35967551207, 35956658913). Every post-publish gitHead validation shares the
+// race, so each one is held to the same budget as an invariant, not as exact loop strings.
+for (const { lane, workflow, stepName } of [
+  { lane: 'SDK canary', workflow: sdkPublish, stepName: 'Validate canary gitHead' },
+  { lane: 'operator canary', workflow: publish, stepName: 'Validate client canary gitHead' },
+  { lane: 'operator stable', workflow: publish, stepName: 'Validate stable client gitHead' },
+]) {
+  test(`${lane} gitHead validation waits out npm asynchronous publish processing`, () => {
+    const stepAt = workflow.indexOf(`name: ${stepName}`);
+    assert.notEqual(stepAt, -1, `${lane} gitHead validation step must exist`);
+    const nextStepAt = workflow.indexOf('- name:', stepAt);
+    const step = workflow.slice(stepAt, nextStepAt === -1 ? undefined : nextStepAt);
 
-  const iterations = Number(step.match(/seq 1 (\d+)/)?.[1]);
-  const sleepSeconds = Number(step.match(/sleep (\d+)/)?.[1]);
-  assert.ok(iterations > 0, 'the validation must poll in a bounded `seq 1 N` loop');
-  assert.ok(sleepSeconds > 0, 'the validation must sleep between polls');
-  assert.ok(
-    iterations * sleepSeconds >= 600,
-    `retry budget is ${iterations} x ${sleepSeconds}s = ${iterations * sleepSeconds}s; npm processes ` +
-      'a publish asynchronously and the version can take minutes to become visible, so the ' +
-      'budget must be at least 600s',
-  );
+    const iterations = Number(step.match(/seq 1 (\d+)/)?.[1]);
+    const sleepSeconds = Number(step.match(/sleep (\d+)/)?.[1]);
+    assert.ok(iterations > 0, 'the validation must poll in a bounded `seq 1 N` loop');
+    assert.ok(sleepSeconds > 0, 'the validation must sleep between polls');
+    assert.ok(
+      iterations * sleepSeconds >= 600,
+      `retry budget is ${iterations} x ${sleepSeconds}s = ${iterations * sleepSeconds}s; npm processes ` +
+        'a publish asynchronously and the version can take minutes to become visible, so the ' +
+        'budget must be at least 600s',
+    );
 
-  // A longer wait must still fail loudly when the version never resolves.
-  assert.match(step, /::error::\$\{PACKAGE_SPEC\} gitHead did not resolve to \$\{JINN_BUILD_COMMIT\}/);
-  assert.match(step, /exit 1/);
-});
+    // A longer wait must still fail loudly when the version never resolves.
+    assert.match(step, /::error::\$\{PACKAGE_SPEC\} gitHead did not resolve to \$\{JINN_BUILD_COMMIT\}/);
+    assert.match(step, /exit 1/);
+  });
+}
