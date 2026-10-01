@@ -66,7 +66,7 @@ import {
   DISCLOSURE_SPECIFICATION_EXTENSION,
   DISCLOSURE_SPECIFICATION_MEDIA_TYPE,
 } from "@jinn-network/benchmarking-records";
-import { DISCLOSURE_SPECIFICATION_CAPABILITY, EXTERNAL_IMPORT_CAPABILITY, activeCapabilityVector } from "@colophon-claims/check";
+import { DISCLOSURE_SPECIFICATION_CAPABILITY, EXTERNAL_IMPORT_CAPABILITY, activeCapabilityVector, deriveClaimTaskSelection } from "@colophon-claims/check";
 import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { buildClaimPackage, writeClaimPackage, type ClaimPackage } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
@@ -428,6 +428,9 @@ export function runReport(
             projectsBinaryQualification: entry.method === BENCHMARKING_METHOD_IDS.binaryInstrument,
             declaresDisclosure: disclosureCarriage !== undefined,
             importedRun,
+            // Issue #3416: a fact about the sealed Run, so every entry of a declaring run declares it
+            // and the builder projects every entry's section from the same Run.
+            declaresTaskSelection: deriveClaimTaskSelection(runRecord) !== undefined,
           })
           : undefined;
         const entryIsDisclosed = composedCapabilities !== undefined

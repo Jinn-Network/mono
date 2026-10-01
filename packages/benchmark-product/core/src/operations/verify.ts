@@ -45,6 +45,7 @@ import {
   DISCLOSURE_SPECIFICATION_CAPABILITY,
   EXTERNAL_IMPORT_CAPABILITY,
   activeCapabilityVector,
+  deriveClaimTaskSelection,
   evaluateIntegrityAnchors,
   type IntegrityAnchorsReport,
 } from "@colophon-claims/check";
@@ -439,6 +440,7 @@ export async function verifyRunWorkspace(
             projectsBinaryQualification: reportRecord.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument,
             declaresDisclosure: disclosureCarriage !== undefined,
             importedRun: importedCarriage !== undefined,
+            declaresTaskSelection: deriveClaimTaskSelection(runRecord) !== undefined,
           })
           : undefined;
 

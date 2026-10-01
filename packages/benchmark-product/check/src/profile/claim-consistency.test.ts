@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BINARY_INSTRUMENT_MEASUREMENT_PROFILE } from "@jinn-network/benchmarking-aggregate";
+import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import {
   BENCHMARKING_METHOD_IDS,
   BENCHMARKING_METHOD_VERSION,
@@ -22,6 +23,7 @@ import {
   DISCLOSURE_VARIABLE_KEYS,
   MATRIX_RECORD_KIND,
   SIX_VARIABLE_DISCLOSURE_SPECIFICATION,
+  TASK_SELECTION_EXTENSION,
   sealDisclosureSpecification,
   type BenchmarkRecord,
   type MatrixRecord,
@@ -346,6 +348,114 @@ describe("issue #3403: the composed claim package", () => {
       { composedCapabilities: ["anchoring"], anchors: [] },
     )).not.toThrow();
   });
+});
+
+/**
+ * Issue #3416: the `task-selection` capability's claim section.
+ *
+ * The section is the sealed Run's `task-selection/v1` declaration, projected by the builder from
+ * the Run it is already handed rather than supplied beside it. Only the composed generation
+ * carries it, and only when its vector declares the capability; every earlier claim id refuses it,
+ * so no pre-composition claim changes shape.
+ */
+describe("issue #3416: the composed claim's task-selection section", () => {
+  const declaringRun = { ...runRecord, [TASK_SELECTION_EXTENSION]: { mode: "claimant-chosen" } } as unknown as RunRecord;
+  function claimOf(run: RunRecord, composedCapabilities?: readonly string[]): ClaimPackage {
+    return buildClaimPackage({
+      draftId: DRAFT_ID,
+      benchmarkSha256: identities.benchmarkSha256,
+      runRecord: run,
+      runSha256: identities.runSha256,
+      matrixRecord,
+      matrixSha256: identities.matrixSha256,
+      reportRecord,
+      reportSha256: identities.reportSha256!,
+      reportEnvelopeSha256: identities.reportEnvelopeSha256,
+      venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, run, []),
+      verificationCommandVerb: "bundle verify",
+      assurance: { preset: ASSURANCE_PRESET, resolved: RESOLVED_ASSURANCE },
+      ...(composedCapabilities === undefined ? {} : { composedCapabilities }),
+    });
+  }
+  const consistency = (claim: ClaimPackage, run: RunRecord, composedCapabilities?: readonly string[]) =>
+    () => assertClaimConsistency({
+      claim,
+      identities,
+      benchmarkRecord: {} as unknown as BenchmarkRecord,
+      runRecord: run,
+      matrixRecord,
+      reportRecord,
+      draftId: DRAFT_ID,
+      assurancePreset: ASSURANCE_PRESET,
+      ...(composedCapabilities === undefined ? {} : { composedCapabilities }),
+    });
+  const issuesOf = (claim: unknown): string[] => {
+    const parsed = ClaimPackageSchema.safeParse(claim);
+    return parsed.success ? [] : parsed.error.issues.map((issue) => issue.message);
+  };
+
+  test("a declaring vector carries the Run's mode, and adds no check and no later reader", () => {
+    const declared = claimOf(declaringRun, ["task-selection"]);
+    expect(declared.claimSchema).toBe(COMPOSED_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(declared.taskSelection).toEqual({ mode: "claimant-chosen" });
+    expect(declared.verification.checks).toEqual(expectedChecks([]));
+    expect(declared.verification).toEqual(expect.objectContaining(readerInstructions([])));
+    expect(issuesOf(declared)).toEqual([]);
+    // Everything else is the undeclared composed claim of the same records.
+    expect({ ...declared, taskSelection: undefined }).toEqual({ ...claimOf(runRecord, []), taskSelection: undefined });
+  });
+
+  test("the pre-composition claim of a declaring run is unchanged: no section", () => {
+    const legacy = claimOf(declaringRun);
+    expect(legacy.claimSchema).toBe(CLAIM_PACKAGE_SCHEMA_ID);
+    expect(legacy.taskSelection).toBeUndefined();
+    expect(canonicalJsonBytes(legacy)).toEqual(canonicalJsonBytes(claimOf(runRecord)));
+  });
+
+  test("the builder refuses a vector that hides the declaration, and one the Run cannot back", () => {
+    expect(() => claimOf(declaringRun, [])).toThrow(/"task-selection" and its "taskSelection" section/u);
+    expect(() => claimOf(runRecord, ["task-selection"])).toThrow(/"task-selection" and its "taskSelection" section/u);
+  });
+
+  test("an earlier claim id cannot grow the section", () => {
+    for (const legacy of [claimOf(runRecord), anchoredClaim()]) {
+      expect(issuesOf({ ...legacy, taskSelection: { mode: "claimant-chosen" } }))
+        .toContain("only the composed claim-package/7 allocation carries a taskSelection section");
+    }
+  });
+
+  test("the rebuild projects the section from the Run, never from the claim under test", () => {
+    const declared = claimOf(declaringRun, ["task-selection"]);
+    expect(consistency(declared, declaringRun, ["task-selection"])).not.toThrow();
+    // Schema-valid tamper: another vocabulary token, which the page would then state.
+    const softened = { ...declared, taskSelection: { mode: "fixed-public-set" } } as ClaimPackage;
+    expect(issuesOf(softened)).toEqual([]);
+    expect(consistency(softened, declaringRun, ["task-selection"]))
+      .toThrow(/claim package taskSelection\.mode is not the exact projection/u);
+    // The section stripped from a claim whose bundle declares it.
+    const { taskSelection: _section, ...stripped } = declared;
+    expect(issuesOf(stripped)).toEqual([]);
+    expect(consistency(stripped as ClaimPackage, declaringRun, ["task-selection"]))
+      .toThrow(/claim package taskSelection is not the exact projection/u);
+  });
+
+  function anchoredClaim(): ClaimPackage {
+    return buildClaimPackage({
+      draftId: DRAFT_ID,
+      benchmarkSha256: identities.benchmarkSha256,
+      runRecord,
+      runSha256: identities.runSha256,
+      matrixRecord,
+      matrixSha256: identities.matrixSha256,
+      reportRecord,
+      reportSha256: identities.reportSha256!,
+      reportEnvelopeSha256: identities.reportEnvelopeSha256,
+      venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, []),
+      verificationCommandVerb: "bundle verify",
+      assurance: { preset: ASSURANCE_PRESET, resolved: RESOLVED_ASSURANCE },
+      anchors: [],
+    });
+  }
 });
 
 describe("firstDifference", () => {

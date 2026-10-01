@@ -973,6 +973,12 @@ export async function createSyntheticV4BundleFixture<Skip extends true | undefin
    */
   readonly declareDisclosure?: true;
   /**
+   * #2980 task-selection provenance, sealed into the Run at lock time (issue #3416 publishes it on
+   * the composed generation as the `task-selection` capability). OPTIONS-ONLY and defaults off, so
+   * every existing caller's draft, Run, and bundle bytes are unchanged.
+   */
+  readonly taskSelection?: "claimant-chosen";
+  /**
    * Asks `report` for the composed generation (issue #3403 / #3405). OPTIONS-ONLY and defaults
    * off **in this fixture**, so every existing caller still materializes the enumerated cell it
    * always did. The production `report` default is the other way: omitted means `/10`. This
@@ -1166,6 +1172,7 @@ export async function createSyntheticV4BundleFixture<Skip extends true | undefin
       ...(input.additionalAnalyses === undefined
         ? {}
         : { additionalAnalyses: input.additionalAnalyses.map((entry) => ({ ...entry })) }),
+      ...(input.taskSelection === undefined ? {} : { taskSelection: input.taskSelection }),
     },
   }), "draft binary profile");
 

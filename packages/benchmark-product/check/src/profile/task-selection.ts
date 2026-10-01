@@ -19,13 +19,16 @@
  * side of it is unsound.
  */
 
+import { z } from "zod";
 import {
+  TASK_SELECTION_MODES,
   compareCalendarStrictRfc3339Instants,
   readTaskSelectionMode,
   type BenchmarkRecord,
   type RunRecord,
   type TaskSelectionMode,
 } from "@jinn-network/benchmarking-records";
+import { TASK_SELECTION_CAPABILITY } from "../capabilities.js";
 import { refuse } from "./errors.js";
 
 /** The verification path every refusal here is reported under. Adding a new named check would be a
@@ -77,9 +80,9 @@ function withheldAtLock(benchmark: BenchmarkRecord, closeAt: string): boolean {
 /**
  * The declared mode, refusing rather than throwing raw on bytes the Run schema would not have
  * sealed. Exported so any reader that resolves the mode does so through this refusal posture
- * rather than re-deriving it with its own error handling. No presentation asset consumes it today
- * -- the report face renders nothing for task selection until issue #3416 -- so its only callers
- * are `taskSelectionContradiction` below and its own tests.
+ * rather than re-deriving it with its own error handling. Its callers are the contradiction rule
+ * below and, on the composed generation, the capability binding and claim section after it; the
+ * report face reads the mode only through that verified section (issue #3416).
  */
 export function declaredTaskSelectionMode(runRecord: RunRecord): TaskSelectionMode | undefined {
   try {
@@ -154,4 +157,63 @@ export function taskSelectionContradiction(input: TaskSelectionConsistencyInput)
 export function assertTaskSelectionConsistency(input: TaskSelectionConsistencyInput): void {
   const contradiction = taskSelectionContradiction(input);
   if (contradiction !== undefined) refuse("record-integrity", PATH, contradiction);
+}
+
+/**
+ * The `task-selection` capability's claim section (issue #3416): the sealed Run's declared mode,
+ * verbatim, and nothing else. Strict for the reason the Run extension is strict: a second key here
+ * would ride in the claim while every reader ignored it.
+ */
+export const ClaimTaskSelectionSectionSchema = z.strictObject({
+  mode: z.enum(TASK_SELECTION_MODES),
+});
+
+export type ClaimTaskSelectionSection = z.infer<typeof ClaimTaskSelectionSectionSchema>;
+
+/**
+ * The section a composed claim carries when its bundle declares `task-selection`, or `undefined`
+ * when the Run declares nothing. One projection for the producer and both claim rebuilds: the claim
+ * builder calls it on the Run it is already handed, so no caller supplies a second copy.
+ */
+export function deriveClaimTaskSelection(runRecord: RunRecord): ClaimTaskSelectionSection | undefined {
+  const mode = declaredTaskSelectionMode(runRecord);
+  return mode === undefined ? undefined : { mode };
+}
+
+/**
+ * The composed generation's binding between a bundle's declared vector and its sealed Run (issue
+ * #3416, operator ruling 2026-09-24). Both directions refuse, on the vector:
+ *
+ * - **The Run declares, the vector does not.** The report face states who chose the tasks only when
+ *   the capability is declared, so an undeclared one would be a quieter page over the same records.
+ *   A bundle cannot pass while hiding who chose its tasks.
+ * - **The vector declares, the Run does not.** There is nothing for the section or the header row
+ *   to project.
+ *
+ * Only a `/10` bundle reaches this. Earlier formats carry no vector and render nothing for task
+ * selection, exactly as they did before the capability existed; the contradiction rule above still
+ * applies to every format.
+ */
+export function assertTaskSelectionDeclaration(input: {
+  readonly declared: boolean;
+  readonly runRecord: RunRecord;
+}): void {
+  const mode = declaredTaskSelectionMode(input.runRecord);
+  if (mode !== undefined && !input.declared) {
+    refuse(
+      "record-integrity",
+      "bundle.manifest.capabilities",
+      `the sealed Run declares task selection "${mode}", but this bundle does not declare the`
+      + ` "${TASK_SELECTION_CAPABILITY}" capability that states it on the report face; a bundle`
+      + " cannot pass while hiding who chose its tasks",
+    );
+  }
+  if (mode === undefined && input.declared) {
+    refuse(
+      "record-integrity",
+      "bundle.manifest.capabilities",
+      `this bundle declares the "${TASK_SELECTION_CAPABILITY}" capability, but its sealed Run`
+      + " carries no task-selection/v1 declaration for it to state",
+    );
+  }
 }

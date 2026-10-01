@@ -24,6 +24,7 @@ import { describe, expect, test } from "vitest";
 import {
   BENCHMARKING_METHOD_IDS,
   BENCHMARKING_METHOD_VERSION,
+  TASK_SELECTION_EXTENSION,
   type MatrixRecord,
   type ReportRecord,
   type RunRecord,
@@ -416,5 +417,78 @@ describe("issue #3403: the composed claim package", () => {
       claimFor({ composedCapabilities: ["anchoring"], anchors: [] }),
       { composedCapabilities: ["anchoring"], anchors: [] },
     )).not.toThrow();
+  });
+});
+
+/**
+ * Issue #3416, mirrored from `@colophon-claims/check`'s own `profile/claim-consistency.test.ts`: the
+ * composed claim's `taskSelection` section. Both builders project it from the Run through the
+ * checker's one `deriveClaimTaskSelection`, and both must refuse the same shapes, because core's
+ * workspace verify and `report` reach this copy while a reader reaches the other.
+ */
+describe("issue #3416: the composed claim's task-selection section", () => {
+  const declaringRun = { ...runRecord, [TASK_SELECTION_EXTENSION]: { mode: "claimant-chosen" } } as unknown as RunRecord;
+  function claimOf(run: RunRecord, composedCapabilities?: readonly string[]): ClaimPackage {
+    return buildClaimPackage({
+      draftId: DRAFT_ID,
+      benchmarkSha256: identities.benchmarkSha256,
+      runRecord: run,
+      runSha256: identities.runSha256,
+      matrixRecord,
+      matrixSha256: identities.matrixSha256,
+      reportRecord,
+      reportSha256: identities.reportSha256,
+      reportEnvelopeSha256: identities.reportEnvelopeSha256,
+      venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, run, []),
+      verificationCommandVerb: "bundle verify",
+      assurance: { preset: ASSURANCE_PRESET, resolved: RESOLVED_ASSURANCE },
+      ...(composedCapabilities === undefined ? {} : { composedCapabilities }),
+    });
+  }
+  const issuesOf = (claim: unknown): string[] => {
+    const parsed = ClaimPackageSchema.safeParse(claim);
+    return parsed.success ? [] : parsed.error.issues.map((issue) => issue.message);
+  };
+
+  test("a declaring vector carries the Run's mode, and adds no check", () => {
+    const declared = claimOf(declaringRun, ["task-selection"]);
+    expect(declared.claimSchema).toBe(COMPOSED_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(declared.taskSelection).toEqual({ mode: "claimant-chosen" });
+    expect(declared.verification.checks).toEqual(expectedChecks([]));
+    expect(issuesOf(declared)).toEqual([]);
+  });
+
+  test("the pre-composition claim of a declaring run carries no section", () => {
+    expect(claimOf(declaringRun).claimSchema).toBe(CLAIM_PACKAGE_SCHEMA_ID);
+    expect(claimOf(declaringRun).taskSelection).toBeUndefined();
+    expect(claimOf(declaringRun)).toEqual(claimOf(runRecord));
+  });
+
+  test("the builder refuses a vector that hides the declaration, and one the Run cannot back", () => {
+    expect(() => claimOf(declaringRun, [])).toThrow(/"task-selection" and its "taskSelection" section/u);
+    expect(() => claimOf(runRecord, ["task-selection"])).toThrow(/"task-selection" and its "taskSelection" section/u);
+  });
+
+  test("an earlier claim id cannot grow the section", () => {
+    expect(issuesOf({ ...claimOf(runRecord), taskSelection: { mode: "claimant-chosen" } }))
+      .toContain("only the composed claim-package/7 allocation carries a taskSelection section");
+  });
+
+  test("core's rebuild projects the section from the Run, never from the claim under test", () => {
+    const declared = claimOf(declaringRun, ["task-selection"]);
+    const rebuild = (claim: ClaimPackage) => () => assertClaimConsistency({
+      claim,
+      identities,
+      benchmarkRecord: {} as never,
+      runRecord: declaringRun,
+      matrixRecord,
+      reportRecord,
+      draftId: DRAFT_ID,
+      assurancePreset: ASSURANCE_PRESET,
+      composedCapabilities: ["task-selection"],
+    });
+    expect(rebuild(declared)).not.toThrow();
+    expect(rebuild({ ...declared, taskSelection: { mode: "fixed-public-set" } } as ClaimPackage))
+      .toThrow(/claim package taskSelection\.mode is not the exact projection/u);
   });
 });

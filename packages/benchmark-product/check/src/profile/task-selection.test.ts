@@ -16,7 +16,13 @@ import {
   type TaskSelectionMode,
 } from "@jinn-network/benchmarking-records";
 import { BenchmarkProductError } from "./errors.js";
-import { assertTaskSelectionConsistency, declaredTaskSelectionMode } from "./task-selection.js";
+import {
+  ClaimTaskSelectionSectionSchema,
+  assertTaskSelectionConsistency,
+  assertTaskSelectionDeclaration,
+  declaredTaskSelectionMode,
+  deriveClaimTaskSelection,
+} from "./task-selection.js";
 
 const CLAIMANT = "did:example:claimant";
 const CURATOR = "did:example:curator";
@@ -191,5 +197,65 @@ describe("drawn-post-lock", () => {
       benchmarkRecord: benchmark({ policy: "after-run" }),
       runRecord: run({ mode: "drawn-post-lock" }),
     })).not.toThrow();
+  });
+});
+
+/**
+ * Issue #3416 (operator ruling 2026-09-24): on the composed generation the declaration is a
+ * capability, `task-selection`, and the vector a `/10` bundle states is bound to the Run both ways.
+ */
+describe("the task-selection capability's claim section", () => {
+  test("is the Run's declared mode, verbatim, and nothing else", () => {
+    for (const mode of ["claimant-chosen", "fixed-public-set", "drawn-post-lock"] as const) {
+      const section = deriveClaimTaskSelection(run({ mode }));
+      expect(section).toEqual({ mode });
+      expect(ClaimTaskSelectionSectionSchema.safeParse(section).success).toBe(true);
+    }
+  });
+
+  test("is absent for a Run that declares nothing", () => {
+    expect(deriveClaimTaskSelection(run())).toBeUndefined();
+  });
+
+  test("admits no mode outside the vocabulary and no second key", () => {
+    expect(ClaimTaskSelectionSectionSchema.safeParse({ mode: "whatever-i-like" }).success).toBe(false);
+    expect(ClaimTaskSelectionSectionSchema.safeParse({ mode: "claimant-chosen", chosenBy: CLAIMANT }).success).toBe(false);
+    expect(ClaimTaskSelectionSectionSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe("the declared vector and the Run's declaration are bound both ways", () => {
+  function declarationRefusal(declared: boolean, runRecord: RunRecord): BenchmarkProductError {
+    try {
+      assertTaskSelectionDeclaration({ declared, runRecord });
+    } catch (error) {
+      return error as BenchmarkProductError;
+    }
+    return expect.unreachable("expected a refusal");
+  }
+
+  test("a Run carrying the declaration, under a vector that does not declare it, is refused", () => {
+    // A bundle cannot pass while hiding who chose its tasks: the page renders the declaration only
+    // when the capability is declared, so an undeclared one would be a quieter page.
+    for (const mode of ["claimant-chosen", "fixed-public-set", "drawn-post-lock"] as const) {
+      const error = declarationRefusal(false, run({ mode }));
+      expect(error).toBeInstanceOf(BenchmarkProductError);
+      expect(error.code).toBe("record-integrity");
+      expect(error.issues[0]?.path).toBe("bundle.manifest.capabilities");
+      expect(error.message).toContain(`"${mode}"`);
+      expect(error.message).toContain("does not declare");
+    }
+  });
+
+  test("a vector declaring it over a Run that declares nothing is refused", () => {
+    const error = declarationRefusal(true, run());
+    expect(error.code).toBe("record-integrity");
+    expect(error.issues[0]?.path).toBe("bundle.manifest.capabilities");
+    expect(error.message).toContain("carries no task-selection/v1 declaration");
+  });
+
+  test("agreement passes in both states", () => {
+    expect(() => assertTaskSelectionDeclaration({ declared: true, runRecord: run({ mode: "claimant-chosen" }) })).not.toThrow();
+    expect(() => assertTaskSelectionDeclaration({ declared: false, runRecord: run() })).not.toThrow();
   });
 });

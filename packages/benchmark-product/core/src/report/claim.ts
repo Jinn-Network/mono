@@ -46,11 +46,13 @@ import {
   ClaimAnchorSchema,
   ClaimDisclosureSectionSchema,
   ClaimExternalImportSectionSchema,
+  ClaimTaskSelectionSectionSchema,
   PROMPTED_SCREENING_PROFILE,
   PUBLIC_BUNDLE_V8_CHECKS as READER_DISCLOSED_VERIFICATION_CHECKS,
   SELF_RUN_TRUST_ROOT,
   anchoredTrustRoot,
   composeClosure,
+  deriveClaimTaskSelection,
   readerInstructions,
 } from "@colophon-claims/check";
 import {
@@ -359,6 +361,10 @@ const ClaimPackageWireSchema = z.object({
    * below refuses it on every earlier allocation. Contents are the marker's projection, never a
    * second opinion. */
   externalImport: ClaimExternalImportSectionSchema.optional(),
+  /** issue #3416: present exactly when the composed vector declares `task-selection`. The refine
+   * below refuses it on every earlier allocation, so no pre-composition claim changes shape.
+   * Contents are the sealed Run's declared mode, never a second opinion. */
+  taskSelection: ClaimTaskSelectionSectionSchema.optional(),
   /** Optional Colophon suite-protocol bits. Not Report v2 required fields. */
   suiteComparability: z.object({
     executionConformance: z.boolean(),
@@ -399,6 +405,13 @@ const ClaimPackageWireSchema = z.object({
       code: "custom",
       message: "only the composed claim-package/7 allocation carries an externalImport section",
       path: ["externalImport"],
+    });
+  }
+  if (!composedClosure && claim.taskSelection !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "only the composed claim-package/7 allocation carries a taskSelection section",
+      path: ["taskSelection"],
     });
   }
   const anchoredClosure = claim.claimSchema === ANCHORED_CLAIM_PACKAGE_SCHEMA_ID
@@ -667,7 +680,7 @@ function exactBinaryClaimControls(input: Record<string, unknown>): boolean {
   // generic control-shape failure. Neither field is ever set on an actual binary-instrument claim
   // (`methodProjection`'s dispatch is exclusive), so admitting them here is defense in depth, not
   // a widening any real claim exercises.
-  return exactKeys(input, ["claimSchema", "scope", "records", "method", "results", "completeness", "attrition", "conflicted", "assurance", "disclosures", "limitations", "venueHonesty", "verification", "rehearsal", "qualification", "anchors", "disclosure", "externalImport", "pairwiseDisagreement", "pairedMajorityDelta"])
+  return exactKeys(input, ["claimSchema", "scope", "records", "method", "results", "completeness", "attrition", "conflicted", "assurance", "disclosures", "limitations", "venueHonesty", "verification", "rehearsal", "qualification", "anchors", "disclosure", "externalImport", "taskSelection", "pairwiseDisagreement", "pairedMajorityDelta"])
     && exactKeys(scope, ["draftId", "benchmarkSha256", "taskCount", "arms", "replicates", "venue"])
     && Array.isArray((scope as { arms?: unknown }).arms)
     && ((scope as { arms: unknown[] }).arms).every((arm) => exactKeys(arm, ["armId", "pinning"]))
@@ -767,6 +780,8 @@ export interface BuildClaimPackageInput {
   /** issue #3417: the projected external-import section, already derived from the authenticated
    * marker. Absent for every driven run, which is what keeps every existing claim byte-identical. */
   readonly externalImport?: ClaimExternalImportSection;
+  // issue #3416: there is no `taskSelection` input. The section is projected from `runRecord`
+  // above by the checker's `deriveClaimTaskSelection`, the one projection both builders share.
   /** Optional two-axis official-suite comparability. Absent unless a suite protocol is bound. */
   readonly suiteComparability?: {
     readonly executionConformance: boolean;
@@ -1164,6 +1179,10 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     checks: composeClosure(input.composedCapabilities).checks,
     ...readerInstructions(input.composedCapabilities),
   };
+  // Issue #3416: projected here from the sealed Run rather than supplied beside it, because the Run
+  // is already this builder's input. Composed only: every earlier claim stays byte-identical, and
+  // the biconditional below makes a vector that hides the Run's declaration a refusal.
+  const taskSelection = composed === undefined ? undefined : deriveClaimTaskSelection(input.runRecord);
   if (composed !== undefined) {
     // Total over the registry's sections: a capability registered without stating here how its
     // section is supplied is a compile error, not a composed claim that can no longer be built.
@@ -1172,6 +1191,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
       anchors: anchored,
       disclosure: disclosure !== undefined,
       externalImport: input.externalImport !== undefined,
+      taskSelection: taskSelection !== undefined,
     };
     for (const capability of CAPABILITY_REGISTRY) {
       if (supplied[capability.claimSection] !== input.composedCapabilities!.includes(capability.token)) {
@@ -1278,6 +1298,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     // about what that record says (issue #2839, design §6.6).
     ...(disclosure === undefined ? {} : { disclosure }),
     ...(input.externalImport === undefined ? {} : { externalImport: input.externalImport }),
+    ...(taskSelection === undefined ? {} : { taskSelection }),
     ...(input.previewDisclosure !== undefined
       ? {
           rehearsal: {

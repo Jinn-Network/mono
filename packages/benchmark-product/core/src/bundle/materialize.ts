@@ -98,7 +98,7 @@ import {
 } from "../runtime/inspect/binary-judge-manifest.js";
 import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
-import { activeCapabilityVector, derivePublicComparison, EXTERNAL_IMPORT_BUNDLE_MEMBER } from "@colophon-claims/check";
+import { activeCapabilityVector, deriveClaimTaskSelection, derivePublicComparison, EXTERNAL_IMPORT_BUNDLE_MEMBER } from "@colophon-claims/check";
 
 const ROLE_ORDER: readonly BundleV4EvidenceRole[] = BUNDLE_V4_EVIDENCE_ROLES;
 
@@ -428,6 +428,28 @@ function recordClosure(input: MaterializeBundleInput): {
       + " — a declaration made or replaced after the run was reported is recorded, but this claim"
       + " predates it and cannot be republished as though it did not",
     );
+  }
+
+  // ── The composed claim's task-selection section (issue #3416) ──────────────────────────────
+  //
+  // The Run's `task-selection/v1` declaration is sealed at lock, so it cannot drift after `report`;
+  // what can is a composed claim reported before the capability existed, which carries no section
+  // for a Run that declares one. Its bundle would declare the capability over a claim that does not
+  // state it, and every reader would refuse it. Refused here instead, where the operator can act.
+  if (composedGeneration) {
+    const storedTaskSelection = (claim as { readonly taskSelection?: unknown }).taskSelection;
+    const expectedTaskSelection = deriveClaimTaskSelection(run);
+    if (!Buffer.from(canonicalJsonBytes({ taskSelection: storedTaskSelection ?? null } as never)).equals(
+      Buffer.from(canonicalJsonBytes({ taskSelection: expectedTaskSelection ?? null } as never)),
+    )) {
+      refuse(
+        "record-integrity",
+        "claim-package.json",
+        "the sealed claim's taskSelection section is not the projection of the task-selection/v1"
+        + " declaration this run sealed at lock; the claim was reported before the task-selection"
+        + " capability existed, and a composed bundle cannot state who chose its tasks without it",
+      );
+    }
   }
 
   const files = new Map<string, Uint8Array>([
@@ -1105,7 +1127,8 @@ function recordClosure(input: MaterializeBundleInput): {
   // `/10` and states capability in its vector rather than in the choice of number (issue #3403).
   // The vector comes from the registry's activation predicates over the facts derived above --
   // the same facts, and the same predicates, `report` sealed the claim's sections from. An
-  // imported run is a fourth fact (issue #3417). `composedFormat: false` at `report` still seals
+  // imported run is a fourth fact (issue #3417), and a Run declaring its task selection a fifth
+  // (issue #3416). `composedFormat: false` at `report` still seals
   // a legacy claim, and this function then emits the enumerated cell that claim implies.
   const legacyFormat = anchored
     ? binaryQualification
@@ -1164,6 +1187,7 @@ function recordClosure(input: MaterializeBundleInput): {
           projectsBinaryQualification: binaryQualification,
           declaresDisclosure: disclosureCarriage !== undefined,
           importedRun: importedCarriage !== undefined,
+          declaresTaskSelection: deriveClaimTaskSelection(run) !== undefined,
         }),
       }
       : { format: legacyFormat }),
