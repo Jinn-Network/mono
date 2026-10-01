@@ -67,3 +67,43 @@ PR #3285 never merged; the rename is re-filed as #4188. This amendment does
 not introduce `@colophon-claims/check` and does not turn
 `@colophon-claims/verify@0.2` into an alias. The published verify 0.2 line
 remains the checker itself.
+
+## Amendment (2026-10-01): check 0.2.1 receipt, and the core and cli re-pin
+
+Issues #4733 and #4886. `@colophon-claims/check@0.2.1`, the checker under the
+name #4188 gave it, is released under the operator's authorization in #4733.
+Its receipt lives in
+`packages/benchmark-product/product-release-platform-pins.json` under
+decision `operator-authorization-2026-09-23-issue-4733`, with the same 15
+package names as the verify 0.2.1 receipt; that receipt is not re-keyed.
+This supersedes the 2026-09-18 statement that this record does not introduce
+`@colophon-claims/check`.
+
+Only `@colophon-claims/check@0.2.1`, `@colophon-claims/core@0.1.0` and
+`@colophon-claims/cli@0.1.0` MAY pin `@jinn-network/*` to the exact
+already-attested platform version
+`0.1.0-canary.sha.1c023eb4c24201435e665ddae9d297f286a196bc` (Stack npm
+Publish run 36838465494 attempt 1, push to `next`). For core and cli this
+supersedes the 0533a22 pin the 2026-09-18 amendment gave them; neither
+version has been published. core depends on the checker and shares platform
+packages with it, so the three receipts carry one sha. The verify 0.2.0 and
+0.2.1 receipts are unchanged.
+
+Why the pin is not 0533a22 (#4886): the checker sets
+`extendedKeyUsageCritical`, a field `@jinn-network/trust-core` gained in
+436fe2368c, after 0533a22, so it does not compile against that canary. No
+sha after 436fe2368c had the checker's closure published until the
+`benchmarking-product-v1` release group regained a canary lane (#4909).
+1c023eb is on `next` after both.
+
+The `check` dispatch of the demand-gated workflow also publishes
+`@colophon-claims/verify@0.2.2`, a passthrough alias that depends on
+`@colophon-claims/check@0.2.1` exactly and declares no `@jinn-network/*`
+dependency, so it carries no receipt. From then on
+`@colophon-claims/verify@0.2` resolves to that alias. This supersedes the
+2026-09-18 statement that the published verify 0.2 line remains the checker
+itself; the published verify 0.2.0 and 0.2.1 are unchanged.
+
+This does not permit a floating `@canary`, a mixed SHA closure, another
+product or product version, an implicit future exception, or a stable-stack
+claim. `npm publish` remains a human act after the recording change merges.

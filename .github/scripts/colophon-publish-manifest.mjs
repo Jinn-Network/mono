@@ -126,17 +126,24 @@ const PRODUCT_RELEASES = {
   },
   '@colophon-claims/core@0.1.0': {
     decision: 'DR-2026-08-22-a',
-    platformSourceSha: '0533a224cf99f06d7facf0c23455f2781a5b9e62',
-    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/33517790412/attempts/2',
-    receiptSha256: '03c9de23b12274417087c7884dae1e112a0e4cc14b4d1fd2cfc9a84588193e90',
+    platformSourceSha: '1c023eb4c24201435e665ddae9d297f286a196bc',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/36838465494/attempts/1',
+    receiptSha256: '9644cb05598d13484eeb3d05aae88dc1a6f8ee3ed2625e90cdfbee2bda03fba3',
     closure: CORE_010_PLATFORM_CLOSURE,
   },
   '@colophon-claims/cli@0.1.0': {
     decision: 'DR-2026-08-22-a',
-    platformSourceSha: '0533a224cf99f06d7facf0c23455f2781a5b9e62',
-    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/33517790412/attempts/2',
-    receiptSha256: 'a68ee374b0dc7382df32f5d999584bc0ca6af37b3ebbed3f221d39452004f3ee',
+    platformSourceSha: '1c023eb4c24201435e665ddae9d297f286a196bc',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/36838465494/attempts/1',
+    receiptSha256: '8e9a08ddecfbf55af3351d97f2f3370cb65214bb543a81a1d5c5d74d2da967c6',
     closure: CLI_010_PLATFORM_CLOSURE,
+  },
+  '@colophon-claims/check@0.2.1': {
+    decision: 'operator-authorization-2026-09-23-issue-4733',
+    platformSourceSha: '1c023eb4c24201435e665ddae9d297f286a196bc',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/36838465494/attempts/1',
+    receiptSha256: '9560178d3a2bceb5998d8953ef9ab7c41880b928c037be774778149000b5cacc',
+    closure: VERIFY_020_PLATFORM_CLOSURE,
   },
 };
 const PRODUCT_RELEASE_IDS = Object.keys(PRODUCT_RELEASES);
@@ -380,7 +387,6 @@ export function applyColophonPublishManifest(manifestPath, pin, options = {}) {
  * It is deliberately not derived from `PRODUCT_RELEASES`. A platform receipt attests one publish
  * run; a registered release is any version this tree may resolve against. `verify@0.1.0` predates
  * the receipt file and `verify@0.2.2` is the alias, which carries no Jinn closure to attest.
- * `check@0.2.1` is the checker about to be published and has no receipt yet (issue #4188).
  */
 const READER_RELEASES = {
   '@colophon-claims/check': ['0.2.1'],
