@@ -260,4 +260,20 @@ describe('checkDistributorReachable', () => {
     expect(result?.detail).not.toContain('SECRETKEY123');
     expect(result?.detail).not.toContain('u:pw');
   });
+
+  it('tells an operator plainly what a drained pool means, naming no team and no channel (#4926)', async () => {
+    const { checkDistributorReachable } = await import('@/cli/commands/doctor.js');
+    const config = { network: 'testnet', rpcUrl: 'http://fake' } as never;
+    const result = await checkDistributorReachable(config, async () => 0n);
+    expect(result?.name).toBe('distributor_reachable');
+    expect(result?.ok).toBe(false);
+    expect(result?.detail).toContain('testnet staking pool is drained');
+    expect(result?.remedy).not.toMatch(/team/i);
+    expect(result?.remedy).not.toMatch(/channel/i);
+    expect(result?.remedy).not.toMatch(/report/i);
+    expect(result?.remedy).toContain('Operators cannot fix this locally');
+    expect(result?.remedy).toContain('funding key');
+    expect(result?.remedy).toContain('`Overflow`');
+    expect(result?.remedy).toContain('The Base Sepolia task marketplace is parked');
+  });
 });

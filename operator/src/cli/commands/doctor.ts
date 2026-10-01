@@ -260,9 +260,9 @@ async function readDistributorBalance(config: JinnConfig, olasToken: Address, di
 
 /**
  * On testnet, warn if the stOLAS distributor pool is drained. Operators can
- * neither fix this themselves nor bootstrap past it — the protocol team has
- * to refill the distributor. Emitted as a warning, not a hard failure,
- * because a refill may be in-flight.
+ * neither fix this themselves nor bootstrap past it — only the holder of the
+ * pool's funding key can refill the distributor. Emitted as a warning, not a
+ * hard failure, because a refill may be in-flight.
  */
 export async function checkDistributorReachable(
   config: JinnConfig,
@@ -293,8 +293,9 @@ export async function checkDistributorReachable(
         ok: false,
         detail: `testnet staking pool is drained — distributor holds ${jinn.toFixed(2)} tJINN, need ≥${required.toFixed(2)} per service`,
         remedy:
-          'Protocol-team action required (operators cannot fix this locally). ' +
-          'Report the outage to the Jinn testnet channel; bootstrap will keep failing with `Overflow` until the pool is topped up.',
+          'Operators cannot fix this locally: the pool can only be refilled by whoever holds its funding key, ' +
+          'and `jinn bootstrap` keeps failing with `Overflow` until it is. ' +
+          'The Base Sepolia task marketplace is parked and is not running tasks, so there is no action to take.',
       };
     }
     return {
