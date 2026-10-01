@@ -158,9 +158,18 @@ export function describeTaskExecutionBackendContract(makeBackend: () => Testable
       const backend = makeBackend();
       const { attempt, source } = await submitAccepted(backend);
 
-      const pending = await backend.observe(attempt);
-      expect(pending.descriptor.derived.state).toBe("pending");
-      expect(pending.descriptor.derived.terminal).toBe(false);
+      // A backend that really executes may start the Attempt itself before this suite drives
+      // anything: the local backend journals `attempt-started` as soon as its shim is live, which
+      // can be before the first `observe` here. So `pending` is checked against the snapshot's own
+      // evidence rather than assumed: pending exactly when no authoritative `attempt-started` is
+      // recorded, running only when one is. Either way a live Attempt is never terminal.
+      const beforeDrive = await backend.observe(attempt);
+      const alreadyStarted = beforeDrive.observations.some(
+        (observation) =>
+          observation.type === "network.jinn.task-execution.attempt-started.v1" && observation.source === source,
+      );
+      expect(beforeDrive.descriptor.derived.state).toBe(alreadyStarted ? "running" : "pending");
+      expect(beforeDrive.descriptor.derived.terminal).toBe(false);
 
       await backend.drive(attempt, [startedObservation(attempt, source)]);
       const running = await backend.observe(attempt);

@@ -63,8 +63,10 @@ const launcherCapabilities: LauncherCapabilities = {
 /**
  * The real-backend suite must cross the actual supervisor/shim boundary. This launcher remains
  * a pure contract implementation: its plan is closed data and it never calls the fake
- * launcher's `onRun` simulation hook. A short delay keeps generic drive-based scenarios pending
- * until their synthetic observations are appended; evidence scenarios select immediate exit.
+ * launcher's `onRun` simulation hook. A short delay keeps generic drive-based scenarios
+ * nonterminal until their synthetic observations are appended; it does not keep them pending,
+ * because the backend records `attempt-started` itself as soon as the shim is live. Evidence
+ * scenarios select immediate exit.
  */
 function makeNodeProcessLauncher(delayMs: number): LauncherContract {
   return {
