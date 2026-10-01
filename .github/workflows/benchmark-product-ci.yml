@@ -322,7 +322,9 @@ jobs:
           # The profile kit is intentionally product-local application acceptance coverage, not
           # a shipped protocol claim. Run its manifest and the actual combined Harbor/source
           # post-hoc case explicitly so future broad test filtering cannot silently omit it.
-          yarn vitest run src/conformance/publication-profile.test.ts src/runtime/harbor/harbor.test.ts
+          # The claimant path is named for the same reason: it is the one test where the slate
+          # `method terminal-bench-2.1` binds meets a real Harbor jobs directory (#4937).
+          yarn vitest run src/conformance/publication-profile.test.ts src/runtime/harbor/harbor.test.ts src/conformance/claimant-path.terminal-bench-2-1.test.ts
           yarn build
           yarn check:parity
           yarn pack:smoke
