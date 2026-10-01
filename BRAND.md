@@ -151,7 +151,6 @@ Strong claims that the canonical introduction deliberately does not carry. Each 
 
 | Claim | Lives in |
 |---|---|
-| "Solve any problem" — the ambition | `THESIS.md` (when populated) and pinned X post |
 | "Open data" — system property of the loop | Long-form pitch / explainer thread / docs |
 | "Bonded / staked economy" — operator lens | Operator-recruitment copy, runbook intro |
 | "Go alone fast, go together far" — culture line | Manifesto opener, closing line of thesis posts |

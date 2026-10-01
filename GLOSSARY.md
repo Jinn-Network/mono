@@ -59,7 +59,7 @@ Replaces the informal "task trace" and "contribution" (as a noun — *contribute
 
 ### Corpus
 
-The accumulating collection of records announced by their holders, offered free or priced (see **Offer** and **Price** below). A record may be kept in Jinn's standard formats or its producer's own, and anyone can check it. The attempts the parked task marketplace published (scrubbed, consented, held on IPFS and anchored on-chain) are part of it. Named consistently across the explorer's Corpus surface and the CLI's corpus commands.
+The accumulating collection of records (see [**Record**](#record) below) announced by their holders, offered free or priced (see **Offer** and **Price** below). A record may be kept in Jinn's standard formats or its producer's own, and anyone can check it. The attempts the parked task marketplace published (scrubbed, consented, held on IPFS and anchored on-chain) are part of it. Named consistently across the explorer's Corpus surface and the CLI's corpus commands.
 
 ### Envelope
 
@@ -74,6 +74,10 @@ Used in place of "training" in external contexts when the subject is how a netwo
 ## Records and offers
 
 The protocol, [Jinn-Network/spec](https://github.com/Jinn-Network/spec#what-two-implementations-must-be-able-to-do), is the authority on these terms; the entries below point to it and do not redefine it. Offers exist in the protocol today. Buying and selling records is the direction, not a working market.
+
+### Record
+
+The noun for what work leaves behind. Every record is a sealed JSON document with a published schema, a stable identifier, and a digest. Jinn's standard formats are the record families that [Jinn-Network/spec](https://github.com/Jinn-Network/spec#the-record-families) defines. A producer's own format is a record kind that an application defines on top of the protocol, such as Colophon's sealed benchmark claims: it follows the same disciplines, its owner publishes it, and it is not part of the specification. One record refers to another by its digest, and where a record is stored is never its identity. Anyone can check a record from its own bytes, with their own tools, and no Jinn code is needed; the rules are in [Verifying a record by hand](https://github.com/Jinn-Network/spec#verifying-a-record-by-hand).
 
 ### Holder
 
