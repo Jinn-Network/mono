@@ -383,7 +383,11 @@ The product's self-run disclosure is `LOCAL_VENUE_LIMITS` in
 `packages/benchmark-product/core/src/operations/run-results.ts` (mirrored in
 `packages/benchmark-product/check/src/profile/run-results.ts`), quoted in
 `packages/benchmark-product/EXTERNAL-VERIFICATION.md`; it names owner-controlled
-dispatch, not the publication source.
+dispatch. The owner-controlled publication source is the sixth sentence a
+`benchmark-product-public-bundle/10` bundle seals when it declares the
+`owner-controlled-publication` capability
+(`packages/benchmark-product/check/src/profile/owner-controlled-publication.ts`),
+which every bundle the product emits on that format declares.
 
 ## 8. The one thing worth building — head anchoring
 
