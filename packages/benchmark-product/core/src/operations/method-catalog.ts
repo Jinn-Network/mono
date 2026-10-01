@@ -51,6 +51,12 @@ export interface MethodCatalogRow {
   readonly framework: MethodFramework;
   readonly derivedExport: MethodDerivedExport;
   readonly hostKeys: readonly string[];
+  /**
+   * Whether binding this id refuses without `--host`. False only where the bind reads nothing from
+   * the host document, so a claimant is not asked to write a file whose content changes nothing
+   * (issue #4949). The flag is still accepted there.
+   */
+  readonly hostRequired: boolean;
 }
 
 export const METHOD_CATALOG = {
@@ -59,30 +65,35 @@ export const METHOD_CATALOG = {
     framework: "harbor",
     derivedExport: "harbor-hub",
     hostKeys: ["executable", "registryMetadataPath", "datasetRevision", "taskMaterialPath", "arms", "environment", "outputs"],
+    hostRequired: false,
   },
   "terminal-bench-3.0": {
     protocol: "terminal-bench-3.0",
     framework: "harbor",
     derivedExport: "harbor-hub",
     hostKeys: ["executable", "registryMetadataPath", "datasetRevision", "taskMaterialPath", "arms", "environment", "outputs"],
+    hostRequired: true,
   },
   "swe-bench-verified": {
     protocol: "swe-bench-verified",
     framework: "swebench-harness",
     derivedExport: "swebench-predictions",
     hostKeys: ["executable", "registryMetadataPath", "arms"],
+    hostRequired: true,
   },
   "apex-agents": {
     protocol: "apex-agents",
     framework: "archipelago",
     derivedExport: "apex-inspection",
     hostKeys: ["executable", "registryMetadataPath", "arms"],
+    hostRequired: true,
   },
   "apex-swe-dev": {
     protocol: "apex-swe-dev",
     framework: "apex-swe-dev",
     derivedExport: "apex-swe-package",
     hostKeys: ["apxExecutable", "pythonExecutable", "registryMetadataPath", "integrationTasksDir", "observabilityProjectDir", "arms"],
+    hostRequired: true,
   },
 } as const satisfies Record<string, MethodCatalogRow>;
 
@@ -280,8 +291,10 @@ export function resolveMethodOperand(input: ResolveMethodOperandInput): Resolved
   }
   const catalogId = input.ref;
   if (!isMethodCatalogId(catalogId)) unknownMethodRef(input.ref);
-  if (input.hostPath === undefined || input.hostPath === "") {
-    refuse("invalid-invocation", "--host", "--host is required for a catalog id");
+  const row = METHOD_CATALOG[catalogId];
+  const hostPath = input.hostPath === undefined || input.hostPath === "" ? undefined : input.hostPath;
+  if (hostPath === undefined && row.hostRequired) {
+    refuse("invalid-invocation", "--host", "--host is required for this catalog id");
   }
   if (input.n !== undefined && (input.slice !== undefined || input.ids !== undefined)) {
     refuse("invalid-invocation", "--n", "pass --slice, --ids, or --n, not more than one");
@@ -293,8 +306,9 @@ export function resolveMethodOperand(input: ResolveMethodOperandInput): Resolved
     refuse("invalid-invocation", "--slice", "--slice, --ids, or --n is required for a catalog id");
   }
   const n = input.n === undefined ? undefined : parseN(input.n);
-  const row = METHOD_CATALOG[catalogId];
-  const host = readJsonObject(resolvePath(input.cwd, input.hostPath), "--host");
+  // A named host file is always read, even where it is optional: a path that cannot be read is a
+  // mistake to report, not a value to drop.
+  const host = hostPath === undefined ? {} : readJsonObject(resolvePath(input.cwd, hostPath), "--host");
   if (input.ids !== undefined) {
     return {
       kind: "catalog",
