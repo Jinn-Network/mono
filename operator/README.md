@@ -10,7 +10,7 @@ Jinn operator daemon. Runs a headless daemon that participates in the Jinn train
 The daemon is headless. Running `jinn run` starts the API on
 `http://127.0.0.1:7331` (`GET /` returns `{ "error": "no_human_surface" }`).
 The operator console lives at `apps/operator-console` and talks to the daemon
-with `x-jinn-ui-token` (see [`DEPLOY.md`](../DEPLOY.md) and headless §9).
+with `x-jinn-ui-token` (see [`DEPLOY.md`](https://github.com/Jinn-Network/mono/blob/next/DEPLOY.md) and headless §9).
 
 On first launch `jinn run` may open `http://127.0.0.1:3000`. Use `jinn ui`
 later. Use `jinn run --no-ui` to suppress auto-open.
@@ -196,7 +196,7 @@ Each Harness reads its **own** auth store (the daemon only forwards an
 allowlisted set of env vars — it does not hold your provider keys). For the
 per-harness auth store, the canonical rotate command/file, and why `client/.env`
 must not be used to set provider keys at runtime, see
-[`docs/operator/rotating-harness-keys.md`](../docs/operator/rotating-harness-keys.md).
+[`docs/operator/rotating-harness-keys.md`](https://github.com/Jinn-Network/mono/blob/next/docs/operator/rotating-harness-keys.md).
 
 **Safety net:** before spending gas on a claim, the daemon checks whether the
 responsible Harness is actually ready. If a portfolio.v0 request arrives and your
@@ -321,7 +321,7 @@ All action verbs support `--dry-run` and `--yes`.
 - Non-zero exits emit a structured error envelope on stdout with `schemaVersion`, `code`, `exitCode`, `message`, `hint`, and `exampleCli`.
 - Without a global install, use `npx @jinn-network/operator@latest <verb> ...`.
 
-See the [client surface spec](https://github.com/Jinn-Network/mono/blob/main/spec/2026-04-14-client-surface.md) for the full CLI reference.
+See the [client surface spec](https://github.com/Jinn-Network/mono/blob/next/spec/2026-04-14-client-surface.md) for the full CLI reference.
 
 ## Configuration
 
@@ -483,8 +483,8 @@ troubleshooting section of the testnet runbook:
 
 ## How it works
 
-See [`client/ARCHITECTURE.md`](https://github.com/Jinn-Network/mono/blob/main/client/ARCHITECTURE.md) for the integrating narrative — operator app, CLI, daemon loops, task lifecycle, and extension points — with code pointers for each layer.
+See [`operator/ARCHITECTURE.md`](https://github.com/Jinn-Network/mono/blob/next/operator/ARCHITECTURE.md) for the integrating narrative — operator app, CLI, daemon loops, task lifecycle, and extension points — with code pointers for each layer.
 
 ## Development
 
-See [CONTRIBUTING.md](https://github.com/Jinn-Network/mono/blob/main/client/CONTRIBUTING.md) for development setup, running from source, and testing.
+See [CONTRIBUTING.md](https://github.com/Jinn-Network/mono/blob/next/operator/CONTRIBUTING.md) for development setup, running from source, and testing.
