@@ -66,13 +66,14 @@ function entry(token: string, order: number, overrides: Partial<CapabilityEntry>
 }
 
 describe("the registered capabilities", () => {
-  test("exactly five, under their stable wire tokens", () => {
+  test("exactly six, under their stable wire tokens", () => {
     expect(CAPABILITY_REGISTRY.map((capability) => capability.token)).toEqual([
       "binary-qualification",
       "anchoring",
       "disclosure-specification",
       "external-import",
       "task-selection",
+      "owner-controlled-publication",
     ]);
   });
 
@@ -152,6 +153,23 @@ describe("the registered capabilities", () => {
     expect(selection.checks).toEqual([]);
     expect(selection.claimSection).toBe("taskSelection");
     expect(expectedChecks(["task-selection"])).toEqual(expectedChecks([]));
+  });
+
+  test("owner-controlled-publication adds a sealed sentence and nothing else (issue #3401)", () => {
+    // No member, no grammar, no role, and no check of its own: the sentence and the section are
+    // rebuilt by claim-consistency from the declared vector, so a sixth top-level check would add
+    // a denominator without adding a fact.
+    const publication = CAPABILITY_REGISTRY.find((capability) => capability.token === "owner-controlled-publication")!;
+    expect(publication.order).toBe(6);
+    expect(publication.mandatoryFiles).toEqual([]);
+    expect(publication.memberPatterns).toEqual([]);
+    expect(publication.requires).toEqual([]);
+    expect(publication.conflicts).toEqual([]);
+    expect(publication.refines).toEqual([]);
+    expect(publication.roleDerivations).toEqual([]);
+    expect(publication.checks).toEqual([]);
+    expect(publication.claimSection).toBe("ownerControlledPublication");
+    expect(expectedChecks(["owner-controlled-publication"])).toEqual(expectedChecks([]));
   });
 });
 
@@ -414,6 +432,8 @@ describe("reader instructions", () => {
       "external-import": "check@0.2.1",
       // Issue #3416: the render ships inside the first checker release (operator ruling 2026-09-24).
       "task-selection": "check@0.2.1",
+      // Issue #3401: the sentence ships inside the first checker release (same ruling).
+      "owner-controlled-publication": "check@0.2.1",
     });
   });
 
@@ -433,28 +453,32 @@ describe("producer-side activation", () => {
     importedRun: false,
     declaresTaskSelection: false,
   };
+  // Interoperability profile section 9.3: a self-run publisher's publication source is
+  // owner-controlled. Every bundle this product builds is self-run, so every composed vector
+  // declares it, whatever the run's other facts (issue #3401).
+  const PUBLICATION = "owner-controlled-publication";
 
   test("each predicate turns on exactly its own token, in canonical wire order", () => {
-    expect(activeCapabilityVector(NONE)).toEqual([]);
-    expect(activeCapabilityVector({ ...NONE, anchoredClosure: true })).toEqual(["anchoring"]);
+    expect(activeCapabilityVector(NONE)).toEqual([PUBLICATION]);
+    expect(activeCapabilityVector({ ...NONE, anchoredClosure: true })).toEqual(["anchoring", PUBLICATION]);
     expect(activeCapabilityVector({ ...NONE, projectsBinaryQualification: true }))
-      .toEqual(["binary-qualification"]);
-    expect(activeCapabilityVector({ ...NONE, importedRun: true })).toEqual(["external-import"]);
-    expect(activeCapabilityVector({ ...NONE, declaresTaskSelection: true })).toEqual(["task-selection"]);
+      .toEqual(["binary-qualification", PUBLICATION]);
+    expect(activeCapabilityVector({ ...NONE, importedRun: true })).toEqual(["external-import", PUBLICATION]);
+    expect(activeCapabilityVector({ ...NONE, declaresTaskSelection: true })).toEqual([PUBLICATION, "task-selection"]);
     expect(activeCapabilityVector({
       anchoredClosure: true,
       projectsBinaryQualification: true,
       declaresDisclosure: true,
       importedRun: false,
       declaresTaskSelection: false,
-    })).toEqual(["anchoring", "binary-qualification", "disclosure-specification"]);
+    })).toEqual(["anchoring", "binary-qualification", "disclosure-specification", PUBLICATION]);
     expect(activeCapabilityVector({
       anchoredClosure: true,
       projectsBinaryQualification: true,
       declaresDisclosure: true,
       importedRun: true,
       declaresTaskSelection: true,
-    })).toEqual(["anchoring", "binary-qualification", "disclosure-specification", "external-import", "task-selection"]);
+    })).toEqual(["anchoring", "binary-qualification", "disclosure-specification", "external-import", PUBLICATION, "task-selection"]);
   });
 
   test("a task-selection declaration rides every analysis of the run, whatever it projects", () => {
@@ -469,15 +493,15 @@ describe("producer-side activation", () => {
   test("a declaration rides the qualification analysis alone, and needs no anchor", () => {
     // A run publishes one bundle per analysis. The record is named by the qualification Report's
     // own extension, so a sibling headline or comparison analysis never carried it (issue #2839).
-    expect(activeCapabilityVector({ ...NONE, declaresDisclosure: true })).toEqual([]);
+    expect(activeCapabilityVector({ ...NONE, declaresDisclosure: true })).toEqual([PUBLICATION]);
     expect(activeCapabilityVector({ ...NONE, anchoredClosure: true, declaresDisclosure: true }))
-      .toEqual(["anchoring"]);
+      .toEqual(["anchoring", PUBLICATION]);
     // The cell the closure model never allocated: disclosed and qualified, unanchored.
     expect(activeCapabilityVector({ ...NONE, projectsBinaryQualification: true, declaresDisclosure: true }))
-      .toEqual(["binary-qualification", "disclosure-specification"]);
+      .toEqual(["binary-qualification", "disclosure-specification", PUBLICATION]);
   });
 
-  test("every activated vector resolves", () => {
+  test("every activated vector resolves, and declares owner-controlled-publication", () => {
     for (const anchoredClosure of [false, true]) {
       for (const projectsBinaryQualification of [false, true]) {
         for (const declaresDisclosure of [false, true]) {
@@ -485,6 +509,7 @@ describe("producer-side activation", () => {
             for (const declaresTaskSelection of [false, true]) {
               const facts = { anchoredClosure, projectsBinaryQualification, declaresDisclosure, importedRun, declaresTaskSelection };
               expect(() => composeClosure(activeCapabilityVector(facts)), JSON.stringify(facts)).not.toThrow();
+              expect(activeCapabilityVector(facts), JSON.stringify(facts)).toContain(PUBLICATION);
             }
           }
         }

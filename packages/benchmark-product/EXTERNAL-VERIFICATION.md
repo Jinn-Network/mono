@@ -88,6 +88,15 @@ itself; the sentences below are carried verbatim in `claim-package.json`
 - Cost figures, where present, are self-reported by this venue and were never independently settled.
 - Distinct solver and evaluator identities prove agent-distinctness only — each evaluator identity is backed by its own workspace-minted signing key, whose verdict signature this product verifies — not that they are independent real-world parties.
 
+A v10 bundle that declares the `owner-controlled-publication` capability carries
+a sixth sentence right after these five, in the same two places, and again as
+the claim's `ownerControlledPublication` section:
+
+- This venue's publication source is owner-controlled and has no witness: the owner holds its signing key and hosts its archive, so it can rewrite what it published before a reader first fetches it, and only a reader who kept an earlier copy can detect a later rewrite.
+
+Every bundle the product emits on v10 declares it. A bundle on an earlier
+format, or a v10 bundle that does not declare it, carries the five alone.
+
 The trust root is equally blunt, from `claim-package.json` `verification.trustRoot`:
 "Signatures verify against the bundle-carried public keys minted by this
 workspace; there is no third-party trust anchor on the self-run venue."
@@ -102,10 +111,11 @@ chain defined in `docs/superpowers/specs/2026-07-27-record-discovery-protocol-de
 section 5.1) has every transparency-log property except a witness, so the
 publisher who holds the signing key and hosts the archive can rewrite the chain
 from any point, re-sign a shorter or different head, and no reader who had not
-previously fetched the old head could tell. The five sealed sentences above do
-not say this in those words. A reader should treat the announcement chain the
-publisher serves as the publisher's own statement about its own history, not as
-independent evidence of it.
+previously fetched the old head could tell. The sixth sentence above says this
+on every bundle that declares `owner-controlled-publication`; the five alone do
+not. A reader should treat the announcement chain the publisher serves as the
+publisher's own statement about its own history, not as independent evidence of
+it.
 
 ## Post-seal randomness: `beacon-binding/1`
 

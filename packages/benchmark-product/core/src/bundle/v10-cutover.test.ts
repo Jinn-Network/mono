@@ -18,10 +18,12 @@ import { afterAll, describe, expect, test } from "vitest";
 import {
   BUNDLE_V10_FORMAT,
   COMPOSED_CLAIM_PACKAGE_SCHEMA_ID,
+  OWNER_CONTROLLED_PUBLICATION_LIMIT,
   summarizeVerificationOutcome,
   verifyPublicBundle,
 } from "@colophon-claims/check";
 import type { OperationContext } from "../operations/context.js";
+import { LOCAL_VENUE_LIMITS } from "../operations/run-results.js";
 import { runReport } from "../operations/report.js";
 import { readRunState } from "../run/state.js";
 import { BUNDLE_FORMAT, CLAIM_PACKAGE_SCHEMA_ID } from "../legacy-closures.js";
@@ -75,13 +77,15 @@ describe("D1 clean cutover: new bundles emit composed /10", () => {
 
     const manifest = json(bundleDir, "bundle.json");
     expect(manifest["format"]).toBe(BUNDLE_V10_FORMAT);
-    expect(manifest["capabilities"]).toEqual([]);
+    // Every composed bundle declares owner-controlled-publication (issue #3401): it adds the sixth
+    // venue sentence and no check, so the base run still runs the six base checks.
+    expect(manifest["capabilities"]).toEqual(["owner-controlled-publication"]);
     expect(json(bundleDir, "claim-package.json")["claimSchema"]).toBe(COMPOSED_CLAIM_PACKAGE_SCHEMA_ID);
 
     const verified = await verifyPublicBundle(bundleDir);
     expect(verified.format).toBe(BUNDLE_V10_FORMAT);
     if (verified.format !== BUNDLE_V10_FORMAT) throw new Error("unreachable");
-    expect(verified.capabilities).toEqual([]);
+    expect(verified.capabilities).toEqual(["owner-controlled-publication"]);
     const outcome = summarizeVerificationOutcome(verified);
     expect(outcome.passed).toBe(outcome.total);
     expect(outcome.total).toBe(6);
@@ -103,6 +107,11 @@ describe("D1 clean cutover: new bundles emit composed /10", () => {
     expect(manifest["format"]).toBe(BUNDLE_FORMAT);
     expect(manifest).not.toHaveProperty("capabilities");
     expect(json(bundleDir, "claim-package.json")["claimSchema"]).toBe(CLAIM_PACKAGE_SCHEMA_ID);
+    // The rollback declares nothing, so it keeps the five venue sentences byte for byte (issue #3401).
+    const claim = json(bundleDir, "claim-package.json");
+    expect(claim["ownerControlledPublication"]).toBeUndefined();
+    expect((claim["venueHonesty"] as { limits: unknown }).limits).toEqual([...LOCAL_VENUE_LIMITS]);
+    expect(json(bundleDir, "report.json")["limitations"]).not.toContain(OWNER_CONTROLLED_PUBLICATION_LIMIT);
 
     const verified = await verifyPublicBundle(bundleDir);
     expect(verified.format).toBe(BUNDLE_FORMAT);

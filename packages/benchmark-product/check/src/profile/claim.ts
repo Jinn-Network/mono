@@ -68,6 +68,8 @@ import type { ClaimDisclosureSection } from "./disclosure.js";
 import { ClaimExternalImportSectionSchema } from "./external-import.js";
 import type { ClaimExternalImportSection } from "./external-import.js";
 import { ClaimTaskSelectionSectionSchema, deriveClaimTaskSelection } from "./task-selection.js";
+import { ClaimOwnerControlledPublicationSectionSchema } from "./owner-controlled-publication.js";
+import type { ClaimOwnerControlledPublicationSection } from "./owner-controlled-publication.js";
 import { PROMPTED_SCREENING_PROFILE } from "../admission/contracts.js";
 import { ClaimAnchorSchema, SELF_RUN_TRUST_ROOT, anchoredTrustRoot } from "./anchor-claims.js";
 import type { ClaimAnchor } from "./anchor-claims.js";
@@ -357,6 +359,9 @@ const ClaimPackageWireSchema = z.object({
    * below refuses it on every earlier allocation, so no pre-composition claim changes shape.
    * Contents are the sealed Run's declared mode, never a second opinion. */
   taskSelection: ClaimTaskSelectionSectionSchema.optional(),
+  /** issue #3401: present exactly when the composed vector declares `owner-controlled-publication`,
+   * and then the ruled sentence verbatim. The refine below refuses it on every earlier allocation. */
+  ownerControlledPublication: ClaimOwnerControlledPublicationSectionSchema.optional(),
 }).superRefine((claim, ctx) => {
   // The two anchored allocations differ only in which method projection they carry: /4 takes the
   // headline/comparison family, /5 (issue #3205) the binary qualification. Both carry the section.
@@ -398,6 +403,13 @@ const ClaimPackageWireSchema = z.object({
       code: "custom",
       message: "only the composed claim-package/7 allocation carries a taskSelection section",
       path: ["taskSelection"],
+    });
+  }
+  if (!composedClosure && claim.ownerControlledPublication !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "only the composed claim-package/7 allocation carries an ownerControlledPublication section",
+      path: ["ownerControlledPublication"],
     });
   }
   const anchoredClosure = claim.claimSchema === ANCHORED_CLAIM_PACKAGE_SCHEMA_ID
@@ -666,7 +678,7 @@ function exactBinaryClaimControls(input: Record<string, unknown>): boolean {
   // control-shape failure. Neither judge field is ever set on an actual binary-instrument claim
   // (`methodProjection`'s dispatch is exclusive), so admitting them here is defense in depth, not
   // a widening any real claim exercises.
-  return exactKeys(input, ["claimSchema", "scope", "records", "method", "results", "completeness", "attrition", "conflicted", "assurance", "disclosures", "limitations", "venueHonesty", "verification", "rehearsal", "qualification", "anchors", "disclosure", "externalImport", "taskSelection", "pairwiseDisagreement", "pairedMajorityDelta"])
+  return exactKeys(input, ["claimSchema", "scope", "records", "method", "results", "completeness", "attrition", "conflicted", "assurance", "disclosures", "limitations", "venueHonesty", "verification", "rehearsal", "qualification", "anchors", "disclosure", "externalImport", "taskSelection", "ownerControlledPublication", "pairwiseDisagreement", "pairedMajorityDelta"])
     && exactKeys(scope, ["draftId", "benchmarkSha256", "taskCount", "arms", "replicates", "venue"])
     && Array.isArray((scope as { arms?: unknown }).arms)
     && ((scope as { arms: unknown[] }).arms).every((arm) => exactKeys(arm, ["armId", "pinning"]))
@@ -768,6 +780,10 @@ export interface BuildClaimPackageInput {
   readonly externalImport?: ClaimExternalImportSection;
   // issue #3416: there is no `taskSelection` input. The section is projected from `runRecord`
   // above by `deriveClaimTaskSelection`, the one projection the producer and both rebuilds share.
+  /** issue #3401: the ruled sentence, supplied exactly when the vector declares
+   * `owner-controlled-publication`. The caller supplies the same sentence after the venue
+   * sentences in `venueHonesty`, and the Report it projects already seals it. */
+  readonly ownerControlledPublication?: ClaimOwnerControlledPublicationSection;
 }
 
 type Comparison = z.infer<typeof ComparisonSchema>;
@@ -1157,6 +1173,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
       disclosure: disclosure !== undefined,
       externalImport: input.externalImport !== undefined,
       taskSelection: taskSelection !== undefined,
+      ownerControlledPublication: input.ownerControlledPublication !== undefined,
     };
     for (const capability of CAPABILITY_REGISTRY) {
       if (supplied[capability.claimSection] !== input.composedCapabilities!.includes(capability.token)) {
@@ -1259,6 +1276,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     ...(disclosure === undefined ? {} : { disclosure }),
     ...(input.externalImport === undefined ? {} : { externalImport: input.externalImport }),
     ...(taskSelection === undefined ? {} : { taskSelection }),
+    ...(input.ownerControlledPublication === undefined ? {} : { ownerControlledPublication: input.ownerControlledPublication }),
     ...(input.previewDisclosure !== undefined
       ? {
           rehearsal: {

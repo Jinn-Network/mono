@@ -11,6 +11,11 @@
  * ways, then the composed bundle is required to carry the same member set, the same check list
  * in the same order, the same claim sections, and the same verification outcome.
  *
+ * Every composed bundle also declares `owner-controlled-publication` (issue #3401), which no legacy
+ * cell can: it adds the sixth venue sentence and its claim section, and no member and no check. So
+ * the composed vector is the cell's plus that token, and the composed claim carries the cell's
+ * sections plus that one; members, checks, and outcome are the cell's exactly.
+ *
  * Expected checks and sections are taken from `composeClosure`, not re-enumerated here. The
  * generated lattice that replaces hand-enumeration at test time already lives in the checker
  * (`check/src/capability-lattice.test.ts`, packet C3) and already includes `/8` as a registry
@@ -32,6 +37,7 @@ import {
   BUNDLE_V8_FORMAT,
   BUNDLE_V10_FORMAT,
   CAPABILITY_REGISTRY,
+  OWNER_CONTROLLED_PUBLICATION_CAPABILITY,
   composeClosure,
   summarizeVerificationOutcome,
   verifyPublicBundle,
@@ -212,12 +218,17 @@ describe("legacy cells are equivalent to composed /10", () => {
     test(`${cell.cell}: the same run, reported both ways, has the same members, checks, sections, and outcome`, async () => {
       const built = await bothWays(cell);
       const closure = composeClosure(built.vector);
+      // The token sorts after every cell's own, so appending keeps the wire order canonical.
+      const composedVector = [...built.vector, OWNER_CONTROLLED_PUBLICATION_CAPABILITY];
+      const composedClosure = composeClosure(composedVector);
+      expect(composedClosure.mandatoryFiles).toEqual(closure.mandatoryFiles);
+      expect(composedClosure.checks).toEqual(closure.checks);
 
       const legacyManifest = json(built.legacyDir, "bundle.json");
       const composedManifest = json(built.composedDir, "bundle.json");
       expect(legacyManifest["format"]).toBe(built.legacyFormat);
       expect(composedManifest["format"]).toBe(BUNDLE_V10_FORMAT);
-      expect(composedManifest["capabilities"]).toEqual(built.vector);
+      expect(composedManifest["capabilities"]).toEqual(composedVector);
 
       // Same member set. `bundle.json` sorts by path, so the arrays are comparable in order; the
       // design's equivalence step asks for the set, which this is.
@@ -228,8 +239,8 @@ describe("legacy cells are equivalent to composed /10", () => {
 
       const legacyClaim = json(built.legacyDir, "claim-package.json");
       const composedClaim = json(built.composedDir, "claim-package.json");
-      expect(claimSections(composedClaim)).toEqual([...closure.claimSections]);
-      expect(claimSections(composedClaim)).toEqual(claimSections(legacyClaim));
+      expect(claimSections(composedClaim)).toEqual([...composedClosure.claimSections]);
+      expect(claimSections(composedClaim)).toEqual([...claimSections(legacyClaim), "ownerControlledPublication"]);
       expect(legacyClaim["verification"]["checks"]).toEqual([...closure.checks]);
       expect(composedClaim["verification"]["checks"]).toEqual(legacyClaim["verification"]["checks"]);
 

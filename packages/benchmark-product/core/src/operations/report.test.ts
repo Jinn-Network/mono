@@ -1307,7 +1307,7 @@ describe("portable public bundle", () => {
       expect(verified.identity).toBe(materialized.identity);
       expect(verified.format).toBe(BUNDLE_V10_FORMAT);
       if (verified.format !== BUNDLE_V10_FORMAT) throw new Error("unreachable");
-      expect(verified.capabilities).toEqual([]);
+      expect(verified.capabilities).toEqual(["owner-controlled-publication"]);
       expect(verified.checks).toEqual([
         "manifest",
         "evidence-closure",

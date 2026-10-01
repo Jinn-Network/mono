@@ -28,7 +28,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { expectedCellSet, parseBenchmark, parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
-import { IMPORTED_RUN_PINNING_LIMIT } from "@colophon-claims/check";
+import { IMPORTED_RUN_PINNING_LIMIT, OWNER_CONTROLLED_PUBLICATION_LIMIT } from "@colophon-claims/check";
 import type { ExternalRunRecord } from "../intake/external-run-records.js";
 import { materializePublicBundle } from "../bundle/materialize.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
@@ -206,7 +206,8 @@ describe("run.import — the imported bundle passes the public reader", () => {
       expect(verified.identity).toBe(materialized.identity);
       expect(verified.format).toBe(BUNDLE_V10_FORMAT);
       if (verified.format !== BUNDLE_V10_FORMAT) throw new Error("unreachable");
-      expect(verified.capabilities).toEqual(["external-import"]);
+      // Imported runs included (issue #3401): the sixth venue sentence rides every composed bundle.
+      expect(verified.capabilities).toEqual(["external-import", "owner-controlled-publication"]);
       // `matrix-rederivation` is the load-bearing one: it recomputes the Matrix from the bundle's
       // own evidence closure and byte-compares it against the carried Matrix. Its passing is what
       // proves the imported outcomes are the honest aggregation of the imported evidence rather
@@ -224,12 +225,19 @@ describe("run.import — the imported bundle passes the public reader", () => {
 
       const claim = JSON.parse(readFileSync(join(copied, "claim-package.json"), "utf8")) as {
         readonly externalImport?: { readonly dumpSha256: string; readonly rows: readonly { readonly cellKey: string }[] };
+        readonly ownerControlledPublication?: string;
+        readonly limitations: readonly string[];
         readonly venueHonesty: { readonly limits: readonly string[] };
       };
       expect(claim.externalImport?.dumpSha256).toMatch(/^[a-f0-9]{64}$/u);
       expect(claim.externalImport?.rows.map((row) => row.cellKey).sort())
         .toEqual([...cellKeys].sort());
       expect(claim.venueHonesty.limits[2]).toBe(IMPORTED_RUN_PINNING_LIMIT);
+      // After the import-aware five, in the sealed Report's copy and in the venue sentences.
+      expect(claim.venueHonesty.limits[5]).toBe(OWNER_CONTROLLED_PUBLICATION_LIMIT);
+      expect(claim.limitations[2]).toBe(IMPORTED_RUN_PINNING_LIMIT);
+      expect(claim.limitations[5]).toBe(OWNER_CONTROLLED_PUBLICATION_LIMIT);
+      expect(claim.ownerControlledPublication).toBe(OWNER_CONTROLLED_PUBLICATION_LIMIT);
 
       const marker = JSON.parse(readFileSync(join(copied, "external-import.json"), "utf8")) as {
         readonly dump: { readonly sha256: string };

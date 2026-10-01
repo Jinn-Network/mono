@@ -34,6 +34,7 @@ import {
 import {
   ANCHORED_PRE_REGISTRATION,
   IMPORTED_RUN_PINNING_LIMIT,
+  OWNER_CONTROLLED_PUBLICATION_LIMIT,
   STRUCTURAL_PRE_REGISTRATION,
   anchoredPreRegistration,
   anchoredVenueLimits,
@@ -177,10 +178,13 @@ const MULTI_POLICY_ISOLATION_LIMIT =
   "Run pinning on the harness, model, and loadout axes is enforced by an admission gate at dispatch time. The isolation axis is unverifiable: this configured venue admits both unrestricted and OCI-container execution, so its multi-policy inventory cannot establish containment from admission alone.";
 
 /** Run-derived disclosure; the unrestricted branch returns the historical array byte-for-byte.
- * `imported` replaces the admission-gate pinning sentence: no venue dispatched those cells. */
+ * `imported` replaces the admission-gate pinning sentence: no venue dispatched those cells.
+ * `ownerControlledPublication` appends the sixth sentence after the five, for a `/10` bundle that
+ * declares the capability (issue #3401); omitted, every run keeps its exact five. */
 export function localVenueLimitsForRun(
   runRecord: Pick<RunRecord, "policy">,
   imported = false,
+  ownerControlledPublication = false,
 ): readonly string[] {
   const posture = venueIsolationPostureForPolicy(
     runRecord.policy.submissionBaseline?.["isolationPolicy"],
@@ -193,9 +197,10 @@ export function localVenueLimitsForRun(
       MULTI_POLICY_ISOLATION_LIMIT,
       ...LOCAL_VENUE_LIMITS.slice(3),
     ];
-  return imported
+  const venue = imported
     ? [limits[0]!, limits[1]!, IMPORTED_RUN_PINNING_LIMIT, ...limits.slice(3)]
     : limits;
+  return ownerControlledPublication ? [...venue, OWNER_CONTROLLED_PUBLICATION_LIMIT] : venue;
 }
 
 function bareSha256(digest: string): string {
@@ -279,11 +284,12 @@ export function buildLocalVenueHonesty(
   runRecord: Pick<RunRecord, "policy">,
   anchors: readonly ClaimAnchor[] = [],
   imported = false,
+  ownerControlledPublication = false,
 ): VenueHonesty {
   return {
     venue: "self-run",
     preRegistration: anchoredPreRegistration(anchors),
-    limits: anchoredVenueLimits(localVenueLimitsForRun(runRecord, imported), anchors),
+    limits: anchoredVenueLimits(localVenueLimitsForRun(runRecord, imported, ownerControlledPublication), anchors),
     unverifiableAxisCounts: unverifiableAxisCounts(cells),
   };
 }
