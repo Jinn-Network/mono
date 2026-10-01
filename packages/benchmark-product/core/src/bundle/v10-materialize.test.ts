@@ -151,7 +151,7 @@ const CELLS = [
     // check of its own; what it adds is the claim section and the report face's header fact row.
     // On the rollback path the same run publishes `/2` with neither (`v6-verify.test.ts`).
     cell: "task selection",
-    vector: ["task-selection"],
+    vector: ["owner-controlled-publication", "task-selection"],
     checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
     run: () => once("task-selection", (workspaceDir) =>
       createSyntheticV6BundleFixture({ workspaceDir, taskSelection: "claimant-chosen", composedFormat: true })),
@@ -160,7 +160,7 @@ const CELLS = [
     // The same declaration on a qualification run: the capability composes with a refining one,
     // and the binary claim's control-shape gate admits the section.
     cell: "task selection, qualified",
-    vector: ["binary-qualification", "task-selection"],
+    vector: ["binary-qualification", "owner-controlled-publication", "task-selection"],
     checks: PUBLIC_BUNDLE_VERIFICATION_CHECKS,
     run: () => once("task-selection-qualified", (workspaceDir) =>
       createSyntheticV4BundleFixture({
@@ -452,7 +452,7 @@ describe("composed bundle v10: task selection at headline weight", () => {
     writeFileSync(join(hidden, "index.html"), read(hidden, "index.html").replace(`\n${ROW}`, ""));
     writeFileSync(join(hidden, "README.md"), read(hidden, "README.md").replace(`\n\n${LINE}`, ""));
     writeFileSync(join(hidden, "share.txt"), read(hidden, "share.txt").replace(` ${LINE}`, ""));
-    redeclare(hidden, []);
+    redeclare(hidden, ["owner-controlled-publication"]);
     expect(await refusal(hidden)).toEqual({
       path: "bundle.manifest.capabilities",
       message: expect.stringContaining("cannot pass while hiding who chose its tasks"),
@@ -462,7 +462,7 @@ describe("composed bundle v10: task selection at headline weight", () => {
   test("declaring task-selection over a Run that declares nothing is refused", async () => {
     const base = await cell("/2").run();
     const overclaimed = detach(base.bundleDir, "overclaimed");
-    redeclare(overclaimed, ["task-selection"]);
+    redeclare(overclaimed, ["owner-controlled-publication", "task-selection"]);
     expect(await refusal(overclaimed)).toEqual({
       path: "bundle.manifest.capabilities",
       message: expect.stringContaining("carries no task-selection/v1 declaration"),
@@ -475,7 +475,7 @@ describe("composed bundle v10: task selection at headline weight", () => {
     const claim = json(softened, "claim-package.json");
     claim["taskSelection"] = { mode: "fixed-public-set" };
     writeFileSync(join(softened, "claim-package.json"), canonicalJsonBytes(claim as never));
-    redeclare(softened, ["task-selection"]);
+    redeclare(softened, ["owner-controlled-publication", "task-selection"]);
     expect(await refusal(softened)).toEqual({
       path: "claim-consistency",
       message: expect.stringContaining("taskSelection.mode"),
@@ -486,7 +486,7 @@ describe("composed bundle v10: task selection at headline weight", () => {
     const declared = await cell("task selection").run();
     const rowless = detach(declared.bundleDir, "rowless");
     writeFileSync(join(rowless, "index.html"), read(rowless, "index.html").replace(`\n${ROW}`, ""));
-    redeclare(rowless, ["task-selection"]);
+    redeclare(rowless, ["owner-controlled-publication", "task-selection"]);
     expect(await refusal(rowless)).toEqual({
       path: "index.html",
       message: expect.stringContaining("not the exact projection"),
