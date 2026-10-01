@@ -165,6 +165,7 @@ function usage(): string {
     + "  --identity-binding  A colophon-domain-binding/1 document binding one of this bundle's\n"
     + "                 signing keys to a domain. Checked offline as far as the bytes allow;\n"
     + "                 the lookup at the domain itself stays yours.\n"
+    + "  --help, -h     Print this usage and exit 0.\n"
     + "Trust material is yours, not the bundle's: with none supplied a well-formed anchor reports\n"
     + "present rather than verified, and none ships with this tool.\n"
     + "Exit 0: valid bundle; 1: invalid bundle, or a freeze repository that drifted from it;\n"
@@ -560,6 +561,12 @@ export async function runVerifierCli(
   args: readonly string[],
   deps: VerifierCliDeps = {},
 ): Promise<VerifierCliResult> {
+  // Asking for help is not a usage failure: the same text, on stdout, with exit 0 (issue #4955).
+  // Checked before parsing so the flag answers wherever it sits, and so `-h` is never taken for
+  // the bundle path.
+  if (args.includes("--help") || args.includes("-h")) {
+    return { exitCode: 0, stdout: withoutHumanIdentifiers(usage()), stderr: "" };
+  }
   const parsed = parseArguments(args);
   if (parsed === undefined) return { exitCode: 2, stdout: "", stderr: withoutHumanIdentifiers(usage()) };
 
