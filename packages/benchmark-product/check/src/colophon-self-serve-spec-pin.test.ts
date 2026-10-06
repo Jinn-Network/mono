@@ -33,6 +33,7 @@ function extractSpecTextBlock(specMarkdown: string, marker: string): string {
 function normalizeSection51Sample(text: string): string {
   return text
     .replace(/^Bundle: sha256:[0-9a-f]{64}$/m, "Bundle: sha256:<bundle-id>")
+    .replace(/^Run: [0-9a-f]{64}$/m, "Run: <run-sha256>")
     .replace(/^    key sha256:[0-9a-f]{64}/m, "    key sha256:<publisher-key-fingerprint>");
 }
 

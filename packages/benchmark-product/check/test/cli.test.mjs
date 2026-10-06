@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -937,6 +938,96 @@ test("a metadata-first bundle with one deferred body says body, not bodies", asy
     },
   }));
   assert.match(output, /1 artifact body was not fetched/);
+});
+
+// ---------------------------------------------------------------------------
+// The Run digest in the human output (issue #4972)
+// ---------------------------------------------------------------------------
+//
+// `lock` prints `run <64 hex>` and the report page prints the Run SHA-256 the same way, so the
+// checker prints the bare digest too: a reader holds the three against each other as strings, with
+// no prefix to strip. The bundle identity above it keeps its `sha256:` prefix; it is a different
+// value, on a line of its own.
+
+const RUN_SHA256 = "c".repeat(64);
+/** A complete six-check classic result, less the format that decides how it is counted. */
+const RUN_DIGEST_RESULT = {
+  identity: "a".repeat(64),
+  checks: /** @type {const} */ ([
+    "manifest", "evidence-closure", "trust", "matrix-rederivation",
+    "report-verification", "claim-consistency",
+  ]),
+  benchmarkSha256: "b".repeat(64),
+  runSha256: RUN_SHA256,
+  matrixSha256: "d".repeat(64),
+  reportSha256: "e".repeat(64),
+  reportEnvelopeSha256: "f".repeat(64),
+};
+/** @type {readonly import("../dist/index.js").PublicBundleVerificationResult[]} */
+const RUN_DIGEST_SHAPES = [
+  // The oldest format and the composed one: a classic result carries `runSha256` whatever its
+  // format number, and `/10` is the format the first `colophon-check` release is published for.
+  { ...RUN_DIGEST_RESULT, format: "benchmark-product-public-bundle/2" },
+  { ...RUN_DIGEST_RESULT, format: "benchmark-product-public-bundle/10", capabilities: [] },
+];
+
+test("the Run digest prints once, on the line under Format, as bare hex (issue #4972)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  for (const shape of RUN_DIGEST_SHAPES) {
+    const lines = renderVerifiedBundle(shape).split("\n");
+    assert.equal(lines[0], "Recomputed: 6 of 6 checks passed", shape.format);
+    assert.equal(lines[1], `Bundle: sha256:${"a".repeat(64)}`, shape.format);
+    assert.equal(lines[2], `Format: ${shape.format}`, shape.format);
+    assert.equal(lines[3], `Run: ${RUN_SHA256}`, shape.format);
+    // The blank line that separated the header from the caveats still does.
+    assert.equal(lines[4], "", shape.format);
+    assert.match(lines[5], /^Not checked by this tool:/, shape.format);
+    assert.equal(lines.filter((line) => line.startsWith("Run:")).length, 1, shape.format);
+  }
+});
+
+test("a /5 bundle has no Run record, so its output prints no Run line (issue #4972)", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle(v5({
+    ...V5_RESULT,
+    profile: "https://spec.jinn.network/profiles/benchmark-product-public-bundle/5",
+    artifactContent: { status: "verified", verified: 5, notFetched: 0, notFetchedDigests: [] },
+  }));
+  const lines = output.split("\n");
+  assert.equal(lines[2], "Format: benchmark-product-public-bundle/5");
+  assert.equal(lines[3], "");
+  assert.match(lines[4], /^Not checked by this tool:/);
+  assert.doesNotMatch(output, /^Run:/m);
+});
+
+test("the Run line is the runSha256 that --json already carries, and --json is unchanged (issue #4972)", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  for (const shape of RUN_DIGEST_SHAPES) {
+    const human = await runVerifierCli(["bundle"], { verify: async () => verified(shape) });
+    assert.equal(human.exitCode, 0, shape.format);
+    const machine = await runVerifierCli(["bundle", "--json"], { verify: async () => verified(shape) });
+    assert.equal(machine.exitCode, 0, shape.format);
+    const body = JSON.parse(machine.stdout);
+    assert.equal(body.runSha256, RUN_SHA256, shape.format);
+    assert.equal(human.stdout.split("\n")[3], `Run: ${body.runSha256}`, shape.format);
+    // The machine body is the verification result under the three envelope keys, as before: the
+    // human line adds no key and renames none.
+    const { ok, verifierVersion, supportedFormats, ...result } = body;
+    assert.equal(ok, true, shape.format);
+    assert.equal(verifierVersion, "0.2.1", shape.format);
+    assert.ok(Array.isArray(supportedFormats), shape.format);
+    assert.deepEqual(result, shape, shape.format);
+  }
+});
+
+test("the golden bundle's Run line is the SHA-256 of its run.json (issue #4972)", async () => {
+  const golden = fileURLToPath(new URL("../fixtures/public-bundle-conformance-v1/golden", import.meta.url));
+  const expected = createHash("sha256").update(await readFile(join(golden, "run.json"))).digest("hex");
+  const human = await invoke([golden]);
+  assert.equal(human.code, undefined);
+  const lines = human.stdout.split("\n");
+  assert.equal(lines[2], "Format: benchmark-product-public-bundle/2");
+  assert.equal(lines[3], `Run: ${expected}`);
 });
 
 const INTERNAL_NAMESPACE = /jinn\.network|jinn\.benchmarking|urn:|did:key/;
