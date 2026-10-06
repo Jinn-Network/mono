@@ -417,9 +417,9 @@ record by the operator credential that did not author it.
 ## Amends (at ratification)
 
 - [DR-2026-08-17-b](./2026-08-17-official-suite-protocol.md) decision 6, on
-  one point: for a trial with no reward, "(errors count as 0)" does not hold
-  for a rate Colophon states. The rest of that decision, and decision 3,
-  stand.
+  one point: for a trial with no reward, "(errors count as 0)" does not
+  describe a rate Colophon states. The rest of that decision, and decision
+  3, stand. That record carries the amendment line at decision 6.
 - Does not amend: [DR-2026-09-04](./2026-09-04-colophon-surrounds-the-run.md).
   `quote` as a required claimant step is a stopgap against its decision 5,
   and that decision stands. Does not amend DR-2026-08-18-f (method operand),
