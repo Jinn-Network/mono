@@ -680,9 +680,10 @@ downloads when it runs.
 The rule passes at a reward of 1, fails at 0, and answers inconclusive for any
 other value. The threshold is not this product's choice. Every one of the 89
 task packages ships a verifier script, `tests/test.sh`, that writes `1` to the
-reward file when its tests pass and `0` otherwise, and writes a reward nowhere
-else. `core/scripts/generate-terminal-bench-2-1-verifier-pins.mjs` asserts that
-of every package before it writes the values the specs are sealed from, and
+reward file when every exit code it checks is zero and `0` otherwise, in one
+place, and no other file the package runs names a reward file.
+`core/scripts/generate-terminal-bench-2-1-verifier-pins.mjs` asserts that of
+every package before it writes the values the specs are sealed from, and
 `core/test/fixtures/terminal-bench-2-1-packages/manifest.json` lists every
 package file by path and SHA-256, so the chain from a spec's digests to the
 slate's package refs can be recomputed without the packages.
@@ -691,7 +692,7 @@ Each spec names one required evidence reference, `trial-result.json`. That is
 the name under which the Harbor reader carries the `result.json` Harbor wrote
 for the trial, the file that holds Harbor's raw reward map. This checker
 recomputes each verdict from the sealed measurement. It does not read the
-reward back out of that file, and it does not refuse a cell that lacks it.
+reward back out of that file, and it does not require a cell to carry it.
 
 The capability is bound to the records both ways. A v10 bundle whose Benchmark
 carries the extension for Terminal-Bench 2.1 and whose vector declares

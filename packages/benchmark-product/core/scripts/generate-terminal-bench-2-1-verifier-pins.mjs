@@ -33,8 +33,8 @@
  * - `[verifier] timeout_sec` is a whole number of seconds, and `[environment] docker_image` is a
  *   plain string;
  * - `tests/test.sh` writes the reward in one place and in one way: `1` to
- *   `/logs/verifier/reward.txt` when its condition holds and `0` otherwise, and no other file
- *   under `tests/`, `environment/`, `solution/` or `steps/` names a reward file.
+ *   `/logs/verifier/reward.txt` when every exit code it checks is zero and `0` otherwise, and no
+ *   other file under `tests/`, `environment/`, `solution/` or `steps/` names a reward file.
  *
  * The last assertion is the source of the sealed verdict rule's threshold. Each spec passes at a
  * reward of 1 and fails at 0 because every one of the 89 verifier scripts writes exactly those two
@@ -140,15 +140,21 @@ function readTaskToml(text, at) {
 }
 
 /**
- * `tests/test.sh` mentions a reward in exactly one block, which writes 1 when its condition holds
- * and 0 otherwise:
+ * `tests/test.sh` mentions a reward in exactly one block, which writes 1 when every exit code it
+ * checks is zero and 0 otherwise:
  *
- *     if <condition>; then
+ *     if [ $? -eq 0 ]; then
  *       echo 1 > /logs/verifier/reward.txt
  *     else
  *       echo 0 > /logs/verifier/reward.txt
  *     fi
+ *
+ * The condition is one or more tests of the form `[ $<exit code> -eq 0 ]`, joined by `&&`: `$?`,
+ * the exit code of the command before it, or a variable the script saved one in.
  */
+const EXIT_CODE_IS_ZERO = String.raw`\[ \$(?:\?|[A-Za-z_][A-Za-z0-9_]*) -eq 0 \]`;
+const REWARD_CONDITION = new RegExp(`^if ${EXIT_CODE_IS_ZERO}(?: && ${EXIT_CODE_IS_ZERO})*; then$`, "u");
+
 function assertRewardBlock(script, at) {
   const lines = script.split("\n").map((line) => line.trim());
   const mentions = lines.flatMap((line, index) => (line.toLowerCase().includes("reward") ? [index] : []));
@@ -158,10 +164,10 @@ function assertRewardBlock(script, at) {
   const expected = [`echo 1 > ${REWARD_FILE}`, "else", `echo 0 > ${REWARD_FILE}`, "fi"];
   if (
     otherwise !== pass + 2
-    || !/^if .+; then$/u.test(block[0] ?? "")
+    || !REWARD_CONDITION.test(block[0] ?? "")
     || expected.some((line, offset) => block[offset + 1] !== line)
   ) {
-    fail(`${at}: the reward is not written by one if/else block that writes 1 or 0 to ${REWARD_FILE}`);
+    fail(`${at}: the reward is not written by one if/else block, on exit codes equal to 0, that writes 1 or 0 to ${REWARD_FILE}`);
   }
 }
 
