@@ -393,9 +393,10 @@ describe("with the verified claim section, each cell shows its verdict and its r
   test("a verdict with no reward, or a reward in neither sealed form, states no score", () => {
     // A sealed reward is a safe integer or a plain decimal string. A sealed record cannot carry a
     // fractional number or one past 2^53 - 1, so neither is read as a reward here.
+    // Under the section the reward is the only score: another measurement is not promoted to one.
     const notRewards = [
-      {}, { score: 1 }, { reward: true }, { reward: "" }, { reward: "banana" }, { reward: "1e3" }, { reward: " 1" },
-      { reward: "1." }, { reward: ".5" }, { reward: 0.5 }, { reward: 2 ** 53 },
+      {}, { score: 1 }, { solverBrier: "0.25" }, { reward: true }, { reward: "" }, { reward: "banana" }, { reward: "1e3" },
+      { reward: " 1" }, { reward: "1." }, { reward: ".5" }, { reward: 0.5 }, { reward: 2 ** 53 },
     ] as Measurements[];
     for (const measurements of notRewards) {
       const cell = declaredCell({ verdicts: [verdict("pass", measurements)] });
