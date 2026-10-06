@@ -28,7 +28,7 @@ function refusal(action: () => unknown): string | undefined {
 describe("external-verifier measurements", () => {
   it("passes every golden and adversarial fixture case", async () => {
     const cases = await loadFixtureFamily(familyDir);
-    expect(cases.length).toBe(8);
+    expect(cases.length).toBe(12);
     const results = runStructuralCheck(cases, (input) =>
       readExternalVerifierMeasurements(input as ExternalVerifierMeasurementsInput));
     for (const result of results) {
