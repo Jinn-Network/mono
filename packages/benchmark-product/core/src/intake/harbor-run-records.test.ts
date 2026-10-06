@@ -19,10 +19,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { cellKey } from "@jinn-network/benchmarking-records";
-import { evaluateVerdictRule, parseEvaluationSpec } from "@jinn-network/task-execution-profiles";
+import { cellKey, sealBenchmark } from "@jinn-network/benchmarking-records";
+import { evaluateVerdictRule, parseEvaluationSpec, sealEvaluationSpec } from "@jinn-network/task-execution-profiles";
+import { sealTask } from "@jinn-network/task-execution-protocol";
 import { BenchmarkProductError } from "../errors.js";
 import { armAdd } from "../operations/arms.js";
+import { attachBenchmarkToDraft } from "../operations/attach.js";
 import type { OperationContext } from "../operations/context.js";
 import { createDraft, readDraftDocument, updateDraft } from "../operations/drafts.js";
 import { importSweBenchRows } from "../operations/import.js";
@@ -39,7 +41,7 @@ import {
   TERMINAL_BENCH_2_1_DATASET_ID,
   TERMINAL_BENCH_2_1_DATASET_REF,
 } from "../runtime/terminal-bench-2-1/manifest.js";
-import { getSealedBytes } from "../workspace/sealed-store.js";
+import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import {
   HARBOR_RUN_IMPORT_EVIDENCE_BYTES_PER_CELL,
   HARBOR_RUN_IMPORT_VERSIONS,
@@ -49,6 +51,7 @@ import {
   taskNameByDigestForHarborImport,
   type HarborRunImportDump,
 } from "./harbor-run-records.js";
+import { buildTerminalBench21EvaluationSpec, buildTerminalBench21Tasks } from "./terminal-bench-2-1.js";
 import { TERMINAL_BENCH_21_OFFICIAL_TASKS } from "./terminal-bench-2-1-slate.js";
 
 const digestHello = "ab".repeat(32);
@@ -535,7 +538,10 @@ describe("readHarborRunImport — the official Terminal-Bench 2.1 slate", () => 
   function sealedVerdict(record: HarborRunImportDump["records"][number]): string {
     const task = sealedJson(record.cellKey.split("/")[0]!);
     const spec = parseEvaluationSpec(getSealedBytes(workspaceDir, task["evaluation"]["digest"]["sha256"] as string));
-    return evaluateVerdictRule(spec.verdictRule as Parameters<typeof evaluateVerdictRule>[0], record.measurements ?? {});
+    return evaluateVerdictRule(
+      spec.verdictRule as Parameters<typeof evaluateVerdictRule>[0],
+      { ...record.measurements },
+    ).verdict;
   }
 
   function rewriteJson(path: string, edit: (value: Record<string, any>) => void): void {
@@ -664,6 +670,54 @@ describe("readHarborRunImport — the official Terminal-Bench 2.1 slate", () => 
     const record = recordOf(dump, "oracle: chess-best-move #1");
     expect(record).toMatchObject({ outcome: "ungradeable", reason: 'Harbor reward "reward" is not a finite number' });
     expect(record.measurements).toBeUndefined();
+  });
+
+  test("a Task whose sealed spec names another package as its grader is not graded", async () => {
+    // A hand-built slate: the official chess-best-move Task, rebound to a spec that is the
+    // official one in every field but the grader digest. No command produces this Task. A trial
+    // is held to the package ref the Task seals, so its reward is that package's reward, and it
+    // is not read under a spec that calls a different package its grader.
+    const operation = context();
+    initWorkspace(operation);
+    createDraft(operation, { draftId: "draft-1", name: "Hand-built slate" });
+    const built = buildTerminalBench21Tasks(["chess-best-move"]);
+    const decode = (bytes: Uint8Array): Record<string, any> => JSON.parse(new TextDecoder().decode(bytes));
+    const official = buildTerminalBench21EvaluationSpec("chess-best-move");
+    const spec = sealEvaluationSpec({
+      ...official,
+      grader: { ...official.grader, digest: { sha256: "0".repeat(64) } },
+    });
+    const taskBytes = sealTask({
+      ...decode(built.tasks[0]!.bytes),
+      evaluation: { digest: { sha256: spec.digest.slice("sha256:".length) } },
+    } as Parameters<typeof sealTask>[0]);
+    const benchmark = sealBenchmark({
+      ...decode(built.benchmark.bytes),
+      items: [{ task: { digest: { sha256: sha256Hex(taskBytes) } } }],
+    } as Parameters<typeof sealBenchmark>[0]);
+    for (const bytes of [built.profile.bytes, spec.bytes, taskBytes, benchmark.bytes]) {
+      putSealedBytes(workspaceDir, bytes);
+    }
+    attachBenchmarkToDraft(workspaceDir, "draft-1", benchmark.digest.slice("sha256:".length), operation.clock());
+    armAdd(operation, { draftId: "draft-1", armId: "oracle", pinning: { harness: { id: "harbor-oracle" } } });
+    armAdd(operation, {
+      draftId: "draft-1",
+      armId: "deepseek-flash",
+      pinning: { agent: { id: "terminus-2" }, model: { id: REAL_MODEL } },
+    });
+    const quoted = await runQuote(operation, { draftId: "draft-1" });
+    expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
+    const locked = runLock(operation, { draftId: "draft-1" });
+    expect(locked.ok, JSON.stringify(locked)).toBe(true);
+
+    const dump = readHarborRunImport({ workspaceDir, draftId: "draft-1", jobsDir: REAL_JOBS });
+    const onSlate = dump.records.filter((record) => record.cellKey.startsWith(sha256Hex(taskBytes)));
+    expect(onSlate).toHaveLength(2);
+    for (const record of onSlate) {
+      expect(record.outcome).not.toBe("graded");
+      expect(record.measurements).toBeUndefined();
+    }
+    expect(dump.records.some((record) => record.outcome === "graded")).toBe(false);
   });
 
   test("the Harbor version is the one the job lock.json records", async () => {
