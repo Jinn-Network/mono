@@ -986,7 +986,7 @@ test("the Run digest prints once, on the line under Format, as bare hex (issue #
   }
 });
 
-test("a /5 bundle has no Run record, so its output prints no Run line (issue #4972)", async () => {
+test("a /5 result carries no Run digest, so its output prints no Run line (issue #4972)", async () => {
   const { renderVerifiedBundle } = await import("../dist/index.js");
   const output = renderVerifiedBundle(v5({
     ...V5_RESULT,
