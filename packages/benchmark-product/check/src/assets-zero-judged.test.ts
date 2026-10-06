@@ -5,10 +5,10 @@
  * 2026-10-06, decision 6, option c).
  *
  * `wilson@1` seals a `passRate` of `0.0000` and an interval of `0.0000` to `0.0000` for an arm
- * with `n` 0, because the claim package schema requires the strings. Printed as they are sealed,
- * they read as "failed every task, with certainty" about an arm that was never scored. The ruling
- * keeps the sealed values and changes only what is shown: the page and the claim text say that no
- * rate is stated for that arm.
+ * with `n` 0. Printed as they are sealed, they read as "failed every task, with certainty" about
+ * an arm that was never scored. The claim package schema requires the strings, so the ruling keeps
+ * the sealed values and changes only what is shown: the page and the claim text say that no rate
+ * is stated for that arm.
  *
  * The wording is the `/10` presentation capability `zero-judged-rate-unstated`. It is format-level,
  * not a declared capability, so it reaches every `/10` page with such an arm. That is deliberate:
