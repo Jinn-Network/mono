@@ -146,6 +146,43 @@ describe("external-verifier spec checks", () => {
       .toMatch(/type "number"/);
   });
 
+  it("refuses a block that carries a bare own key named __proto__, on check, seal and parse", async () => {
+    const spec = await golden();
+    // The key comes from JSON.parse: a literal `{ __proto__: ... }` sets the prototype and adds
+    // no key, and the sealer would then refuse the object for another reason.
+    const carrier = JSON.parse('{"__proto__": {"platform": "linux/amd64"}}') as Record<string, unknown>;
+    const familyBlock = { ...carrier, ...(spec.familyBlock as Record<string, unknown>) };
+    expect(Object.hasOwn(familyBlock, "__proto__")).toBe(true);
+    expect(Object.getPrototypeOf(familyBlock)).toBe(Object.prototype);
+    const bad = { ...spec, familyBlock } as EvaluationSpec;
+    const text = JSON.stringify(bad);
+    expect(text).toContain('"__proto__":{"platform":"linux/amd64"}');
+
+    expect(checkExternalVerifierSpec(bad)).toMatchObject({ ok: false, code: "invalid-document" });
+    expect(() => sealEvaluationSpec(bad)).toThrow(ProfilesError);
+    expect(refusalCode(() => sealEvaluationSpec(bad))).toBe("invalid-document");
+    const bytes = new TextEncoder().encode(text);
+    expect(() => parseEvaluationSpec(bytes)).toThrow(ProfilesError);
+    expect(refusalCode(() => parseEvaluationSpec(bytes))).toBe("invalid-document");
+  });
+
+  it("keeps a namespaced key in the block through check, seal and parse", async () => {
+    const spec = await golden();
+    const familyBlock = {
+      ...(spec.familyBlock as Record<string, unknown>),
+      "org.example.note": { platform: "linux/amd64" },
+    };
+    const extended = { ...spec, familyBlock } as EvaluationSpec;
+    expect(checkExternalVerifierSpec(extended)).toEqual({ ok: true });
+    const sealed = sealEvaluationSpec(extended);
+    expect(parseEvaluationSpec(sealed.bytes)).toEqual(extended);
+    expect(new TextDecoder().decode(sealed.bytes)).toContain('"org.example.note":{"platform":"linux/amd64"}');
+    // The plain golden spec is the same document it was.
+    expect(sealEvaluationSpec(spec).digest).toBe(
+      "sha256:7929fd9e8bba524affeeda218bff8146ecfa93de643bdd91d41903ffc037475b",
+    );
+  });
+
   it("accepts a grader with no name and a public or private access class", async () => {
     const spec = await golden();
     const digest = (spec.grader as { digest: Record<string, string> }).digest;

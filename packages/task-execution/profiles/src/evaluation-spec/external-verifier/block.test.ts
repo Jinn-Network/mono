@@ -26,6 +26,13 @@ const block = (testMaterial: unknown[]) => ({
   timeout: 900,
 });
 
+/** Adds an own key named `__proto__`, the way JSON text carries one. The key comes from
+ * `JSON.parse` because a literal `{ __proto__: ... }` sets the prototype and adds no key. */
+function withOwnProtoKey(value: Record<string, unknown>): Record<string, unknown> {
+  const carrier = JSON.parse('{"__proto__": {"platform": "linux/amd64"}}') as Record<string, unknown>;
+  return { ...carrier, ...value };
+}
+
 describe("external-verifier family block", () => {
   it("passes every golden and adversarial fixture case", async () => {
     const cases = await loadFixtureFamily(familyDir);
@@ -79,6 +86,27 @@ describe("external-verifier family block", () => {
       const parsed = ExternalVerifierBlockSchema.safeParse({ ...block([entry("tests/test.sh", "b")]), [key]: {} });
       expect(parsed.success, key).toBe(false);
     }
+  });
+
+  it("refuses a bare own key named __proto__, like any other bare extra key", () => {
+    const input = withOwnProtoKey(block([entry("tests/test.sh", "b")]));
+    // The input is the case under test only if the key is its own and its prototype is untouched.
+    expect(Object.hasOwn(input, "__proto__")).toBe(true);
+    expect(Object.getPrototypeOf(input)).toBe(Object.prototype);
+    expect(JSON.stringify(input)).toContain('"__proto__":{"platform":"linux/amd64"}');
+
+    const parsed = ExternalVerifierBlockSchema.safeParse(input);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues.map((issue) => issue.path)).toEqual([["__proto__"]]);
+    expect(FAMILY_BLOCK_SCHEMAS[EXTERNAL_VERIFIER_FAMILY].safeParse(input).success).toBe(false);
+    expect(() => checkExternalVerifierBlock({ family: EXTERNAL_VERIFIER_FAMILY, block: input })).toThrow(ProfilesError);
+  });
+
+  it("keeps a namespaced extra key, and returns a plain block as it was given", () => {
+    const plain = block([entry("tests/test.sh", "b")]);
+    expect(checkExternalVerifierBlock({ family: EXTERNAL_VERIFIER_FAMILY, block: plain })).toEqual(plain);
+    const namespaced = { ...plain, "org.example.note": { platform: "linux/amd64" } };
+    expect(checkExternalVerifierBlock({ family: EXTERNAL_VERIFIER_FAMILY, block: namespaced })).toEqual(namespaced);
   });
 
   it("the fixture check refuses a block offered under another family name", () => {
