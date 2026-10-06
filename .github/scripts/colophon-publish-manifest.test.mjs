@@ -262,8 +262,8 @@ test('the README transform moves only this repository\'s next-branch links', () 
     '[kit](https://github.com/Jinn-Network/mono/tree/next/packages/benchmark-product/check/fixtures)',
     '<https://github.com/Jinn-Network/mono/blob/next/README.md>',
     // Another repository has its own history: this commit does not exist there.
-    '[site](https://github.com/colophon-claims/site/blob/next/README.md)',
-    '[fork](https://github.com/Jinn-Network/mono-archive/blob/next/README.md)',
+    '[other](https://github.com/Jinn-Network/example-other-repository/blob/next/README.md)',
+    '[prefix](https://github.com/Jinn-Network/mono-example/blob/next/README.md)',
     // Not a branch link, so there is nothing to pin.
     '[package](https://www.npmjs.com/package/@colophon-claims/check)',
     'A directory named blob/next/ in prose, and the word next.',
@@ -275,8 +275,8 @@ test('the README transform moves only this repository\'s next-branch links', () 
       `[guide](https://github.com/Jinn-Network/mono/blob/${PUBLISH_HEAD}/packages/benchmark-product/PUBLIC-BUNDLE.md#formats)`,
       `[kit](https://github.com/Jinn-Network/mono/tree/${PUBLISH_HEAD}/packages/benchmark-product/check/fixtures)`,
       `<https://github.com/Jinn-Network/mono/blob/${PUBLISH_HEAD}/README.md>`,
-      '[site](https://github.com/colophon-claims/site/blob/next/README.md)',
-      '[fork](https://github.com/Jinn-Network/mono-archive/blob/next/README.md)',
+      '[other](https://github.com/Jinn-Network/example-other-repository/blob/next/README.md)',
+      '[prefix](https://github.com/Jinn-Network/mono-example/blob/next/README.md)',
       '[package](https://www.npmjs.com/package/@colophon-claims/check)',
       'A directory named blob/next/ in prose, and the word next.',
       '',
