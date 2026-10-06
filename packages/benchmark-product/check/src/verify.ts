@@ -95,6 +95,7 @@ import {
   type ClaimExternalImportSection,
 } from "./profile/external-import.js";
 import { assertTaskSelectionConsistency, assertTaskSelectionDeclaration } from "./profile/task-selection.js";
+import { assertTerminalBench21ComparabilityDeclaration } from "./profile/terminal-bench-2-1-comparability.js";
 import { buildPublicAssets } from "./assets.js";
 import { derivePublicComparison, type PublicComparisonView } from "./comparison.js";
 import {
@@ -115,6 +116,7 @@ import {
   DISCLOSURE_SPECIFICATION_CAPABILITY,
   EXTERNAL_IMPORT_CAPABILITY,
   TASK_SELECTION_CAPABILITY,
+  TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY,
   assertMemberClosure,
   composeClosure,
 } from "./capabilities.js";
@@ -735,6 +737,19 @@ export async function verifyPublicBundleSnapshot(
     assertTaskSelectionDeclaration({
       declared: composed.capabilities.includes(TASK_SELECTION_CAPABILITY),
       runRecord: run,
+    });
+    // ── The Terminal-Bench 2.1 comparability axis is BOUND to the Benchmark and the import ─────
+    //
+    // Operator rulings of 2026-10-06: a `/10` bundle whose Benchmark carries the official
+    // Terminal-Bench 2.1 slate extension and whose run was imported must declare
+    // `terminal-bench-2-1-comparability`, and a bundle declaring it must be both. It has no member
+    // either, so it is refused here, on the vector, for the same reason. Whether the extension is
+    // TRUE of the Benchmark (the pinned constants, names, coverage, and Task digests) is settled
+    // under `claim-consistency`, where the section is rebuilt from it.
+    assertTerminalBench21ComparabilityDeclaration({
+      declared: composed.capabilities.includes(TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY),
+      imported: composed.capabilities.includes(EXTERNAL_IMPORT_CAPABILITY),
+      benchmarkRecord: benchmark,
     });
   }
   const identities = {

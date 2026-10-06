@@ -576,9 +576,10 @@ Every token is **must-understand**. A reader that does not implement a token in
 the vector refuses the bundle whole, naming the token, before it reads any
 member. There is no tier of tokens a reader may ignore.
 
-Six capabilities are registered. Each one's members, checks, and claim section
+Seven capabilities are registered. Each one's members, checks, and claim section
 are exactly what the closure it came from carries, except `external-import`,
-`task-selection`, and `owner-controlled-publication`, which are new with this generation:
+`task-selection`, `owner-controlled-publication`, and
+`terminal-bench-2-1-comparability`, which are new with this generation:
 
 | Token | Adds | Check it appends | Claim section |
 | --- | --- | --- | --- |
@@ -588,10 +589,12 @@ are exactly what the closure it came from carries, except `external-import`,
 | `external-import` | `external-import.json`, the dump digest plus one row per sealed Matrix cell | `external-import` | `externalImport` |
 | `task-selection` | no member of its own; the declaration is the Run's `task-selection/v1` extension, and the report face states it as a header fact row (see [Task-selection provenance](#task-selection-provenance)) | none; its refusals run under `claim-consistency` | `taskSelection` |
 | `owner-controlled-publication` | no member; a sixth sealed venue sentence, stated below | none; `claim-consistency` rebuilds the sentence and the section | `ownerControlledPublication` |
+| `terminal-bench-2-1-comparability` | no member; one sealed sentence in the Report limitations, stated below, for a run imported onto the official Terminal-Bench 2.1 slate | none; `claim-consistency` checks the Benchmark against the pinned slate and rebuilds the sentence and the section | `terminalBench21Comparability` |
 
 `disclosure-specification` requires `binary-qualification`, because the evidence
 role that carries its record exists only in the v4 grammar. It does not require
-`anchoring`.
+`anchoring`. `terminal-bench-2-1-comparability` requires `external-import`,
+because its sentence states a fact about an imported run.
 
 Everything else is derived from the vector. The mandatory members are v2's plus
 each declared capability's. The checks are v2's **six**, then each declared
@@ -599,10 +602,11 @@ capability's in the order of the table above --- so `["anchoring"]` runs v6's
 seven and all three pre-composition tokens run v8's eight. The vector naming `anchoring` alone
 is v6's closure exactly, the vector naming `anchoring` and
 `binary-qualification` is v7's, and the vector naming those three is v8's.
-`external-import`, `task-selection`, and `owner-controlled-publication` are additive
-and have no pre-composition cell. Neither `task-selection` nor
-`owner-controlled-publication` appends a check, so a vector keeps its check list with
-or without them.
+`external-import`, `task-selection`, `owner-controlled-publication`, and
+`terminal-bench-2-1-comparability` are additive and have no pre-composition cell.
+`task-selection`, `owner-controlled-publication`, and
+`terminal-bench-2-1-comparability` append no check, so a vector keeps its check
+list with or without them.
 
 `owner-controlled-publication` states where the publication source stands. The
 [interoperability profile](../../docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md)
@@ -622,6 +626,51 @@ for byte: every earlier format, and a v10 bundle whose vector omits it.
 `claim-consistency` refuses the sentence in the Report, the venue sentences, or
 the claim without the declaration, and the declaration without the sentence in
 each of them.
+
+`terminal-bench-2-1-comparability` is declared by a run that was made outside
+this product, imported from a Harbor jobs directory, and bound to the official
+Terminal-Bench 2.1 slate with `method terminal-bench-2.1`. Such a run cannot show
+that it met the leaderboard's protocol: this product did not run it, and no
+record in the bundle establishes the conditions it ran under. So its signed
+Report carries one more limitation, once, after the venue sentences and any
+binary-instrument lines and before the paired-estimate line, and the claim's
+`limitations` copy it:
+
+> This run is not a Terminal-Bench 2.1 leaderboard submission: it was run outside Colophon and imported from a Harbor jobs directory, and nothing in this bundle shows that it met the leaderboard's protocol. The pass rate is taken over the cells that reached a pass or fail verdict. A trial with no reward is left out of that rate and counted in the accounting, so the rate can be higher than Harbor's mean for the same job, which counts such a trial as 0.
+
+The claim's `terminalBench21Comparability` section carries the slate facts a
+reader of the claim needs, each one projected from the Benchmark's
+`official-suite-slate/v1` extension after the checker has verified it, and the
+sentence again:
+
+| Field | Meaning |
+| --- | --- |
+| `datasetId`, `datasetRevision` | the dataset, and the revision of it the leaderboard pins |
+| `upstreamCommit` | the commit of the dataset's source repository the slate was read at |
+| `slateDigest` | the digest of the slate: every official task name with its package ref |
+| `coverage` | `one_task`, `ten_task`, `full`, or `custom`, recomputed from the selected names |
+| `selectedTaskCount`, `datasetTaskCount` | how many of the dataset's tasks this Benchmark carries |
+| `limit` | the sentence above |
+
+A bundle is on the official slate because its records are, not because its
+vector says so. The checker carries its own copy of the slate: the dataset
+constants and, for each of the 89 official tasks, the SHA-256 of the Task record
+this product seals for it. A declaring bundle is refused under
+`claim-consistency` unless its extension equals those constants, its selected
+names are distinct official names, its coverage word is the one those names
+recompute to, each Benchmark item is the pinned Task of the name in the same
+position, and its import marker names `harbor` as the source. A Task digest
+covers the Task's profile, payload, instructions, author, and outputs, so one
+comparison per item settles which Task it is. The checker requires the marker to
+name Harbor. It cannot prove that a Harbor process wrote the rewards.
+
+The capability is bound to the records both ways. A v10 bundle whose Benchmark
+carries the extension for Terminal-Bench 2.1 and whose vector declares
+`external-import` must declare it, and a bundle declaring it must be both.
+Either mismatch is refused on the vector. The sentence in a Report whose bundle
+does not declare it is refused, and so is a declaring bundle whose Report omits
+the sentence, repeats it, or seals it anywhere but its slot. A run on the slate
+that was not imported declares nothing here, and its bundle is unchanged.
 
 Declaration is authoritative, and presence is derived from it, never the
 reverse. A member of a capability the vector does not declare --- an
@@ -683,8 +732,10 @@ the composed generation, so a run that does not ask otherwise publishes on
 facts: an anchored run declares `anchoring`, a run projecting a binary qualification
 declares `binary-qualification`, a qualification run with a sealed disclosure
 declaration declares `disclosure-specification`, anchored or not, a run whose
-evidence was imported (`run import`) declares `external-import`, and a run that sealed a
-task-selection declaration at lock declares `task-selection` on every bundle it publishes. Every run declares
+evidence was imported (`run import`) declares `external-import`, a run that sealed a
+task-selection declaration at lock declares `task-selection` on every bundle it publishes, and
+a run imported onto the official Terminal-Bench 2.1 slate declares
+`terminal-bench-2-1-comparability`. Every run declares
 `owner-controlled-publication`, imported runs included: this product publishes only
 from its self-run venue, whose workspace mints the key that signs the Report and whose
 owner hosts the bundle. The enumerated v2, v4,

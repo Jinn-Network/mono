@@ -113,6 +113,8 @@ export interface CapabilityActivationFacts {
   readonly importedRun: boolean;
   /** The sealed Run carries a `task-selection/v1` declaration (issue #3416). */
   readonly declaresTaskSelection: boolean;
+  /** The Benchmark carries the `official-suite-slate/v1` extension naming Terminal-Bench 2.1. */
+  readonly officialTerminalBench21Slate: boolean;
 }
 
 /** The uniform per-entry contract (design §4). */
@@ -151,6 +153,7 @@ export const DISCLOSURE_SPECIFICATION_CAPABILITY = "disclosure-specification" as
 export const EXTERNAL_IMPORT_CAPABILITY = "external-import" as const;
 export const TASK_SELECTION_CAPABILITY = "task-selection" as const;
 export const OWNER_CONTROLLED_PUBLICATION_CAPABILITY = "owner-controlled-publication" as const;
+export const TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY = "terminal-bench-2-1-comparability" as const;
 
 /**
  * Every capability this build implements, in `order`.
@@ -285,6 +288,33 @@ export const CAPABILITY_REGISTRY = [
     // Report and the owner hosts the bundle. So every composed bundle declares it, imported runs
     // included, whatever the run's other facts.
     activation: () => true,
+  },
+  {
+    // Operator rulings of 2026-10-06 on the Terminal-Bench 2.1 bring-your-run path (decisions 2
+    // and 7). Additive and memberless: one sealed sentence in the Report limitations, after the
+    // binary-instrument lines and before the paired-estimate line, and a claim section projected
+    // from the Benchmark's `official-suite-slate/v1` extension once that extension has been checked
+    // against the slate this package pins. It appends no check: both claim-consistency copies
+    // rebuild the section and hold the sentence to its slot, and the verifier binds the vector to
+    // the Benchmark both ways, so a brought run on the slate cannot pass without declaring it.
+    //
+    // It requires `external-import` because the sentence states a fact about an imported run. A
+    // slate run this product drove itself is not one and declares nothing here.
+    //
+    // Named for the suite, not for official suites in general: a token carries one minimum reader
+    // release, so another suite gets its own token rather than a second meaning for this one.
+    token: TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY,
+    order: 7,
+    requires: [EXTERNAL_IMPORT_CAPABILITY],
+    conflicts: [],
+    mandatoryFiles: [],
+    memberPatterns: [],
+    refines: [],
+    roleDerivations: [],
+    claimSection: "terminalBench21Comparability",
+    checks: [],
+    minimumReaderRelease: "check@0.2.1",
+    activation: (facts) => facts.officialTerminalBench21Slate && facts.importedRun,
   },
 ] as const satisfies readonly CapabilityEntry[];
 
