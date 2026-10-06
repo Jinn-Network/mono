@@ -8,6 +8,7 @@ import {
   TERMINAL_BENCH_21_OFFICIAL_SLATE_EXTENSION,
   officialTerminalBench21TaskNames,
 } from "../intake/terminal-bench-2-1.js";
+import { readRunJournalEntries } from "../run/journal.js";
 import { readRunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { armAdd } from "./arms.js";
@@ -114,6 +115,7 @@ describe("run.import against the official Terminal-Bench 2.1 slate", () => {
       records: unrunRows(cellKeys),
       source: SOURCE,
       evidenceRoot,
+      namedReader: "harbor",
     });
     expect(imported.ok, JSON.stringify(imported)).toBe(true);
     if (!imported.ok) return;
@@ -128,6 +130,7 @@ describe("run.import against the official Terminal-Bench 2.1 slate", () => {
       records: unrunRows(cellKeys.slice(0, -1)),
       source: SOURCE,
       evidenceRoot,
+      namedReader: "harbor",
     });
     expect(imported.ok).toBe(false);
     if (imported.ok) return;
@@ -154,6 +157,7 @@ describe("run.import against the official Terminal-Bench 2.1 slate", () => {
       records: unrunRows(one.cellKeys),
       source: SOURCE,
       evidenceRoot,
+      namedReader: "harbor",
     });
     expect(oneImported.ok, JSON.stringify(oneImported)).toBe(true);
 
@@ -176,7 +180,47 @@ describe("run.import against the official Terminal-Bench 2.1 slate", () => {
       records: unrunRows(custom.cellKeys),
       source: SOURCE,
       evidenceRoot,
+      namedReader: "harbor",
     });
     expect(customImported.ok, JSON.stringify(customImported)).toBe(true);
+  }, 60_000);
+
+  test("only the Harbor reader may import onto the slate: a generic dump is refused and the draft stays locked", async () => {
+    const clock = makeClock();
+    const { cellKeys } = await lockedOfficial(clock, { slice: "1" });
+    // What `run import --file` passes: no named reader, whatever `--source` calls the harness.
+    // A dump row names a slot and nothing else, so nothing in it can be held against the package
+    // ref and dataset revision the slate seals for that task.
+    const generic = [
+      { source: SOURCE },
+      { source: { harness: "harbor", version: "0.21.0" } },
+      { source: SOURCE, namedReader: "inspect" as const },
+    ];
+    for (const input of generic) {
+      const refused = await importRunRecords(contextFor(clock), {
+        draftId: "draft-1",
+        records: unrunRows(cellKeys),
+        evidenceRoot,
+        ...input,
+      });
+      expect(refused.ok, JSON.stringify(input)).toBe(false);
+      if (refused.ok) return;
+      expect(refused.error.code).toBe("conflict");
+      expect(refused.error.detail).toContain("official Terminal-Bench 2.1 slate");
+      expect(refused.error.detail).toContain("run import --from harbor");
+      expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+      expect(readRunJournalEntries(workspaceDir, "draft-1")).toHaveLength(0);
+      expect(readRunState(workspaceDir, "draft-1")?.launchedAt).toBeUndefined();
+    }
+
+    const imported = await importRunRecords(contextFor(clock), {
+      draftId: "draft-1",
+      records: unrunRows(cellKeys),
+      source: SOURCE,
+      evidenceRoot,
+      namedReader: "harbor",
+    });
+    expect(imported.ok, JSON.stringify(imported)).toBe(true);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("running");
   }, 60_000);
 });
