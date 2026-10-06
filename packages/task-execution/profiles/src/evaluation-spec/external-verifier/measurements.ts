@@ -21,9 +21,9 @@ function invalid(message: string): never {
  * The shortest decimal string that reads back as the same binary64 value, written without an
  * exponent.
  *
- * The digits are the ones ECMAScript's `Number::toString` gives: the fewest significant digits
- * that read back as the same value and, where more than one such digit string exists, the one
- * nearest the value. `String(value)` yields exactly those; it switches to exponent form below
+ * The digits are the ones JavaScript's number-to-string conversion gives: the fewest significant
+ * digits that read back as the same value and, where more than one such digit string exists, the
+ * one nearest the value. `String(value)` yields exactly those; it switches to exponent form below
  * 1e-6 and from 1e21 up, so those two forms are written out positionally here, padded with
  * zeros. The digits themselves are never recomputed. A whole number past 2^53 is therefore
  * written with its significant digits and then zeros, not with the exact integer value of the
