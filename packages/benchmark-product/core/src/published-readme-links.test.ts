@@ -74,9 +74,13 @@ function headingAnchors(markdown: string): readonly string[] {
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 
-/** Every mention of a URL under the package's own repository, in whatever Markdown form. */
+/**
+ * Every URL that reaches into the package's own repository, in whatever Markdown form and on
+ * whatever host: a raw-content address names a branch as well, and the publish step does not pin it.
+ */
 function repositoryLinks(readme: PublishedReadme): readonly string[] {
-  const pattern = new RegExp(`${escapeRegExp(readme.repositoryUrl)}/[^\\s)>\\]]*`, "gu");
+  const ownerAndName = new URL(readme.repositoryUrl).pathname.slice(1);
+  const pattern = new RegExp(`https?://[^\\s)>\\]]*/${escapeRegExp(ownerAndName)}/[^\\s)>\\]]*`, "giu");
   return [...readme.markdown.matchAll(pattern)].map((match) => match[0]);
 }
 
