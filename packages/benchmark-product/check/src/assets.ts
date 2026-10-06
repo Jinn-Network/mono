@@ -881,7 +881,7 @@ function comparisonCellDetailsHtml(comparison: PublicComparisonView): string {
   return comparison.cells.map((cell) => {
     const outputLinks = cell.outputs.map((output) => `<li><a href="index.html#records-heading">${escapeMarkup(output.name)}</a>: ${escapeMarkup(output.summary)} <span class="digest">${escapeMarkup(output.sha256)}</span></li>`).join("");
     const verdicts = cell.verdicts.map((verdict) => `<li><a href="index.html#records-heading">${escapeMarkup(verdict.evaluator)}</a>: ${escapeMarkup(verdict.verdict)}<pre>${escapeMarkup(canonicalText(verdict.measurements))}</pre></li>`).join("");
-    return `<details id="cell-${escapeMarkup(cell.cellKey)}" class="cell-detail"><summary><strong>${escapeMarkup(cell.armId)}</strong> · Task ${escapeMarkup(cell.taskDigest.slice(0, 12))} · replicate ${cell.replicate} · ${escapeMarkup(cellScore(cell))}</summary><p>${escapeMarkup(cell.outputSummary)}</p><h4>Authenticated outputs</h4><ul>${outputLinks || "<li>No solve output.</li>"}</ul><h4>Authenticated verdict evidence</h4><ul>${verdicts || "<li>No verdict evidence.</li>"}</ul></details>`;
+    return `<details id="cell-${escapeMarkup(cell.cellKey)}" class="cell-detail"><summary><strong>${escapeMarkup(cell.armId)}</strong> · ${escapeMarkup(cell.taskLabel ?? `Task ${cell.taskDigest.slice(0, 12)}`)} · replicate ${cell.replicate} · ${escapeMarkup(cellScore(cell))}</summary><p>${escapeMarkup(cell.outputSummary)}</p><h4>Authenticated outputs</h4><ul>${outputLinks || "<li>No solve output.</li>"}</ul><h4>Authenticated verdict evidence</h4><ul>${verdicts || "<li>No verdict evidence.</li>"}</ul></details>`;
   }).join("");
 }
 
