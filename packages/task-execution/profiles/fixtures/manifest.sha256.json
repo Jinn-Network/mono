@@ -50,6 +50,38 @@
       "sha256": "2c8a95eb34694db869fc7aff8240399e1e37b2c1b09dda1dec319ddeb5303427"
     },
     {
+      "id": "evaluation-spec/adversarial/external-verifier-boolean-measurement.json",
+      "sha256": "33ddae8570f61027246612c5d897a5acdbd54246eb11fcad93f92341ddb5391f"
+    },
+    {
+      "id": "evaluation-spec/adversarial/external-verifier-grader-inlined-content.json",
+      "sha256": "7ab94dd70aa91245689adde97d3217183e2f2d28e2741d15b8a622928c0e322e"
+    },
+    {
+      "id": "evaluation-spec/adversarial/external-verifier-grader-list.json",
+      "sha256": "eab310bef9931f1824cb0c1c740bda8e2b3643541c2b9f224d4fc6a69c717fa3"
+    },
+    {
+      "id": "evaluation-spec/adversarial/external-verifier-grader-prefixed-digest.json",
+      "sha256": "ca0c65e0364eeccdc79a194ac3d5e183177858b50f6d34948afac823a7034959"
+    },
+    {
+      "id": "evaluation-spec/adversarial/external-verifier-grader-without-digest.json",
+      "sha256": "cfbdb92e1c4b7de2635e5f95d5648488aa56baf8efa07f5e8f9a10ef3f390117"
+    },
+    {
+      "id": "evaluation-spec/adversarial/external-verifier-no-measurements.json",
+      "sha256": "d76e13aa57a6d8bebb0a6d223b0a3da7444c56840844950e3f7c348211f3ea5d"
+    },
+    {
+      "id": "evaluation-spec/adversarial/external-verifier-wrong-block.json",
+      "sha256": "f93f473bb1df2e8b8eb2ccdb51ac217a62c6b63a97789253118ab7352a15ae2c"
+    },
+    {
+      "id": "evaluation-spec/adversarial/unknown-family.json",
+      "sha256": "15968e382c0986aa59e84567fceaec173b3867f5d9a3f9d093b2230d4710bbb3"
+    },
+    {
       "id": "evaluation-spec/adversarial/wrong-protocol.json",
       "sha256": "6ba590c267c7189eb2938b4b583ae6eed5b2efb3ca8a34bddebc782566817b1b"
     },
@@ -60,6 +92,14 @@
     {
       "id": "evaluation-spec/golden/deterministic-minimal.sha256",
       "sha256": "33385a415392756bcf4388fe0e7f289dfb241ea98a79c6ebc2f4e975b0f0d28b"
+    },
+    {
+      "id": "evaluation-spec/golden/external-verifier-minimal.json",
+      "sha256": "845d451c7057d0305562b1b63cb3ab8c27cf4d4e92a18a383924056d23463fc0"
+    },
+    {
+      "id": "evaluation-spec/golden/external-verifier-minimal.sha256",
+      "sha256": "3e66f423fb7aa5cf0942fddd9a6e0847f482eb4d61f3e74c8cb997c539c81ee1"
     },
     {
       "id": "evaluation-spec/golden/fractional-threshold.json",
@@ -96,6 +136,134 @@
     {
       "id": "evaluation-task-derivation/golden/derive-TD.json",
       "sha256": "11a8352e4ba4b93b67fe89e55925172431dddbbc2e66b036e0db3aedbb1df0e9"
+    },
+    {
+      "id": "external-verifier-block/adversarial/declared-image-descriptor.json",
+      "sha256": "e47f6a77f1a1051b2112fa81c627be9cd49f910105eb44c570b3cf4e0c3c8be0"
+    },
+    {
+      "id": "external-verifier-block/adversarial/declared-image-empty.json",
+      "sha256": "0c65f3f138a1689974bcdb05ded0c0f112ee5e365a78acce4f7317e5c1115aae"
+    },
+    {
+      "id": "external-verifier-block/adversarial/image-key.json",
+      "sha256": "c2e25458257783086dad9d5bcd9d01acf15a6a983590b664055e801991a1f9e8"
+    },
+    {
+      "id": "external-verifier-block/adversarial/missing-semantics-version.json",
+      "sha256": "1a6bb1fdf1d996c6c4fb3a1296780e8e9e93c8b458299628dd498bb4073a200b"
+    },
+    {
+      "id": "external-verifier-block/adversarial/platform-key.json",
+      "sha256": "2f3869728e76a1d88e11c3180036d1434b41fc3571ede15f98560f8eb96fff5e"
+    },
+    {
+      "id": "external-verifier-block/adversarial/test-material-duplicate-name.json",
+      "sha256": "5e7f56a68f17f79b4a284b1146d462a80b661afca2ec64034b4d801ba8a0ccba"
+    },
+    {
+      "id": "external-verifier-block/adversarial/test-material-empty.json",
+      "sha256": "0216724bf5ace481cb49317c4d2a5457a70c938650fc36683966c46e5cbe0dd2"
+    },
+    {
+      "id": "external-verifier-block/adversarial/test-material-inlined-content.json",
+      "sha256": "d51ab6515548a406170adcb39df10cfe5b7b8b2487102eb1e0c07389203523ac"
+    },
+    {
+      "id": "external-verifier-block/adversarial/test-material-prefixed-digest.json",
+      "sha256": "b5ed7dcbcabe40b97e10499914347ba7262a38e493b17f09ce5323e0921f36ad"
+    },
+    {
+      "id": "external-verifier-block/adversarial/test-material-unsorted.json",
+      "sha256": "268c892ee97f552e5a61c461bbac111c7859c6e904b8d86703db5a6cd6a775e5"
+    },
+    {
+      "id": "external-verifier-block/adversarial/test-material-without-digest.json",
+      "sha256": "3ce1f4eae82ea683d739c1b8ee6ab6ee36724d0dc20676c5ba32005d15393d8e"
+    },
+    {
+      "id": "external-verifier-block/adversarial/test-material-without-name.json",
+      "sha256": "a41f7699ceaf21962efe55f0cb58731cfd9bb4a7eaa30403ef9466ab6b3329af"
+    },
+    {
+      "id": "external-verifier-block/adversarial/timeout-fractional.json",
+      "sha256": "377bbdae7a41acf252eb86bc28a3649b31ce22f8a2b4c8fc5da117fb7f65ed5b"
+    },
+    {
+      "id": "external-verifier-block/adversarial/timeout-zero.json",
+      "sha256": "020644da570e9c748767ea878ee2572d6436bdb2b25bf33d00ea4d21815ea728"
+    },
+    {
+      "id": "external-verifier-block/adversarial/unknown-harness.json",
+      "sha256": "b67a0bf530035250c4e3f11bc26c001863546cb09082000ff2509545724e046d"
+    },
+    {
+      "id": "external-verifier-block/adversarial/unknown-semantics-version.json",
+      "sha256": "579b35a4d64aacb8224a8a6fe0b012ce367029d4972b697ca86dbb6883fec920"
+    },
+    {
+      "id": "external-verifier-block/golden/declared-image-tag.json",
+      "sha256": "465a08a05086df7b9f791f6ef1a1caae108b9e7b8e2a6e627bd3f23eb2157447"
+    },
+    {
+      "id": "external-verifier-block/golden/minimal.json",
+      "sha256": "d7ac3641709c59d96bf5808a866a04f8e3cdc6f355669e37ad26f5c25388b1ae"
+    },
+    {
+      "id": "external-verifier-block/golden/namespaced-extra-key.json",
+      "sha256": "890fc359287fc001ac395f4971e65e4b7c23af5171a3ad636eb0e05778d1f178"
+    },
+    {
+      "id": "external-verifier-measurements/adversarial/non-numeric-value.json",
+      "sha256": "dd315e58c7351d36faae822792fb795684df52dedfff8fa86185d6153a3305de"
+    },
+    {
+      "id": "external-verifier-measurements/adversarial/not-a-map.json",
+      "sha256": "221c32bc6e1466b56770e713bd4be130f927afffa8935fd5d0a6c4856546c642"
+    },
+    {
+      "id": "external-verifier-measurements/golden/fractional-reward.json",
+      "sha256": "d422c2de021988fb17adb96f022ae9dc9efa9ac396f9f896586f70b67a764f76"
+    },
+    {
+      "id": "external-verifier-measurements/golden/required-key-absent.json",
+      "sha256": "a6887f7e92ab63eabfa434cf464b593e0af8bf799abd4fd49330d135a1c3624b"
+    },
+    {
+      "id": "external-verifier-measurements/golden/small-fractional-reward.json",
+      "sha256": "fcd0a4329d95948593e2bad4c7d0fe0875f3869c698bb152bf694c714089de42"
+    },
+    {
+      "id": "external-verifier-measurements/golden/undeclared-key-dropped.json",
+      "sha256": "720f8c6ddf86441dcd47ccd1e8f4a5971b1877ab23fa7dd6531ba036aea5db8d"
+    },
+    {
+      "id": "external-verifier-measurements/golden/unsafe-whole-reward.json",
+      "sha256": "07661c3beba7512cc41053d8bd763c72ef877ca636c8e1096c06a114de7f631d"
+    },
+    {
+      "id": "external-verifier-measurements/golden/whole-reward.json",
+      "sha256": "87220560afe11b4a8bfea34041d48026e405b8237d947fab435552cac39fc3c5"
+    },
+    {
+      "id": "external-verifier-package-digest/adversarial/duplicate-path.json",
+      "sha256": "561b8b8068b90d3b6e0f5e2be74e5d40814d54d0b1efcb86dbaea1476fab21b4"
+    },
+    {
+      "id": "external-verifier-package-digest/adversarial/malformed-file-digest.json",
+      "sha256": "ba5558ea6f6002d15f82cb75b5765713b6567054db3c0342f33e42c28cef5b8b"
+    },
+    {
+      "id": "external-verifier-package-digest/golden/code-point-order.json",
+      "sha256": "0858926048bde4959abb2521b7aee2706f6d0764e91f6aaec97eb327290a1da7"
+    },
+    {
+      "id": "external-verifier-package-digest/golden/input-order-ignored.json",
+      "sha256": "d4b2990923c29dfe0e1499be1d55e6bd9a509cd882eda46a3eafbfd6e8f92b62"
+    },
+    {
+      "id": "external-verifier-package-digest/golden/two-files.json",
+      "sha256": "527b7630d593344d25a58a9a08a7b2d18cd6a7cf6dd071aefab42b2ebf552d65"
     },
     {
       "id": "family-blocks/adversarial/composite-bare-extra-key.json",

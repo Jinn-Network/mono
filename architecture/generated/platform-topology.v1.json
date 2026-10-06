@@ -12984,6 +12984,78 @@
         "kind": "fixtures",
         "package": "@jinn-network/task-execution-profiles",
         "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/evaluation-spec/adversarial/external-verifier-boolean-measurement.json",
+        "relativeSource": "fixtures/evaluation-spec/adversarial/external-verifier-boolean-measurement.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/evaluation-spec/adversarial/external-verifier-grader-inlined-content.json",
+        "relativeSource": "fixtures/evaluation-spec/adversarial/external-verifier-grader-inlined-content.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/evaluation-spec/adversarial/external-verifier-grader-list.json",
+        "relativeSource": "fixtures/evaluation-spec/adversarial/external-verifier-grader-list.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/evaluation-spec/adversarial/external-verifier-grader-prefixed-digest.json",
+        "relativeSource": "fixtures/evaluation-spec/adversarial/external-verifier-grader-prefixed-digest.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/evaluation-spec/adversarial/external-verifier-grader-without-digest.json",
+        "relativeSource": "fixtures/evaluation-spec/adversarial/external-verifier-grader-without-digest.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/evaluation-spec/adversarial/external-verifier-no-measurements.json",
+        "relativeSource": "fixtures/evaluation-spec/adversarial/external-verifier-no-measurements.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/evaluation-spec/adversarial/external-verifier-wrong-block.json",
+        "relativeSource": "fixtures/evaluation-spec/adversarial/external-verifier-wrong-block.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/evaluation-spec/adversarial/unknown-family.json",
+        "relativeSource": "fixtures/evaluation-spec/adversarial/unknown-family.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
         "path": "packages/task-execution/profiles/fixtures/evaluation-spec/adversarial/wrong-protocol.json",
         "relativeSource": "fixtures/evaluation-spec/adversarial/wrong-protocol.json"
       },
@@ -13004,6 +13076,24 @@
         "packedTargets": [],
         "path": "packages/task-execution/profiles/fixtures/evaluation-spec/golden/deterministic-minimal.sha256",
         "relativeSource": "fixtures/evaluation-spec/golden/deterministic-minimal.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/evaluation-spec/golden/external-verifier-minimal.json",
+        "relativeSource": "fixtures/evaluation-spec/golden/external-verifier-minimal.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/evaluation-spec/golden/external-verifier-minimal.sha256",
+        "relativeSource": "fixtures/evaluation-spec/golden/external-verifier-minimal.sha256"
       },
       {
         "claim": null,
@@ -13085,6 +13175,294 @@
         "packedTargets": [],
         "path": "packages/task-execution/profiles/fixtures/evaluation-task-derivation/golden/derive-TD.json",
         "relativeSource": "fixtures/evaluation-task-derivation/golden/derive-TD.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/adversarial/declared-image-descriptor.json",
+        "relativeSource": "fixtures/external-verifier-block/adversarial/declared-image-descriptor.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/adversarial/declared-image-empty.json",
+        "relativeSource": "fixtures/external-verifier-block/adversarial/declared-image-empty.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/adversarial/image-key.json",
+        "relativeSource": "fixtures/external-verifier-block/adversarial/image-key.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/adversarial/missing-semantics-version.json",
+        "relativeSource": "fixtures/external-verifier-block/adversarial/missing-semantics-version.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/adversarial/platform-key.json",
+        "relativeSource": "fixtures/external-verifier-block/adversarial/platform-key.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/adversarial/test-material-duplicate-name.json",
+        "relativeSource": "fixtures/external-verifier-block/adversarial/test-material-duplicate-name.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/adversarial/test-material-empty.json",
+        "relativeSource": "fixtures/external-verifier-block/adversarial/test-material-empty.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/adversarial/test-material-inlined-content.json",
+        "relativeSource": "fixtures/external-verifier-block/adversarial/test-material-inlined-content.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/adversarial/test-material-prefixed-digest.json",
+        "relativeSource": "fixtures/external-verifier-block/adversarial/test-material-prefixed-digest.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/adversarial/test-material-unsorted.json",
+        "relativeSource": "fixtures/external-verifier-block/adversarial/test-material-unsorted.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/adversarial/test-material-without-digest.json",
+        "relativeSource": "fixtures/external-verifier-block/adversarial/test-material-without-digest.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/adversarial/test-material-without-name.json",
+        "relativeSource": "fixtures/external-verifier-block/adversarial/test-material-without-name.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/adversarial/timeout-fractional.json",
+        "relativeSource": "fixtures/external-verifier-block/adversarial/timeout-fractional.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/adversarial/timeout-zero.json",
+        "relativeSource": "fixtures/external-verifier-block/adversarial/timeout-zero.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/adversarial/unknown-harness.json",
+        "relativeSource": "fixtures/external-verifier-block/adversarial/unknown-harness.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/adversarial/unknown-semantics-version.json",
+        "relativeSource": "fixtures/external-verifier-block/adversarial/unknown-semantics-version.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/golden/declared-image-tag.json",
+        "relativeSource": "fixtures/external-verifier-block/golden/declared-image-tag.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/golden/minimal.json",
+        "relativeSource": "fixtures/external-verifier-block/golden/minimal.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-block/golden/namespaced-extra-key.json",
+        "relativeSource": "fixtures/external-verifier-block/golden/namespaced-extra-key.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-measurements/adversarial/non-numeric-value.json",
+        "relativeSource": "fixtures/external-verifier-measurements/adversarial/non-numeric-value.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-measurements/adversarial/not-a-map.json",
+        "relativeSource": "fixtures/external-verifier-measurements/adversarial/not-a-map.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/fractional-reward.json",
+        "relativeSource": "fixtures/external-verifier-measurements/golden/fractional-reward.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/required-key-absent.json",
+        "relativeSource": "fixtures/external-verifier-measurements/golden/required-key-absent.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/small-fractional-reward.json",
+        "relativeSource": "fixtures/external-verifier-measurements/golden/small-fractional-reward.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/undeclared-key-dropped.json",
+        "relativeSource": "fixtures/external-verifier-measurements/golden/undeclared-key-dropped.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/unsafe-whole-reward.json",
+        "relativeSource": "fixtures/external-verifier-measurements/golden/unsafe-whole-reward.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/whole-reward.json",
+        "relativeSource": "fixtures/external-verifier-measurements/golden/whole-reward.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-package-digest/adversarial/duplicate-path.json",
+        "relativeSource": "fixtures/external-verifier-package-digest/adversarial/duplicate-path.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-package-digest/adversarial/malformed-file-digest.json",
+        "relativeSource": "fixtures/external-verifier-package-digest/adversarial/malformed-file-digest.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-package-digest/golden/code-point-order.json",
+        "relativeSource": "fixtures/external-verifier-package-digest/golden/code-point-order.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-package-digest/golden/input-order-ignored.json",
+        "relativeSource": "fixtures/external-verifier-package-digest/golden/input-order-ignored.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-package-digest/golden/two-files.json",
+        "relativeSource": "fixtures/external-verifier-package-digest/golden/two-files.json"
       },
       {
         "claim": null,
