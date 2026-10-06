@@ -75,7 +75,7 @@ filesystem holding the tree carries one — because those move the commit oid a 
 announcement pins. `executableBitChecked` reports whether that second dimension was read,
 and where it was not the report names which of the two reasons applied. Rendering a
 repository from a bundle is `colophon freeze-repo export` in the product CLI; the layout
-and the licence scaffolding are specified in `../PUBLIC-BUNDLE.md`.
+and the licence scaffolding are specified in [`PUBLIC-BUNDLE.md`](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/PUBLIC-BUNDLE.md).
 
 The rendered tree's format is `colophon-freeze-repo/2`. The `/1` renderer stated a source
 `downloadLocation` and a `supplier` its record did not support, and refused an ordinary
@@ -125,10 +125,11 @@ number of name characters and a colon is refused. Together with those and with t
 `colophon-freeze-repo/1` to `/2` format bump above, which makes a tree published under `/1` report
 drift, the next published cut is therefore at least 0.3.0, not a patch on 0.2.1.
 
-Bundles are also verifiable without this package: `../EXTERNAL-VERIFICATION.md` specifies
+Bundles are also verifiable without this package: [`EXTERNAL-VERIFICATION.md`](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/EXTERNAL-VERIFICATION.md) specifies
 the external path (openssl plus a dependency-free script, shipped here as
 `scripts/external-verify.py`), the JSON Schemas under `schemas/`, and the conformance kit
-under `fixtures/public-bundle-conformance-v1/` for testing an independent verifier.
+for testing an independent verifier. The kit is not in this package. It is in the repository, under
+[`fixtures/public-bundle-conformance-v1/`](https://github.com/Jinn-Network/mono/tree/next/packages/benchmark-product/check/fixtures/public-bundle-conformance-v1).
 
 ## What this does not yet prove
 
