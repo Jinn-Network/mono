@@ -1,7 +1,11 @@
 import { BENCHMARKING_METHOD_IDS, type BenchmarkRecord, type MatrixRecord, type ReportRecord, type RunRecord } from "@jinn-network/benchmarking-records";
 import {
   OWNER_CONTROLLED_PUBLICATION_LIMIT,
+  TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY,
+  TERMINAL_BENCH_21_COMPARABILITY_LIMIT,
   assertOwnerControlledPublicationLimitations,
+  assertTerminalBench21ComparabilityLimitations,
+  deriveClaimTerminalBench21Comparability,
   firstDifference,
   type ClaimAnchor,
   type ClaimDisclosureSection,
@@ -72,7 +76,7 @@ export function assertClaimConsistency(input: {
     readonly leaderboardSubmitReady: boolean;
   };
 }): void {
-  const { claim, identities, runRecord, matrixRecord, reportRecord } = input;
+  const { claim, identities, benchmarkRecord, runRecord, matrixRecord, reportRecord } = input;
   if (identities.reportSha256 === undefined) {
     refuse("record-integrity", "claim-consistency", "verified Report identity is absent");
   }
@@ -94,6 +98,16 @@ export function assertClaimConsistency(input: {
   // issue #3401: the sixth venue sentence and its section, rebuilt from the declared vector.
   const ownerControlledPublication =
     input.composedCapabilities?.includes(OWNER_CONTROLLED_PUBLICATION_CAPABILITY) === true;
+  // The comparability section, rebuilt from the run's own Benchmark and import marker and never from
+  // the claim under test. Deriving it is what holds the Benchmark to the checker's pinned official
+  // slate: an extension or a Task digest off the pin, or an import that does not name Harbor,
+  // refuses here, before the claim is compared. Mirrors the checker's copy exactly.
+  const comparability = input.composedCapabilities?.includes(TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY) === true
+    ? deriveClaimTerminalBench21Comparability({
+      benchmarkRecord,
+      importSourceHarness: input.externalImport?.source.harness,
+    })
+    : undefined;
   const expected = buildClaimPackage({
     draftId: input.draftId,
     benchmarkSha256: identities.benchmarkSha256,
@@ -127,6 +141,7 @@ export function assertClaimConsistency(input: {
     ...(input.disclosure === undefined ? {} : { disclosure: input.disclosure }),
     ...(input.externalImport === undefined ? {} : { externalImport: input.externalImport }),
     ...(ownerControlledPublication ? { ownerControlledPublication: OWNER_CONTROLLED_PUBLICATION_LIMIT } : {}),
+    ...(comparability === undefined ? {} : { terminalBench21Comparability: comparability }),
     ...(input.suiteComparability === undefined ? {} : { suiteComparability: input.suiteComparability }),
   });
   if (!bytesEqual(canonicalJsonBytes(claim), canonicalJsonBytes(expected))) {
@@ -156,10 +171,12 @@ export function assertClaimConsistency(input: {
       ? [PAIRED_ESTIMATE_LIMITATION]
       : [];
   const venueLimits = localVenueLimitsForRun(runRecord, imported, ownerControlledPublication);
+  // The comparability sentence's slot: after the binary-instrument lines, before the
+  // paired-estimate line. `operations/report.ts` seals it there, directly after any suite line.
+  const beforeComparability = [...venueLimits, ...(input.additionalLimitations ?? []), ...binaryLimitations];
   const expectedLimitations = [
-    ...venueLimits,
-    ...(input.additionalLimitations ?? []),
-    ...binaryLimitations,
+    ...beforeComparability,
+    ...(comparability === undefined ? [] : [TERMINAL_BENCH_21_COMPARABILITY_LIMIT]),
     ...pairedEstimateLimitation,
     ...(rehearsalLine === undefined ? [] : [rehearsalLine]),
   ];
@@ -167,6 +184,13 @@ export function assertClaimConsistency(input: {
     reportLimitations,
     venueLimits,
     declared: ownerControlledPublication,
+  });
+  // The whole-list compare below runs only under its gate, so the capability settles its own
+  // sentence on every Report: once and in its slot when declared, nowhere when not.
+  assertTerminalBench21ComparabilityLimitations({
+    reportLimitations,
+    precedingLimitations: beforeComparability,
+    declared: comparability !== undefined,
   });
   const isolationPosture = venueIsolationPostureForPolicy(
     runRecord.policy.submissionBaseline?.["isolationPolicy"],

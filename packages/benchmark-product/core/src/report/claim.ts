@@ -45,6 +45,7 @@ import type {
   ClaimDisclosureSection,
   ClaimExternalImportSection,
   ClaimOwnerControlledPublicationSection,
+  ClaimTerminalBench21ComparabilitySection,
 } from "@colophon-claims/check";
 import {
   CAPABILITY_REGISTRY,
@@ -53,6 +54,7 @@ import {
   ClaimExternalImportSectionSchema,
   ClaimOwnerControlledPublicationSectionSchema,
   ClaimTaskSelectionSectionSchema,
+  ClaimTerminalBench21ComparabilitySectionSchema,
   PROMPTED_SCREENING_PROFILE,
   PUBLIC_BUNDLE_V8_CHECKS as READER_DISCLOSED_VERIFICATION_CHECKS,
   SELF_RUN_TRUST_ROOT,
@@ -374,6 +376,10 @@ const ClaimPackageWireSchema = z.object({
   /** issue #3401: present exactly when the composed vector declares `owner-controlled-publication`,
    * and then the ruled sentence verbatim. The refine below refuses it on every earlier allocation. */
   ownerControlledPublication: ClaimOwnerControlledPublicationSectionSchema.optional(),
+  /** Present exactly when the composed vector declares `terminal-bench-2-1-comparability`. The
+   * refine below refuses it on every earlier allocation. Contents are the projection of the
+   * Benchmark's verified official-slate extension plus the sealed sentence, never a second opinion. */
+  terminalBench21Comparability: ClaimTerminalBench21ComparabilitySectionSchema.optional(),
   /** Optional Colophon suite-protocol bits. Not Report v2 required fields. */
   suiteComparability: z.object({
     executionConformance: z.boolean(),
@@ -428,6 +434,13 @@ const ClaimPackageWireSchema = z.object({
       code: "custom",
       message: "only the composed claim-package/7 allocation carries an ownerControlledPublication section",
       path: ["ownerControlledPublication"],
+    });
+  }
+  if (!composedClosure && claim.terminalBench21Comparability !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "only the composed claim-package/7 allocation carries a terminalBench21Comparability section",
+      path: ["terminalBench21Comparability"],
     });
   }
   const anchoredClosure = claim.claimSchema === ANCHORED_CLAIM_PACKAGE_SCHEMA_ID
@@ -696,7 +709,7 @@ function exactBinaryClaimControls(input: Record<string, unknown>): boolean {
   // generic control-shape failure. Neither field is ever set on an actual binary-instrument claim
   // (`methodProjection`'s dispatch is exclusive), so admitting them here is defense in depth, not
   // a widening any real claim exercises.
-  return exactKeys(input, ["claimSchema", "scope", "records", "method", "results", "completeness", "attrition", "conflicted", "assurance", "disclosures", "limitations", "venueHonesty", "verification", "rehearsal", "qualification", "anchors", "disclosure", "externalImport", "taskSelection", "ownerControlledPublication", "pairwiseDisagreement", "pairedMajorityDelta"])
+  return exactKeys(input, ["claimSchema", "scope", "records", "method", "results", "completeness", "attrition", "conflicted", "assurance", "disclosures", "limitations", "venueHonesty", "verification", "rehearsal", "qualification", "anchors", "disclosure", "externalImport", "taskSelection", "ownerControlledPublication", "terminalBench21Comparability", "pairwiseDisagreement", "pairedMajorityDelta"])
     && exactKeys(scope, ["draftId", "benchmarkSha256", "taskCount", "arms", "replicates", "venue"])
     && Array.isArray((scope as { arms?: unknown }).arms)
     && ((scope as { arms: unknown[] }).arms).every((arm) => exactKeys(arm, ["armId", "pinning"]))
@@ -802,6 +815,12 @@ export interface BuildClaimPackageInput {
    * `owner-controlled-publication`. The caller supplies the same sentence after the venue
    * sentences in `venueHonesty`, and the Report it projects already seals it. */
   readonly ownerControlledPublication?: ClaimOwnerControlledPublicationSection;
+  /** The projected comparability section, supplied exactly when the vector declares
+   * `terminal-bench-2-1-comparability`. Already derived from the Benchmark's verified official-slate
+   * extension by the checker's `projectClaimTerminalBench21Comparability`; the Report this claim
+   * projects already seals the sentence the section repeats. Distinct from `suiteComparability`
+   * below, which is the bound-runtime path's own three booleans. */
+  readonly terminalBench21Comparability?: ClaimTerminalBench21ComparabilitySection;
   /** Optional two-axis official-suite comparability. Absent unless a suite protocol is bound. */
   readonly suiteComparability?: {
     readonly executionConformance: boolean;
@@ -1213,6 +1232,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
       externalImport: input.externalImport !== undefined,
       taskSelection: taskSelection !== undefined,
       ownerControlledPublication: input.ownerControlledPublication !== undefined,
+      terminalBench21Comparability: input.terminalBench21Comparability !== undefined,
     };
     for (const capability of CAPABILITY_REGISTRY) {
       if (supplied[capability.claimSection] !== input.composedCapabilities!.includes(capability.token)) {
@@ -1321,6 +1341,9 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     ...(input.externalImport === undefined ? {} : { externalImport: input.externalImport }),
     ...(taskSelection === undefined ? {} : { taskSelection }),
     ...(input.ownerControlledPublication === undefined ? {} : { ownerControlledPublication: input.ownerControlledPublication }),
+    ...(input.terminalBench21Comparability === undefined
+      ? {}
+      : { terminalBench21Comparability: { ...input.terminalBench21Comparability } }),
     ...(input.previewDisclosure !== undefined
       ? {
           rehearsal: {

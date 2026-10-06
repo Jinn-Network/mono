@@ -109,6 +109,7 @@ export {
   EXTERNAL_IMPORT_CAPABILITY,
   OWNER_CONTROLLED_PUBLICATION_CAPABILITY,
   TASK_SELECTION_CAPABILITY,
+  TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY,
   activeCapabilityVector,
   composeClosure,
   expectedChecks,
@@ -162,6 +163,29 @@ export {
   assertOwnerControlledPublicationLimitations,
 } from "./profile/owner-controlled-publication.js";
 export type { ClaimOwnerControlledPublicationSection } from "./profile/owner-controlled-publication.js";
+// The Terminal-Bench 2.1 comparability sentence, its claim section, the pinned official slate, and
+// the coverage rule (operator rulings of 2026-10-06). Single-sourced here so the producer's sealed
+// copy and the verifier's rebuild are the same bytes, and so the producer can run the verifier's
+// own assertion before it seals a Report.
+export {
+  ClaimTerminalBench21ComparabilitySectionSchema,
+  OFFICIAL_SUITE_SLATE_EXTENSION,
+  TERMINAL_BENCH_21_COMPARABILITY_LIMIT,
+  TERMINAL_BENCH_21_IMPORT_HARNESS,
+  assertTerminalBench21ComparabilityDeclaration,
+  assertTerminalBench21ComparabilityLimitations,
+  carriesOfficialTerminalBench21Slate,
+  deriveClaimTerminalBench21Comparability,
+  projectClaimTerminalBench21Comparability,
+} from "./profile/terminal-bench-2-1-comparability.js";
+export type {
+  ClaimTerminalBench21ComparabilitySection,
+  TerminalBench21ComparabilityInput,
+  TerminalBench21ComparabilityProjection,
+} from "./profile/terminal-bench-2-1-comparability.js";
+export { TERMINAL_BENCH_21_PINS } from "./profile/terminal-bench-2-1-pins.js";
+export { SUITE_COVERAGE, coverageFromSelectedNames, namedSliceTaskNames } from "./profile/suite-coverage.js";
+export type { SuiteCoverage } from "./profile/suite-coverage.js";
 export type { BundleManifest, SupportedBundleFormat, VerifiedBundleSnapshot } from "./manifest.js";
 export * from "./admission/index.js";
 export * from "./schema.js";

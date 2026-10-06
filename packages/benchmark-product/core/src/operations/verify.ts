@@ -45,6 +45,7 @@ import {
   DISCLOSURE_SPECIFICATION_CAPABILITY,
   EXTERNAL_IMPORT_CAPABILITY,
   activeCapabilityVector,
+  carriesOfficialTerminalBench21Slate,
   deriveClaimTaskSelection,
   evaluateIntegrityAnchors,
   type IntegrityAnchorsReport,
@@ -441,6 +442,10 @@ export async function verifyRunWorkspace(
             declaresDisclosure: disclosureCarriage !== undefined,
             importedRun: importedCarriage !== undefined,
             declaresTaskSelection: deriveClaimTaskSelection(runRecord) !== undefined,
+            // The same Benchmark fact `report` read. With `importedRun` it turns on
+            // `terminal-bench-2-1-comparability`, whose section `assertClaimConsistency` then
+            // rebuilds from `benchRecord` and the import marker below.
+            officialTerminalBench21Slate: carriesOfficialTerminalBench21Slate(benchRecord),
           })
           : undefined;
 
