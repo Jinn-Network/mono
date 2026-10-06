@@ -80,7 +80,13 @@ function contextFor(clock: () => string): OperationContext {
 const DRAFT_ID = "draft-1";
 const HARBOR = { harness: "harbor", version: "0.21.0" } as const;
 
-/** Arms, quote, lock, an import in which no slot was driven, and collect: a closed draft. */
+/**
+ * Arms, quote, lock, an import in which no slot was driven, and collect: a closed draft.
+ *
+ * The import names the Harbor reader, as `run import --from harbor` does: `run import` accepts no
+ * other route onto this slate. `source` is the label the import seals in its marker. The operation
+ * takes it from its caller and does not hold it to the reader's name.
+ */
 async function closeImported(clock: () => string, source: { readonly harness: string; readonly version?: string }): Promise<void> {
   armAdd(contextFor(clock), { draftId: DRAFT_ID, armId: "oracle", pinning: { harness: { id: "harbor", version: "0.21.0" }, agent: { id: "oracle" } } });
   armAdd(contextFor(clock), { draftId: DRAFT_ID, armId: "terminus-2", pinning: { harness: { id: "harbor", version: "0.21.0" }, agent: { id: "terminus-2" } } });
@@ -101,7 +107,13 @@ async function closeImported(clock: () => string, source: { readonly harness: st
     outcome: "unrun",
     reason: "this slot was never driven",
   }));
-  const imported = await importRunRecords(contextFor(clock), { draftId: DRAFT_ID, records, source, evidenceRoot });
+  const imported = await importRunRecords(contextFor(clock), {
+    draftId: DRAFT_ID,
+    records,
+    source,
+    evidenceRoot,
+    namedReader: "harbor",
+  });
   expect(imported.ok, JSON.stringify(imported)).toBe(true);
   const collected = await runCollect(contextFor(clock), { draftId: DRAFT_ID });
   expect(collected.ok, JSON.stringify(collected)).toBe(true);
@@ -171,9 +183,13 @@ describe("report on a run brought onto the official Terminal-Bench 2.1 slate", (
     expect(verified.ok, JSON.stringify(verified)).toBe(true);
   }, 120_000);
 
-  test("refuses an import that does not name Harbor, before it seals anything", async () => {
+  test("refuses an import whose sealed marker does not name Harbor, before it seals anything", async () => {
     const clock = makeClock();
     await bindOfficialSlate(clock, "1");
+    // No command reaches this: on this slate `run import` refuses every route but `--from harbor`,
+    // and the Harbor reader writes `harbor` as the source itself. A caller of the operation can
+    // still name that reader and seal another label, and the marker is all a reader of the bundle
+    // sees, so `report` holds the marker and does not rely on the import having refused.
     await closeImported(clock, { harness: "my-own-runner", version: "1" });
 
     const reported = await runReport(contextFor(clock), { draftId: DRAFT_ID });
