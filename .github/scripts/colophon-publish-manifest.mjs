@@ -367,13 +367,42 @@ export function transformColophonManifestForPublish(manifest, pin, { gitHead } =
   return patched;
 }
 
+/**
+ * Pins a shipped README's links into this repository to the publishing commit.
+ *
+ * In the repository the READMEs link documents on the `next` branch, which is where a reader of the
+ * repository wants them. A tarball is different: it is immutable, and a branch link in it would
+ * follow the documents wherever they go after the publish. So the same commit `--apply` writes into
+ * the manifest as `gitHead` replaces the branch in every `/blob/next/` and `/tree/next/` link, and
+ * the README on npm describes the bytes it shipped with (issue #4954).
+ *
+ * Only this repository's links move: the commit exists nowhere else. With no commit to pin to, the
+ * README is returned as written, and its links still resolve on the branch.
+ * `packages/benchmark-product/core/src/published-readme-links.test.ts` holds the READMEs to the one
+ * link form this rewrites.
+ */
+export function transformColophonReadmeForPublish(readme, { gitHead } = {}) {
+  if (!gitHead || !COMMIT_SHA.test(gitHead)) return readme;
+  return readme.replace(
+    /(https:\/\/github\.com\/Jinn-Network\/mono\/(?:blob|tree)\/)next\//gu,
+    (_link, prefix) => `${prefix}${gitHead}/`,
+  );
+}
+
 export function applyColophonPublishManifest(manifestPath, pin, options = {}) {
   const originalBytes = readFileSync(manifestPath, 'utf8');
   const patched = transformColophonManifestForPublish(JSON.parse(originalBytes), pin, options);
   writeFileSync(manifestPath, `${JSON.stringify(patched, null, 2)}\n`, 'utf8');
+  // The README beside the manifest ships in the same tarball, so the same step pins it.
+  const readmePath = resolve(dirname(manifestPath), 'README.md');
+  const originalReadme = existsSync(readmePath) ? readFileSync(readmePath, 'utf8') : undefined;
+  if (originalReadme !== undefined) {
+    writeFileSync(readmePath, transformColophonReadmeForPublish(originalReadme, options), 'utf8');
+  }
   return {
     restore() {
       writeFileSync(manifestPath, originalBytes, 'utf8');
+      if (originalReadme !== undefined) writeFileSync(readmePath, originalReadme, 'utf8');
     },
   };
 }

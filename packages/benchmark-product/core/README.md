@@ -9,15 +9,15 @@ are clients of these public operations; neither is a second implementation.
 The user-facing `colophon` executable is owned by `@colophon-claims/cli`; core
 retains the advanced command library used by that endpoint.
 
-Authority: [product design](../../../docs/superpowers/specs/2026-08-05-benchmark-product-design.md).
-Start at the [product overview](../README.md); see the
-[public-bundle guide](../PUBLIC-BUNDLE.md), [Inspect runtime guide](../INSPECT-RUNTIME.md),
-and [threat model](../SECURITY.md).
+Authority: [product design](https://github.com/Jinn-Network/mono/blob/next/docs/superpowers/specs/2026-08-05-benchmark-product-design.md).
+Start at the [product overview](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/README.md); see the
+[public-bundle guide](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/PUBLIC-BUNDLE.md), [Inspect runtime guide](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/INSPECT-RUNTIME.md),
+and [threat model](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/SECURITY.md).
 
 This package is the operations library the published CLI depends on, and requires Node 22. The complete
 portal dependency graph must be built from source before core. The exact
 dependency order is maintained in
-[Benchmark Product CI](../../../.github/workflows/benchmark-product-ci.yml);
+[Benchmark Product CI](https://github.com/Jinn-Network/mono/blob/next/.github/workflows/benchmark-product-ci.yml);
 the old two-dependency build recipe is insufficient.
 
 ```bash
@@ -39,12 +39,12 @@ Docker, then proves prospective registration, six public-before-Harbor
 Submissions, complete runtime evidence, Accounting/Matrix v2, signed Report v2,
 exact public retrieval, and no publication-triggered rerun. It uses Harbor's
 built-in Oracle agent and does not use model credentials. The
-[product overview](../README.md#real-harbor-publication-rehearsal) names this as
+[product overview](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/README.md#real-harbor-publication-rehearsal) names this as
 a service launch.
 
 ## Operations library and CLI parity
 
-The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
+The generated [parity artifact](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/core/parity-matrix.v1.json) is authoritative. It
 contains **41 generated operations**, all shipped through the library and CLI
 with an explicit shipped/deferred GUI disposition:
 
@@ -107,7 +107,7 @@ npx @colophon-claims/check@0.2 <dir>
 Reader lines are not forward compatible, and a reader that is too old refuses
 with the same code an invalid bundle earns, so take the line from the bundle's
 own claim package `verification.command` rather than from this illustration.
-The per-format table in the [public-bundle guide](../PUBLIC-BUNDLE.md) covers
+The per-format table in the [public-bundle guide](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/PUBLIC-BUNDLE.md) covers
 the case where you have only `bundle.json`.
 
 It reads only the caller-selected immutable bundle, needs no workspace or
@@ -129,7 +129,7 @@ colophon freeze-repo verify --bundle <dir> --repo <dir> --json
 Both read only the caller-selected immutable bundle and need no workspace or
 principal. The repository is a derived artifact, never the claim of record; the
 layout, the licence scaffolding, and the commit hash an announcement pins are in
-the [public-bundle guide](../PUBLIC-BUNDLE.md).
+the [public-bundle guide](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/PUBLIC-BUNDLE.md).
 
 Every workspace command accepts `--workspace <dir>`, `--principal <id>`, and
 `--json`; command-specific flags are listed by `colophon help`.
@@ -204,7 +204,7 @@ inside the workspace. Sealed records are stored as exact digest-addressed bytes.
 public and not a general PII or confidentiality scrubber. `publication serve` is
 the separate, explicitly invoked verb that puts the already-emitted public
 archive tree on a socket; it announces nothing and writes no workspace record.
-See `docs/runbooks/colophon-announcement-source-serving.md`.
+See [`docs/runbooks/colophon-announcement-source-serving.md`](https://github.com/Jinn-Network/mono/blob/next/docs/runbooks/colophon-announcement-source-serving.md).
 
 For staged publication, `publicBaseUrl` is the exact archive mount, not merely an origin. For
 example, `https://example.test/publication` resolves records beneath
