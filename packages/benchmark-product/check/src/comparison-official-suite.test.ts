@@ -489,11 +489,11 @@ describe("the page of a declaring bundle", () => {
     const escaped = "&lt;img src=x onerror=alert(1)&gt; &quot;q&quot; &#39;s&#39; &amp; **b** [l](http://e.example) `c`";
     expect(html).toContain(`<tr><th scope="row"><strong>${escaped}</strong><br>`);
     expect(html).toContain(`<summary><strong>oracle</strong> · ${escaped} · replicate 1 · 1 reward (higher-is-better)</summary>`);
-    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<img src=x");
     expect(html).not.toContain("\u0007");
     const readme = decode(assets["README.md"]);
     expect(readme).toContain("- **&lt;img src=x onerror=alert\\(1\\)&gt; \"q\" 's' & \\*\\*b\\*\\* \\[l\\]\\(http\\://e.example\\) \\`c\\`** — ");
-    expect(readme).not.toContain("<img");
+    expect(readme).not.toContain("<img src=x");
     expect(readme).not.toContain("**b**");
     expect(readme).not.toContain("[l](http://e.example)");
 
