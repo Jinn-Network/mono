@@ -96,6 +96,33 @@ test("usage exits 2 and states the exit contract", async () => {
   assert.doesNotMatch(result.stderr, /not hosted/);
 });
 
+test("--help and -h print the usage on stdout and exit 0 (issue #4955)", async () => {
+  // An explicit request for help is not a usage failure. A script that runs `--help` to confirm
+  // the checker installed read the old exit 2 as a broken install. The error path keeps its
+  // stream and its code: no bundle argument still prints the usage on stderr and exits 2.
+  const usageError = await invoke([]);
+  assert.equal(usageError.code, 2);
+  assert.equal(usageError.stdout, "");
+  assert.match(usageError.stderr, /--help, -h {5}Print this usage and exit 0\./);
+  for (const flag of ["--help", "-h"]) {
+    const result = await invoke([flag]);
+    assert.equal(result.code, undefined, flag);
+    assert.equal(result.stderr, "", flag);
+    // The same text the error path prints, on the other stream.
+    assert.equal(result.stdout, usageError.stderr, flag);
+  }
+});
+
+test("a help flag beside other arguments exits 0 without reading the bundle (issue #4955)", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  for (const args of [["--help"], ["-h"], ["bundle", "--help"], ["bundle", "--json", "-h"]]) {
+    const result = await runVerifierCli(args, { verify: async () => { throw new Error("must not be reached"); } });
+    assert.equal(result.exitCode, 0, args.join(" "));
+    assert.match(result.stdout, /^Usage: colophon-check/, args.join(" "));
+    assert.equal(result.stderr, "", args.join(" "));
+  }
+});
+
 test("a missing bundle exits 1 with machine-readable invalid-bundle output", async () => {
   const missing = join(await mkdtemp(join(tmpdir(), "colophon-check-")), "missing");
   const result = await invoke([missing, "--json"]);
