@@ -1,0 +1,54 @@
+{
+    "id": "7ee2cf9e-f730-4ce3-9c7d-aa665e2bb46d",
+    "started_at": "2026-10-01T12:39:39.478332",
+    "updated_at": "2026-10-01T13:31:19.190471",
+    "finished_at": "2026-10-01T13:31:19.190471",
+    "n_total_trials": 10,
+    "stats": {
+        "n_completed_trials": 10,
+        "n_errored_trials": 1,
+        "n_running_trials": 0,
+        "n_pending_trials": 0,
+        "n_cancelled_trials": 0,
+        "n_retries": 0,
+        "evals": {
+            "terminus-2__deepseek/deepseek-v4.1-flash__terminal-bench/terminal-bench-2-1": {
+                "n_trials": 10,
+                "n_errors": 1,
+                "metrics": [
+                    {
+                        "mean": 0.8
+                    }
+                ],
+                "pass_at_k": {},
+                "reward_stats": {
+                    "reward": {
+                        "1.0": [
+                            "caffe-cifar-10__DhiQRe6",
+                            "circuit-fibsqrt__CRgNwS2",
+                            "build-pov-ray__c9zsofb",
+                            "adaptive-rejection-sampler__t7nHWWo",
+                            "build-cython-ext__Kuy79q8",
+                            "break-filter-js-from-html__sbGQSeS",
+                            "build-pmars__zbxuLhb",
+                            "bn-fit-modify__xQgerPp"
+                        ],
+                        "0.0": [
+                            "cancel-async-tasks__xiVVWvx",
+                            "chess-best-move__gs92yNg"
+                        ]
+                    }
+                },
+                "exception_stats": {
+                    "AgentTimeoutError": [
+                        "chess-best-move__gs92yNg"
+                    ]
+                }
+            }
+        },
+        "n_input_tokens": 5977758,
+        "n_cache_tokens": 5560448,
+        "n_output_tokens": 591624,
+        "cost_usd": 0.7894594380000001
+    }
+}

@@ -113,7 +113,7 @@ let executable: string;
 let metadataPath: string;
 let materialPath: string;
 
-function writeBatchedFakeHarbor(mode: "success" | "retry-first" | "timeout-first" = "success"): string {
+function writeBatchedFakeHarbor(mode: "success" | "retry-first" | "timeout-first" | "timeout-first-nested" = "success"): string {
   const path = join(root, "harbor");
   writeFileSync(path, `#!/usr/bin/env node
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -174,11 +174,19 @@ for (const name of names) {
   for (let attempt = 1; attempt <= config.n_attempts; attempt++) {
     index += 1;
     const trialName = "trial-" + index;
-    if (planned && index === 1 && mode === "timeout-first") {
+    if (planned && index === 1 && (mode === "timeout-first" || mode === "timeout-first-nested")) {
       const once = ${JSON.stringify(join(root, "timeout-once.marker"))};
       try {
         writeFileSync(once, "1", { flag: "wx" });
-        writeTrial(trialName, name, attempt, "error", { exception_type: "AgentTimeoutError" });
+        if (mode === "timeout-first") {
+          writeTrial(trialName, name, attempt, "error", { exception_type: "AgentTimeoutError" });
+        } else {
+          // The shape official Harbor 0.21.0 writes: no status, the type under exception_info.
+          writeTrial(trialName, name, attempt, undefined, {
+            exception_info: { exception_type: "AgentTimeoutError", exception_message: "Agent execution timed out after 900.0 seconds" },
+            finished_at: new Date().toISOString(),
+          });
+        }
         sleep(50);
         continue;
       } catch (cause) {
@@ -456,8 +464,11 @@ describe("Harbor per-arm batched Job", () => {
     expect(exported.result.mode).toBe("inspection-upload");
   }, 120_000);
 
-  test("a Harbor-excluded timeout is a new Submission filled by a follow-up Harbor job", async () => {
-    executable = writeBatchedFakeHarbor("timeout-first");
+  test.each([
+    ["exception_type at the top level", "timeout-first"],
+    ["exception_info.exception_type, as official Harbor 0.21.0 writes it", "timeout-first-nested"],
+  ] as const)("a Harbor-excluded timeout is a new Submission filled by a follow-up Harbor job (%s)", async (_shape, mode) => {
+    executable = writeBatchedFakeHarbor(mode);
     const context = { workspaceDir, principal: "sponsor-1", clock: clock() };
     expect(initWorkspace(context).ok).toBe(true);
     expect(createDraft(context, { draftId: "salvage", name: "salvage" }).ok).toBe(true);

@@ -158,9 +158,17 @@ test('core 0.1.0 and cli 0.1.0 select the same attested stack-canary receipt as 
 
 test('the published CLI README names the claimant verbs and documents launch as the service\'s', () => {
   const readme = readFileSync(join(repoRoot, 'packages/benchmark-product/cli/README.md'), 'utf8');
-  for (const verb of ['method', 'arm add', 'lock', 'anchor', 'run import', 'collect', 'report', 'publish', 'results', 'status']) {
+  // The claimant path in the order a brought run needs it (issue #4943): the table used to start
+  // at `method`, which cannot run before `init` and `draft create`, and left out `quote`, which
+  // `lock` requires. The CLI package's own suite holds this order against core's exported list.
+  const claimantPath = ['init', 'draft create', 'method', 'arm add', 'quote', 'lock', 'anchor', 'run import', 'collect', 'report', 'publish'];
+  const rows = claimantPath.map((verb) => readme.indexOf(`| \`${verb}\` |`));
+  for (const [index, at] of rows.entries()) assert.notEqual(at, -1, claimantPath[index]);
+  assert.deepEqual(rows, [...rows].sort((left, right) => left - right));
+  for (const verb of ['inspect', 'results', 'status']) {
     assert.match(readme, new RegExp(verb, 'u'), verb);
   }
+  assert.doesNotMatch(readme, /`launch`, `resume`, `preview`, `quote`/u);
   assert.match(readme, /launch/u);
   assert.match(readme, /service/u);
   assert.match(readme, new RegExp(CHECK_PIN_VERSION, 'u'));

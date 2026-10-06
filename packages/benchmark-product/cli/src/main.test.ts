@@ -72,6 +72,14 @@ describe("Colophon install surface", () => {
     expect(methodHelp.stdout).toContain("--host");
     expect(methodHelp.stdout).not.toContain("colophon demo");
 
+    // The verbs the claimant path adds reach core's verb help the same way (issue #4943).
+    const initHelp = await runColophonCli(["init", "--help"], context);
+    expect(initHelp).toMatchObject({ exitCode: 0, stdout: "  init             --workspace <dir> --principal <id>\n" });
+    const draftCreateHelp = await runColophonCli(["draft", "create", "--help"], context);
+    expect(draftCreateHelp.exitCode).toBe(0);
+    expect(draftCreateHelp.stdout).toContain("draft create     --workspace <dir> --principal <id> --name <name>");
+    expect(draftCreateHelp.stdout).not.toContain("colophon demo");
+
     const helpMethod = await runColophonCli(["help", "method"], context);
     expect(helpMethod.exitCode).toBe(0);
     expect(helpMethod.stdout).toContain("terminal-bench-2.1");
@@ -87,8 +95,10 @@ describe("Colophon install surface", () => {
     const answer = await runColophonCli(["--help"], context);
     expect(answer.exitCode).toBe(0);
     expect(answer.stdout).toContain("colophon demo");
-    expect(answer.stdout).toContain("Published claimant verbs:");
-    expect(answer.stdout).toContain("method, arm add, lock, anchor, run import, collect, report, publish, results, status");
+    expect(answer.stdout).toContain("Published claimant verbs, in the order a brought run needs:");
+    expect(answer.stdout).toContain(
+      "init, draft create, method, arm add, quote, lock, [anchor], run import, collect, report, publish",
+    );
     expect(answer.stdout).toContain("service's machinery");
     expect(answer.stdout).not.toContain("terminal-bench-2.1");
   });

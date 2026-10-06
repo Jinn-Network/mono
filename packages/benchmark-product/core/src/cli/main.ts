@@ -106,6 +106,8 @@ import { resolveWorkspacePublicationSourceName } from "../run/publication-source
 import { DEFAULT_PUBLICATION_SERVE_PORT, startPublicationArchiveServer, type PublicationWellKnownOutcome } from "../run/publication-serve.js";
 import { readDraftDocument } from "../operations/drafts.js";
 import { listMethodCatalog } from "../operations/method-catalog.js";
+import { PRODUCIBLE_ANCHOR_PROFILES } from "../anchor/profiles.js";
+import { renderClaimantCommandPath } from "./claimant-path.js";
 import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, readTextFile, required, type ParsedArgs } from "./args.js";
 import type { CliContext, CliResult } from "./result.js";
 
@@ -207,7 +209,9 @@ function methodHelp(): string {
     [
       `  ${row.id}`,
       `    protocol=${row.protocol}  framework=${row.framework}  derivedExport=${row.derivedExport}`,
-      `    hostKeys: ${row.hostKeys.join(", ")}`,
+      row.hostRequired
+        ? `    hostKeys: ${row.hostKeys.join(", ")}`
+        : "    --host: optional; binding this id reads nothing from it",
     ].join("\n"),
   );
   return `method [<ref>]
@@ -219,6 +223,10 @@ method-document file onto a draft.
   method <ref>     --workspace <dir> --principal <id> --draft <draftId>
                    [--slice 1|10|all] [--ids <csv>] [--n <count>] [--host <host.json>]
 
+  --workspace <dir>   the directory init created
+  --principal <id>    the id init was given
+  --draft <draftId>   the id draft create printed
+
 Catalog:
 ${catalogLines.join("\n")}
 
@@ -226,10 +234,18 @@ Coverage (catalog id only; pass exactly one of --slice, --ids, or --n):
   --slice 1|10|all
   --ids <csv>
   --n <count>     first N tasks from the host registry
-  --host <file>   required for a catalog id; keys listed per catalog row
+  --host <file>   a JSON object. Binding reads one key from it, registryMetadataPath,
+                  and only for --n: the path of the suite's registry metadata JSON,
+                  whose task list --n takes the first N from. No other host key is
+                  read or sealed by method. terminal-bench-2.1 carries its own
+                  official task list, so there --n needs no host file either.
 
-Dry-run then paid path: doctor, then quote, then lock, then launch.
-doctor plus quote is the dry-run. There is no run verb.
+Bringing a finished run, in this order:
+  ${renderClaimantCommandPath()}
+quote is required before lock today. anchor is optional and comes before run import.
+There is no run verb: run the suite on its own harness, then bring the output
+with run import. inspect prints the Harbor dataset and task names of an official
+terminal-bench-2.1 slate.
 
 import swebench loads homemade instance rows. method swe-bench-verified binds
 the official protocol.
@@ -237,6 +253,51 @@ the official protocol.
 inspect is draft inspect. lock is runLock.
 `;
 }
+
+/**
+ * What a verb's `--help` says beyond its USAGE stanza. Kept out of `USAGE` so the advanced library
+ * stays one screen of grammar, and because the anchor provider names are protocol identifiers that
+ * `USAGE` must not carry (`./lexicon.test.ts`).
+ *
+ * Each entry answers a question the pre-publish rehearsal's walker could not answer from help:
+ * what an arm pinning must contain for a brought run (issue #4946), whether a claimant runs
+ * `quote` and what its refusals mean (issues #4944, #4947), and which provider values `anchor`
+ * accepts (issue #4951).
+ */
+const VERB_HELP_NOTES: Readonly<Record<string, () => string>> = {
+  "arm add": () => `A pinning is a JSON object that says what the arm is. It is sealed into the lock
+and published with the claim. A draft needs at least two arms, and arms must be
+pairwise distinct in their pinning: two byte-identical pinnings are refused at
+quote.
+
+For a run brought with run import --from harbor, the reader matches each Harbor
+trial to exactly one arm, or refuses the import. An arm matches when either holds:
+  - the arm id equals the Harbor agent name
+  - pinning.agent.id equals the Harbor agent name and, when the arm sets it,
+    pinning.model.id equals the Harbor model name
+  example: --arm terminus-2
+           --pinning '{"agent":{"id":"terminus-2"},"model":{"id":"<provider>/<model>"}}'
+
+--agent takes a machine-local Claude Code or Codex profile (agent add) instead
+of --pinning.
+`,
+  quote: () => `Required before lock today: lock accepts only a quoted draft.
+
+quote asks the local venue what it could run itself. For a run brought with
+run import, its ok=false and its unsupported-requirement and refused lines
+describe that venue's inventory. They do not block lock or the brought run.
+`,
+  anchor: () => `--provider takes one of these provider profile names:
+${PRODUCIBLE_ANCHOR_PROFILES.map((profile) => `  ${profile}`).join("\n")}
+They are names, not addresses; nothing is fetched from them.
+
+--endpoint is the https address of the timestamp service to ask. No endpoint
+ships as a default, so an endpoint must be supplied: pass --provider and
+--endpoint here, or store both once with anchoring configure.
+
+A lock anchor is only obtainable before run import.
+`,
+};
 
 const INIT_FLAGS = ["workspace", "principal", "json"] as const;
 const DRAFT_CREATE_FLAGS = ["workspace", "principal", "json", "name", "description", "id", "file"] as const;
@@ -324,7 +385,16 @@ function renderResult<T>(result: OperationResult<T>, jsonMode: boolean, humanSuc
 
 /** Every operational verb requires `--workspace` and `--principal` (spec §5.2). */
 function buildOperationContext(args: ParsedArgs, context: CliContext): OperationContext {
-  const workspaceDir = pathFrom(context.cwd, required(args, "workspace"));
+  // The first refusal a claimant meets, so it says how a workspace comes to exist (issue #4943).
+  const workspace = optional(args, "workspace");
+  if (workspace === undefined || workspace === "") {
+    refuse(
+      "invalid-invocation",
+      "--workspace",
+      "--workspace is required; init --workspace <dir> --principal <id> creates a workspace",
+    );
+  }
+  const workspaceDir = pathFrom(context.cwd, workspace);
   const principal = required(args, "principal");
   return {
     workspaceDir,
@@ -928,6 +998,15 @@ async function handleQuote(args: ParsedArgs, context: CliContext, jsonMode: bool
       lines.push(`${error.code}: ${error.detail}`);
     }
     lines.push(...renderQuotePresentation(value.presentation));
+    // `ok` is a fact about the venue (`operations/run-quote.ts`), and lock does not read it. This
+    // output comes straight before an irreversible lock, so it says which lines are the venue's
+    // and that they stop neither the lock nor a run the claimant brings (issue #4947).
+    if (value.quote.errors.some((error) => error.code === "unsupported-requirement")) {
+      lines.push(
+        "venue inventory: ok=false and each unsupported-requirement and refused line above describe what the local venue could run itself.",
+        "  They do not block lock, and they do not apply to a run brought with run import.",
+      );
+    }
     return `${lines.join("\n")}\n`;
   });
 }
@@ -1840,7 +1919,8 @@ function usageStanza(verb: string): string {
 
 function verbHelpText(verbKey: string): string {
   if (verbKey === "method") return methodHelp();
-  return usageStanza(verbKey);
+  const note = VERB_HELP_NOTES[verbKey];
+  return note === undefined ? usageStanza(verbKey) : `${usageStanza(verbKey)}\n${note()}`;
 }
 
 function verbHelpResult(verbKey: string, jsonMode: boolean): CliResult {

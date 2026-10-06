@@ -411,6 +411,50 @@ describe("resolveMethodOperand", () => {
     expect(error.message).toMatch(/official Terminal-Bench 2\.1 slate \(89\)/u);
   });
 
+  test("terminal-bench-2.1 binds without --host, because it reads nothing from it (issue #4949)", () => {
+    const dir = cwd();
+    const withoutHost = resolveMethodOperand({ ref: "terminal-bench-2.1", cwd: dir, slice: "10" });
+    expect(withoutHost).toMatchObject({
+      kind: "catalog",
+      catalogId: "terminal-bench-2.1",
+      coverage: "ten_task",
+      host: {},
+    });
+    expect(resolveMethodOperand({ ref: "terminal-bench-2.1", cwd: dir, n: "1" })).toMatchObject({ coverage: "one_task" });
+    expect(resolveMethodOperand({ ref: "terminal-bench-2.1", cwd: dir, ids: "fix-git" })).toMatchObject({
+      coverage: "custom",
+      selectedIds: ["fix-git"],
+    });
+
+    // The flag stays accepted, and a file that was named is still read: a path that does not exist
+    // is a typo the claimant should hear about, not a value to drop silently.
+    const hostPath = join(dir, "host.json");
+    writeFileSync(hostPath, JSON.stringify({ executable: "/bin/harbor" }));
+    expect(resolveMethodOperand({ ref: "terminal-bench-2.1", cwd: dir, slice: "10", hostPath })).toMatchObject({
+      coverage: "ten_task",
+      host: { executable: "/bin/harbor" },
+    });
+    const missing = refuse(() => resolveMethodOperand({
+      ref: "terminal-bench-2.1",
+      cwd: dir,
+      slice: "10",
+      hostPath: join(dir, "missing.json"),
+    }));
+    expect(missing.code).toBe("validation");
+    expect(missing.issues[0]?.path).toBe("--host");
+  });
+
+  test("only terminal-bench-2.1 declares --host optional; every other catalog id still requires it", () => {
+    expect(listMethodCatalog().filter((row) => !row.hostRequired).map((row) => row.id)).toEqual(["terminal-bench-2.1"]);
+    const dir = cwd();
+    for (const row of listMethodCatalog()) {
+      if (!row.hostRequired) continue;
+      const error = refuse(() => resolveMethodOperand({ ref: row.id, cwd: dir, slice: "1" }));
+      expect(error.code, row.id).toBe("invalid-invocation");
+      expect(error.issues[0]?.path, row.id).toBe("--host");
+    }
+  });
+
   test("relative file refs resolve from cwd", () => {
     const dir = cwd();
     mkdirSync(join(dir, "nested"));

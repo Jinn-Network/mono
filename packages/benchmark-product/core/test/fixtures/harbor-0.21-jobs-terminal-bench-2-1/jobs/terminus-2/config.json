@@ -1,0 +1,28 @@
+{
+    "job_name": "terminus-2",
+    "n_concurrent_trials": 2,
+    "agents": [
+        {
+            "name": "terminus-2",
+            "model_name": "openrouter/deepseek/deepseek-v4.1-flash"
+        }
+    ],
+    "datasets": [
+        {
+            "name": "terminal-bench/terminal-bench-2-1",
+            "ref": "sha256:7d7bdc1cbedad549fc1140404bd4dc45e5fd0ea7c4186773687d177ad3a0699a",
+            "task_names": [
+                "terminal-bench/adaptive-rejection-sampler",
+                "terminal-bench/bn-fit-modify",
+                "terminal-bench/break-filter-js-from-html",
+                "terminal-bench/build-cython-ext",
+                "terminal-bench/build-pmars",
+                "terminal-bench/build-pov-ray",
+                "terminal-bench/caffe-cifar-10",
+                "terminal-bench/cancel-async-tasks",
+                "terminal-bench/chess-best-move",
+                "terminal-bench/circuit-fibsqrt"
+            ]
+        }
+    ]
+}

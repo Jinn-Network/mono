@@ -9,42 +9,53 @@ npx @colophon-claims/cli@0.1 --help
 
 ## Claimant verbs this package exposes
 
-These verbs are the published claimant path:
+These verbs are the published claimant path, in the order a brought run needs them:
 
 | Verb | Role |
 |---|---|
+| `init` | Create the workspace every later verb names with `--workspace` |
+| `draft create` | Create the draft every later verb names with `--draft` |
 | `method` | Bind a named suite or method document onto a draft |
 | `arm add` | Add a pinned solver arm |
+| `quote` | Quote the draft; required before `lock` today |
 | `lock` | Seal the method before the run |
-| `anchor` | Publicly anchor the sealed lock or matrix |
+| `anchor` | Optional: publicly anchor the sealed lock (before `run import`) or matrix |
 | `run import` | Bring a finished harness run back onto the sealed slate |
 | `collect` | Collect sealed evidence after the run |
 | `report` | Produce the report |
 | `publish` | Emit the local public bundle |
-| `results` | Read the sealed results document |
+| `inspect` | Read a draft, and the Harbor task names of an official slate |
 | `status` | Read draft or run status |
+| `results` | Read the sealed results document |
 
 ```sh
+npx @colophon-claims/cli@0.1 init --help
+npx @colophon-claims/cli@0.1 draft create --help
 npx @colophon-claims/cli@0.1 method --help
 npx @colophon-claims/cli@0.1 arm add --help
+npx @colophon-claims/cli@0.1 quote --help
 npx @colophon-claims/cli@0.1 lock --help
 npx @colophon-claims/cli@0.1 anchor --help
 npx @colophon-claims/cli@0.1 run import --help
 npx @colophon-claims/cli@0.1 collect --help
 npx @colophon-claims/cli@0.1 report --help
 npx @colophon-claims/cli@0.1 publish --help
-npx @colophon-claims/cli@0.1 results --help
+npx @colophon-claims/cli@0.1 inspect --help
 npx @colophon-claims/cli@0.1 status --help
+npx @colophon-claims/cli@0.1 results --help
 ```
 
 `help --advanced` prints the full lifecycle library.
 
 ## Service venue verbs
 
-`launch`, `resume`, `preview`, `quote`, and the other venue-orchestration verbs
+`launch`, `resume`, `preview`, and the other venue-orchestration verbs
 are the service's machinery on a venue Colophon controls. They are not the
 claimant path. A claimant runs the benchmark on Harbor, Inspect, or their own
 harness and brings the finished output with `run import`.
+
+`quote` also reports what the local venue could run itself. For a brought run
+those lines describe that venue's inventory and do not block `lock`.
 
 ## Bundled sample
 

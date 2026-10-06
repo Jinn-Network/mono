@@ -1,0 +1,180 @@
+{
+    "id": "d3129446-6ec6-46c6-8598-167d84ad7159",
+    "task_name": "terminal-bench/chess-best-move",
+    "trial_name": "chess-best-move__gs92yNg",
+    "task_id": {
+        "org": "terminal-bench",
+        "name": "chess-best-move",
+        "ref": "sha256:9ab8e4b3674282e751edafbd9b5bd551fef995fd6601585a2cdb04fd70c520da"
+    },
+    "source": "terminal-bench/terminal-bench-2-1",
+    "task_checksum": "aeda768947080f7e68599cb77d4311f1c550fd394994b6582fd223c1a863578e",
+    "config": {
+        "task": {
+            "path": null,
+            "git_url": null,
+            "git_commit_id": null,
+            "name": "terminal-bench/chess-best-move",
+            "ref": "sha256:9ab8e4b3674282e751edafbd9b5bd551fef995fd6601585a2cdb04fd70c520da",
+            "overwrite": false,
+            "download_dir": null,
+            "source": "terminal-bench/terminal-bench-2-1"
+        },
+        "trial_name": "chess-best-move__gs92yNg",
+        "trials_dir": "jobs/terminus-2",
+        "install_only": false,
+        "timeout_multiplier": 1.0,
+        "agent_timeout_multiplier": null,
+        "verifier_timeout_multiplier": null,
+        "agent_setup_timeout_multiplier": null,
+        "environment_build_timeout_multiplier": null,
+        "agent": {
+            "name": "terminus-2",
+            "import_path": null,
+            "model_name": "openrouter/deepseek/deepseek-v4.1-flash",
+            "n_concurrent": null,
+            "concurrency_group": null,
+            "skills": [],
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "resume_trajectory": false,
+            "load_trajectory": null,
+            "extra_allowed_hosts": [],
+            "kwargs": {},
+            "mcp_servers": []
+        },
+        "environment": {
+            "type": "docker",
+            "import_path": null,
+            "force_build": false,
+            "delete": true,
+            "cpu_enforcement_policy": "auto",
+            "memory_enforcement_policy": "auto",
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "override_tpu": null,
+            "mounts": null,
+            "extra_docker_compose": [],
+            "kwargs": {},
+            "extra_allowed_hosts": []
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "disable": false
+        },
+        "artifacts": [],
+        "extra_instruction_paths": [],
+        "job_id": "7ee2cf9e-f730-4ce3-9c7d-aa665e2bb46d",
+        "source_trial": null
+    },
+    "agent_info": {
+        "name": "terminus-2",
+        "version": "2.0.0",
+        "model_info": {
+            "name": "deepseek/deepseek-v4.1-flash",
+            "provider": "openrouter"
+        }
+    },
+    "agent_result": {
+        "n_input_tokens": 1818524,
+        "n_cache_tokens": 1751296,
+        "n_output_tokens": 162510,
+        "cost_usd": 0.22568817599999996,
+        "rollout_details": [],
+        "metadata": {
+            "n_episodes": 56,
+            "api_request_times_msec": [
+                1722.6147651672363,
+                3590.8071994781494,
+                4222.711801528931,
+                6994.342088699341,
+                11544.578552246094,
+                20962.2061252594,
+                4987.908124923706,
+                7015.891790390015,
+                3633.8324546813965,
+                5241.892099380493,
+                16184.295177459717,
+                9099.830389022827,
+                29116.692781448364,
+                13087.487697601318,
+                25128.587245941162,
+                23705.20043373108,
+                25191.21289253235,
+                28683.258056640625,
+                44195.93667984009,
+                3029.9153327941895,
+                16063.241481781006,
+                6117.419242858887,
+                11020.084857940674,
+                14225.852012634277,
+                31398.027181625366,
+                16628.391981124878,
+                6665.735483169556,
+                37772.90987968445,
+                29130.064725875854,
+                16528.641939163208,
+                11800.601720809937,
+                20963.586568832397,
+                7018.171787261963,
+                4222.381830215454,
+                1966.447114944458,
+                12311.686277389526,
+                4060.0297451019287,
+                4574.580907821655,
+                6409.93857383728,
+                5676.427841186523,
+                17719.953775405884,
+                10372.509241104126,
+                42020.02716064453,
+                4379.9238204956055,
+                1033.1599712371826,
+                29686.474084854126,
+                5292.7350997924805,
+                9871.916770935059,
+                32269.26040649414,
+                3190.373420715332,
+                914.3426418304443,
+                1248.6200332641602,
+                4630.362510681152,
+                19421.021699905396,
+                14489.86268043518
+            ],
+            "summarization_count": 0
+        }
+    },
+    "verifier_result": {
+        "rewards": {
+            "reward": 0.0
+        }
+    },
+    "verifier_environment_mode": "shared",
+    "exception_info": {
+        "exception_type": "AgentTimeoutError",
+        "exception_message": "Agent execution timed out after 900.0 seconds",
+        "occurred_at": "2026-10-01T13:29:04.493781Z"
+    },
+    "started_at": "2026-10-01T13:13:30.253511Z",
+    "finished_at": "2026-10-01T13:31:19.179759Z",
+    "environment_setup": {
+        "started_at": "2026-10-01T13:13:30.255350Z",
+        "finished_at": "2026-10-01T13:13:55.329945Z"
+    },
+    "agent_setup": {
+        "started_at": "2026-10-01T13:13:55.329961Z",
+        "finished_at": "2026-10-01T13:14:04.486667Z"
+    },
+    "agent_execution": {
+        "started_at": "2026-10-01T13:14:04.486711Z",
+        "finished_at": "2026-10-01T13:29:04.470429Z"
+    },
+    "verifier": {
+        "started_at": "2026-10-01T13:29:04.719760Z",
+        "finished_at": "2026-10-01T13:31:08.418312Z"
+    },
+    "step_results": null
+}

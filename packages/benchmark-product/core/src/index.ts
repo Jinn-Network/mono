@@ -451,6 +451,7 @@ export type {
   DraftSummary,
   ImportSweBenchRowsInput,
   ImportSweBenchRowsResult,
+  OfficialSlateInspection,
   OperationContext,
   OperationResult,
   PreviewArtifact,
@@ -599,6 +600,10 @@ export type {
 // only dist/cli/bin.js touches the process.
 export { USAGE, runCli } from "./cli/main.js";
 export type { CliContext, CliResult } from "./cli/result.js";
+// The ordered commands a claimant runs to bring a finished run. Exported so the published CLI's
+// own help and README are tested against the list `method --help` is rendered from (issue #4943).
+export { CLAIMANT_COMMAND_PATH, renderClaimantCommandPath } from "./cli/claimant-path.js";
+export type { ClaimantCommand } from "./cli/claimant-path.js";
 
 /** The product core's own version, mirrored from package.json. */
 export const PRODUCT_VERSION = "0.1.0";

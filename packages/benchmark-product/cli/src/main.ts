@@ -26,29 +26,38 @@ import { firstCommand, usesPrimaryWrapperHelp } from "./help-routing.js";
 
 export const USAGE = `Colophon — Publish benchmark claims people can check.
 
-Published claimant verbs:
-  method, arm add, lock, anchor, run import, collect, report, publish, results, status
+Published claimant verbs, in the order a brought run needs:
+  init, draft create, method, arm add, quote, lock, [anchor], run import, collect, report, publish
+
+init creates the workspace and draft create creates the draft that every later
+verb names with --workspace and --draft. quote is required before lock today.
+anchor is optional and comes before run import. inspect, status, and results
+are the read verbs.
 
 Primary commands:
   colophon                         Run the bundled sample and open its verified local viewer
   colophon demo [--output <dir>] [--no-open] [--json]
   colophon open --bundle <dir> [--port <n>] [--no-browser]
   colophon open [--workspace <dir>] [--port <n>] [--no-browser]
+  colophon init --help
+  colophon draft create --help
   colophon method --help
   colophon arm add --help
+  colophon quote --help
   colophon lock --help
   colophon anchor --help
   colophon run import --help
   colophon collect --help
   colophon report --help
   colophon publish --help
-  colophon results --help
+  colophon inspect --help
   colophon status --help
+  colophon results --help
   colophon import swebench ...     Import your own SWE-bench tasks
   colophon bundle verify ...       Verify through the full product
   colophon help --advanced         Show the explicit lifecycle library
 
-launch, resume, preview, quote, and the other venue-orchestration verbs are the
+launch, resume, preview, and the other venue-orchestration verbs are the
 service's machinery on a venue Colophon controls. They remain in the advanced
 library; they are not the claimant path. A claimant brings a finished run with
 \`run import\`.

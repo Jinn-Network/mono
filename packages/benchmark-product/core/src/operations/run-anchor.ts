@@ -51,6 +51,7 @@ import {
   anchorProofMediaType,
   encodeAnchorProofContent,
   isProducibleAnchorProfile,
+  PRODUCIBLE_ANCHOR_PROFILES,
   type ProducibleAnchorProfile,
 } from "../anchor/profiles.js";
 import {
@@ -428,15 +429,23 @@ export function runAnchor(
         refuse("venue-unavailable", `drafts.${input.draftId}.anchoring`, "anchoring is disabled for this draft");
       }
       if (resolution.kind === "unconfigured") {
+        // No endpoint ships as a default (§7.3), so the refusal a claimant meets first says what
+        // to supply and names every provider value that would be accepted (issue #4951).
         refuse(
           "venue-unavailable",
           "workspace.anchoring",
-          "no anchor provider endpoint resolves — configure one on the workspace or pass it per invocation",
+          "no anchor provider endpoint resolves — configure one on the workspace or pass it per invocation; "
+          + `an endpoint must be supplied, and the provider is one of ${PRODUCIBLE_ANCHOR_PROFILES.join(", ")}`,
         );
       }
       const { providerProfile, endpoint } = resolution.target;
       if (!isProducibleAnchorProfile(providerProfile)) {
-        refuse("venue-unavailable", "workspace.anchoring", `no acquisition source implements ${providerProfile}`);
+        refuse(
+          "venue-unavailable",
+          "workspace.anchoring",
+          `no acquisition source implements ${providerProfile}; this product can produce anchors for `
+          + PRODUCIBLE_ANCHOR_PROFILES.join(", "),
+        );
       }
 
       const state = requireRunState(context.workspaceDir, input.draftId);
