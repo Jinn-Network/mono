@@ -267,24 +267,39 @@ const EXTERNAL_VERIFIER_SHAPE = {
   timeout: z.number().int().positive(),
 };
 
-export const ExternalVerifierBlockSchema = withNamespacedExtras(
-  z.looseObject(EXTERNAL_VERIFIER_SHAPE),
-  Object.keys(EXTERNAL_VERIFIER_SHAPE),
-).superRefine((block, ctx) => {
-  // Names are unique and ascend by Unicode code point, so one set of files has one block.
-  for (let index = 1; index < block.testMaterial.length; index += 1) {
-    const previous = block.testMaterial[index - 1]?.name;
-    const current = block.testMaterial[index]?.name;
-    if (typeof previous !== "string" || typeof current !== "string") continue;
-    if (compareCodePointStrings(previous, current) >= 0) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["testMaterial", index, "name"],
-        message: `testMaterial names must be unique and ascend by Unicode code point; "${current}" does not follow "${previous}".`,
-      });
-    }
+// An own key named "__proto__" is a bare extra key like any other. zod leaves that one key out
+// of a loose object's parsed value, so the extras check below never meets it. It is refused
+// here, on the raw value, before the block is parsed.
+const ExternalVerifierRawBlockSchema = z.unknown().superRefine((value, ctx) => {
+  if (typeof value === "object" && value !== null && Object.hasOwn(value, "__proto__")) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["__proto__"],
+      message: 'Extension key "__proto__" must be namespaced (reverse-DNS or absolute URI, TEP §21.3).',
+    });
   }
 });
+
+export const ExternalVerifierBlockSchema = ExternalVerifierRawBlockSchema.pipe(
+  withNamespacedExtras(
+    z.looseObject(EXTERNAL_VERIFIER_SHAPE),
+    Object.keys(EXTERNAL_VERIFIER_SHAPE),
+  ).superRefine((block, ctx) => {
+    // Names are unique and ascend by Unicode code point, so one set of files has one block.
+    for (let index = 1; index < block.testMaterial.length; index += 1) {
+      const previous = block.testMaterial[index - 1]?.name;
+      const current = block.testMaterial[index]?.name;
+      if (typeof previous !== "string" || typeof current !== "string") continue;
+      if (compareCodePointStrings(previous, current) >= 0) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["testMaterial", index, "name"],
+          message: `testMaterial names must be unique and ascend by Unicode code point; "${current}" does not follow "${previous}".`,
+        });
+      }
+    }
+  }),
+);
 export type ExternalVerifierBlock = z.infer<typeof ExternalVerifierBlockSchema>;
 
 /** Discriminates the `familyBlock` schema on `EvaluationSpec.family` (wired by schema.ts). */
