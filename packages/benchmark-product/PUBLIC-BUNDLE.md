@@ -681,7 +681,8 @@ The rule passes at a reward of 1, fails at 0, and answers inconclusive for any
 other value. The threshold is not this product's choice. Every one of the 89
 task packages ships a verifier script, `tests/test.sh`, that writes `1` to the
 reward file when every exit code it checks is zero and `0` otherwise, in one
-place, and no other file the package runs names a reward file.
+place, and no other file under the package's `tests/`, `environment/` or
+`solution/` directory names a reward file.
 `core/scripts/generate-terminal-bench-2-1-verifier-pins.mjs` asserts that of
 every package before it writes the values the specs are sealed from, and
 `core/test/fixtures/terminal-bench-2-1-packages/manifest.json` lists every
