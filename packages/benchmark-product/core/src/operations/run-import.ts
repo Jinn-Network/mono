@@ -37,6 +37,11 @@
  * - **`policy.evaluation.minVerdicts > 1`.** Fanning one external result into N evaluator legs
  *   would manufacture agreement between evaluators that never independently existed — the
  *   distinct-is-not-independent laundering `PRINCIPLES.md` forbids naming outright.
+ * - **Anything but `--from harbor` on the official Terminal-Bench 2.1 slate.** The Harbor reader
+ *   holds each trial's package ref and dataset revision against what the slate seals for that
+ *   task. A generic dump row names a slot and nothing else, so it could place any result on any
+ *   official task. The refusal lives here, in the producer: a reader of the bundle can see that
+ *   the import names Harbor, but cannot see which route wrote the rows.
  */
 
 import {
@@ -49,6 +54,7 @@ import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import type { ExternalRunRecord } from "../intake/external-run-records.js";
+import { TERMINAL_BENCH_21_OFFICIAL_SLATE_EXTENSION } from "../intake/terminal-bench-2-1.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import {
   assertExternalRunImportSource,
@@ -76,13 +82,19 @@ export interface RunImportInput {
   /** Directory a relative `evidence[].path` resolves against; normally the dump's own directory. */
   readonly evidenceRoot: string;
   /**
-   * Set only by `run import --from inspect` after `readInspectRunImport`. A generic `--file`
-   * dump must not open an Inspect-bound draft by labeling `source.harness` "inspect".
+   * Set only by `run import --from <reader>`, after that reader produced `records`:
+   * `readInspectRunImport` or `readHarborRunImport`. It says which code read the harness's own
+   * output, which `source.harness` cannot: a generic `--file` dump must not open an Inspect-bound
+   * draft by labeling itself "inspect", nor a draft on the official Terminal-Bench 2.1 slate by
+   * labeling itself "harbor".
    */
-  readonly namedReader?: "inspect";
+  readonly namedReader?: "inspect" | "harbor";
   /** Digest of the dump the operator handed the importer. Omitted, the canonical JSON of
    * `records` is hashed — the in-memory path tests use. */
   readonly dump?: { readonly sha256: string; readonly byteLength: number };
+  /** The most evidence, in bytes, this import may carry in total. Omitted, the 64 MiB default
+   * (`EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES`) applies. */
+  readonly maxAggregateEvidenceBytes?: number;
 }
 
 export interface RunImportResult {
@@ -90,6 +102,8 @@ export interface RunImportResult {
   /** The sealed `ExternalRunImportDeclaration` — the durable home for every imported reason. */
   readonly declarationSha256: string;
   readonly importedCellCount: number;
+  /** Total bytes of the evidence files this import carried, the figure the aggregate cap bounds. */
+  readonly evidenceBytes: number;
   /** Per-outcome counts of what was WRITTEN, not of what the Matrix will derive: the outcome is
    * `run.collect`'s to derive from this evidence, never this operation's to assert. */
   readonly written: {
@@ -175,6 +189,16 @@ export function importRunRecords(
       }
       const benchmarkSha256 = document.spec.taskSet.benchmarkSha256;
       const benchRecord = parseBenchmark(getSealedBytes(workspaceDir, benchmarkSha256));
+      if (carriesOfficialTerminalBench21Slate(benchRecord) && input.namedReader !== "harbor") {
+        refuse(
+          "conflict",
+          `drafts.${input.draftId}.taskSet`,
+          `draft ${input.draftId} is bound to the official Terminal-Bench 2.1 slate, and a run on `
+            + "that slate is brought with `run import --from harbor <jobs-dir>`. Only the Harbor "
+            + "reader checks each trial's package ref and dataset revision against what the slate "
+            + "seals for its task, so no other import is accepted on this slate.",
+        );
+      }
       // Refuses with EVERY problem at once, and writes nothing, before the transition below.
       const plan = validateExternalRunRecords({
         records: input.records,
@@ -207,7 +231,14 @@ export function importRunRecords(
         plan,
         runRecord,
         evidenceRoot: input.evidenceRoot,
+        ...(input.maxAggregateEvidenceBytes === undefined
+          ? {}
+          : { maxAggregateEvidenceBytes: input.maxAggregateEvidenceBytes }),
       });
+      // The dump's identity is one more thing that can refuse: with no `dump` supplied it is the
+      // hash of the records' canonical JSON, and canonical JSON carries no fractional number. So
+      // it is taken here, with every other fallible resolution, and not after the transition.
+      const dump = input.dump ?? recordsDumpIdentity(input.records);
 
       const transitioned = transition("locked", "launch");
       if (!transitioned.ok) {
@@ -224,7 +255,7 @@ export function importRunRecords(
         runRecord,
         owner: runState.owner,
         source: input.source,
-        dump: input.dump ?? dumpIdentityFromRecords(input.records),
+        dump,
         preflight,
         at,
       });
@@ -238,6 +269,7 @@ export function importRunRecords(
         draft,
         declarationSha256: written.declarationSha256,
         importedCellCount: plan.cells.length,
+        evidenceBytes: preflight.evidenceBytes,
         written: {
           graded: written.judged,
           ungradeable: written.unscorable,
@@ -246,4 +278,30 @@ export function importRunRecords(
       };
     },
   });
+}
+
+/** True when the sealed Benchmark carries the official Terminal-Bench 2.1 slate extension, the
+ * one `method terminal-bench-2.1` seals (`../intake/terminal-bench-2-1.ts`). */
+function carriesOfficialTerminalBench21Slate(benchmark: Readonly<Record<string, unknown>>): boolean {
+  const slate = benchmark[TERMINAL_BENCH_21_OFFICIAL_SLATE_EXTENSION];
+  return typeof slate === "object" && slate !== null
+    && (slate as Readonly<Record<string, unknown>>)["protocol"] === "terminal-bench-2.1";
+}
+
+/** `dumpIdentityFromRecords`, with its one failure raised as a refusal: records the canonical
+ * JSON sealer will not write have no identity to seal into the declaration. */
+function recordsDumpIdentity(
+  records: readonly ExternalRunRecord[],
+): { readonly sha256: string; readonly byteLength: number } {
+  try {
+    return dumpIdentityFromRecords(records);
+  } catch (cause) {
+    refuse(
+      "validation",
+      "records",
+      "the dump identity could not be taken from these records, because they are not canonical "
+        + `JSON: ${cause instanceof Error ? cause.message : String(cause)} Pass the identity of `
+        + "the dump the records were read from, or write a fractional value as a decimal string.",
+    );
+  }
 }

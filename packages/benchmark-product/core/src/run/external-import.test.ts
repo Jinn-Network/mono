@@ -12,8 +12,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { expectedCellSet, type BenchmarkRecord, type RunRecord } from "@jinn-network/benchmarking-records";
+import { EVALUATION_SPEC_FORMAT_URI, sealEvaluationSpec } from "@jinn-network/task-execution-profiles";
+import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { BenchmarkProductError } from "../errors.js";
 import type { ExternalRunRecord } from "../intake/external-run-records.js";
+import { putSealedBytes } from "../workspace/sealed-store.js";
 import {
   assertExternalRunImportSource,
   dumpIdentityFromPath,
@@ -280,8 +283,10 @@ describe("validateExternalRunRecords — the refusal message says what to do ins
       'A slot you cannot supply is recorded with outcome "error", "timeout", or "unrun"',
     );
     expect(error.message).toContain(
-      "and a non-blank reason; it is counted in the denominator exactly like every other slot.",
+      "and a non-blank reason; it stays in the run's accounting as one of its arm's planned slots.",
     );
+    // The page calls such a slot "Not in the denominator", so the refusal must not say it is in it.
+    expect(error.message).not.toContain("denominator");
     expect(error.message).toContain("Every expected slot must appear exactly once.");
   });
 
@@ -403,6 +408,208 @@ describe("preflightExternalRunImport — evidence reads never follow a symlink",
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * A subject Task whose sealed EvaluationSpec declares one `number` measurement under the guarded
+ * rule the official Terminal-Bench 2.1 slate is ruled to seal: pass at 1, fail at 0, and
+ * inconclusive for any other value. The family block is the platform's own golden
+ * deterministic-process shape; only the measurements and the rule matter here.
+ */
+const REWARD_SPEC = {
+  protocol: EVALUATION_SPEC_FORMAT_URI,
+  semanticsVersion: "4",
+  family: "deterministic-process" as const,
+  grader: { uri: "https://example.org/graders/deterministic-process-runner" },
+  familyBlock: {
+    image: { uri: "https://example.org/images/runner" },
+    platform: "linux/amd64",
+    workspace: { root: "/workspace" },
+    testMaterial: [{ uri: "https://example.org/tests/test.sh", accessClass: "public" }],
+    parser: {
+      id: "jinn.parser.pytest-json-report",
+      version: "1.0.0",
+      digest: `sha256:${"1".repeat(64)}`,
+    },
+    transitions: { failToPass: ["test_a"], passToPass: ["test_b"] },
+    timeout: 1800,
+  },
+  measurements: [
+    { name: "reward", type: "number" as const, required: true },
+    { name: "note", type: "string" as const, required: false },
+  ],
+  verdictRule: {
+    all: [
+      {
+        inconclusiveWhen: {
+          not: {
+            any: [
+              { threshold: { measurement: "reward", op: "eq" as const, value: 0 } },
+              { threshold: { measurement: "reward", op: "eq" as const, value: 1 } },
+            ],
+          },
+        },
+        class: "non-binary-reward",
+      },
+      { threshold: { measurement: "reward", op: "eq" as const, value: 1 } },
+    ],
+  },
+  unscorable: [{ name: "non-binary-reward", disposition: "recorded-inconclusive" as const }],
+  evidenceConventions: { requiredRefs: [] },
+};
+
+describe("preflightExternalRunImport, grading against a sealed EvaluationSpec", () => {
+  let workspaceDir: string;
+  let evidenceRoot: string;
+  let benchmark: BenchmarkRecord;
+
+  beforeEach(() => {
+    workspaceDir = mkdtempSync(join(tmpdir(), "bp-import-grading-ws-"));
+    evidenceRoot = mkdtempSync(join(tmpdir(), "bp-import-grading-dump-"));
+    const spec = sealEvaluationSpec(REWARD_SPEC);
+    putSealedBytes(workspaceDir, spec.bytes);
+    // `prepareGrading` reads exactly one thing from the subject Task: the digest of the spec it
+    // binds. A document carrying only that keeps this a unit test of the preflight.
+    const taskDigest = putSealedBytes(workspaceDir, new TextEncoder().encode(JSON.stringify({
+      evaluation: { digest: { sha256: spec.digest.slice("sha256:".length) } },
+    })));
+    benchmark = { items: [{ task: { digest: { sha256: taskDigest } } }] } as unknown as BenchmarkRecord;
+  });
+
+  afterEach(() => {
+    rmSync(workspaceDir, { recursive: true, force: true });
+    rmSync(evidenceRoot, { recursive: true, force: true });
+  });
+
+  /** One graded row carrying `measurements`, beside an unrun row for the task's second replicate. */
+  function preflightGraded(
+    measurements: Record<string, string | number | boolean>,
+    options: { readonly evidence?: readonly string[]; readonly maxAggregateEvidenceBytes?: number } = {},
+  ) {
+    const expected = expectedCellSet(benchmark, RUN);
+    const evidence = options.evidence ?? ["result.json"];
+    for (const name of evidence) writeFileSync(join(evidenceRoot, name), "0123456789");
+    const plan = validateExternalRunRecords({
+      records: [
+        {
+          row: 1,
+          cellKey: expected[0]!.cellKey,
+          outcome: "graded",
+          evidence: evidence.map((name) => ({ name, path: name })),
+          measurements,
+        },
+        { row: 2, cellKey: expected[1]!.cellKey, outcome: "unrun", reason: "not attempted" },
+      ],
+      benchmark,
+      run: RUN,
+      benchmarkSha256: BENCHMARK_SHA,
+      runSha256: RUN_SHA,
+      runOpenAt: RUN_OPEN_AT,
+      importedAt: IMPORTED_AT,
+    });
+    return preflightExternalRunImport({
+      workspaceDir,
+      plan,
+      runRecord: RUN,
+      evidenceRoot,
+      ...(options.maxAggregateEvidenceBytes === undefined
+        ? {}
+        : { maxAggregateEvidenceBytes: options.maxAggregateEvidenceBytes }),
+    });
+  }
+
+  function gradingOf(measurements: Record<string, string | number | boolean>) {
+    return preflightGraded(measurements).cells[0]!.grading!;
+  }
+
+  function refusedGrading(measurements: Record<string, string | number | boolean>): BenchmarkProductError {
+    try {
+      preflightGraded(measurements);
+    } catch (error) {
+      if (error instanceof BenchmarkProductError) return error;
+      throw error;
+    }
+    throw new Error("expected a refusal, got a preflight");
+  }
+
+  // A sealed number must be a whole number (the sealers refuse any other JSON number), so a
+  // fractional measurement has exactly one sealable form: a decimal string. The verdict rule
+  // compares that string as an exact decimal.
+  it.each([
+    { supplied: 0.5, sealed: "0.5" },
+    { supplied: "0.5", sealed: "0.5" },
+    { supplied: "0.50", sealed: "0.50" },
+    { supplied: 1e-7, sealed: "0.0000001" },
+    { supplied: -2.5, sealed: "-2.5" },
+    { supplied: 1.5e-7, sealed: "0.00000015" },
+  ])("a fractional $supplied is sealed as the decimal string $sealed and reaches the rule", ({ supplied, sealed }) => {
+    const grading = gradingOf({ reward: supplied });
+    expect(grading.measurements).toEqual({ reward: sealed });
+    expect(() => canonicalJsonBytes(grading.measurements)).not.toThrow();
+    expect(grading.outcome).toEqual({ verdict: "inconclusive", inconclusiveClass: "non-binary-reward" });
+  });
+
+  it.each([
+    { supplied: 1, sealed: 1, verdict: "pass" },
+    { supplied: "1", sealed: 1, verdict: "pass" },
+    { supplied: "1.0", sealed: 1, verdict: "pass" },
+    { supplied: 0, sealed: 0, verdict: "fail" },
+    { supplied: "0", sealed: 0, verdict: "fail" },
+    { supplied: 2, sealed: 2, verdict: "inconclusive" },
+  ])("a whole $supplied is sealed as the number $sealed", ({ supplied, sealed, verdict }) => {
+    const grading = gradingOf({ reward: supplied });
+    expect(grading.measurements).toEqual({ reward: sealed });
+    expect(grading.outcome.verdict).toBe(verdict);
+  });
+
+  it("a whole number no sealed number can hold is sealed as a decimal string, never rounded", () => {
+    // 2^53 is a whole number, and it is not a safe integer: the sealers refuse it as a number.
+    expect(gradingOf({ reward: 2 ** 53 }).measurements).toEqual({ reward: "9007199254740992" });
+    expect(gradingOf({ reward: "9007199254740992" }).measurements).toEqual({ reward: "9007199254740992" });
+    expect(gradingOf({ reward: "9007199254740993" }).measurements).toEqual({ reward: "9007199254740993" });
+    expect(gradingOf({ reward: 1e21 }).measurements).toEqual({ reward: "1000000000000000000000" });
+  });
+
+  it("refuses a number with no decimal form", () => {
+    for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      const error = refusedGrading({ reward: value });
+      expect(error.code).toBe("validation");
+      expect(error.message).toContain('measurement "reward"');
+      expect(error.message).toContain('declared type "number"');
+    }
+  });
+
+  it("refuses a typed measurement the sealer cannot write, as a refusal and before anything is written", () => {
+    // An unpaired surrogate is a string, so it types against a `string` declaration, and no
+    // canonical JSON document can carry it. The verdict statement is sealed only after the draft
+    // has left `locked`, so the preflight is the last place this can be refused safely.
+    const error = refusedGrading({ reward: 1, note: "\ud800" });
+    expect(error.code).toBe("validation");
+    expect(error.issues.map((issue) => issue.path)).toEqual(["row 1"]);
+    expect(error.message).toContain(expectedCellSet(benchmark, RUN)[0]!.cellKey);
+    expect(error.message).toContain("cannot be sealed");
+  });
+
+  it("reports the evidence bytes it read", () => {
+    expect(preflightGraded({ reward: 1 }, { evidence: ["a.json", "b.json", "c.json"] }).evidenceBytes).toBe(30);
+  });
+
+  it("takes the aggregate evidence cap from its caller, and defaults to the 64 MiB constant", () => {
+    expect(EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES).toBe(64 * 1024 * 1024);
+    expect(() => preflightGraded({ reward: 1 }, { evidence: ["a.json", "b.json", "c.json"] })).not.toThrow();
+    expect(() => preflightGraded(
+      { reward: 1 },
+      { evidence: ["a.json", "b.json", "c.json"], maxAggregateEvidenceBytes: 30 },
+    )).not.toThrow();
+    let refused: unknown;
+    try {
+      preflightGraded({ reward: 1 }, { evidence: ["a.json", "b.json", "c.json"], maxAggregateEvidenceBytes: 29 });
+    } catch (error) {
+      refused = error;
+    }
+    expect(refused).toBeInstanceOf(BenchmarkProductError);
+    expect((refused as BenchmarkProductError).message).toContain("above the 29-byte cap");
   });
 });
 
