@@ -3,9 +3,7 @@
   "semanticsVersion": "4",
   "family": "external-verifier",
   "grader": {
-    "name": "example/sum-two-numbers",
-    "uri": "https://example.org/packages/sum-two-numbers",
-    "accessClass": "public"
+    "uri": "https://example.org/packages/sum-two-numbers"
   },
   "familyBlock": {
     "harness": "harbor",

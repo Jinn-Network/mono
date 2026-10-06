@@ -67,7 +67,7 @@
     },
     {
       "id": "evaluation-spec/adversarial/external-verifier-grader-without-digest.json",
-      "sha256": "cfbdb92e1c4b7de2635e5f95d5648488aa56baf8efa07f5e8f9a10ef3f390117"
+      "sha256": "01281f95bf3cd36838958b7d7c81a226a7fe032ea29e2c3259c53a8bd9f216dc"
     },
     {
       "id": "evaluation-spec/adversarial/external-verifier-no-measurements.json",
