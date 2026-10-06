@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
@@ -9,6 +11,7 @@ import {
   FIRST_CUT_PLATFORM_PIN_PATH,
   PRODUCT_RELEASE_PLATFORM_PINS_PATH,
   READER_INSTRUCTION_DOCS,
+  applyColophonPublishManifest,
   assertClaimPinsMatchPublish,
   assertClaimReaderPinsMatchPublish,
   assertReaderInstructionPinsResolve,
@@ -21,6 +24,7 @@ import {
   loadProductReleasePlatformPin,
   registeredReaderReleases,
   transformColophonManifestForPublish,
+  transformColophonReadmeForPublish,
   validateProductReleasePlatformPin,
   validateProductReleasePlatformPins,
 } from './colophon-publish-manifest.mjs';
@@ -175,6 +179,130 @@ test('the published CLI README names the claimant verbs and documents launch as 
   assert.match(readme, /Protocol identifiers[\s\S]{0,64}are names, not addresses/u);
   assert.match(readme, /What this does not yet prove/u);
   assert.doesNotMatch(readme, /spec\.jinn\.network/u);
+});
+
+// A README written against the `next` branch is right in the repository and wrong in a tarball: the
+// branch moves on, and the README a reader installed keeps pointing at whatever the documents have
+// become since. The `--apply` step already stamps the publishing commit into the manifest as
+// `gitHead`, so it pins the README's repository links to that same commit (issue #4954).
+const PUBLISH_HEAD = '4954c0ffee4954c0ffee4954c0ffee4954c0ffee';
+const SHIPPED_README_PRODUCTS = ['check', 'core', 'cli'];
+
+/** A throwaway copy of one product's manifest and README: everything `--apply` reads or writes there. */
+function stagedProduct(product) {
+  const dir = mkdtempSync(join(tmpdir(), `colophon-publish-readme-${product}-`));
+  for (const file of ['package.json', 'README.md']) {
+    copyFileSync(join(repoRoot, 'packages/benchmark-product', product, file), join(dir, file));
+  }
+  return dir;
+}
+
+function runApply(manifestPath, gitHead) {
+  const env = { ...process.env };
+  delete env.GITHUB_SHA;
+  if (gitHead !== undefined) env.GITHUB_SHA = gitHead;
+  return spawnSync(
+    process.execPath,
+    [join(repoRoot, '.github/scripts/colophon-publish-manifest.mjs'), '--apply', manifestPath],
+    { env, encoding: 'utf8' },
+  );
+}
+
+test('the --apply step pins every repository link in each shipped README to the publishing commit (issue #4954)', () => {
+  for (const product of SHIPPED_README_PRODUCTS) {
+    const dir = stagedProduct(product);
+    try {
+      const manifestPath = join(dir, 'package.json');
+      const readmePath = join(dir, 'README.md');
+      const source = readFileSync(readmePath, 'utf8');
+      // The repository is the one the package's own manifest names, so the links a reader follows
+      // and the `repository` field npm shows cannot come apart.
+      const repository = JSON.parse(readFileSync(manifestPath, 'utf8')).repository.url.replace(/\.git$/u, '');
+      assert.equal(repository, 'https://github.com/Jinn-Network/mono', product);
+      const onBranch = source.split(`${repository}/blob/next/`).length + source.split(`${repository}/tree/next/`).length - 2;
+      assert.ok(onBranch > 0, `${product}: the README links no repository document, so this test would prove nothing`);
+
+      const applied = runApply(manifestPath, PUBLISH_HEAD);
+      assert.equal(applied.status, 0, applied.stderr);
+      const published = readFileSync(readmePath, 'utf8');
+      assert.doesNotMatch(published, /\/(?:blob|tree)\/next\//u, `${product}: a link still names the branch`);
+      const onCommit = published.split(`${repository}/blob/${PUBLISH_HEAD}/`).length
+        + published.split(`${repository}/tree/${PUBLISH_HEAD}/`).length - 2;
+      assert.equal(onCommit, onBranch, `${product}: every link must keep its path at the commit`);
+      // Nothing but the ref moved.
+      assert.equal(published.replaceAll(`/${PUBLISH_HEAD}/`, '/next/'), source, product);
+      // The README names the commit the manifest names.
+      assert.equal(JSON.parse(readFileSync(manifestPath, 'utf8')).gitHead, PUBLISH_HEAD, product);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('--apply with no publishing commit leaves the README on the branch, where its links still resolve', () => {
+  const dir = stagedProduct('check');
+  try {
+    const readmePath = join(dir, 'README.md');
+    const source = readFileSync(readmePath, 'utf8');
+    for (const gitHead of [undefined, 'next', PUBLISH_HEAD.slice(0, 12)]) {
+      copyFileSync(join(repoRoot, 'packages/benchmark-product/check/package.json'), join(dir, 'package.json'));
+      const applied = runApply(join(dir, 'package.json'), gitHead);
+      assert.equal(applied.status, 0, applied.stderr);
+      assert.equal(readFileSync(readmePath, 'utf8'), source, `GITHUB_SHA=${gitHead}`);
+      assert.equal(JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).gitHead, undefined, `GITHUB_SHA=${gitHead}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the README transform moves only this repository\'s next-branch links', () => {
+  const readme = [
+    '[guide](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/PUBLIC-BUNDLE.md#formats)',
+    '[kit](https://github.com/Jinn-Network/mono/tree/next/packages/benchmark-product/check/fixtures)',
+    '<https://github.com/Jinn-Network/mono/blob/next/README.md>',
+    // Another repository has its own history: this commit does not exist there.
+    '[site](https://github.com/colophon-claims/site/blob/next/README.md)',
+    '[fork](https://github.com/Jinn-Network/mono-archive/blob/next/README.md)',
+    // Not a branch link, so there is nothing to pin.
+    '[package](https://www.npmjs.com/package/@colophon-claims/check)',
+    'A directory named blob/next/ in prose, and the word next.',
+    '',
+  ].join('\n');
+  assert.equal(
+    transformColophonReadmeForPublish(readme, { gitHead: PUBLISH_HEAD }),
+    [
+      `[guide](https://github.com/Jinn-Network/mono/blob/${PUBLISH_HEAD}/packages/benchmark-product/PUBLIC-BUNDLE.md#formats)`,
+      `[kit](https://github.com/Jinn-Network/mono/tree/${PUBLISH_HEAD}/packages/benchmark-product/check/fixtures)`,
+      `<https://github.com/Jinn-Network/mono/blob/${PUBLISH_HEAD}/README.md>`,
+      '[site](https://github.com/colophon-claims/site/blob/next/README.md)',
+      '[fork](https://github.com/Jinn-Network/mono-archive/blob/next/README.md)',
+      '[package](https://www.npmjs.com/package/@colophon-claims/check)',
+      'A directory named blob/next/ in prose, and the word next.',
+      '',
+    ].join('\n'),
+  );
+  assert.equal(transformColophonReadmeForPublish(readme), readme);
+  assert.equal(transformColophonReadmeForPublish(readme, { gitHead: 'next' }), readme);
+});
+
+test('restoring an applied publish manifest restores the README beside it', () => {
+  const dir = stagedProduct('core');
+  try {
+    const manifestPath = join(dir, 'package.json');
+    const readmePath = join(dir, 'README.md');
+    const manifestSource = readFileSync(manifestPath, 'utf8');
+    const readmeSource = readFileSync(readmePath, 'utf8');
+    const pin = loadProductReleasePlatformPin(repoRoot, JSON.parse(manifestSource));
+    const applied = applyColophonPublishManifest(manifestPath, pin, { gitHead: PUBLISH_HEAD });
+    assert.notEqual(readFileSync(manifestPath, 'utf8'), manifestSource);
+    assert.notEqual(readFileSync(readmePath, 'utf8'), readmeSource);
+    applied.restore();
+    assert.equal(readFileSync(manifestPath, 'utf8'), manifestSource);
+    assert.equal(readFileSync(readmePath, 'utf8'), readmeSource);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('the verifier 0.2 exception cannot become an implicit product or version exception', () => {
