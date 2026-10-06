@@ -87,10 +87,23 @@ function repositoryLinks(readme: PublishedReadme): readonly string[] {
 /** Whether the tarball carries `path`, given relative to the package directory. */
 function shipped(readme: PublishedReadme, path: string): boolean {
   const normalized = path.replace(/\/$/u, "");
-  return readme.files.some((entry) => {
+  // npm packs the manifest whatever `files` says.
+  return normalized === "package.json" || readme.files.some((entry) => {
     const allowed = entry.replace(/\/$/u, "");
     return normalized === allowed || normalized.startsWith(`${allowed}/`);
   });
+}
+
+/**
+ * Whether `span` names a path this checkout has and the tarball does not. The package's own file
+ * wins: `README.md` is the shipped README, not the one at the product or repository root.
+ */
+function namesAnUnshippedPath(readme: PublishedReadme, span: string): boolean {
+  const fromPackage = relative(readme.packageDir, resolve(readme.packageDir, span));
+  if (!fromPackage.startsWith("..") && existsSync(resolve(readme.packageDir, span))) {
+    return !shipped(readme, fromPackage);
+  }
+  return [readme.packageDir, productRoot, repoRoot].some((base) => existsSync(resolve(base, span)));
 }
 
 /**
@@ -103,14 +116,7 @@ function unshippedPathsNamedWithoutALink(readme: PublishedReadme): readonly stri
   const spans = [...outsideLinks.matchAll(/`([^`\n]+)`/gu)].map((match) => match[1]!);
   const looksLikeAPath = (span: string): boolean =>
     /^[\w.-][\w./-]*$/u.test(span) && (span.includes("/") || /\.[a-z]+$/u.test(span));
-  return [...new Set(spans)].filter(looksLikeAPath).filter((span) =>
-    [readme.packageDir, productRoot, repoRoot].some((base) => {
-      const absolute = resolve(base, span);
-      if (!existsSync(absolute)) return false;
-      const fromPackage = relative(readme.packageDir, absolute);
-      return fromPackage.startsWith("..") || !shipped(readme, fromPackage);
-    }),
-  );
+  return [...new Set(spans)].filter(looksLikeAPath).filter((span) => namesAnUnshippedPath(readme, span));
 }
 
 describe("published package READMEs resolve for someone who has only the npm package", () => {
