@@ -1,0 +1,22 @@
+{
+  "input": {
+    "family": "external-verifier",
+    "block": {
+      "harness": "harbor",
+      "testMaterial": [
+        {
+          "name": "tests/test.sh",
+          "digest": {
+            "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "accessClass": "public"
+        }
+      ],
+      "timeout": 900
+    }
+  },
+  "expect": {
+    "ok": false,
+    "code": "invalid-document"
+  }
+}
