@@ -111,10 +111,17 @@ Measurement values are typed against the sealed EvaluationSpec's own
 declarations, so the two dialects genuinely produce one record. A measurement
 declared `boolean` accepts `true`/`false` in either dialect and the strings
 `"true"`/`"false"` — nothing else, because `1` and `yes` are guesses. One
-declared `number` accepts a number or a decimal string; a decimal a JS number
-cannot hold exactly stays the string it was, which the verdict rule compares as
-an exact decimal anyway. One declared `string` accepts only a string. Anything
-else is refused, naming the measurement, the row, and the declared type.
+declared `number` accepts a number or a decimal string. A whole number is
+sealed as a number: `1`, `"1"`, and `"1.0"` all seal the number `1`. Any other
+value is sealed as a decimal string, because a sealed number must be whole. A
+decimal string stays the string it was, so `"0.50"` stays `"0.50"`. A number
+is written as the shortest decimal that reads back as the same value, with no
+exponent, so `0.5` becomes `"0.5"` and `1e-7` becomes `"0.0000001"`. A whole
+number too large for a sealed number to hold exactly, above 2^53 - 1 in
+magnitude, is sealed as a decimal string as well. The verdict rule compares a
+decimal string as an exact decimal, so `"0.50"` equals `0.5`. One declared
+`string` accepts only a string. Anything else is refused, naming the
+measurement, the row, and the declared type.
 
 Evidence paths may not leave the dump file's own directory. An absolute path,
 or a relative one that climbs out of the tree, is refused: whatever a dump
@@ -170,12 +177,13 @@ over a slate you chose after seeing the results — the exact move the sealed
 slate exists to prevent.
 
 So a slot you cannot supply is recorded as `error`, `timeout`, or `unrun` with
-a non-blank reason, and it counts in the denominator like every other slot. A
-dump that omits a slot, names a slot outside the slate, or names one twice is
-refused. The refusal reports **every** problem in the dump at once, grouped
-missing before unknown before duplicate, then the row-level problems in row
-order. Repair the whole list and re-run; there is no round-trip where each
-attempt reveals one more problem.
+a non-blank reason, and it stays in the run's accounting as one of its arm's
+planned slots. It does not enter the pass rate, which is taken over judged
+cells only; the report page shows both counts. A dump that omits a slot, names
+a slot outside the slate, or names one twice is refused. The refusal reports
+**every** problem in the dump at once, grouped missing before unknown before
+duplicate, then the row-level problems in row order. Repair the whole list and
+re-run; there is no round-trip where each attempt reveals one more problem.
 
 ## File formats
 
@@ -373,6 +381,12 @@ is fabricating the artifact a skeptic reads.
 - **`policy.evaluation.minVerdicts > 1`.** A dump carries one result per slot.
   Fanning it across several evaluator legs would manufacture agreement between
   evaluators that never independently existed.
+- **A generic dump into a draft on the official Terminal-Bench 2.1 slate.** A
+  draft bound with `method terminal-bench-2.1` accepts `--from harbor` and
+  nothing else. The Harbor reader holds each trial's package ref and dataset
+  revision against what the slate seals for its task. A `--file` row names a
+  slot and nothing else, so `--source harbor` on a generic dump does not open
+  the slate.
 - **A `graded` row for a task that binds no EvaluationSpec.** There is no rule
   to check the measurements against, and the importer has no standing to supply
   one. Import it as `ungradeable` with a reason.
