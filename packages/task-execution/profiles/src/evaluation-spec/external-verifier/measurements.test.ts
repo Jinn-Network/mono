@@ -61,6 +61,11 @@ describe("external-verifier measurements", () => {
       [-1e21, "-1000000000000000000000"],
       [5e-324, `0.${"0".repeat(323)}5`],
       [1.7976931348623157e308, `17976931348623157${"0".repeat(292)}`],
+      // Past 2^53 several strings of one length read back as the same value. The one carried
+      // has the fewest significant digits, then zeros. It is not the exact integer value of the
+      // binary64, which here is 1152921504606847232.
+      [2 ** 60 + 256, "1152921504606847200"],
+      [123456789012345680000, "123456789012345680000"],
     ];
     for (const [value, text] of cases) {
       expect(read({ reward: value }), String(value)).toEqual({ reward: text });
