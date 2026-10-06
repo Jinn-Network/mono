@@ -222,8 +222,20 @@
       "sha256": "221c32bc6e1466b56770e713bd4be130f927afffa8935fd5d0a6c4856546c642"
     },
     {
+      "id": "external-verifier-measurements/adversarial/out-of-range-value.json",
+      "sha256": "f01e0a8a09a7a41bf57b212f7e73c36e18a668bc9c007ba368b85e725605358b"
+    },
+    {
       "id": "external-verifier-measurements/golden/fractional-reward.json",
       "sha256": "d422c2de021988fb17adb96f022ae9dc9efa9ac396f9f896586f70b67a764f76"
+    },
+    {
+      "id": "external-verifier-measurements/golden/large-whole-reward.json",
+      "sha256": "24a18dc5f3afe78f3e11f704da5c3e467b9bd5dda50170b9adeeff74d5e69707"
+    },
+    {
+      "id": "external-verifier-measurements/golden/nearest-digits-reward.json",
+      "sha256": "3c890129fea8e5b44dbaa1058eba23f6c7d6161f1440d1d4b4d5380ea2a06591"
     },
     {
       "id": "external-verifier-measurements/golden/required-key-absent.json",
@@ -232,6 +244,10 @@
     {
       "id": "external-verifier-measurements/golden/small-fractional-reward.json",
       "sha256": "fcd0a4329d95948593e2bad4c7d0fe0875f3869c698bb152bf694c714089de42"
+    },
+    {
+      "id": "external-verifier-measurements/golden/tied-digits-reward.json",
+      "sha256": "6a5a2988dfd066559ea42a02ccc6fb38e9afd400fff14392f30dde492cdd445b"
     },
     {
       "id": "external-verifier-measurements/golden/undeclared-key-dropped.json",

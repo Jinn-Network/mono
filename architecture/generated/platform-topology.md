@@ -1475,9 +1475,13 @@ The exact 75-package trusted-publisher set is the union of canary-eligible group
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/external-verifier-block/golden/namespaced-extra-key.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/external-verifier-measurements/adversarial/non-numeric-value.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/external-verifier-measurements/adversarial/not-a-map.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/external-verifier-measurements/adversarial/out-of-range-value.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/fractional-reward.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/large-whole-reward.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/nearest-digits-reward.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/required-key-absent.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/small-fractional-reward.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/tied-digits-reward.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/undeclared-key-dropped.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/unsafe-whole-reward.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/whole-reward.json | — | — | — |

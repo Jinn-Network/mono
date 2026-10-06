@@ -13371,8 +13371,35 @@
         "kind": "fixtures",
         "package": "@jinn-network/task-execution-profiles",
         "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-measurements/adversarial/out-of-range-value.json",
+        "relativeSource": "fixtures/external-verifier-measurements/adversarial/out-of-range-value.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
         "path": "packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/fractional-reward.json",
         "relativeSource": "fixtures/external-verifier-measurements/golden/fractional-reward.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/large-whole-reward.json",
+        "relativeSource": "fixtures/external-verifier-measurements/golden/large-whole-reward.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/nearest-digits-reward.json",
+        "relativeSource": "fixtures/external-verifier-measurements/golden/nearest-digits-reward.json"
       },
       {
         "claim": null,
@@ -13391,6 +13418,15 @@
         "packedTargets": [],
         "path": "packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/small-fractional-reward.json",
         "relativeSource": "fixtures/external-verifier-measurements/golden/small-fractional-reward.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/external-verifier-measurements/golden/tied-digits-reward.json",
+        "relativeSource": "fixtures/external-verifier-measurements/golden/tied-digits-reward.json"
       },
       {
         "claim": null,
