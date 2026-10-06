@@ -672,6 +672,18 @@ does not declare it is refused, and so is a declaring bundle whose Report omits
 the sentence, repeats it, or seals it anywhere but its slot. A run on the slate
 that was not imported declares nothing here, and its bundle is unchanged.
 
+The report page of a declaring bundle names its tasks. The task-by-task
+comparison labels each task by its official name, read from the sealed Task's
+`taskName`, and states the dataset with the first 12 hexadecimal digits of the
+dataset revision and of the task's Harbor package ref. Each cell is headed by
+the task's name and states its verdict, and its score is the `reward`
+measurement when every verdict on the cell carries the same one. A cell with no
+verdict states neither. The page is keyed on the verified
+`terminalBench21Comparability` section, never on the Task's profile. So a bundle
+that does not declare the capability renders the page it rendered before, with
+each task labelled by its Task digest: every earlier format, and a slate run
+this product drove itself.
+
 Declaration is authoritative, and presence is derived from it, never the
 reverse. A member of a capability the vector does not declare --- an
 `anchors/...` file, a `qualification.json` --- is a non-allowlisted file. A
