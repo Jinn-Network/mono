@@ -369,22 +369,26 @@ describe("lock on the official slate says what the Harbor run must meet", () => 
   test("a draft that is not on the slate gets none of it", async () => {
     const ctx = contextAt();
     await init(ctx);
-    await createDraft(ctx, "draft-1");
-    await ok(["sample", "init", ...base(), "--draft", "draft-1"], ctx);
-    await ok(["arm", "add", ...base(), "--draft", "draft-1", "--arm", "baseline", "--pinning", JSON.stringify({ harness: { id: "prediction-v1-baseline", version: "1.0.0" } })], ctx);
-    await ok(["arm", "add", ...base(), "--draft", "draft-1", "--arm", "sample", "--pinning", JSON.stringify({ harness: { id: "sample-uniform", version: "0.1.0" } })], ctx);
-    await ok(["quote", ...base(), "--draft", "draft-1"], ctx);
+    /** The bundled sample benchmark, with its two venue arms, quoted. */
+    const quotedSampleDraft = async (draftId: string): Promise<void> => {
+      await createDraft(ctx, draftId);
+      await ok(["sample", "init", ...base(), "--draft", draftId], ctx);
+      await ok(["arm", "add", ...base(), "--draft", draftId, "--arm", "baseline", "--pinning", JSON.stringify({ harness: { id: "prediction-v1-baseline", version: "1.0.0" } })], ctx);
+      await ok(["arm", "add", ...base(), "--draft", draftId, "--arm", "sample", "--pinning", JSON.stringify({ harness: { id: "sample-uniform", version: "0.1.0" } })], ctx);
+      await ok(["quote", ...base(), "--draft", draftId], ctx);
+    };
+
+    await quotedSampleDraft("draft-1");
     const refused = await runCli(["lock", ...base(), "--draft", "draft-1", "--json"], ctx);
+    expect(refused.exitCode).toBe(2);
     expect(envelope(refused).error!.detail).not.toContain("leaderboard");
     const locked = await ok(["lock", ...base(), "--draft", "draft-1", "--ack-sample-size", "--json"], ctx);
     expect(envelope(locked).result).not.toHaveProperty("harborRun");
-    await createDraft(ctx, "draft-2");
-    await ok(["sample", "init", ...base(), "--draft", "draft-2"], ctx);
-    await ok(["arm", "add", ...base(), "--draft", "draft-2", "--arm", "baseline", "--pinning", JSON.stringify({ harness: { id: "prediction-v1-baseline", version: "1.0.0" } })], ctx);
-    await ok(["arm", "add", ...base(), "--draft", "draft-2", "--arm", "sample", "--pinning", JSON.stringify({ harness: { id: "sample-uniform", version: "0.1.0" } })], ctx);
-    await ok(["quote", ...base(), "--draft", "draft-2"], ctx);
+
+    await quotedSampleDraft("draft-2");
     const human = await ok(["lock", ...base(), "--draft", "draft-2", "--ack-sample-size"], ctx);
     expect(human.stdout).not.toMatch(/harbor/iu);
+    // The receipt is still the last line the lock itself prints.
     expect(human.stdout.trimEnd().split("\n").at(-1)).toMatch(/^locked draft draft-2: run [a-f0-9]{64}, closes /u);
   }, 120_000);
 });
