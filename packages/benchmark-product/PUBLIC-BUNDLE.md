@@ -664,8 +664,8 @@ identifies a package's bytes.
 
 The two agree for 88 of the 89 tasks and differ for one. For 88 tasks the
 repository at the upstream commit lists the same ref and holds the same files as
-the published package, once the `.gitignore` that each task directory carries in
-the repository, and that Harbor does not publish, is left out. For
+the published package, once the `.gitignore` at the root of each task directory
+in the repository, which Harbor does not publish, is left out. For
 `sanitize-git-repo` one file differs, `tests/test_outputs.py`: the repository
 writes five placeholder credentials as two joined string literals each, and the
 published package writes each as one literal, 25 bytes fewer in all. So the
@@ -674,8 +674,10 @@ repository at that commit lists
 that task, and the slate pins
 `sha256:6e86297715fae62cd499fbdd27013e11a38d05d7e05b7f661cb50b4ecead128f`, the
 package Harbor publishes and runs. A reader who hashes the repository's task
-directories at the upstream commit by Harbor's rule, leaving out each
-`.gitignore`, reproduces 88 of the slate's refs and not that one.
+directories at the upstream commit by Harbor's rule, leaving out the
+`.gitignore` at the root of each task directory and nothing else, reproduces 88
+of the slate's refs and not that one. One package, `install-windows-3.11`,
+publishes a nested `environment/isos/.gitignore`; that file stays in.
 
 A bundle is on the official slate because its records are, not because its
 vector says so. The checker carries its own copy of the slate: the dataset

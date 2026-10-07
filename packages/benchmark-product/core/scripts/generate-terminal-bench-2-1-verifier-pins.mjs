@@ -44,8 +44,8 @@
  * two are not the same bytes. The commit the slate names is where the task list was read. A
  * package's bytes are identified by its slate ref, the content hash Harbor gives the published
  * package. When this table was first generated, 88 of the 89 task directories at that commit held
- * exactly the files of the published package, once the `.gitignore` each directory carries in the
- * repository, which Harbor does not publish, was left out, and the repository's own
+ * exactly the files of the published package, once the `.gitignore` at the root of each directory
+ * in the repository, which Harbor does not publish, was left out, and the repository's own
  * `tasks/dataset.toml` listed the slate ref for each of them. The 89th, `sanitize-git-repo`, did
  * not: its `tests/test_outputs.py` writes five placeholder credentials as two joined string
  * literals in the repository and as one literal each in the published package, and the

@@ -11,9 +11,9 @@
  * A `ref` is the content hash Harbor gives the package it publishes for that revision. It is the
  * value a Harbor trial records, and it is what identifies a package's bytes. The commit does not.
  * For 88 tasks the repository at that commit lists the same ref and holds the same files, once the
- * `.gitignore` each task directory carries there, which Harbor does not publish, is left out. For
- * `sanitize-git-repo` it lists another ref, because one test file differs. `PUBLIC-BUNDLE.md`
- * states the difference.
+ * `.gitignore` at the root of each task directory there, which Harbor does not publish, is left
+ * out. For `sanitize-git-repo` it lists another ref, because one test file differs.
+ * `PUBLIC-BUNDLE.md` states the difference.
  */
 
 export const TERMINAL_BENCH_21_UPSTREAM_REPOSITORY =
