@@ -100,6 +100,7 @@ import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationRes
 import {
   DOMAIN_BINDING_MECHANISM_NAMES,
   beaconIndexWord,
+  carriesOfficialTerminalBench21Slate,
   exportFreezeRepo,
   summarizeVerificationOutcome,
   verifyFreezeRepo,
@@ -277,7 +278,8 @@ inspect is draft inspect. lock is runLock.
  * Each entry answers a question the pre-publish rehearsal's walker could not answer from help:
  * what an arm pinning must contain for a brought run (issue #4946), whether a claimant runs
  * `quote` and what its refusals mean (issues #4944, #4947), and which provider values `anchor`
- * accepts (issue #4951).
+ * accepts (issue #4951). `arm add` also names the document that walks the whole path, because a
+ * help page holds one example and no reader of it can ask for the rest.
  */
 const VERB_HELP_NOTES: Readonly<Record<string, () => string>> = {
   "arm add": () => `A pinning is a JSON object that says what the arm is. It is sealed into the lock
@@ -292,6 +294,9 @@ trial to exactly one arm, or refuses the import. An arm matches when either hold
     pinning.model.id equals the Harbor model name
   example: --arm terminus-2
            --pinning '{"agent":{"id":"terminus-2"},"model":{"id":"<provider>/<model>"}}'
+
+The full walkthrough is CLAIMANT-WALKTHROUGH.md, linked from the
+@colophon-claims/cli README.
 
 --agent takes a machine-local Claude Code or Codex profile (agent add) instead
 of --pinning.
@@ -1507,6 +1512,10 @@ function importFormat(args: ParsedArgs): ExternalRunRecordFormat {
  * The measurement columns are exactly what each subject Task's own sealed EvaluationSpec declares.
  * A `graded` row's verdict is computed from that spec's verdict rule, so these are the names the
  * rule can actually read; anything else would be a column with nowhere to land.
+ *
+ * A draft on the official Terminal-Bench 2.1 slate gets no skeleton. Import accepts only a Harbor
+ * jobs directory there (`operations/run-import.ts`), so a skeleton would be a file whose filled
+ * copy is refused. The refusal names the command that does bring the run.
  */
 function renderImportTemplate(
   workspaceDir: string,
@@ -1517,11 +1526,20 @@ function renderImportTemplate(
   if (document.spec.taskSet.kind !== "benchmark") {
     refuse("conflict", `drafts.${draftId}.taskSet`, `draft ${draftId} has no attached benchmark`);
   }
+  const benchmark = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
+  if (carriesOfficialTerminalBench21Slate(benchmark)) {
+    refuse(
+      "conflict",
+      `drafts.${draftId}.taskSet`,
+      `draft ${draftId} is bound to the official Terminal-Bench 2.1 slate, and a run on that slate `
+        + "is brought with `run import --from harbor <jobs-dir>`. That reads the Harbor jobs "
+        + "directory itself and takes no dump file, so there is no skeleton to fill in.",
+    );
+  }
   const runState = requireRunState(workspaceDir, draftId);
   if (runState.runSha256 === undefined) {
     refuse("conflict", `runs.${draftId}`, `draft ${draftId} has no sealed Run record yet — lock it first`);
   }
-  const benchmark = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
   const run = parseRun(getSealedBytes(workspaceDir, runState.runSha256));
   const coords = expectedCellSet(benchmark, run);
 
