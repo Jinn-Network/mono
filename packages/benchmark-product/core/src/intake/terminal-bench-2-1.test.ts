@@ -280,7 +280,10 @@ describe("the EvaluationSpec of an official Terminal-Bench 2.1 task", () => {
     expect(built.profile.sha256).toBe("be35444162406ef9b2720be2e49c30570a2b1bd49af2bd88855c867a14e2574b");
     expect(built.tasks[0]!.evaluationSpec.sha256).toBe("f8a23fcec481a0bc9382b2e820a0dbbf574c324bd454d35f82ad0acc8eef1b59");
     expect(built.tasks[0]!.sha256).toBe("8c5e35f7096a5c2e3b7f4a8c4fc3d9a2c9134c6980ca5a01789bfddadc6af916");
-    expect(built.benchmark.sha256).toBe("738b5bca6c8e455b101153c5628048d629069000fe09874a41028c82c9cc67a0");
+    // The Benchmark alone moved once more, when its description stopped saying its tasks are "at"
+    // the upstream commit (it was 738b5bca...). No Task and no profile carries that text, so the
+    // three digests above and the checker's pin table stayed where they were.
+    expect(built.benchmark.sha256).toBe("4d78c13b27d937de0b929c0f02309e5a06b6d5fc584949877950a12c7f79cb08");
     // The slate digest covers names and package refs only, so it does not move.
     expect(built.slateDigest).toBe("sha256:0192806b9856af79819833c8cacd409a52f8ae56352936b0d392c3c463ec504d");
   });

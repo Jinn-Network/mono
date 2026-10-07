@@ -41,11 +41,16 @@
  * values. That is a fact about the packages, checked here on every run.
  *
  * The published packages, not the dataset's upstream git repository, are the input, because the
- * two are not the same bytes. When this table was first generated, 88 of the 89 package
- * directories at the upstream commit the slate names hashed to their slate ref. The 89th,
- * `sanitize-git-repo`, did not: its `tests/test_outputs.py` writes five placeholder credentials as
- * two joined string literals in the repository and as one literal each in the published package.
- * The slate ref names the published package, which is what Harbor runs and what a trial records.
+ * two are not the same bytes. The commit the slate names is where the task list was read. A
+ * package's bytes are identified by its slate ref, the content hash Harbor gives the published
+ * package. When this table was first generated, 88 of the 89 task directories at that commit held
+ * exactly the files of the published package, once the `.gitignore` each directory carries in the
+ * repository, which Harbor does not publish, was left out, and the repository's own
+ * `tasks/dataset.toml` listed the slate ref for each of them. The 89th, `sanitize-git-repo`, did
+ * not: its `tests/test_outputs.py` writes five placeholder credentials as two joined string
+ * literals in the repository and as one literal each in the published package, and the
+ * repository lists another ref for it. The slate ref names the published package, which is what
+ * Harbor runs and what a trial records.
  *
  * Run `yarn build` first: the slate table is read from `dist/`.
  *

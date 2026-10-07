@@ -646,11 +646,36 @@ sentence again:
 | Field | Meaning |
 | --- | --- |
 | `datasetId`, `datasetRevision` | the dataset, and the revision of it the leaderboard pins |
-| `upstreamCommit` | the commit of the dataset's source repository the slate was read at |
+| `upstreamCommit` | the commit of the dataset's source repository where the official task list was read; it does not identify a task package's bytes, which the package ref does |
 | `slateDigest` | the digest of the slate: every official task name with its package ref |
 | `coverage` | `one_task`, `ten_task`, `full`, or `custom`, recomputed from the selected names |
 | `selectedTaskCount`, `datasetTaskCount` | how many of the dataset's tasks this Benchmark carries |
 | `limit` | the sentence above |
+
+The upstream commit and the package refs say two different things. Each official
+Task seals both, as `payload.upstreamCommit` and `payload.packageRef`, and the
+Benchmark's extension seals the repository and the commit. The commit names
+where the task list was read: the 89 task names, in slate order, are the entries
+of `tasks/dataset.toml` in the dataset's source repository at that commit, and
+the dataset revision is the one that repository's leaderboard code pins there. A
+package ref is the content hash Harbor gives the package it publishes for that
+dataset revision. It is the value a Harbor trial records, and it is what
+identifies the bytes a task was run and scored with.
+
+The two agree for 88 of the 89 tasks and differ for one. For 88 tasks the
+repository at the upstream commit lists the same ref and holds the same files as
+the published package, once the `.gitignore` that each task directory carries in
+the repository, and that Harbor does not publish, is left out. For
+`sanitize-git-repo` one file differs, `tests/test_outputs.py`: the repository
+writes five placeholder credentials as two joined string literals each, and the
+published package writes each as one literal, 25 bytes fewer in all. So the
+repository at that commit lists
+`sha256:73c94a21ebe370bae843adbeeaaa9e991374867b18483aaf56c7cd470dcddea7` for
+that task, and the slate pins
+`sha256:6e86297715fae62cd499fbdd27013e11a38d05d7e05b7f661cb50b4ecead128f`, the
+package Harbor publishes and runs. A reader who hashes the repository's task
+directories at the upstream commit by Harbor's rule, leaving out each
+`.gitignore`, reproduces 88 of the slate's refs and not that one.
 
 A bundle is on the official slate because its records are, not because its
 vector says so. The checker carries its own copy of the slate: the dataset
@@ -687,7 +712,10 @@ place, and no other file under the package's `tests/`, `environment/` or
 every package before it writes the values the specs are sealed from, and
 `core/test/fixtures/terminal-bench-2-1-packages/manifest.json` lists every
 package file by path and SHA-256, so the chain from a spec's digests to the
-slate's package refs can be recomputed without the packages.
+slate's package refs can be recomputed without the packages. The manifest lists
+the packages as Harbor publishes them for the pinned dataset revision, which is
+what the package refs name. It does not list the repository's files at the
+upstream commit, which differ for one task as stated above.
 
 Each spec names one required evidence reference, `trial-result.json`. That is
 the name under which the Harbor reader carries the `result.json` Harbor wrote

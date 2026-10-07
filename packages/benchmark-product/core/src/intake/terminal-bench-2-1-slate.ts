@@ -1,5 +1,19 @@
-/** Official Terminal-Bench 2.1 task list at the leaderboard hub.py commit.
- * Names match Harbor registry metadata for DATASET_REF (metadata-only query; no task content).
+/**
+ * The official Terminal-Bench 2.1 slate: 89 task names, each with its Harbor package ref.
+ *
+ * `TERMINAL_BENCH_21_UPSTREAM_COMMIT` names where the task list was read. It is the commit of the
+ * dataset's source repository at which the leaderboard code
+ * (`leaderboard/src/leaderboard/core/hub.py`) pins the dataset revision, `DATASET_REF`. The 89
+ * names, in this order, are the entries of that commit's `tasks/dataset.toml`, and they match
+ * Harbor's registry metadata for the dataset at that revision (a metadata-only query; no task
+ * content).
+ *
+ * A `ref` is the content hash Harbor gives the package it publishes for that revision. It is the
+ * value a Harbor trial records, and it is what identifies a package's bytes. The commit does not.
+ * For 88 tasks the repository at that commit lists the same ref and holds the same files, once the
+ * `.gitignore` each task directory carries there, which Harbor does not publish, is left out. For
+ * `sanitize-git-repo` it lists another ref, because one test file differs. `PUBLIC-BUNDLE.md`
+ * states the difference.
  */
 
 export const TERMINAL_BENCH_21_UPSTREAM_REPOSITORY =
