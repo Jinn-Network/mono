@@ -221,6 +221,10 @@ function ExcludedFromDeclared({ value }: { readonly value: number | undefined })
  * `accounting` is `undefined` when the caller has no per-arm accounting it can attribute to this
  * headline. Every arm then withholds its strict number, which is what `armDenominators` already
  * does for an arm the accounting does not carry.
+ *
+ * An arm with `n` 0 states no rate and no interval. `wilson@1` seals `0.0000` for all three, and
+ * shown as sealed that reads as an arm that failed every task when it was never scored. The stored
+ * records are not changed.
  */
 function HeadlineByArm({
   caption,
@@ -236,7 +240,7 @@ function HeadlineByArm({
   const denominators = armDenominators(arms, accounting ?? NO_ACCOUNTING);
   return <div tabIndex={0} aria-label={ariaLabel} className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">{caption}</caption><thead><tr><th scope="col">Arm</th><th scope="col">Judged n</th><th scope="col">All planned slots</th><th scope="col">Not in the denominator</th><th scope="col">Pass rate</th><th scope="col">Wilson interval</th></tr></thead><tbody>{arms.map((arm, index) => {
     const pair = denominators[index]!;
-    return <tr key={arm.armId} className="border-t"><th scope="row" className="py-2 pr-4">{arm.armId}</th><td>{pair.declared}</td><td>{pair.allSlots ?? "Not stated"}</td><td><ExcludedFromDeclared value={pair.excludedFromDeclared} /></td><td>{arm.passRate}</td><td>{arm.low} to {arm.high}</td></tr>;
+    return <tr key={arm.armId} className="border-t"><th scope="row" className="py-2 pr-4">{arm.armId}</th><td>{pair.declared}</td><td>{pair.allSlots ?? "Not stated"}</td><td><ExcludedFromDeclared value={pair.excludedFromDeclared} /></td><td>{arm.n === 0 ? "No rate is stated" : arm.passRate}</td><td>{arm.n === 0 ? "Not stated" : <>{arm.low} to {arm.high}</>}</td></tr>;
   })}</tbody></table></div>;
 }
 

@@ -70,6 +70,9 @@ async function executeSelectTerminalBench21Runtime(context: OperationContext, in
     const author = loadOrCreateReportSigningKey(context.workspaceDir).keyId;
     const authoredTasks: Array<{ taskName: string; taskSha256: string; bytes: Uint8Array }> = [];
     for (const task of built.tasks) {
+      // The re-authored Task below keeps the official Task's `evaluation` digest, so the spec is
+      // stored once and serves both.
+      putSealedBytes(context.workspaceDir, task.evaluationSpec.bytes);
       putSealedBytes(context.workspaceDir, task.bytes);
       const authored = deriveWorkspaceAuthoredTask({
         sourceBytes: task.bytes,
