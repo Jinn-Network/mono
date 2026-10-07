@@ -125,6 +125,8 @@ let paths: ClaimantPaths;
 const ran = new Map<string, CliResult>();
 /** The draft's lifecycle state after each step that ended the way it declares. */
 const stateAfter = new Map<string, string>();
+/** The instant the Run was sealed, read from the workspace once it holds one. */
+let lockedAt: string | undefined;
 
 /**
  * Writes the dump: the skeleton `run import --template` printed, with every slot marked `unrun`.
@@ -217,8 +219,6 @@ const CLAIMANT_STEPS: readonly ClaimantStep[] = [
 
 /** What is read out of the workspace before it is deleted. */
 interface WorkspaceFacts {
-  /** The instant the Run was sealed. */
-  readonly lockedAt: string;
   readonly declaration: ExternalRunImportDeclaration;
   /** Sealed Task digest to the official task name its payload seals. */
   readonly taskNames: ReadonlyMap<string, string>;
@@ -301,7 +301,9 @@ beforeAll(async () => {
     const result = await runCli([...step.argv(paths), ...(step.human === true ? [] : ["--json"])], context);
     ran.set(step.name, result);
     if ((result.exitCode === 0) === (step.refused === true)) return;
-    if (step.name !== "init") stateAfter.set(step.name, readDraftDocument(paths.workspaceDir, DRAFT).state);
+    if (step.name === "init") continue;
+    stateAfter.set(step.name, readDraftDocument(paths.workspaceDir, DRAFT).state);
+    lockedAt ??= readRunState(paths.workspaceDir, DRAFT)?.lockedAt;
   }
 
   const sealedJson = (sha256: string): unknown =>
@@ -310,7 +312,6 @@ beforeAll(async () => {
     sealedJson(resultOf("run import --from harbor")["declarationSha256"] as string),
   );
   workspaceFacts = {
-    lockedAt: readRunState(paths.workspaceDir, DRAFT)!.lockedAt!,
     declaration,
     taskNames: new Map([...new Set(declaration.rows.map((row) => row.cellKey.split("/")[0]!))].map((taskSha256) => [
       taskSha256,
@@ -392,7 +393,8 @@ describe("claimant path: method terminal-bench-2.1 to a published bundle of an a
     ));
     expect(trialStarts).toHaveLength(6);
     const anchoredAt = Date.parse(ANCHOR_GEN_TIME);
-    expect(Date.parse(facts().lockedAt)).toBeLessThan(anchoredAt);
+    expect(lockedAt, "the workspace holds a sealed Run").toBeDefined();
+    expect(Date.parse(lockedAt!)).toBeLessThan(anchoredAt);
     expect(anchoredAt).toBeLessThan(Math.min(...trialStarts));
   });
 
