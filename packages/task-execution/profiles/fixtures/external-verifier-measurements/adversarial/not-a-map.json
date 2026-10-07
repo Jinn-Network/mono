@@ -1,0 +1,8 @@
+{
+  "input": {
+    "harness": "harbor",
+    "measurements": [{ "name": "reward", "type": "number", "required": true }],
+    "rewards": null
+  },
+  "expect": { "ok": false, "code": "invalid-document" }
+}

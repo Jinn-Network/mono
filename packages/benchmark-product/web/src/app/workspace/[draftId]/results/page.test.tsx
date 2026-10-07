@@ -480,3 +480,50 @@ describe("declared and all-slots denominators", () => {
     expect(tableFrom(markup, "Headline results by arm")).toContain("<td>2</td><td>Not stated</td><td>Not stated</td>");
   });
 });
+
+/** Operator rulings of 2026-10-06, decision 6 (issue #4975). `wilson@1` seals `0.0000` for the
+ * rate and both interval bounds of an arm with `n` 0, and shown as sealed that reads as an arm
+ * that failed every task when it was never scored. */
+describe("an arm with no judged cell", () => {
+  beforeEach(() => loadResultsViewMock.mockReset());
+
+  function tableFrom(markup: string, caption: string): string {
+    const start = markup.indexOf(caption);
+    expect(start).toBeGreaterThan(0);
+    return markup.slice(start, markup.indexOf("</table>", start));
+  }
+
+  test("states no rate and no interval in either headline table, and a scored arm keeps its sealed values", async () => {
+    const view = reportedView();
+    const unscored = { n: 0, passRate: "0.0000", wilsonInterval: { low: "0.0000", high: "0.0000" } };
+    Object.assign(view.results.result.report.claimPackage.headline, { candidate: unscored });
+    Object.assign(view.results.result.report.record.results.perSubject[0]!.results.arms, { candidate: unscored });
+    loadResultsViewMock.mockReturnValue(view);
+    const markup = renderToStaticMarkup(await ResultsPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+
+    const claim = tableFrom(markup, "Headline results by arm");
+    const report = tableFrom(markup, "Stored Report headline by arm");
+    for (const table of [claim, report]) {
+      expect(table).toContain("<td>No rate is stated</td><td>Not stated</td></tr>");
+      expect(table).not.toContain("0.0000");
+    }
+    // The declared and planned counts beside it are unchanged: the Matrix planned one slot for the
+    // arm and none of it is in the denominator.
+    expect(claim).toContain("candidate</th><td>0</td><td>1</td><td>1</td><td>No rate is stated</td>");
+    // The other arm was scored, so its sealed rate and interval print as they are.
+    expect(claim).toContain("<td>1.0000</td><td>0.2065 to 1.0000</td></tr>");
+    expect(report).toContain("<td>0.2500</td><td>0.0100 to 0.7000</td></tr>");
+  });
+
+  test("an arm that was scored and failed every task keeps its sealed zero rate", async () => {
+    const view = reportedView();
+    Object.assign(view.results.result.report.claimPackage.headline, {
+      baseline: { n: 3, passRate: "0.0000", wilsonInterval: { low: "0.0000", high: "0.5615" } },
+    });
+    loadResultsViewMock.mockReturnValue(view);
+    const markup = renderToStaticMarkup(await ResultsPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+    const claim = tableFrom(markup, "Headline results by arm");
+    expect(claim).toContain("<td>0.0000</td><td>0.0000 to 0.5615</td></tr>");
+    expect(claim).not.toContain("No rate is stated");
+  });
+});

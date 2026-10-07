@@ -1,0 +1,14 @@
+{
+    "task": {
+        "name": "terminal-bench/cancel-async-tasks",
+        "ref": "sha256:a3d048d351136e48070696cda8bb79660dfd74db1fea3b6da88559f0332699c1",
+        "source": "terminal-bench/terminal-bench-2-1"
+    },
+    "trial_name": "cancel-async-tasks__u3KL6Xo",
+    "trials_dir": "jobs/terminus-2",
+    "agent": {
+        "name": "terminus-2",
+        "model_name": "openrouter/deepseek/deepseek-v4.1-flash"
+    },
+    "job_id": "ec23d448-4283-41f7-8a7a-b3c1ca43f1dc"
+}

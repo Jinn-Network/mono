@@ -1,0 +1,15 @@
+{
+  "input": {
+    "family": "external-verifier",
+    "block": {
+      "harness": "harbor",
+      "verifierSemanticsVersion": "1",
+      "testMaterial": [],
+      "timeout": 900
+    }
+  },
+  "expect": {
+    "ok": false,
+    "code": "invalid-document"
+  }
+}
