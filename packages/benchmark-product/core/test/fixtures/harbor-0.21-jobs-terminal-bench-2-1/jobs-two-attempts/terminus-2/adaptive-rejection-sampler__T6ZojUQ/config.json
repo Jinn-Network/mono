@@ -1,0 +1,14 @@
+{
+    "task": {
+        "name": "terminal-bench/adaptive-rejection-sampler",
+        "ref": "sha256:bcaa2399985cd57666018025846289ab25e193ae0dd8fb7f0ffab2410c24d4de",
+        "source": "terminal-bench/terminal-bench-2-1"
+    },
+    "trial_name": "adaptive-rejection-sampler__T6ZojUQ",
+    "trials_dir": "jobs/terminus-2",
+    "agent": {
+        "name": "terminus-2",
+        "model_name": "openrouter/deepseek/deepseek-v4.1-flash"
+    },
+    "job_id": "ec23d448-4283-41f7-8a7a-b3c1ca43f1dc"
+}

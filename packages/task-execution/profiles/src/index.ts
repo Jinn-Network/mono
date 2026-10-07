@@ -32,3 +32,7 @@ export * from "./evaluation-spec/state-predicate/observation.js";
 export * from "./evaluation-spec/state-predicate/reads.js";
 export * from "./evaluation-spec/state-predicate/evaluate.js";
 export * from "./evaluation-spec/state-predicate/spec-checks.js";
+export * from "./evaluation-spec/external-verifier/code-point-order.js";
+export * from "./evaluation-spec/external-verifier/package-digest.js";
+export * from "./evaluation-spec/external-verifier/measurements.js";
+export * from "./evaluation-spec/external-verifier/spec-checks.js";

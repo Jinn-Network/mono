@@ -3,18 +3,21 @@ import { EVALUATION_SPEC_FORMAT_URI } from "../identifiers.js";
 import { accessClassifiedResourceDescriptor } from "../resource-descriptor.js";
 import { VerdictRuleSchema } from "./verdict-rule.js";
 import { UnscorableSchema } from "./unscorable.js";
-import { FAMILY_BLOCK_SCHEMAS, STATE_PREDICATE_FAMILY } from "./family-blocks.js";
+import { EXTERNAL_VERIFIER_FAMILY, FAMILY_BLOCK_SCHEMAS, STATE_PREDICATE_FAMILY } from "./family-blocks.js";
+import { checkExternalVerifierSpec } from "./external-verifier/spec-checks.js";
 import { checkStatePredicateSpec } from "./state-predicate/spec-checks.js";
 
-/** Grader families (5, §7.1 + chain-environment design §6/CF1: `state-predicate` added
+/** Grader families (6, §7.1 + chain-environment design §6/CF1: `state-predicate` added
  * additively — an enum amendment plus a typed block, proposed explicitly, never an appeal to
- * extension rules the profiles design does not carry). */
+ * extension rules the profiles design does not carry; `external-verifier` added the same way by
+ * proposal 0002). The set is closed: any other family name is an invalid document. */
 export const GRADER_FAMILIES = [
   "deterministic-process",
   "model-graded",
   "human-review",
   "composite",
   "state-predicate",
+  "external-verifier",
 ] as const;
 export type GraderFamily = (typeof GRADER_FAMILIES)[number];
 
@@ -67,6 +70,12 @@ export const EvaluationSpecSchema = z
     }
     if (spec.family === STATE_PREDICATE_FAMILY) {
       const check = checkStatePredicateSpec(spec);
+      if (!check.ok) {
+        ctx.addIssue({ code: "custom", message: check.reason });
+      }
+    }
+    if (spec.family === EXTERNAL_VERIFIER_FAMILY) {
+      const check = checkExternalVerifierSpec(spec);
       if (!check.ok) {
         ctx.addIssue({ code: "custom", message: check.reason });
       }

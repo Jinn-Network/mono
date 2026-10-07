@@ -81,7 +81,10 @@ composed `/10` generation. An imported run's `report` / `publish` path:
 - Hashes `--file` and `--from inspect` pointing at a file by those file bytes;
   a directory (`--from harbor`, `--from inspect` at a dir) hashes the canonical
   JSON of the normalized records. In-memory tests hash the records.
-- Caps a hostile dump: 10_000 rows, 8 MiB per evidence file, 64 MiB aggregate.
+- Caps a hostile dump: 10_000 rows and 8 MiB per evidence file. All evidence
+  together is capped at 64 MiB unless the import is given a larger figure. The
+  Harbor reader works one out for its run: 4 MiB for each cell the locked run
+  expects, and never less than 64 MiB.
 
 `colophon publish` and the GUI's `run.publish` succeed. Managed signed Report
 v2 publication (`colophon publication report`) seals the same import-aware
@@ -90,6 +93,9 @@ does not carry it. Both durable signals are still consulted so a crash after the
 journal marker but before `RunState.externalImportSha256` still reads as
 imported. The public reader accepts the published bundle; the extra check is
 `external-import`. Proven in `core/src/operations/run-import.bundle.test.ts`.
+A Harbor run on the official Terminal-Bench 2.1 slate is walked from `init` to
+a published bundle that the reader accepts in
+`core/src/conformance/claimant-path.terminal-bench-2-1.test.ts`.
 
 ## The per-attempt record shape
 
@@ -283,24 +289,76 @@ path already uses: `harborTrialTaskName` / `assignHarborTrialAttempt` (Harbor
 `from-harbor.ts` (`taskNameByDigestFromSuite` / `digestByTaskNameFromSuite`).
 This issue does not invent a second Harbor mapper.
 
-Outcomes are the closed vocabulary above. A Harbor trial that finished with
-verifier reward or a prediction artifact is imported as `ungradeable`: Harbor's
-grader is not the subject Task's sealed EvaluationSpec, and this reader does
-not invent measurements for that spec. `AgentTimeoutError` /
-`VerifierTimeoutError` are `timeout`. Other terminal Harbor failures are
-`error`. The exception type is read from `exception_info.exception_type`, where
-Harbor 0.21 writes it, or from a top-level `exception_type`. A slot the jobs
-directory did not contain is written as `unrun` with a reason so it stays in
-the denominator. There is no exclude flag.
+Outcomes are the closed vocabulary above. On a draft bound with
+`method terminal-bench-2.1`, each Task seals an `external-verifier`
+EvaluationSpec that declares one measurement, `reward`. It is the same-named
+key of Harbor's raw reward map, the object at `verifier_result.rewards` in the
+trial `result.json`. A finished trial whose map holds that key as a finite
+number is imported as `graded`, with the reward as its measurement. A whole
+reward is sealed as a number and any other as a decimal string, by the number
+rule above. The reader supplies no verdict. The sealed rule gives it: pass at
+1, fail at 0, inconclusive for any other value. An inconclusive cell is left
+out of the pass rate.
+
+A trial is graded by its reward whatever exception Harbor also recorded. A
+trial that ran to `AgentTimeoutError`, and whose work the verifier then scored,
+has a reward and is graded by it. The exception stays in the
+`trial-result.json` the record carries. A trial whose reward map lacks the
+`reward` key, or holds something other than a finite number there, is not
+graded. It is imported as `ungradeable` with a reason that names the key. The
+reader never fills a reward in.
+
+A trial with no reward map is not graded either. `AgentTimeoutError` and
+`VerifierTimeoutError` are `timeout`. `RewardFileNotFoundError`,
+`RewardFileEmptyError` and `VerifierOutputParseError` are `ungradeable`. Other
+terminal Harbor failures are `error`. The exception type is read from
+`exception_info.exception_type`, where Harbor 0.21 writes it, or from a
+top-level `exception_type`. A slot the jobs directory did not contain is
+written as `unrun` with a reason, so it stays in the run's accounting. There is
+no exclude flag.
+
+On a draft bound any other way no trial is graded. Its Tasks declare no
+measurement that Harbor's reward could be read into, so a finished trial with a
+verifier reward or a prediction artifact is imported as `ungradeable`, and this
+reader does not invent measurements.
+
+The reader accepts only a job written by Harbor 0.21.0. It is tested against a
+real jobs directory of each version it accepts, and it has none of any other.
+A job's version is the one its `lock.json` states (`harbor.version`). A job
+that states another version, or none, is refused by name. The same file must
+state `retry.max_retries` as 0, and a job `result.json` that counts retries
+(`stats.n_retries`) must count 0. No real record shows how Harbor lays out a
+retried trial, so a job that allowed retries is refused by name. Retries off is
+Harbor's default (`harbor run --max-retries 0`). A directory that holds no job
+is refused too.
+
+More than one trial of a task fills that many replicates. Harbor does not
+number the attempts of a task (`harbor run --n-attempts <k>`): they are sibling
+trial directories that differ in a random suffix. The reader numbers them from
+1 in code-point order of the directory names, for each arm, so the numbering
+does not depend on the locale of the machine that runs the import. A run locked
+with two replicates takes two trials of each task from each arm. A third trial
+of a task has no slot, and the import is refused.
 
 Timings (`started_at` / `finished_at`) and evidence paths (`result.json`,
 `config.json`, `verifier/reward.txt`, prediction and trajectory artifacts) are
 carried on the record. Evidence paths are relative to the jobs directory you
 passed. The #2979 sealed-run window still applies: an imported timestamp must
-fall at or after lock and at or before import. Harbor timestamps from a run
-that finished before you locked this draft will be refused for that reason —
-omit them from the trial `result.json`, or lock the Colophon run so its window
-covers the Harbor times.
+fall at or after lock, and at or before the earlier of the run's close time and
+the import. `lock` prints the close time. So lock first, then run Harbor.
+
+A run that finished before you locked the draft cannot be brought onto that
+lock. Each of its trials is dated before the window opens, so the import is
+refused, naming the row and the time of every start and finish that falls
+outside the window. A refused import writes nothing and the draft stays locked:
+run Harbor again after the lock, and import that run.
+
+Do not edit the times out of a trial `result.json` to get an earlier run in.
+The reader tells a finished trial by its `finished_at`. A Harbor 0.21.0 trial
+record with both times removed is read as a trial that has not finished, so the
+import succeeds with every such cell recorded as not delivered, and the lock is
+spent on a run with no results. A record with only one of the two times is
+refused.
 
 A trial whose Harbor task name is not on the locked slate is left as an
 unknown-slot cellKey for the #2979 validator to refuse. Duplicate trials for
@@ -349,15 +407,16 @@ name table in `from-inspect.ts` (`sampleIdByDigestFromSuite` /
 `digestBySampleIdFromSuite`). Scorer outputs are projected into the
 pre-registered measurements the Inspect adapter already uses for orchestrated
 cells — that can be `graded` when the sealed EvaluationSpec types those
-measurements. This is not Harbor's ungradeable mapping: Harbor's grader is
-not the sealed spec; Inspect's scorers are.
+measurements. A Harbor import is graded the same way where the Task's sealed
+spec declares Harbor's reward, as every Task of the official Terminal-Bench 2.1
+slate does.
 
 A zip `.eval` container is refused rather than unpacked. Convert it with
 Inspect to JSON (`log_format=json` / an EvalLog dump) so the reader stays on
 the official shape without a second parser.
 
-A slot the logs did not contain is written as `unrun` with a reason so it
-stays in the denominator. Extra and duplicate samples are left for the
+A slot the logs did not contain is written as `unrun` with a reason, so it
+stays in the run's accounting. Extra and duplicate samples are left for the
 `#2979` validator (`unknown-slot` / `duplicate-slot`). There is no exclude
 flag.
 
@@ -389,7 +448,9 @@ is fabricating the artifact a skeptic reads.
   the slate.
 - **A `graded` row for a task that binds no EvaluationSpec.** There is no rule
   to check the measurements against, and the importer has no standing to supply
-  one. Import it as `ungradeable` with a reason.
+  one. Import it as `ungradeable` with a reason. `quote` and `lock` refuse a
+  draft whose Tasks bind no EvaluationSpec, so only a run locked before that
+  check existed can reach this refusal.
 - **A `graded` row whose measurements the sealed verdict rule cannot read.**
   The refusal names the missing measurement.
 - **A measurement name the sealed EvaluationSpec does not declare, or a value

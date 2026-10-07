@@ -511,8 +511,13 @@ describe("run import --from harbor", () => {
     mkdirSync(join(trial, "verifier"), { recursive: true });
     writeFileSync(join(job, "config.json"), JSON.stringify({
       job_name: input.jobName,
-      harbor_version: "0.21.4",
       agents: [{ name: "baseline", model_name: "prediction-v1-baseline" }],
+    }));
+    // The reader takes the Harbor version and the retry setting from the job `lock.json`, and
+    // refuses a job that states neither.
+    writeFileSync(join(job, "lock.json"), JSON.stringify({
+      harbor: { version: "0.21.0" },
+      retry: { max_retries: 0 },
     }));
     writeFileSync(join(job, "result.json"), JSON.stringify({
       id: input.jobName,

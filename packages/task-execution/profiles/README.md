@@ -56,9 +56,11 @@ const { digest } = sealTaskProfile(buildRepositoryWorkProfile());
 
 The `./testing` subpath re-exports the pure structural runner (`loadFixtureFamily`,
 `runStructuralCheck`), the named structural checks (`checkAdmissionReceipt`,
-`checkAllOfConstruction`, `checkMeasurementCoverage`, `checkStatePredicateBlock`,
-`checkStatePredicateSpec`, `checkVerdictConsistency`, `deriveEvaluationTask`,
-`evaluatePredicates`, `resolveFamilyUri`), and `FIXTURE_FAMILIES` — every fixture family this
+`checkAllOfConstruction`, `checkExternalVerifierBlock`, `checkExternalVerifierSpec`,
+`checkMeasurementCoverage`, `checkStatePredicateBlock`, `checkStatePredicateSpec`,
+`checkVerdictConsistency`, `deriveEvaluationTask`, `evaluatePredicates`,
+`harborPackageContentHash`, `readExternalVerifierMeasurements`, `resolveFamilyUri`), and
+`FIXTURE_FAMILIES` — every fixture family this
 package ships under `fixtures/*`. A downstream consumer (the marketplace binding, the Autopilot
 adapter) drives its own conformance suite by iterating `FIXTURE_FAMILIES`, loading each with
 `loadFixtureFamily`, and running the matching structural check with `runStructuralCheck` — without
@@ -88,6 +90,41 @@ sealed world showed under the block's criteria, not absolute truth.
 
 Fixture families: `state-predicate-block`, `state-predicate-evaluation`, and the sealed
 `evaluation-spec/golden/state-predicate-minimal` pin.
+
+### `external-verifier` family
+
+The `external-verifier` grader family describes a task that is judged by a verifier an external
+harness ships and runs itself. Whoever seals the spec runs no grader, so the spec states only
+what can be read from the harness's task package, with nothing invented. Its rules are proposal
+0002 (`proposals/0002-external-verifier-grader-family.md` in the protocol specification
+repository). This version defines one harness, `harbor`.
+
+- **The grader is the task package.** `grader` is a single descriptor whose `digest.sha256` is
+  the content hash the harness itself assigns to the package. It is not the SHA-256 of any file
+  or archive, so no byte stream hashes to it. `harborPackageContentHash` applies Harbor's rule:
+  one line per file (the path, a zero byte, the file's SHA-256, a newline), ordered by path,
+  then hashed once more.
+- **The block is what the package declares.** `testMaterial` lists the package's own test files
+  by path and SHA-256, with the paths unique and ascending by Unicode code point
+  (`compareCodePointStrings`). `declaredImage` is the image reference exactly as the package
+  writes it. It may be a tag, and it pins no image. `timeout` is the declared verifier timeout
+  in seconds. The block has no field for an image digest, a platform, a parser or a transition
+  list, and a block that carries one under a bare key is refused.
+- **A measurement is the harness's own reward.** Each declared measurement is the same-named
+  key of the reward map the harness reports for a trial. `readExternalVerifierMeasurements`
+  reads it: a safe whole number stays a number, any other number becomes a decimal string, and
+  an absent key gets no default. The family fixes no verdict rule. The spec's own `verdictRule`
+  says what a reward means.
+- **The facts of one run are not in the spec.** The harness version, the timeout after any
+  multiplier, the platform and the digest of the image that was pulled belong to the Result
+  Evaluation Evidence that reports the evaluation, in `evaluationMethod` and `evidence`.
+
+Nothing in this package runs the family. A spec of this family does not make a verdict
+reproducible. It fixes which package, which test files and which declared environment were
+named as the judge.
+
+Fixture families: `external-verifier-block`, `external-verifier-measurements`,
+`external-verifier-package-digest`, and the `external-verifier` cases under `evaluation-spec/`.
 
 ## `@noble/hashes` version constraint
 

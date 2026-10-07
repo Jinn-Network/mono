@@ -42,6 +42,7 @@ import {
   BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE,
 } from "@jinn-network/benchmarking-protocol";
 import { PRODUCT_ERROR_CODES } from "./errors.js";
+import { TERMINAL_BENCH_21_OFFICIAL_TASKS } from "./intake/terminal-bench-2-1-slate.js";
 import { LOCAL_VENUE_LIMITS } from "./operations/run-results.js";
 import { PRODUCT_BRANDING } from "./branding.js";
 
@@ -337,6 +338,18 @@ describe("product documentation consistency", () => {
       expect(guide, sentence).toContain(`\n- ${sentence}\n`);
     }
     expect(read(bundleReadmePath)).toContain(`\n> ${OWNER_CONTROLLED_PUBLICATION_LIMIT}\n`);
+  });
+
+  it("says what the Terminal-Bench 2.1 upstream commit names, and quotes the slate's own ref for the one package that differs", () => {
+    // The commit names where the task list was read. A package's bytes are identified by its
+    // package ref, and one published package differs from the repository at that commit. The
+    // document quotes that task's ref, so the slate table and the document cannot drift apart.
+    const bundle = read(bundleReadmePath).replace(/\s+/gu, " ");
+    const pinned = TERMINAL_BENCH_21_OFFICIAL_TASKS.find((task) => task.name === "sanitize-git-repo");
+    expect(pinned).toBeDefined();
+    expect(bundle).toContain("where the official task list was read; it does not identify a task package's bytes");
+    expect(bundle).toContain(`For \`sanitize-git-repo\` one file differs, \`tests/test_outputs.py\``);
+    expect(bundle).toContain(`the slate pins \`${pinned!.ref}\``);
   });
 
   it("mirrors the Terminal-Bench 2.1 comparability sentence verbatim, and names its token", () => {
