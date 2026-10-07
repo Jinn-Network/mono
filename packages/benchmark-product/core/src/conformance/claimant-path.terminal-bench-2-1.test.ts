@@ -19,15 +19,18 @@
  * instant, and `beforeAll` runs the list once, stopping at the first failure.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { RFC3161_TSA_ANCHOR_PROFILE } from "@jinn-network/trust-core";
+import { KIT_AUTHORITY_SEED, createFixtureAuthority } from "@jinn-network/trust-testing";
 import { runCli } from "../cli/main.js";
 import type { CliContext, CliResult } from "../cli/result.js";
 import { readDraftDocument } from "../operations/drafts.js";
 import { ExternalRunImportDeclarationSchema } from "../run/external-import.js";
+import { readRunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 
 const HARBOR_JOBS = fileURLToPath(
@@ -47,12 +50,40 @@ const ORACLE_PINNING = { agent: { id: "oracle", version: "1.0.0" } };
 
 /** The lock must precede the fixture's earliest trial start (12:58:28Z) ... */
 const BEFORE_THE_RUN = "2026-10-01T12:00:00.000Z";
+/** ... the anchor comes after the lock and still before that first trial ... */
+const AT_THE_ANCHOR = "2026-10-01T12:30:00.000Z";
 /** ... and the import must follow its latest trial finish (13:39:36Z). */
 const AFTER_THE_RUN = "2026-10-01T14:00:00.000Z";
 
+/**
+ * The timestamp authority. It is the trust kit's seeded fixture authority, standing in for the
+ * service a claimant names with `--endpoint`: it signs a real RFC 3161 token over the digest it is
+ * asked about, and its own certificate is the root a reader would be handed. The kit never reads
+ * the wall clock, so the token is minted at the instant the `anchor` command runs at.
+ */
+const authority = createFixtureAuthority(KIT_AUTHORITY_SEED);
+/** `AT_THE_ANCHOR` as the DER GeneralizedTime a token carries, and as a reader sees it printed. */
+const ANCHOR_GEN_TIME_DER = "20261001123000Z";
+const ANCHOR_GEN_TIME = "2026-10-01T12:30:00Z";
+/** No request leaves this process: `.invalid` never resolves, and the source below is injected. */
+const TSA_ENDPOINT = "http://timestamp.invalid";
+
+const anchorDeps: NonNullable<CliContext["anchorDeps"]> = {
+  sources: {
+    [RFC3161_TSA_ANCHOR_PROFILE]: {
+      profile: RFC3161_TSA_ANCHOR_PROFILE,
+      async obtainProof(request) {
+        return authority.mintTimeStampToken({
+          subjectSha256: request.subjectSha256,
+          genTime: ANCHOR_GEN_TIME_DER,
+        }).tokenDer;
+      },
+    },
+  },
+};
+
 interface ClaimantPaths {
   readonly workspaceDir: string;
-  readonly hostPath: string;
 }
 
 interface ClaimantStep {
@@ -85,7 +116,7 @@ const CLAIMANT_STEPS: readonly ClaimantStep[] = [
     name: "method terminal-bench-2.1",
     at: BEFORE_THE_RUN,
     argv: (paths) => [
-      "method", "terminal-bench-2.1", ...onDraft(paths), "--ids", TASKS.join(","), "--host", paths.hostPath,
+      "method", "terminal-bench-2.1", ...onDraft(paths), "--ids", TASKS.join(","),
     ],
   },
   {
@@ -104,7 +135,15 @@ const CLAIMANT_STEPS: readonly ClaimantStep[] = [
   {
     name: "lock",
     at: BEFORE_THE_RUN,
-    argv: (paths) => ["lock", ...onDraft(paths), "--ack-sample-size", "--no-anchor"],
+    argv: (paths) => ["lock", ...onDraft(paths), "--ack-sample-size"],
+  },
+  {
+    name: "anchor --subject lock",
+    at: AT_THE_ANCHOR,
+    argv: (paths) => [
+      "anchor", ...onDraft(paths), "--subject", "lock",
+      "--provider", RFC3161_TSA_ANCHOR_PROFILE, "--endpoint", TSA_ENDPOINT,
+    ],
   },
   {
     name: "run import --from harbor",
@@ -141,10 +180,9 @@ function sealedJson(sha256: string): Record<string, any> {
 
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), "bp-claimant-path-tb21-"));
-  paths = { workspaceDir: join(root, "ws"), hostPath: join(root, "host.json") };
-  writeFileSync(paths.hostPath, "{}");
+  paths = { workspaceDir: join(root, "ws") };
   for (const step of CLAIMANT_STEPS) {
-    const context: CliContext = { cwd: root, clock: clockAt(step.at) };
+    const context: CliContext = { cwd: root, clock: clockAt(step.at), anchorDeps };
     const result = await runCli([...step.argv(paths)], context);
     ran.set(step.name, result);
     if (result.exitCode !== 0) break;
@@ -165,6 +203,30 @@ describe("claimant path: method terminal-bench-2.1 to an imported Harbor 0.21 ru
   test("the catalog method binds the official slate and the lock seals a Run on it", () => {
     expect(resultOf("method terminal-bench-2.1")).toMatchObject({ catalogId: "terminal-bench-2.1", official: true });
     expect(resultOf("lock")["runSha256"]).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  test("the lock is anchored after it is sealed and before the first Harbor trial starts", () => {
+    const anchored = resultOf("anchor --subject lock");
+    expect(anchored).toMatchObject({
+      subject: "lock",
+      provider: RFC3161_TSA_ANCHOR_PROFILE,
+      subjectSha256: resultOf("lock")["runSha256"],
+      // The claimant's machine holds no trust material, so it can say the token is well formed
+      // and covers this Run, and no more. Whether its time is believed is the reader's call.
+      proofStatus: "present",
+    });
+    const trialStarts = readdirSync(HARBOR_JOBS).flatMap((job) =>
+      readdirSync(join(HARBOR_JOBS, job), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((trial) => JSON.parse(readFileSync(join(HARBOR_JOBS, job, trial.name, "result.json"), "utf8")) as {
+          started_at: string;
+        })
+        .map((result) => Date.parse(result.started_at)));
+    expect(trialStarts).toHaveLength(6);
+    const lockedAt = Date.parse(readRunState(paths.workspaceDir, DRAFT)!.lockedAt!);
+    const anchoredAt = Date.parse(ANCHOR_GEN_TIME);
+    expect(lockedAt).toBeLessThan(anchoredAt);
+    expect(anchoredAt).toBeLessThan(Math.min(...trialStarts));
   });
 
   test("the Harbor jobs directory imports onto the locked slate, every cell graded", () => {
