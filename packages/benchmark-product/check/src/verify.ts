@@ -2132,6 +2132,10 @@ export async function verifyPublicBundleSnapshot(
       matrix,
       assemblyCells: assembly.cells,
       recordBytes: records,
+      // The Terminal-Bench 2.1 projector is keyed on the claim section `claim-consistency` has just
+      // rebuilt from the verified Benchmark, so it is on exactly when the vector declares
+      // `terminal-bench-2-1-comparability`. No earlier format's claim can carry the section.
+      ...(claim.terminalBench21Comparability === undefined ? {} : { officialSuite: claim.terminalBench21Comparability }),
     })
     : undefined;
   const assetFacts = {
