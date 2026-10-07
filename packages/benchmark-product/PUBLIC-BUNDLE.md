@@ -900,10 +900,12 @@ Every row but `.../10` runs as `npx @colophon-claims/verify<line> <bundle-dir>`.
 states its package in full and runs as `npx <line> <bundle-dir>`. Append the anchor flags where
 the row lists them.
 
-The reader's report names the run it checked. Under `Format:` it prints a `Run:` line, on every
-format but `.../5`. The value is the SHA-256 of the bundle's `run.json`, as 64 hex characters, and
-it is the digest `lock` printed when the method was sealed. A claimant who made that digest public
-before the run gives a reader something to hold this line against.
+From `@colophon-claims/check@0.2.1` on, the reader's report names the run it checked: under
+`Format:` it prints a `Run:` line, on every format but `.../5`. The `verify` releases the earlier
+rows pin print no such line; for those, compute the value yourself with `shasum -a 256 run.json`.
+The value is the SHA-256 of the bundle's `run.json`, as 64 hex characters, and it is the digest
+`lock` printed when the method was sealed. A claimant who made that digest public before the run
+gives a reader something to hold this line against.
 [`CLAIMANT-WALKTHROUGH.md`](CLAIMANT-WALKTHROUGH.md) has that step, and every other command of a
 run brought from Harbor.
 
