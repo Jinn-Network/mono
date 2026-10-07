@@ -93,6 +93,9 @@ does not carry it. Both durable signals are still consulted so a crash after the
 journal marker but before `RunState.externalImportSha256` still reads as
 imported. The public reader accepts the published bundle; the extra check is
 `external-import`. Proven in `core/src/operations/run-import.bundle.test.ts`.
+A Harbor run on the official Terminal-Bench 2.1 slate is walked from `init` to
+a published bundle that the reader accepts in
+`core/src/conformance/claimant-path.terminal-bench-2-1.test.ts`.
 
 ## The per-attempt record shape
 
@@ -341,7 +344,8 @@ Timings (`started_at` / `finished_at`) and evidence paths (`result.json`,
 `config.json`, `verifier/reward.txt`, prediction and trajectory artifacts) are
 carried on the record. Evidence paths are relative to the jobs directory you
 passed. The #2979 sealed-run window still applies: an imported timestamp must
-fall at or after lock and at or before import. Harbor timestamps from a run
+fall at or after lock, and at or before the earlier of the run's close time and
+the import. `lock` prints the close time. Harbor timestamps from a run
 that finished before you locked this draft will be refused for that reason —
 omit them from the trial `result.json`, or lock the Colophon run so its window
 covers the Harbor times.
@@ -401,8 +405,8 @@ A zip `.eval` container is refused rather than unpacked. Convert it with
 Inspect to JSON (`log_format=json` / an EvalLog dump) so the reader stays on
 the official shape without a second parser.
 
-A slot the logs did not contain is written as `unrun` with a reason so it
-stays in the denominator. Extra and duplicate samples are left for the
+A slot the logs did not contain is written as `unrun` with a reason, so it
+stays in the run's accounting. Extra and duplicate samples are left for the
 `#2979` validator (`unknown-slot` / `duplicate-slot`). There is no exclude
 flag.
 
@@ -434,7 +438,9 @@ is fabricating the artifact a skeptic reads.
   the slate.
 - **A `graded` row for a task that binds no EvaluationSpec.** There is no rule
   to check the measurements against, and the importer has no standing to supply
-  one. Import it as `ungradeable` with a reason.
+  one. Import it as `ungradeable` with a reason. `quote` and `lock` refuse a
+  draft whose Tasks bind no EvaluationSpec, so only a run locked before that
+  check existed can reach this refusal.
 - **A `graded` row whose measurements the sealed verdict rule cannot read.**
   The refusal names the missing measurement.
 - **A measurement name the sealed EvaluationSpec does not declare, or a value
