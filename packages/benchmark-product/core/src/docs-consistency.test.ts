@@ -42,8 +42,15 @@ import {
   BENCHMARK_PRODUCT_PUBLIC_BUNDLE_V5_PROFILE,
 } from "@jinn-network/benchmarking-protocol";
 import { PRODUCT_ERROR_CODES } from "./errors.js";
+import { HARBOR_RUN_IMPORT_EVIDENCE_BYTES_PER_CELL, HARBOR_RUN_IMPORT_VERSIONS } from "./intake/harbor-run-records.js";
 import { TERMINAL_BENCH_21_OFFICIAL_TASKS } from "./intake/terminal-bench-2-1-slate.js";
+import { TERMINAL_BENCH_21_LEADERBOARD_TRIALS_PER_TASK } from "./operations/run-lock.js";
 import { LOCAL_VENUE_LIMITS } from "./operations/run-results.js";
+import {
+  EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES,
+  EXTERNAL_IMPORT_MAX_EVIDENCE_FILE_BYTES,
+  EXTERNAL_IMPORT_MAX_ROWS,
+} from "./run/external-import.js";
 import { PRODUCT_BRANDING } from "./branding.js";
 
 const coreRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -57,6 +64,8 @@ const bundleReadmePath = resolve(productRoot, "PUBLIC-BUNDLE.md");
 const inspectRuntimePath = resolve(productRoot, "INSPECT-RUNTIME.md");
 const securityPath = resolve(productRoot, "SECURITY.md");
 const externalVerificationPath = resolve(productRoot, "EXTERNAL-VERIFICATION.md");
+const externalRunImportPath = resolve(productRoot, "EXTERNAL-RUN-IMPORT.md");
+const claimantWalkthroughPath = resolve(productRoot, "CLAIMANT-WALKTHROUGH.md");
 const productDesignPath = resolve(
   repoRoot,
   "docs/superpowers/specs/2026-08-05-benchmark-product-design.md",
@@ -80,6 +89,7 @@ const requiredDocs = [
   coreReadmePath,
   webReadmePath,
   bundleReadmePath,
+  claimantWalkthroughPath,
   inspectRuntimePath,
   securityPath,
   extractionPath,
@@ -350,6 +360,66 @@ describe("product documentation consistency", () => {
     expect(bundle).toContain("where the official task list was read; it does not identify a task package's bytes");
     expect(bundle).toContain(`For \`sanitize-git-repo\` one file differs, \`tests/test_outputs.py\``);
     expect(bundle).toContain(`the slate pins \`${pinned!.ref}\``);
+  });
+
+  it("links the claimant walkthrough from every document a claimant or a reader starts in", () => {
+    // Issue #4942: the path existed only in pieces. The walkthrough is the one document that puts
+    // them in order, so each place a claimant lands has to point at it. The published CLI README
+    // links it too, in the absolute form a tarball needs; `cli/src/walkthrough-pins.test.ts` and
+    // the publish-manifest test hold that one.
+    for (const path of [productReadmePath, externalRunImportPath, bundleReadmePath, externalVerificationPath]) {
+      expect(read(path), path).toContain("](CLAIMANT-WALKTHROUGH.md)");
+    }
+    // And it sends its own reader on to the two references it leans on.
+    const walkthrough = read(claimantWalkthroughPath);
+    expect(walkthrough).toContain("](EXTERNAL-RUN-IMPORT.md#what-import-claims-and-what-it-does-not)");
+    expect(read(externalRunImportPath)).toContain("\n## What import claims, and what it does not\n");
+    expect(walkthrough).toContain("](PUBLIC-BUNDLE.md)");
+  });
+
+  it("states the brought-run limits of the walkthrough from the importer's own constants", () => {
+    // A limit a claimant reads here is one they plan a paid run around. Each figure below is
+    // stated in the walkthrough's own words, so a moved constant fails here and not at import.
+    const walkthrough = read(claimantWalkthroughPath);
+    const MiB = 1024 * 1024;
+    expect(HARBOR_RUN_IMPORT_VERSIONS).toEqual(["0.21.0"]);
+    for (const version of HARBOR_RUN_IMPORT_VERSIONS) {
+      expect(walkthrough).toContain(`- Harbor, version ${version} exactly.`);
+      expect(walkthrough).toContain(`- **Harbor ${version} only, retries off.**`);
+    }
+    expect(walkthrough).toContain(
+      `One evidence file may be at most ${EXTERNAL_IMPORT_MAX_EVIDENCE_FILE_BYTES / MiB} MiB. `
+        + `All evidence of a run together is capped at ${HARBOR_RUN_IMPORT_EVIDENCE_BYTES_PER_CELL / MiB} MiB for each planned cell, `
+        + `or at ${EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES / MiB} MiB when that is more. `
+        + `A run may have at most ${EXTERNAL_IMPORT_MAX_ROWS.toLocaleString("en-US")} cells.`,
+    );
+    expect(TERMINAL_BENCH_21_LEADERBOARD_TRIALS_PER_TASK).toBe(5);
+    expect(walkthrough).toContain("Fewer than five trials of each task is not leaderboard-comparable");
+  });
+
+  it("says in both format references that the reader's Run line is the digest lock printed", () => {
+    // The reader prints `Run:` so a digest made public before the run can be held against the
+    // bundle (issue #4972). Both references state what the value is, in the same words.
+    for (const path of [bundleReadmePath, externalVerificationPath]) {
+      const text = read(path).replace(/\s+/gu, " ");
+      expect(text, path).toContain("prints a `Run:` line");
+      expect(text, path).toContain("the SHA-256 of the bundle's `run.json`");
+      expect(text, path).toContain("the digest `lock` printed");
+    }
+  });
+
+  it("names the reader command the checker package installs, not the alias's (issue #4956)", () => {
+    const checker = JSON.parse(read(resolve(productRoot, "check/package.json"))) as { bin: Record<string, string> };
+    const [command] = Object.keys(checker.bin);
+    expect(Object.keys(checker.bin)).toHaveLength(1);
+    const guide = read(bundleReadmePath);
+    expect(guide).toContain(`\n\`${command} <bundle> --freeze-repo <dir>\`, exit \`1\` on drift.`);
+    // The alias's command name appears once, in the sample of what a reader released under the
+    // alias name prints when it is too old for a format. That output is theirs and stays as it is.
+    const alias = JSON.parse(read(resolve(productRoot, "verify/package.json"))) as { bin: Record<string, string> };
+    const [aliasCommand] = Object.keys(alias.bin);
+    expect(guide.split(aliasCommand!)).toHaveLength(2);
+    expect(guide).toContain(`\n${aliasCommand}: bundle.json does not satisfy the manifest schema\n`);
   });
 
   it("mirrors the Terminal-Bench 2.1 comparability sentence verbatim, and names its token", () => {

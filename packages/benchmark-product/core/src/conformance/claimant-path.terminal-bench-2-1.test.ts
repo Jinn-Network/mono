@@ -31,6 +31,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { expectedCellSet, parseBenchmark, parseRun } from "@jinn-network/benchmarking-records";
 import { RFC3161_TSA_ANCHOR_PROFILE } from "@jinn-network/trust-core";
 import { KIT_AUTHORITY_SEED, createFixtureAuthority } from "@jinn-network/trust-testing";
 import {
@@ -129,15 +130,21 @@ const stateAfter = new Map<string, string>();
 let lockedAt: string | undefined;
 
 /**
- * Writes the dump: the skeleton `run import --template` printed, with every slot marked `unrun`.
- * It names each sealed slot exactly once, so nothing about the dump itself is refusable.
+ * Writes the dump: every slot the sealed Run expects, each marked `unrun`. `run import --template`
+ * is what prints those slots on any other draft, and on this slate it is refused, so the slots are
+ * read from the sealed records the way the template reads them. The dump names each sealed slot
+ * exactly once, so nothing about the dump itself is refusable.
  */
 function writeGenericDump(target: ClaimantPaths): string {
-  const template = ran.get("run import --template")!.stdout;
-  const rows = template.trimEnd().split("\n").map((line) => {
-    const row = JSON.parse(line) as { readonly cellKey: string };
-    return JSON.stringify({ cellKey: row.cellKey, outcome: "unrun", reason: "written by hand, not read from Harbor" });
-  });
+  const document = readDraftDocument(target.workspaceDir, DRAFT);
+  const runSha256 = readRunState(target.workspaceDir, DRAFT)?.runSha256;
+  if (document.spec.taskSet.kind !== "benchmark" || runSha256 === undefined) {
+    throw new Error("the claimant path reached the dump without a locked benchmark draft");
+  }
+  const benchmark = parseBenchmark(getSealedBytes(target.workspaceDir, document.spec.taskSet.benchmarkSha256));
+  const run = parseRun(getSealedBytes(target.workspaceDir, runSha256));
+  const rows = expectedCellSet(benchmark, run).map((coord) =>
+    JSON.stringify({ cellKey: coord.cellKey, outcome: "unrun", reason: "written by hand, not read from Harbor" }));
   writeFileSync(target.dumpPath, `${rows.join("\n")}\n`);
   return target.dumpPath;
 }
@@ -194,11 +201,12 @@ const CLAIMANT_STEPS: readonly ClaimantStep[] = [
     ],
   },
   // A detour this slate does not allow: the generic dump. These two commands are what a claimant
-  // who wrote the records by hand would type, and the second is refused.
+  // who wrote the records by hand would type, and both are refused. The skeleton is refused first,
+  // so nobody fills in a file that the import would then turn away.
   {
     name: "run import --template",
     at: AFTER_THE_RUN,
-    human: true,
+    refused: true,
     argv: (paths) => ["run", "import", "--template", ...onDraft(paths)],
   },
   {
@@ -412,16 +420,23 @@ describe("claimant path: method terminal-bench-2.1 to a published bundle of an a
     expect(anchoredAt).toBeLessThan(Math.min(...trialStarts));
   });
 
-  test("a --file dump is refused on this slate, and the refusal names the Harbor reader", () => {
-    const refused = outputOf("run import --file");
-    expect(refused.exitCode).not.toBe(0);
-    const envelope = JSON.parse(refused.stdout) as { ok: boolean; error?: { code: string; detail: string } };
-    expect(envelope.ok).toBe(false);
-    expect(envelope.error?.code).toBe("conflict");
-    expect(envelope.error?.detail).toContain("official Terminal-Bench 2.1 slate");
-    expect(envelope.error?.detail).toContain("`run import --from harbor <jobs-dir>`");
+  test("the dump skeleton and a --file dump are both refused on this slate, and each refusal names the Harbor reader", () => {
+    for (const step of ["run import --template", "run import --file"]) {
+      const refused = outputOf(step);
+      expect(refused.exitCode, step).not.toBe(0);
+      const envelope = JSON.parse(refused.stdout) as { ok: boolean; error?: { code: string; detail: string } };
+      expect(envelope.ok, step).toBe(false);
+      expect(envelope.error?.code, step).toBe("conflict");
+      expect(envelope.error?.detail, step).toContain("official Terminal-Bench 2.1 slate");
+      expect(envelope.error?.detail, step).toContain("`run import --from harbor <jobs-dir>`");
+    }
+    // The skeleton printed no slot to fill in.
+    expect(outputOf("run import --template").stdout).not.toContain("cellKey");
     // The dump itself was sound: it named all six sealed slots, once each.
-    expect(readFileSync(paths.dumpPath, "utf8").trimEnd().split("\n")).toHaveLength(6);
+    const rows = readFileSync(paths.dumpPath, "utf8").trimEnd().split("\n")
+      .map((line) => (JSON.parse(line) as { readonly cellKey: string }).cellKey);
+    expect(rows).toHaveLength(6);
+    expect(new Set(rows).size).toBe(6);
   });
 
   test("the Harbor jobs directory imports onto the locked slate, every cell graded", () => {

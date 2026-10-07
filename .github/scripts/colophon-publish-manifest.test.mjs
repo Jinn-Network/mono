@@ -181,6 +181,32 @@ test('the published CLI README names the claimant verbs and documents launch as 
   assert.doesNotMatch(readme, /spec\.jinn\.network/u);
 });
 
+// The walkthrough is the document a claimant follows from `init` to a checked bundle (issue #4942).
+// It ends on the reader's side, so it prints a reader line, and it is reached from the README a
+// claimant holds after an install.
+test('the claimant walkthrough is a reader instruction, and the published CLI README links it', () => {
+  const walkthrough = 'packages/benchmark-product/CLAIMANT-WALKTHROUGH.md';
+  assert.ok(READER_INSTRUCTION_DOCS.includes(walkthrough), 'the walkthrough must be scanned for reader lines');
+  // Every reader line it prints is the first checker release, the one a public-bundle/10 claim
+  // pins, and that line resolves against the checker's own ledger.
+  const pins = collectReaderInstructionPins(repoRoot, [walkthrough]);
+  assert.deepEqual(pins, { '@colophon-claims/check': ['0.2.1'] });
+  assert.deepEqual(assertReaderInstructionPinsResolve(pins), pins);
+
+  // The link is written on the branch ref, the one form the publish step pins to its commit.
+  const readme = readFileSync(join(repoRoot, 'packages/benchmark-product/cli/README.md'), 'utf8');
+  assert.ok(
+    readme.includes(`(https://github.com/Jinn-Network/mono/blob/next/${walkthrough})`),
+    'the CLI README must link the walkthrough on the next ref',
+  );
+  // Both anchor provider values are identifiers under that origin. The walkthrough names them,
+  // which is why it is its own document: the README names none (see the test above).
+  assert.match(readFileSync(join(repoRoot, walkthrough), 'utf8'), /spec\.jinn\.network\/trust\/anchor-profiles\//u);
+  assert.doesNotMatch(readme, /spec\.jinn\.network/u);
+  // The README states what a claimant must know before `quote`: the two-arm minimum (issue #4948).
+  assert.match(readme, /A draft needs at least two arms\./u);
+});
+
 // A README written against the `next` branch is right in the repository and wrong in a tarball: the
 // branch moves on, and the README a reader installed keeps pointing at whatever the documents have
 // become since. The `--apply` step already stamps the publishing commit into the manifest as
