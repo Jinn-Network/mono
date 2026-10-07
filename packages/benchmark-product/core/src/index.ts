@@ -604,6 +604,10 @@ export type { CliContext, CliResult } from "./cli/result.js";
 // own help and README are tested against the list `method --help` is rendered from (issue #4943).
 export { CLAIMANT_COMMAND_PATH, renderClaimantCommandPath } from "./cli/claimant-path.js";
 export type { ClaimantCommand } from "./cli/claimant-path.js";
+// The provider profile names `anchor --provider` accepts, as `anchor --help` lists them. Exported so
+// the claimant walkthrough, which is where a claimant reads them, is tested against this list
+// (issue #4951).
+export { PRODUCIBLE_ANCHOR_PROFILES } from "./anchor/profiles.js";
 
 /** The product core's own version, mirrored from package.json. */
 export const PRODUCT_VERSION = "0.1.0";

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { accessClassifiedResourceDescriptor, ResourceDescriptorSchema } from "../resource-descriptor.js";
 import { COMPOSITE_MAX_FANOUT } from "./composite.js";
+import { compareCodePointStrings } from "./external-verifier/code-point-order.js";
 import type { GraderFamily } from "./schema.js";
 import {
   EnvironmentRecordDescriptorSchema,
@@ -217,6 +218,90 @@ export const StatePredicateBlockSchema = withNamespacedExtras(
 });
 export type StatePredicateBlock = z.infer<typeof StatePredicateBlockSchema>;
 
+// --- external-verifier (proposal 0002) ---
+//
+// The task is judged by a verifier that an external harness ships and runs itself. Whoever seals
+// the spec runs no grader, so the block holds only what can be read from the harness's task
+// package with nothing invented: which harness, the package's own test files, the image
+// reference as the package declares it, and the declared timeout. It has no place for an image
+// digest, a platform, a parser identity or a transition list. A block that carries one under a
+// bare key is refused, like any other bare extra key.
+
+export const EXTERNAL_VERIFIER_FAMILY = "external-verifier" as const;
+
+/** Versions this family's own rules (how the block, the grader digest and the measurements are
+ * read), apart from the top-level `semanticsVersion` every family shares. */
+export const EXTERNAL_VERIFIER_SEMANTICS_VERSION = "1" as const;
+
+/** A closed set. The grader digest and the reward map mean nothing without the harness's own
+ * rule, so a harness is named here only once the family text states that rule. */
+export const EXTERNAL_VERIFIER_HARNESSES = ["harbor"] as const;
+export type ExternalVerifierHarness = (typeof EXTERNAL_VERIFIER_HARNESSES)[number];
+
+/** A digest in this family is 64 lowercase hexadecimal digits, never `sha256:`-prefixed. */
+export const EXTERNAL_VERIFIER_DIGEST_PATTERN = /^[0-9a-f]{64}$/;
+
+// One of the task package's own test files: named by its path inside the package, pinned by the
+// SHA-256 of its bytes, never inlined.
+const ExternalVerifierTestMaterialSchema = accessClassifiedResourceDescriptor().superRefine((entry, ctx) => {
+  if (entry.name === undefined || entry.name.length === 0) {
+    ctx.addIssue({ code: "custom", path: ["name"], message: "testMaterial entry requires name, the file's path inside the task package." });
+  }
+  const sha256 = entry.digest?.["sha256"];
+  if (typeof sha256 !== "string" || !EXTERNAL_VERIFIER_DIGEST_PATTERN.test(sha256)) {
+    ctx.addIssue({ code: "custom", path: ["digest", "sha256"], message: "testMaterial entry requires digest.sha256 as bare lowercase hex." });
+  }
+  if (entry.content !== undefined) {
+    ctx.addIssue({ code: "custom", path: ["content"], message: "testMaterial entry is referenced by digest; no file content is inlined." });
+  }
+});
+
+const EXTERNAL_VERIFIER_SHAPE = {
+  harness: z.enum(EXTERNAL_VERIFIER_HARNESSES),
+  verifierSemanticsVersion: z.literal(EXTERNAL_VERIFIER_SEMANTICS_VERSION),
+  testMaterial: z.array(ExternalVerifierTestMaterialSchema).min(1),
+  // The image reference exactly as the task package declares it. A plain string, not a
+  // descriptor: a tag is not a reference to fixed bytes, and this field does not pin an image.
+  declaredImage: z.string().min(1).optional(),
+  // The timeout the task package declares, in seconds.
+  timeout: z.number().int().positive(),
+};
+
+// An own key named "__proto__" is a bare extra key like any other. zod leaves that one key out
+// of a loose object's parsed value, so the extras check below never meets it. It is refused
+// here, on the raw value, before the block is parsed.
+const ExternalVerifierRawBlockSchema = z.unknown().superRefine((value, ctx) => {
+  if (typeof value === "object" && value !== null && Object.hasOwn(value, "__proto__")) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["__proto__"],
+      message: 'Extension key "__proto__" must be namespaced (reverse-DNS or absolute URI, TEP §21.3).',
+    });
+  }
+});
+
+export const ExternalVerifierBlockSchema = ExternalVerifierRawBlockSchema.pipe(
+  withNamespacedExtras(
+    z.looseObject(EXTERNAL_VERIFIER_SHAPE),
+    Object.keys(EXTERNAL_VERIFIER_SHAPE),
+  ).superRefine((block, ctx) => {
+    // Names are unique and ascend by Unicode code point, so one set of files has one block.
+    for (let index = 1; index < block.testMaterial.length; index += 1) {
+      const previous = block.testMaterial[index - 1]?.name;
+      const current = block.testMaterial[index]?.name;
+      if (typeof previous !== "string" || typeof current !== "string") continue;
+      if (compareCodePointStrings(previous, current) >= 0) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["testMaterial", index, "name"],
+          message: `testMaterial names must be unique and ascend by Unicode code point; "${current}" does not follow "${previous}".`,
+        });
+      }
+    }
+  }),
+);
+export type ExternalVerifierBlock = z.infer<typeof ExternalVerifierBlockSchema>;
+
 /** Discriminates the `familyBlock` schema on `EvaluationSpec.family` (wired by schema.ts). */
 export const FAMILY_BLOCK_SCHEMAS: Record<GraderFamily, z.ZodTypeAny> = {
   "deterministic-process": DeterministicProcessBlockSchema,
@@ -224,4 +309,5 @@ export const FAMILY_BLOCK_SCHEMAS: Record<GraderFamily, z.ZodTypeAny> = {
   "human-review": HumanReviewBlockSchema,
   composite: CompositeBlockSchema,
   "state-predicate": StatePredicateBlockSchema,
+  "external-verifier": ExternalVerifierBlockSchema,
 };

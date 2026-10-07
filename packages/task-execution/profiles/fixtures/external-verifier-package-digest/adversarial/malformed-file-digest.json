@@ -1,0 +1,19 @@
+{
+  "input": {
+    "harness": "harbor",
+    "files": [
+      {
+        "path": "task.toml",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "path": "tests/test.sh",
+        "sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ]
+  },
+  "expect": {
+    "ok": false,
+    "code": "invalid-document"
+  }
+}

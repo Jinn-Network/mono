@@ -1,0 +1,59 @@
+{
+  "protocol": "https://spec.jinn.network/profiles/evaluation-spec/v1",
+  "semanticsVersion": "4",
+  "family": "external-verifier",
+  "grader": {
+    "name": "example/sum-two-numbers",
+    "digest": {
+      "sha256": "d9ab9cb898bc6518b5c3429a7bfd8bf0a6e420be644c8c0c1d2765c25627becf"
+    },
+    "accessClass": "public"
+  },
+  "familyBlock": {
+    "image": {
+      "uri": "https://example.org/images/runner"
+    },
+    "platform": "linux/amd64",
+    "workspace": {
+      "root": "/workspace"
+    },
+    "testMaterial": [
+      {
+        "uri": "https://example.org/tests/patch.diff",
+        "accessClass": "public"
+      }
+    ],
+    "parser": {
+      "id": "jinn.parser.pytest-json-report",
+      "version": "1.0.0",
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "transitions": {
+      "failToPass": [
+        "test_a"
+      ],
+      "passToPass": [
+        "test_b"
+      ]
+    },
+    "timeout": 1800
+  },
+  "measurements": [
+    {
+      "name": "reward",
+      "type": "number",
+      "required": true
+    }
+  ],
+  "verdictRule": {
+    "threshold": {
+      "measurement": "reward",
+      "op": "eq",
+      "value": 1
+    }
+  },
+  "unscorable": [],
+  "evidenceConventions": {
+    "requiredRefs": []
+  }
+}

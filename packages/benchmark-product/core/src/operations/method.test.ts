@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { parseBenchmark } from "@jinn-network/benchmarking-records";
+import { itemTaskDigest, parseBenchmark } from "@jinn-network/benchmarking-records";
+import { parseEvaluationSpec } from "@jinn-network/task-execution-profiles";
 import { readAuditEntries } from "../audit/journal.js";
 import {
   TERMINAL_BENCH_21_OFFICIAL_SLATE_EXTENSION,
@@ -20,6 +21,8 @@ import { createDefaultBenchmarkRuntimeHost } from "../runtime/host-port.js";
 import { InspectSelectionManifestSchema, SUPPORTED_INSPECT_VERSION, SUPPORTED_INSPECT_WHEEL_SHA256 } from "../runtime/inspect/manifest.js";
 import { exportDerivedBundle, selectMethod } from "./method.js";
 import { INSPECT_SELECTION_SCHEMA } from "./method-catalog.js";
+import { runLock } from "./run-lock.js";
+import { runQuote } from "./run-quote.js";
 import { runtimeHostsDir } from "../workspace/layout.js";
 
 const coreSrc = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -191,6 +194,36 @@ describe("selectMethod", () => {
     if (!second.ok) return;
     expect(second.result.benchmarkSha256).toBe(firstDigest);
   });
+
+  test("catalog terminal-bench-2.1 bind stores each Task's EvaluationSpec, so the bound draft quotes and locks", async () => {
+    const context = { workspaceDir, principal: "sponsor-1", clock: clock() };
+    expect(initWorkspace(context).ok).toBe(true);
+    expect(createDraft(context, { draftId: "bound", name: "bound" }).ok).toBe(true);
+    expect(armAdd(context, { draftId: "bound", armId: "oracle", pinning: { harness: { id: "harbor", version: "0.21.0" }, agent: { id: "oracle" } } }).ok).toBe(true);
+    expect(armAdd(context, { draftId: "bound", armId: "terminus-2", pinning: { harness: { id: "harbor", version: "0.21.0" }, agent: { id: "terminus-2" } } }).ok).toBe(true);
+    const selected = await selectMethod(context, { draftId: "bound", ref: "terminal-bench-2.1", cwd: root, slice: "10" });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) return;
+
+    // Every item Task names a spec by digest, and those exact bytes are in the workspace store:
+    // collect, publish and every reader resolve the spec from there.
+    const benchmark = parseBenchmark(getSealedBytes(workspaceDir, selected.result.benchmarkSha256!));
+    expect(benchmark.items).toHaveLength(10);
+    const names = officialTerminalBench21TaskNames();
+    for (const [index, item] of benchmark.items.entries()) {
+      const task = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, itemTaskDigest(item)))) as {
+        readonly evaluation?: { readonly digest?: { readonly sha256?: string } };
+      };
+      const spec = parseEvaluationSpec(getSealedBytes(workspaceDir, task.evaluation!.digest!.sha256!));
+      expect(spec.family, names[index]).toBe("external-verifier");
+      expect((spec.grader as { readonly name?: string }).name).toBe(`terminal-bench/${names[index]}`);
+    }
+
+    const quoted = await runQuote(context, { draftId: "bound" });
+    expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
+    const locked = runLock(context, { draftId: "bound" });
+    expect(locked.ok, JSON.stringify(locked)).toBe(true);
+  }, 60_000);
 
   test("custom Inspect file does not wear a suite id; derived export refuses a suite-named bundle", async () => {
     const filePath = join(root, "inspect.json");

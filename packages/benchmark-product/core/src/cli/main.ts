@@ -78,6 +78,11 @@ import {
 } from "../operations/index.js";
 import { renderWorkspaceVerifyHuman } from "./verify-human.js";
 import { anchorAfterLockIfConfigured, type AnchorAfterLockOutcome } from "../operations/run-anchor.js";
+import {
+  TERMINAL_BENCH_21_LEADERBOARD_TRIALS_PER_TASK,
+  draftHarborRunRequirements,
+  type HarborRunRequirements,
+} from "../operations/run-lock.js";
 import { formatEntryAnchorLines } from "../operations/source-entry-anchor.js";
 import { dirname } from "node:path";
 import { expectedCellSet, parseBenchmark, parseRun } from "@jinn-network/benchmarking-records";
@@ -95,6 +100,7 @@ import type { BeaconReference, DomainBindingMechanism, FreezeRepoVerificationRes
 import {
   DOMAIN_BINDING_MECHANISM_NAMES,
   beaconIndexWord,
+  carriesOfficialTerminalBench21Slate,
   exportFreezeRepo,
   summarizeVerificationOutcome,
   verifyFreezeRepo,
@@ -129,6 +135,7 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    (homemade instance rows, not official SWE-bench Verified)
   method <ref>     --workspace <dir> --principal <id> --draft <draftId>
                    [--slice 1|10|all] [--ids <csv>] [--n <count>] [--host <host.json>]
+                   [--replicates <n>]
                    (catalog id or method-document file; omit ref to list)
   export           --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
   arm add          --workspace <dir> --principal <id> --draft <draftId>
@@ -222,6 +229,7 @@ method-document file onto a draft.
   method           [--json]
   method <ref>     --workspace <dir> --principal <id> --draft <draftId>
                    [--slice 1|10|all] [--ids <csv>] [--n <count>] [--host <host.json>]
+                   [--replicates <n>]
 
   --workspace <dir>   the directory init created
   --principal <id>    the id init was given
@@ -239,6 +247,14 @@ Coverage (catalog id only; pass exactly one of --slice, --ids, or --n):
                   whose task list --n takes the first N from. No other host key is
                   read or sealed by method. terminal-bench-2.1 carries its own
                   official task list, so there --n needs no host file either.
+
+Run plan (terminal-bench-2.1 only):
+  --replicates <n>  planned trials of each task. Without it the draft keeps its
+                  count, which is 1 on a new draft. Fewer than ${TERMINAL_BENCH_21_LEADERBOARD_TRIALS_PER_TASK} is not
+                  leaderboard-comparable, and lock says so before it seals.
+  Binding also sets the run window: 2 hours for each task and replicate, and
+  never less than 24 hours. lock seals the close time from it, and run import
+  refuses a trial dated after it. A longer window already on the draft is kept.
 
 Bringing a finished run, in this order:
   ${renderClaimantCommandPath()}
@@ -262,7 +278,8 @@ inspect is draft inspect. lock is runLock.
  * Each entry answers a question the pre-publish rehearsal's walker could not answer from help:
  * what an arm pinning must contain for a brought run (issue #4946), whether a claimant runs
  * `quote` and what its refusals mean (issues #4944, #4947), and which provider values `anchor`
- * accepts (issue #4951).
+ * accepts (issue #4951). `arm add` also names the document that walks the whole path, because a
+ * help page holds one example and no reader of it can ask for the rest.
  */
 const VERB_HELP_NOTES: Readonly<Record<string, () => string>> = {
   "arm add": () => `A pinning is a JSON object that says what the arm is. It is sealed into the lock
@@ -278,6 +295,9 @@ trial to exactly one arm, or refuses the import. An arm matches when either hold
   example: --arm terminus-2
            --pinning '{"agent":{"id":"terminus-2"},"model":{"id":"<provider>/<model>"}}'
 
+The full walkthrough is CLAIMANT-WALKTHROUGH.md, linked from the
+@colophon-claims/cli README.
+
 --agent takes a machine-local Claude Code or Codex profile (agent add) instead
 of --pinning.
 `,
@@ -291,9 +311,10 @@ describe that venue's inventory. They do not block lock or the brought run.
 ${PRODUCIBLE_ANCHOR_PROFILES.map((profile) => `  ${profile}`).join("\n")}
 They are names, not addresses; nothing is fetched from them.
 
---endpoint is the https address of the timestamp service to ask. No endpoint
-ships as a default, so an endpoint must be supplied: pass --provider and
---endpoint here, or store both once with anchoring configure.
+--endpoint is the address of the timestamp service to ask. No endpoint ships as
+a default, so an endpoint must be supplied: pass --provider and --endpoint
+here, or store both once with anchoring configure. An address passed here may
+be http or https. anchoring configure keeps an https address only.
 
 A lock anchor is only obtainable before run import.
 `,
@@ -309,7 +330,7 @@ const SAMPLE_INIT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const IMPORT_SWEBENCH_FLAGS = [
   "workspace", "principal", "json", "draft", "file", "name", "description", "version", "provenance-timestamp",
 ] as const;
-const METHOD_FLAGS = ["workspace", "principal", "json", "draft", "slice", "ids", "n", "host"] as const;
+const METHOD_FLAGS = ["workspace", "principal", "json", "draft", "slice", "ids", "n", "host", "replicates"] as const;
 const METHOD_LIST_FLAGS = ["json"] as const;
 const EXPORT_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
 const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "agent", "notes"] as const;
@@ -488,14 +509,55 @@ function requireSampleSizeAdvisoryAcknowledgement(
   if (planned === undefined) return undefined;
   const advisory = formatSampleSizeAdvisory(planned);
   if (!present(args, SAMPLE_SIZE_ACK_FLAG)) {
+    // The replicate count is sealed by the lock, so its consequence on the official slate is
+    // stated here, where the count can still be changed, and again under the receipt.
+    const harborRun = draftHarborRunRequirements(workspaceDir, draftId);
+    const fewTrials = harborRun === undefined ? undefined : leaderboardTrialsNotice(harborRun);
     refuse(
       "invalid-invocation",
       `--${SAMPLE_SIZE_ACK_FLAG}`,
-      `${advisory}\nThe lock is irreversible. Change the sample size now, or repeat the command with `
+      `${advisory}\n`
+        + (fewTrials === undefined
+          ? ""
+          : `${fewTrials} To plan more, bind a new draft with method terminal-bench-2.1 --replicates <n>, `
+            + "which also sets a run window that fits.\n")
+        + "The lock is irreversible. Change the sample size now, or repeat the command with "
         + `--${SAMPLE_SIZE_ACK_FLAG} to seal at this n.`,
     );
   }
   return advisory;
+}
+
+/**
+ * That a run planning fewer trials of each task than the Terminal-Bench 2.1 leaderboard asks for
+ * is not leaderboard-comparable, or `undefined` at or above that count. Nothing is said at or
+ * above it: no brought run can show that it met the leaderboard's protocol, so the count alone
+ * never makes one comparable.
+ */
+function leaderboardTrialsNotice(harborRun: HarborRunRequirements): string | undefined {
+  const planned = harborRun.attemptsPerTask;
+  if (planned >= harborRun.leaderboardTrialsPerTask) return undefined;
+  return `This run plans ${planned} ${planned === 1 ? "trial" : "trials"} of each task. A Terminal-Bench 2.1 run with fewer `
+    + `than ${harborRun.leaderboardTrialsPerTask} trials of each task is not leaderboard-comparable.`;
+}
+
+/**
+ * What a completed lock on the official Terminal-Bench 2.1 slate says the Harbor run must meet
+ * (issue #4975). Each line is something `run import --from harbor` refuses on, and a refusal
+ * there comes after the run was paid for. The flag names are Harbor 0.21.0's own (`harbor run
+ * --help`): `--n-attempts` is trials of each task, `--max-retries` is retries.
+ */
+function harborRunLines(harborRun: HarborRunRequirements): string {
+  const fewTrials = leaderboardTrialsNotice(harborRun);
+  return [
+    "run import --from harbor accepts the Harbor run of this lock only when:",
+    `  Harbor is version ${harborRun.versions.join(" or ")}`,
+    `  retries are off: harbor run --max-retries ${harborRun.maxRetries}, which is Harbor's default`,
+    `  the dataset is the sealed revision: harbor run --dataset ${harborRun.dataset}`,
+    `  each task has one trial for each replicate: harbor run --n-attempts ${harborRun.attemptsPerTask}`,
+    "  every trial starts after this lock and ends before the close time above",
+    ...(fewTrials === undefined ? [] : [fewTrials]),
+  ].map((line) => `${line}\n`).join("");
 }
 
 function withProviderAcknowledgement<T>(
@@ -701,6 +763,7 @@ async function handleMethodBind(
   const ids = optional(args, "ids");
   const n = optional(args, "n");
   const host = optional(args, "host");
+  const replicates = optional(args, "replicates");
   const result = await selectMethod(opContext, {
     draftId,
     ref: args.words[1],
@@ -709,6 +772,7 @@ async function handleMethodBind(
     ...(ids === undefined ? {} : { ids }),
     ...(n === undefined ? {} : { n }),
     ...(host === undefined ? {} : { hostPath: host }),
+    ...(replicates === undefined ? {} : { replicates }),
   });
   return renderResult(
     result,
@@ -1088,7 +1152,8 @@ async function handleLock(args: ParsedArgs, context: CliContext, jsonMode: boole
     // The acknowledged width prints above the receipt, so human-mode stdout says at what n the
     // digest below it was sealed. `--json` carries the same pair in the envelope.
     (value) => (sampleSizeAdvisory === undefined ? "" : `${sampleSizeAdvisory}\n`)
-      + `locked draft ${value.draft.draftId}: run ${value.runSha256}, closes ${value.closeAt}\n`,
+      + `locked draft ${value.draft.draftId}: run ${value.runSha256}, closes ${value.closeAt}\n`
+      + (value.harborRun === undefined ? "" : harborRunLines(value.harborRun)),
   );
   if (!locked.ok || present(args, NO_ANCHOR_FLAG)) return rendered;
 
@@ -1447,6 +1512,10 @@ function importFormat(args: ParsedArgs): ExternalRunRecordFormat {
  * The measurement columns are exactly what each subject Task's own sealed EvaluationSpec declares.
  * A `graded` row's verdict is computed from that spec's verdict rule, so these are the names the
  * rule can actually read; anything else would be a column with nowhere to land.
+ *
+ * A draft on the official Terminal-Bench 2.1 slate gets no skeleton. Import accepts only a Harbor
+ * jobs directory there (`operations/run-import.ts`), so a skeleton would be a file whose filled
+ * copy is refused. The refusal names the command that does bring the run.
  */
 function renderImportTemplate(
   workspaceDir: string,
@@ -1457,11 +1526,20 @@ function renderImportTemplate(
   if (document.spec.taskSet.kind !== "benchmark") {
     refuse("conflict", `drafts.${draftId}.taskSet`, `draft ${draftId} has no attached benchmark`);
   }
+  const benchmark = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
+  if (carriesOfficialTerminalBench21Slate(benchmark)) {
+    refuse(
+      "conflict",
+      `drafts.${draftId}.taskSet`,
+      `draft ${draftId} is bound to the official Terminal-Bench 2.1 slate, and a run on that slate `
+        + "is brought with `run import --from harbor <jobs-dir>`. That reads the Harbor jobs "
+        + "directory itself and takes no dump file, so there is no skeleton to fill in.",
+    );
+  }
   const runState = requireRunState(workspaceDir, draftId);
   if (runState.runSha256 === undefined) {
     refuse("conflict", `runs.${draftId}`, `draft ${draftId} has no sealed Run record yet — lock it first`);
   }
-  const benchmark = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
   const run = parseRun(getSealedBytes(workspaceDir, runState.runSha256));
   const coords = expectedCellSet(benchmark, run);
 
@@ -1557,17 +1635,18 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
       );
     }
     const resolvedPath = pathFrom(context.cwd, pathWord);
-    const dump = reader === "inspect"
-      ? readInspectRunImport({
-        workspaceDir: opContext.workspaceDir,
-        draftId,
-        evalLogOrDir: resolvedPath,
-      })
-      : readHarborRunImport({
+    const harborDump = reader === "harbor"
+      ? readHarborRunImport({
         workspaceDir: opContext.workspaceDir,
         draftId,
         jobsDir: resolvedPath,
-      });
+      })
+      : undefined;
+    const dump = harborDump ?? readInspectRunImport({
+      workspaceDir: opContext.workspaceDir,
+      draftId,
+      evalLogOrDir: resolvedPath,
+    });
     const imported = await importRunRecords(opContext, {
       draftId,
       records: dump.records,
@@ -1575,6 +1654,9 @@ async function handleRunImport(args: ParsedArgs, context: CliContext, jsonMode: 
       evidenceRoot: dump.evidenceRoot,
       dump: dumpIdentityFromPath(resolvedPath, dump.records),
       namedReader: reader,
+      // The Harbor reader's cap grows with the locked run's cells, so a full-slate run is not
+      // refused for its size. The Inspect reader states none and keeps the default.
+      ...(harborDump === undefined ? {} : { maxAggregateEvidenceBytes: harborDump.maxAggregateEvidenceBytes }),
     });
     return renderResult(
       imported,
@@ -1694,7 +1776,47 @@ function handleResults(args: ParsedArgs, context: CliContext, jsonMode: boolean)
   const draftId = required(args, "draft");
 
   const result = runResults(opContext, { draftId });
-  return renderResult(result, jsonMode, (value) => `${JSON.stringify(value, null, 2)}\n`);
+  return renderResult(result, jsonMode, renderResultsDocument);
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** A `wilson@1` arm with no judged cell, wherever the document carries one: the stored Claim's
+ * headline and the sealed Report's per-subject results use the same three members. */
+function isZeroJudgedArm(value: Readonly<Record<string, unknown>>): boolean {
+  const interval = value["wilsonInterval"];
+  return value["n"] === 0
+    && typeof value["passRate"] === "string"
+    && isRecord(interval)
+    && typeof interval["low"] === "string"
+    && typeof interval["high"] === "string";
+}
+
+function withUnstatedRates(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withUnstatedRates);
+  if (!isRecord(value)) return value;
+  if (isZeroJudgedArm(value)) {
+    return {
+      ...value,
+      passRate: "No rate is stated",
+      wilsonInterval: { ...(value["wilsonInterval"] as object), low: "Not stated", high: "Not stated" },
+    };
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, member]) => [key, withUnstatedRates(member)]));
+}
+
+/**
+ * The `results` document as a person reads it (operator rulings of 2026-10-06, decision 6).
+ *
+ * `wilson@1` seals `0.0000` for the rate and both interval bounds of an arm with `n` 0, and
+ * printed as sealed that reads as "failed every task, with certainty" about an arm that was never
+ * scored. So this rendering states no rate for such an arm. Only what is shown changes: the
+ * stored records keep the sealed strings, and `--json` carries the document exactly as stored.
+ */
+export function renderResultsDocument(value: unknown): string {
+  return `${JSON.stringify(withUnstatedRates(value), null, 2)}\n`;
 }
 
 async function handleReport(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
