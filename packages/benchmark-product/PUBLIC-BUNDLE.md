@@ -715,6 +715,18 @@ that does not declare the capability renders the page it rendered before, with
 each task labelled by its Task digest: every earlier format, and a slate run
 this product drove itself.
 
+The same page says how much of the dataset the run covers, before it states any
+rate. `index.html` carries a `Tasks` fact in its header, directly under the
+scope line, reading `<selected> of the <dataset count> in Terminal-Bench 2.1`,
+for example `3 of the 89 in Terminal-Bench 2.1`, or
+`all 89 in Terminal-Bench 2.1` when the Benchmark carries every task of the
+dataset. `README.md` carries the same words as one line under its scope line,
+`Tasks: 3 of the 89 in Terminal-Bench 2.1.`, and `share.txt` carries that
+sentence directly after its scope. Both numbers are the verified section's
+`selectedTaskCount` and `datasetTaskCount`, and nothing else is read. A page
+without the section carries no such line. The badge and the social card do not
+carry it.
+
 The same page names its rate by what was judged, and every v10 page states no
 rate where nothing was. On a declaring bundle the rate column of the per-arm
 tables reads `Terminal-Bench 2.1 accuracy` only when the Benchmark carries all
