@@ -273,6 +273,20 @@ function bundleJson(path: string): Record<string, any> {
   return JSON.parse(readFileSync(join(reader().bundleDir, path), "utf8")) as Record<string, any>;
 }
 
+/** One file of the copied bundle's report face, as text. */
+function bundleText(path: string): string {
+  return readFileSync(join(reader().bundleDir, path), "utf8");
+}
+
+/** The part of `text` from the first `from` up to the next `to`. Both must be there. */
+function between(text: string, from: string, to: string): string {
+  const start = text.indexOf(from);
+  expect(start, `the text holds "${from}"`).toBeGreaterThan(-1);
+  const end = text.indexOf(to, start + from.length);
+  expect(end, `"${to}" follows "${from}"`).toBeGreaterThan(start);
+  return text.slice(start, end);
+}
+
 /** The one line of a text report that starts with `label`, without the label. */
 function lineAfter(text: string, label: string): string {
   const lines = text.split("\n").filter((line) => line.startsWith(label));
@@ -543,5 +557,56 @@ describe("reader path: the copied bundle, checked with the workspace gone", () =
     for (const report of [reader().cliBare, reader().cliWithRoot]) {
       expect(lineAfter(report.stdout, "Run: ")).toBe(lockedRun());
     }
+  });
+
+  test("the published page says what was measured: the rate's name, the tasks, and 3 of the dataset's 89", () => {
+    // What a reader opens. The walk covers three of the dataset's 89 tasks and every cell of both
+    // arms was judged, which is exactly the run a careless page would call the suite's accuracy.
+    const html = bundleText("index.html");
+    const readme = bundleText("README.md");
+    const share = bundleText("share.txt");
+
+    // The rate is named once per table, on the Report table and on the Claim table, and no file
+    // of the bundle's report face calls it Terminal-Bench 2.1 accuracy.
+    expect(html.split('<th scope="col">Pass rate over judged cells</th>')).toHaveLength(3);
+    expect(html).not.toContain('<th scope="col">Pass rate</th>');
+    expect(readme.split("| Pass rate over judged cells | Wilson low | Wilson high |")).toHaveLength(3);
+    expect(readme).not.toContain("| Pass rate | Wilson low |");
+    for (const [name, text] of [["index.html", html], ["README.md", readme], ["share.txt", share]] as const) {
+      expect(text, name).not.toContain("accuracy");
+    }
+
+    // The comparability sentence, once in each limitation list and nowhere else. The page writes
+    // an apostrophe as a character reference.
+    const sentence = TERMINAL_BENCH_21_COMPARABILITY_LIMIT;
+    const sentenceOnPage = sentence.replaceAll("'", "&#39;");
+    expect(
+      between(html, "<h3>Sealed Report limitations</h3>", "<h3>Stored Claim limitations</h3>").split(sentenceOnPage),
+    ).toHaveLength(2);
+    expect(
+      between(html, "<h3>Stored Claim limitations</h3>", "<h3>Local self-run trust boundary stored in the Claim</h3>")
+        .split(sentenceOnPage),
+    ).toHaveLength(2);
+    expect(html.split(sentenceOnPage)).toHaveLength(3);
+    expect(between(readme, "### Report limitations", "## Stored Claim facts").split(sentence)).toHaveLength(2);
+    expect(between(readme, "### Claim limitations", "### Claim assurance").split(sentence)).toHaveLength(2);
+    expect(readme.split(sentence)).toHaveLength(3);
+
+    // Each task of the fixture, by its official name.
+    for (const task of TASKS) {
+      expect(html, task).toContain(
+        `<tr><th scope="row"><strong>${task}</strong><br><span class="source-label">Terminal-Bench 2.1 task; dataset `,
+      );
+      expect(readme, task).toContain(`- **${task}** — Terminal-Bench 2.1 task; dataset `);
+    }
+
+    // How much of the dataset that is, in the header and above every rate.
+    const coverage = "3 of the 89 in Terminal-Bench 2.1";
+    const header = between(html, "<header>", "</header>");
+    expect(header).toContain(`<dl class="facts"><div><dt>Tasks</dt><dd>${coverage}</dd></div></dl>`);
+    expect(html.split(coverage)).toHaveLength(2);
+    expect(readme).toContain(`\n\nTasks: ${coverage}.\n\n`);
+    expect(readme.indexOf(`Tasks: ${coverage}.`)).toBeLessThan(readme.indexOf("Pass rate over judged cells"));
+    expect(share).toContain(` Tasks: ${coverage}. `);
   });
 });

@@ -128,6 +128,28 @@ describe("Terminal-Bench 2.1 official slate pin", () => {
     expect(customSlate.selectedTaskNames).toEqual(["write-compressor", "qemu-startup"]);
   });
 
+  test("the Benchmark description says what the upstream commit names, and what identifies a package", () => {
+    // The commit is where the task list was read. It is not what identifies a package's bytes:
+    // the published `sanitize-git-repo` package differs from the repository at that commit in one
+    // test file (PUBLIC-BUNDLE.md), and its package ref names the published one. So no Benchmark
+    // says its tasks are "at" the commit, whatever it selects.
+    const packages = "Each task package is identified by its sealed Harbor package ref, not by that commit.";
+    const described = (input: Parameters<typeof buildTerminalBench21Tasks>[0]): string =>
+      parseBenchmark(buildTerminalBench21Tasks(input).benchmark.bytes).description as string;
+    expect(described({ coverage: "full" })).toBe(
+      `Official Terminal-Bench 2.1 task list, read at the sealed upstream commit. ${packages}`,
+    );
+    expect(described({ coverage: "ten_task" })).toBe(
+      `Official Terminal-Bench 2.1 ten_task slice of the task list read at the sealed upstream commit. ${packages}`,
+    );
+    expect(described({ coverage: "one_task" })).toBe(
+      `Official Terminal-Bench 2.1 one_task slice of the task list read at the sealed upstream commit. ${packages}`,
+    );
+    expect(described({ taskNames: ["sanitize-git-repo", "qemu-startup"] })).toBe(
+      `Official Terminal-Bench 2.1 custom slice of the task list read at the sealed upstream commit. ${packages}`,
+    );
+  });
+
   test("refuses a name that is not on the official slate", () => {
     try {
       buildTerminalBench21Tasks(["not-a-terminal-bench-2-1-task"]);
