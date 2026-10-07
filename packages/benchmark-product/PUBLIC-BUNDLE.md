@@ -660,9 +660,40 @@ this product seals for it. A declaring bundle is refused under
 names are distinct official names, its coverage word is the one those names
 recompute to, each Benchmark item is the pinned Task of the name in the same
 position, and its import marker names `harbor` as the source. A Task digest
-covers the Task's profile, payload, instructions, author, and outputs, so one
-comparison per item settles which Task it is. The checker requires the marker to
-name Harbor. It cannot prove that a Harbor process wrote the rewards.
+covers the Task's profile, payload, instructions, author, outputs, and the
+digest of the EvaluationSpec it binds, so one comparison per item settles which
+Task it is. The checker requires the marker to name Harbor. It cannot prove that
+a Harbor process wrote the rewards.
+
+The same pin settles how each cell is scored. Each official Task binds an
+`external-verifier` EvaluationSpec, the grader family of proposal 0002
+(`proposals/0002-external-verifier-grader-family.md`), and that spec names the
+task package as the grader by the content hash Harbor gives it, the package's
+own `tests/` files by digest, the image reference and verifier timeout the
+package declares, and the verdict rule over Harbor's `reward`. A spec that
+passed at another reward, named another package, or belonged to another grader
+family would have another digest, so its Task would be off the pin and the
+bundle refused. The spec states an image reference as the package declares it,
+which is a tag. It pins no image, no platform, and nothing the verifier
+downloads when it runs.
+
+The rule passes at a reward of 1, fails at 0, and answers inconclusive for any
+other value. The threshold is not this product's choice. Every one of the 89
+task packages ships a verifier script, `tests/test.sh`, that writes `1` to the
+reward file when every exit code it checks is zero and `0` otherwise, in one
+place, and no other file under the package's `tests/`, `environment/` or
+`solution/` directory names a reward file.
+`core/scripts/generate-terminal-bench-2-1-verifier-pins.mjs` asserts that of
+every package before it writes the values the specs are sealed from, and
+`core/test/fixtures/terminal-bench-2-1-packages/manifest.json` lists every
+package file by path and SHA-256, so the chain from a spec's digests to the
+slate's package refs can be recomputed without the packages.
+
+Each spec names one required evidence reference, `trial-result.json`. That is
+the name under which the Harbor reader carries the `result.json` Harbor wrote
+for the trial, the file that holds Harbor's raw reward map. This checker
+recomputes each verdict from the sealed measurement. It does not read the
+reward back out of that file, and it does not require a cell to carry it.
 
 The capability is bound to the records both ways. A v10 bundle whose Benchmark
 carries the extension for Terminal-Bench 2.1 and whose vector declares
