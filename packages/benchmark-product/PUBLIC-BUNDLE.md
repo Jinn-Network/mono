@@ -660,7 +660,7 @@ of `tasks/dataset.toml` in the dataset's source repository at that commit, and
 the dataset revision is the one that repository's leaderboard code pins there. A
 package ref is the content hash Harbor gives the package it publishes for that
 dataset revision. It is the value a Harbor trial records, and it is what
-identifies the bytes a task was run and scored with.
+identifies a package's bytes.
 
 The two agree for 88 of the 89 tasks and differ for one. For 88 tasks the
 repository at the upstream commit lists the same ref and holds the same files as
