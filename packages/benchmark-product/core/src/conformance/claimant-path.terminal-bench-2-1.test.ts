@@ -167,15 +167,15 @@ describe("claimant path: method terminal-bench-2.1 to an imported Harbor 0.21 ru
     expect(resultOf("lock")["runSha256"]).toMatch(/^[a-f0-9]{64}$/u);
   });
 
-  test("the Harbor jobs directory imports onto the locked slate", () => {
+  test("the Harbor jobs directory imports onto the locked slate, every cell graded", () => {
     expect(resultOf("run import --from harbor")).toMatchObject({
       importedCellCount: 6,
-      written: { graded: 0, ungradeable: 5, notDelivered: 1 },
+      written: { graded: 6, ungradeable: 0, notDelivered: 0 },
     });
     expect(readDraftDocument(paths.workspaceDir, DRAFT).state).toBe("running");
   });
 
-  test("each imported cell is classified from its Harbor trial", () => {
+  test("each imported cell is graded from its Harbor trial's raw reward", () => {
     const declaration = ExternalRunImportDeclarationSchema.parse(
       sealedJson(resultOf("run import --from harbor")["declarationSha256"] as string),
     );
@@ -185,19 +185,19 @@ describe("claimant path: method terminal-bench-2.1 to an imported Harbor 0.21 ru
       const taskName = sealedJson(taskSha256)["payload"]["taskName"] as string;
       return [`${armId}: ${taskName}`, row.reason === undefined ? row.outcome : `${row.outcome} (${row.reason})`];
     }));
-    // A finished trial with a verifier reward is carried as evidence and not yet graded: the
-    // official slate binds no EvaluationSpec for the reward to be read against.
-    const carried = "ungradeable (Harbor verifier produced execution evidence; the sealed EvaluationSpec was not applied)";
+    // Each official Task seals an EvaluationSpec that declares Harbor's `reward`, so a finished
+    // trial whose result carries that reward is graded by it. That includes the terminus-2 trial
+    // of chess-best-move, which ran to `AgentTimeoutError` and still has a reward of 0.
     expect(classified).toEqual({
-      "oracle: adaptive-rejection-sampler": carried,
-      "oracle: cancel-async-tasks": carried,
-      "oracle: chess-best-move": carried,
-      "terminus-2: adaptive-rejection-sampler": carried,
-      "terminus-2: cancel-async-tasks": carried,
-      "terminus-2: chess-best-move": "timeout (AgentTimeoutError)",
+      "oracle: adaptive-rejection-sampler": "graded",
+      "oracle: cancel-async-tasks": "graded",
+      "oracle: chess-best-move": "graded",
+      "terminus-2: adaptive-rejection-sampler": "graded",
+      "terminus-2: cancel-async-tasks": "graded",
+      "terminus-2: chess-best-move": "graded",
     });
     const evidenced = declaration.rows.filter((row) => row.evidence !== undefined);
-    expect(evidenced).toHaveLength(5);
+    expect(evidenced).toHaveLength(6);
     for (const row of evidenced) {
       expect(row.evidence!.map((file) => file.name)).toEqual(["trial-result.json", "trial-config.json", "reward.txt"]);
     }

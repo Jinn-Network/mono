@@ -133,6 +133,9 @@ function attachOfficialTerminalBench21Slate(
   const built = buildTerminalBench21Tasks(input);
   putSealedBytes(context.workspaceDir, built.profile.bytes);
   for (const task of built.tasks) {
+    // The spec beside the Task that binds it: collect, publish and every reader resolve a Task's
+    // EvaluationSpec from the same store by the digest the Task carries.
+    putSealedBytes(context.workspaceDir, task.evaluationSpec.bytes);
     putSealedBytes(context.workspaceDir, task.bytes);
   }
   const stored = putSealedBytes(context.workspaceDir, built.benchmark.bytes);

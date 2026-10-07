@@ -1,0 +1,35 @@
+{
+  "input": {
+    "family": "external-verifier",
+    "block": {
+      "harness": "harbor",
+      "verifierSemanticsVersion": "1",
+      "testMaterial": [
+        {
+          "name": "tests/test.sh",
+          "digest": {
+            "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "accessClass": "public"
+        }
+      ],
+      "timeout": 900,
+      "org.example.note": "context"
+    }
+  },
+  "expect": {
+    "harness": "harbor",
+    "verifierSemanticsVersion": "1",
+    "testMaterial": [
+      {
+        "name": "tests/test.sh",
+        "digest": {
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "accessClass": "public"
+      }
+    ],
+    "timeout": 900,
+    "org.example.note": "context"
+  }
+}
