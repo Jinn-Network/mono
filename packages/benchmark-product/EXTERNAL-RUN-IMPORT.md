@@ -345,10 +345,20 @@ Timings (`started_at` / `finished_at`) and evidence paths (`result.json`,
 carried on the record. Evidence paths are relative to the jobs directory you
 passed. The #2979 sealed-run window still applies: an imported timestamp must
 fall at or after lock, and at or before the earlier of the run's close time and
-the import. `lock` prints the close time. Harbor timestamps from a run
-that finished before you locked this draft will be refused for that reason —
-omit them from the trial `result.json`, or lock the Colophon run so its window
-covers the Harbor times.
+the import. `lock` prints the close time. So lock first, then run Harbor.
+
+A run that finished before you locked the draft cannot be brought onto that
+lock. Each of its trials is dated before the window opens, so the import is
+refused, naming the row and the time of every start and finish that falls
+outside the window. A refused import writes nothing and the draft stays locked:
+run Harbor again after the lock, and import that run.
+
+Do not edit the times out of a trial `result.json` to get an earlier run in.
+The reader tells a finished trial by its `finished_at`. A Harbor 0.21.0 trial
+record with both times removed is read as a trial that has not finished, so the
+import succeeds with every such cell recorded as not delivered, and the lock is
+spent on a run with no results. A record with only one of the two times is
+refused.
 
 A trial whose Harbor task name is not on the locked slate is left as an
 unknown-slot cellKey for the #2979 validator to refuse. Duplicate trials for

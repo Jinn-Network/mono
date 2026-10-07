@@ -444,6 +444,29 @@ describe("readHarborRunRecords — a real Harbor 0.21.0 jobs directory", () => {
     expect(records).toHaveLength(6);
   });
 
+  test("a real trial record with its times edited out is read as a trial that has not finished", () => {
+    // A Harbor 0.21.0 trial result carries no status word, so the reader tells a finished trial by
+    // its `finished_at`. Removing the times therefore does not get an earlier run past the sealed
+    // run window: the trial is recorded as not delivered, its reward unread. EXTERNAL-RUN-IMPORT.md
+    // tells a claimant this, in place of the advice it used to give.
+    const copy = join(jobsDir, "jobs");
+    cpSync(REAL_JOBS, copy, { recursive: true });
+    const resultPath = join(copy, "oracle", "chess-best-move__5FuHvzp", "result.json");
+    const result = JSON.parse(readFileSync(resultPath, "utf8")) as Record<string, unknown>;
+    expect(result["status"]).toBeUndefined();
+    expect(result["verifier_result"]).toEqual({ rewards: { reward: 1 } });
+    delete result["started_at"];
+    delete result["finished_at"];
+    writeFileSync(resultPath, JSON.stringify(result));
+
+    const record = readReal(copy).find((entry) => entry.cellKey === cellKey(digests["chess-best-move"]!, "oracle", 1))!;
+    expect(record).toMatchObject({ outcome: "unrun", reason: "Harbor trial is not finished" });
+    expect(record.startedAt).toBeUndefined();
+    expect(record.endedAt).toBeUndefined();
+    expect(record.measurements).toBeUndefined();
+    expect(record.evidence).toBeUndefined();
+  });
+
   test("an agent that matches no locked arm is refused with the agent and the arms named", () => {
     expect(() => readHarborRunRecords({
       jobsDir: REAL_JOBS,

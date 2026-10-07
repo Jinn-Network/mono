@@ -10,18 +10,19 @@
  * operations (`method terminal-bench-2.1`, `run import`, `collect`, `report`) and reads the page
  * the producer writes.
  *
- * No Task on the slate binds an EvaluationSpec yet, so every imported cell here is `unrun`: the
- * page names the task and shows no verdict and no reward. For the same reason the standalone
- * checker refuses this bundle at its evidence closure before it rebuilds the page. The page of a
- * judged slate run, checked by the reader, lands with the change that binds the specs.
+ * No slot is driven here: the test imports every cell as `unrun`, so the page names the task and
+ * shows no verdict and no reward. Each Task on the slate binds an `external-verifier`
+ * EvaluationSpec, so the standalone checker accepts this bundle and rebuilds the same page. The
+ * page of a judged slate run is read in `v10-materialize.test.ts`, and walked from a real Harbor
+ * jobs directory in `conformance/claimant-path.terminal-bench-2-1.test.ts`.
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { expectedCellSet, parseBenchmark, parseRun } from "@jinn-network/benchmarking-records";
-import { BUNDLE_V10_FORMAT, TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY } from "@colophon-claims/check";
+import { BUNDLE_V10_FORMAT, TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY, verifyPublicBundle } from "@colophon-claims/check";
 import type { ExternalRunRecord } from "../intake/external-run-records.js";
 import { TERMINAL_BENCH_21_OFFICIAL_TASKS } from "../intake/terminal-bench-2-1-slate.js";
 import { armAdd } from "../operations/arms.js";
@@ -41,17 +42,14 @@ import { materializePublicBundle } from "./materialize.js";
 
 let workspaceDir: string;
 let evidenceRoot: string;
-let hostDir: string;
 
 beforeEach(() => {
   workspaceDir = mkdtempSync(join(tmpdir(), "bp-tb21-page-ws-"));
   evidenceRoot = mkdtempSync(join(tmpdir(), "bp-tb21-page-dump-"));
-  hostDir = mkdtempSync(join(tmpdir(), "bp-tb21-page-host-"));
-  writeFileSync(join(hostDir, "host.json"), "{}");
 });
 
 afterEach(() => {
-  for (const dir of [workspaceDir, evidenceRoot, hostDir]) rmSync(dir, { recursive: true, force: true });
+  for (const dir of [workspaceDir, evidenceRoot]) rmSync(dir, { recursive: true, force: true });
 });
 
 const DRAFT_ID = "draft-1";
@@ -72,8 +70,7 @@ async function reportedSlateDraft(): Promise<{ readonly benchmarkSha256: string;
   const bound = await selectMethod(context(), {
     draftId: DRAFT_ID,
     ref: "terminal-bench-2.1",
-    cwd: hostDir,
-    hostPath: join(hostDir, "host.json"),
+    cwd: workspaceDir,
     slice: "1",
   });
   expect(bound.ok, JSON.stringify(bound)).toBe(true);
@@ -148,5 +145,8 @@ describe("the page the producer writes for a run brought onto the official Termi
 
     const readme = readFileSync(join(bundle.bundleDir, "README.md"), "utf8");
     expect(readme).toContain(`- **${OFFICIAL.name}** — ${summary}\n`);
+
+    // The reader rebuilds this page byte for byte, and accepts the bundle.
+    expect((await verifyPublicBundle(bundle.bundleDir)).format).toBe(BUNDLE_V10_FORMAT);
   }, 120_000);
 });

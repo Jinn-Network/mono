@@ -6,7 +6,7 @@ Terminal-Bench 2.1 slate themselves.
 
 | Directory | Tasks | Trials per task | Read by |
 | --- | --- | --- | --- |
-| `jobs/` | 3 | 1 | `src/intake/harbor-run-records.test.ts`, `src/conformance/claimant-path.terminal-bench-2-1.test.ts` |
+| `jobs/` | 3 | 1 | `src/intake/harbor-run-records.test.ts`, `src/conformance/claimant-path.terminal-bench-2-1.test.ts`, `src/conformance/zero-judged-arm.test.ts`, `src/cli/official-slate-run-plan.test.ts`, `src/cli/results-zero-judged.test.ts` |
 | `jobs-two-attempts/` | 2 | 2 | `src/intake/harbor-run-records.test.ts` |
 
 These two records are also the list of Harbor versions the reader accepts. `--from harbor` reads
