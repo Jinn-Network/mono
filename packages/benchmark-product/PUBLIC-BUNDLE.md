@@ -703,6 +703,37 @@ does not declare it is refused, and so is a declaring bundle whose Report omits
 the sentence, repeats it, or seals it anywhere but its slot. A run on the slate
 that was not imported declares nothing here, and its bundle is unchanged.
 
+The report page of a declaring bundle names its tasks. The task-by-task
+comparison labels each task by its official name, read from the sealed Task's
+`taskName`, and states the dataset with the first 12 hexadecimal digits of the
+dataset revision and of the task's Harbor package ref. Each cell is headed by
+the task's name and states its verdict, and its score is the `reward`
+measurement when every verdict on the cell carries the same one. A cell with no
+verdict states neither. This naming is keyed on the verified
+`terminalBench21Comparability` section, never on the Task's profile. So a bundle
+that does not declare the capability renders the page it rendered before, with
+each task labelled by its Task digest: every earlier format, and a slate run
+this product drove itself.
+
+The same page names its rate by what was judged, and every v10 page states no
+rate where nothing was. On a declaring bundle the rate column of the per-arm
+tables reads `Terminal-Bench 2.1 accuracy` only when the Benchmark carries all
+89 tasks of the dataset and every arm's judged `n` equals its planned slots and
+is not zero. Otherwise, a slice included, it reads `Pass rate over judged
+cells`, and a page without the section keeps `Pass rate`. The comparison is
+against the rate's own denominator and never the Matrix's judged count: a cell
+whose reward is neither 0 nor 1 carries a valid `inconclusive` verdict, which
+the Matrix counts as judged and `wilson@1` leaves out of the rate. The Report
+table and the Claim table are each named from their own record. Separately, on
+every v10 page, declaring or not, a `wilson@1` arm whose judged `n` is 0 prints
+`No rate is stated` for its rate and `Not stated` for both interval bounds, and
+the adverse facts on the page and in `README.md`, and `share.txt`, each say
+`No rate is stated for arm <arm id>: none of its cells reached a pass or fail
+verdict.` The sealed `0.0000` strings stay in `report.json` and
+`claim-package.json`, because the claim package schema requires them, and only
+what is shown changes. The badge and the social card carry no rate and do not
+move, and every format before v10 prints the sealed strings.
+
 Declaration is authoritative, and presence is derived from it, never the
 reverse. A member of a capability the vector does not declare --- an
 `anchors/...` file, a `qualification.json` --- is a non-allowlisted file. A

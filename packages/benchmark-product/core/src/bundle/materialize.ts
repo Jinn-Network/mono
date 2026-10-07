@@ -1124,6 +1124,10 @@ function recordClosure(input: MaterializeBundleInput): {
       record.sha256,
       getSealedBytes(workspaceDir, record.sha256),
     ])),
+    // The Terminal-Bench 2.1 projector is keyed on the claim section `report` sealed, the same
+    // fact the checker keys it on, so the page rendered here is the page it rebuilds. A claim
+    // sealed in a rollback format carries no such section and renders the page it always did.
+    ...(claim.terminalBench21Comparability === undefined ? {} : { officialSuite: claim.terminalBench21Comparability }),
   });
   // Hoisted above the render because `buildPublicAssets` now needs it: the format selects which
   // presentation generation's page is rendered, and the verifier byte-compares the result against
