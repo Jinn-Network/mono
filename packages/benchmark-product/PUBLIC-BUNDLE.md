@@ -900,6 +900,13 @@ Every row but `.../10` runs as `npx @colophon-claims/verify<line> <bundle-dir>`.
 states its package in full and runs as `npx <line> <bundle-dir>`. Append the anchor flags where
 the row lists them.
 
+The reader's report names the run it checked. Under `Format:` it prints a `Run:` line, on every
+format but `.../5`. The value is the SHA-256 of the bundle's `run.json`, as 64 hex characters, and
+it is the digest `lock` printed when the method was sealed. A claimant who made that digest public
+before the run gives a reader something to hold this line against.
+[`CLAIMANT-WALKTHROUGH.md`](CLAIMANT-WALKTHROUGH.md) has that step, and every other command of a
+run brought from Harbor.
+
 Every row above but `.../10` names `@colophon-claims/verify`, because that is the name those
 formats sealed. `.../10` is the first format sealed under the checker's own name,
 `@colophon-claims/check`. A bundle's reader line is the one its own format sealed; run the line
@@ -1325,8 +1332,9 @@ filesystem carries the bit, which the check establishes by probe rather than
 assumption; where it does not, or where the probe cannot be run, the mode
 dimension is dropped and `executableBitChecked` says so.
 
-The standalone verifier package checks a published tree with no product install:
-`colophon-verify <bundle> --freeze-repo <dir>`, exit `1` on drift.
+The standalone checker package checks a published tree with no product install:
+`colophon-check <bundle> --freeze-repo <dir>`, exit `1` on drift. `colophon-check` is the command
+that package installs.
 
 A bundle with no qualification graph has no freeze artifacts, and a Benchmark
 record that declares no licence has no licence data to generate scaffolding from.

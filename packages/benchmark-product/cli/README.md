@@ -47,6 +47,24 @@ npx @colophon-claims/cli@0.1 results --help
 
 `help --advanced` prints the full lifecycle library.
 
+## Bring a Terminal-Bench 2.1 run
+
+[`CLAIMANT-WALKTHROUGH.md`](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/CLAIMANT-WALKTHROUGH.md)
+lists every command of this path in order, from an empty directory to a bundle
+checked on a second machine, for a Terminal-Bench 2.1 run you make on Harbor. It
+gives the arm pinning for a Harbor agent and model and says how a Harbor trial
+is matched to an arm. It names the provider values `anchor` accepts, with one
+example endpoint. It gives the Harbor commands, says where the bundle can be
+hosted, and gives the checker command a reader runs.
+
+A draft needs at least two arms. A claimant with one agent adds Harbor's
+`oracle` agent as the second arm.
+
+`quote` is a required step, and it is known to run on Ubuntu x64 and
+Apple-silicon macOS arm64. So the claimant verbs need one of those two
+platforms, the same two the sample is qualified on. Checking a bundle needs only
+Node 22.
+
 ## Service venue verbs
 
 `launch`, `resume`, `preview`, and the other venue-orchestration verbs

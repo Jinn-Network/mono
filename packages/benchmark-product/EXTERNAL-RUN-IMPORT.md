@@ -266,6 +266,10 @@ to task digests. The sealed benchmark record cannot supply one — its items
 carry a task *reference*, not a foreign id — so the coordinates in the template
 are the only names import accepts.
 
+A draft bound with `method terminal-bench-2.1` gets no template. That slate
+takes a Harbor jobs directory and no dump file, so `--template` is refused
+there, and the refusal names `run import --from harbor <jobs-dir>`.
+
 ## Named readers — Harbor and Inspect
 
 DR-2026-09-04 decision 3: an adapter is a reader, one per harness, from that
@@ -279,6 +283,11 @@ Harbor is the first named reader:
 colophon run import --from harbor ./jobs \
   --workspace ./ws --principal me --draft draft-1
 ```
+
+For a Terminal-Bench 2.1 run, [`CLAIMANT-WALKTHROUGH.md`](CLAIMANT-WALKTHROUGH.md)
+puts this command in its place: every command before and after it, in order,
+with the arm pinning that matches a Harbor agent and the two `harbor run`
+commands. This section is the reference for what the reader does.
 
 `--from harbor` takes the jobs directory, not `--file` / `--source` /
 `--format`. It walks Harbor 0.21 job roots (a directory of jobs, or one job
