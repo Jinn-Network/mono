@@ -1,0 +1,18 @@
+{
+  "input": {
+    "harness": "harbor",
+    "files": [
+      {
+        "path": "tests/test.sh",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      {
+        "path": "task.toml",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  "expect": {
+    "contentHash": "d9ab9cb898bc6518b5c3429a7bfd8bf0a6e420be644c8c0c1d2765c25627becf"
+  }
+}
