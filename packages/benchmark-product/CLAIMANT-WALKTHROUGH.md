@@ -344,6 +344,8 @@ Then put the directory, unchanged, anywhere that serves files over HTTP: a stati
 
 Host exactly these files. The checker refuses a directory that lacks a file the bundle lists, and one that holds a file it does not list. A stray `.DS_Store` is enough to fail a reader's check.
 
+Take care with archives for the same reason. `tar` on macOS adds a metadata entry for each file. Unpacked on Linux, those entries become files named `._<name>`, and the checker refuses the directory. The reader's steps below fetch the listed files one by one and avoid this.
+
 Next to the address, state the Run digest and the timestamp authority you used.
 
 ## Check it from a second machine
