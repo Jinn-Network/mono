@@ -61,7 +61,7 @@ jobs:
           yarn build
           yarn pack:smoke
       - name: Upload distribution
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: read-plane-dist
           path: packages/read-plane/dist

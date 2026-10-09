@@ -476,7 +476,7 @@ jobs:
       - run: yarn playwright install --with-deps chromium
       - run: yarn e2e
       - if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: playwright-traces
           path: apps/operator-console/test-results/

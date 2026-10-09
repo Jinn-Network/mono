@@ -633,7 +633,7 @@ jobs:
       # Surface the raw (URL-scrubbed) scenario logs so a reviewer can step through a red.
       - name: Upload env-suite evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: environment-suite-evidence
           path: |
