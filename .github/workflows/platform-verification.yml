@@ -227,7 +227,7 @@ jobs:
           node .github/scripts/stack-trusted-publishers.mjs
           --out .platform-verification/trusted-publishers
       - name: Upload prepublication artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: platform-verification-artifacts
           path: .platform-verification
@@ -386,7 +386,7 @@ jobs:
           done <<< "${groups}"
       - name: Upload verification receipt
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: platform-verification-receipt
           path: .platform-verification-receipt
