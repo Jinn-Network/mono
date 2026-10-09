@@ -22,7 +22,7 @@
   "dependencies": {
     "@jinn-network/indexer": "portal:../indexer",
     "drizzle-orm": "0.45.3",
-    "pg": "^8.23.0"
+    "pg": "^8.23.1"
   },
   "resolutions": {
     "@jinn-network/task-execution-protocol": "portal:../task-execution/protocol",
@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
-    "@types/node": "^25.9.8",
+    "@types/node": "^25.9.9",
     "@types/pg": "^8.23.1",
     "esbuild": "^0.28.2",
     "tsx": "^4.23.15",
