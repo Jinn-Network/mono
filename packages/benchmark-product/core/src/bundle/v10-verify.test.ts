@@ -37,6 +37,7 @@ import {
 import { buildPublicAssets, type PublicAssetInput } from "./assets.js";
 import { buildBundleManifest } from "./manifest.js";
 import { BUNDLE_V6_FORMAT } from "../legacy-closures.js";
+import { createTerminalBench21SlateBundleFixture } from "./testing/terminal-bench-2-1-slate-fixture.js";
 import { createSyntheticV6BundleFixture } from "./testing/v6-synthetic-fixture.js";
 
 const roots: string[] = [];
@@ -272,4 +273,47 @@ describe("composed bundle v10 — portable verification", () => {
       message: "a bundle declaring owner-controlled-publication must seal the publication-source sentence in its Report limitations, right after the venue sentences",
     });
   }, 180_000);
+
+  test("a run brought onto the official Terminal-Bench 2.1 slate verifies with its workspace gone", async () => {
+    // Operator rulings of 2026-10-06. Each official Task binds an `external-verifier`
+    // EvaluationSpec, so the reader finds a spec for every Task, recomputes every verdict from the
+    // sealed rule over the imported `reward`, and holds every item to the Task digest it pins.
+    const workspaceDir = mkdtempSync(join(tmpdir(), "composed-v10-slate-"));
+    roots.push(workspaceDir);
+    const built = await createTerminalBench21SlateBundleFixture({ workspaceDir });
+    const bundleDir = detach(built.bundle.bundleDir);
+    rmSync(built.workspaceDir, { recursive: true, force: true });
+
+    const vector = ["external-import", "owner-controlled-publication", "terminal-bench-2-1-comparability"];
+    const verified = await verifyPublicBundle(bundleDir);
+    expect(verified.format).toBe(BUNDLE_V10_FORMAT);
+    if (verified.format !== BUNDLE_V10_FORMAT) throw new Error("unreachable");
+    expect(verified.identity).toBe(built.bundle.identity);
+    expect(verified.capabilities).toEqual(vector);
+    expect(verified.checks).toEqual([
+      "manifest",
+      "evidence-closure",
+      "trust",
+      "matrix-rederivation",
+      "report-verification",
+      "claim-consistency",
+      "external-import",
+    ]);
+
+    // The claim section is rebuilt from the Benchmark the reader just verified, never taken from
+    // the claim: a coverage word the selected tasks do not support is refused, re-sealed or not.
+    const claim = json(bundleDir, "claim-package.json");
+    expect(claim["terminalBench21Comparability"]["coverage"]).toBe("custom");
+    claim["terminalBench21Comparability"] = { ...claim["terminalBench21Comparability"], coverage: "full", selectedTaskCount: 89 };
+    writeFileSync(join(bundleDir, "claim-package.json"), canonicalJsonBytes(claim));
+    const paths = (json(bundleDir, "bundle.json")["files"] as { path: string }[]).map((file) => file.path);
+    writeFileSync(
+      join(bundleDir, "bundle.json"),
+      buildBundleManifest(bundleDir, paths, { format: BUNDLE_V10_FORMAT, capabilities: vector }).bytes,
+    );
+    expect(await refusal(bundleDir)).toEqual({
+      path: "claim-consistency",
+      message: "claim package terminalBench21Comparability.coverage is not the exact projection of verified facts",
+    });
+  }, 300_000);
 });

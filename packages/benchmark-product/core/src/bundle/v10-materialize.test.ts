@@ -37,9 +37,12 @@ import {
   BUNDLE_V10_FORMAT,
   CAPABILITY_REGISTRY,
   OWNER_CONTROLLED_PUBLICATION_LIMIT,
+  TERMINAL_BENCH_21_COMPARABILITY_LIMIT,
+  TERMINAL_BENCH_21_PINS,
   composeClosure,
   verifyPublicBundle,
 } from "@colophon-claims/check";
+import { parseEvaluationSpec } from "@jinn-network/task-execution-profiles";
 import type { OperationContext } from "../operations/context.js";
 import { runVerify } from "../operations/verify.js";
 import { COMPOSED_CLAIM_PACKAGE_SCHEMA_ID } from "../report/claim.js";
@@ -52,6 +55,7 @@ import {
   PUBLIC_BUNDLE_VERIFICATION_CHECKS,
 } from "../legacy-closures.js";
 import { buildBundleManifest } from "./manifest.js";
+import { createTerminalBench21SlateBundleFixture } from "./testing/terminal-bench-2-1-slate-fixture.js";
 import { createSyntheticV4BundleFixture } from "./testing/v4-synthetic-fixture.js";
 import { createSyntheticV6BundleFixture } from "./testing/v6-synthetic-fixture.js";
 
@@ -490,6 +494,109 @@ describe("composed bundle v10: task selection at headline weight", () => {
     expect(await refusal(rowless)).toEqual({
       path: "index.html",
       message: expect.stringContaining("not the exact projection"),
+    });
+  }, 300_000);
+});
+
+/**
+ * Operator rulings of 2026-10-06, decisions 1, 2 and 7: a run brought onto the official
+ * Terminal-Bench 2.1 slate publishes a bundle the checker accepts, with
+ * `terminal-bench-2-1-comparability` declared.
+ *
+ * This is the bundle-level positive case the capability could not have before each official Task
+ * bound an EvaluationSpec: a Task with no spec fails the evidence closure. Every cell here is
+ * graded by the sealed `external-verifier` rule over Harbor's `reward`, and the reader recomputes
+ * each verdict from the bundle.
+ */
+describe("composed bundle v10: a run brought onto the official Terminal-Bench 2.1 slate", () => {
+  const SLATE_VECTOR = ["external-import", "owner-controlled-publication", "terminal-bench-2-1-comparability"] as const;
+  const SLATE_CHECKS = [...PUBLIC_BUNDLE_VERIFICATION_CHECKS, "external-import"];
+  const slate = () => once("official-slate", (workspaceDir) => createTerminalBench21SlateBundleFixture({ workspaceDir }));
+
+  test("the checker accepts the published bundle, with the capability declared", async () => {
+    const built = await slate();
+
+    const manifest = json(built.bundleDir, "bundle.json");
+    expect(manifest["format"]).toBe(BUNDLE_V10_FORMAT);
+    expect(manifest["capabilities"]).toEqual(SLATE_VECTOR);
+
+    // The claim section is the projection of the Benchmark's own extension, and the sentence is
+    // sealed once in the signed Report, after the venue sentences of an imported run.
+    const claim = json(built.bundleDir, "claim-package.json");
+    expect(claim["claimSchema"]).toBe(COMPOSED_CLAIM_PACKAGE_SCHEMA_ID);
+    expect(claim["terminalBench21Comparability"]).toEqual({
+      datasetId: TERMINAL_BENCH_21_PINS.datasetId,
+      datasetRevision: TERMINAL_BENCH_21_PINS.datasetRevision,
+      upstreamCommit: TERMINAL_BENCH_21_PINS.upstreamCommit,
+      slateDigest: TERMINAL_BENCH_21_PINS.slateDigest,
+      coverage: "custom",
+      selectedTaskCount: 3,
+      datasetTaskCount: 89,
+      limit: TERMINAL_BENCH_21_COMPARABILITY_LIMIT,
+    });
+    const limitations = json(built.bundleDir, "report.json")["limitations"] as string[];
+    expect(limitations.filter((line) => line === TERMINAL_BENCH_21_COMPARABILITY_LIMIT)).toHaveLength(1);
+    expect(limitations[5]).toBe(OWNER_CONTROLLED_PUBLICATION_LIMIT);
+    expect(limitations[6]).toBe(TERMINAL_BENCH_21_COMPARABILITY_LIMIT);
+    expect(claim["limitations"]).toEqual(limitations);
+    expect(claim["verification"]["checks"]).toEqual(SLATE_CHECKS);
+    expect(claim["verification"]["command"]).toBe("npx @colophon-claims/check@0.2.1 <bundle-dir>");
+
+    // The standalone reader, handed a detached copy with no workspace behind it.
+    const verified = await verifyPublicBundle(detach(built.bundleDir, "slate-verified"));
+    expect(verified.format).toBe(BUNDLE_V10_FORMAT);
+    if (verified.format !== BUNDLE_V10_FORMAT) throw new Error("unreachable");
+    expect(verified.capabilities).toEqual(SLATE_VECTOR);
+    expect(verified.checks).toEqual(SLATE_CHECKS);
+
+    // The workspace's own verification rebuilds the same claim from durable state.
+    const context: OperationContext = {
+      workspaceDir: built.workspaceDir,
+      principal: "sponsor-1",
+      clock: () => new Date().toISOString(),
+    };
+    const workspaceVerified = await runVerify(context, { draftId: built.draftId });
+    expect(workspaceVerified.ok ? "ok" : workspaceVerified.error.detail).toBe("ok");
+  }, 300_000);
+
+  test("carries each official Task at its pinned digest, and the external-verifier spec it binds", async () => {
+    const built = await slate();
+    const benchmark = json(built.bundleDir, "benchmark.json") as { items: { task: { digest: { sha256: string } } }[] };
+    const catalog = json(built.bundleDir, "evidence.json") as { records: { sha256: string; roles: string[] }[] };
+    const rolesOf = (sha256: string) => catalog.records.find((record) => record.sha256 === sha256)?.roles;
+    expect(benchmark.items).toHaveLength(3);
+    for (const [index, item] of benchmark.items.entries()) {
+      const pinned = TERMINAL_BENCH_21_PINS.tasks[index]!;
+      expect(item.task.digest.sha256, pinned.name).toBe(pinned.taskSha256);
+      const task = json(built.bundleDir, `records/${pinned.taskSha256}.bin`);
+      const specSha256 = task["evaluation"]["digest"]["sha256"] as string;
+      expect(rolesOf(specSha256), pinned.name).toEqual(["evaluation-spec"]);
+      const spec = parseEvaluationSpec(new Uint8Array(readFileSync(join(built.bundleDir, `records/${specSha256}.bin`))));
+      expect(spec.family, pinned.name).toBe("external-verifier");
+      expect((spec.grader as { name?: string }).name, pinned.name).toBe(`terminal-bench/${pinned.name}`);
+    }
+  }, 300_000);
+
+  test("the sealed rule gives the verdicts: a reward that is neither 0 nor 1 is left out of the rate, not counted as a fail", async () => {
+    const built = await slate();
+    // Imported rewards: oracle 1, 1, 1; terminus-2 1, 0, and one half. The half is inconclusive
+    // under the sealed rule, so it leaves that arm's rate at one pass of two judged cells. Counted
+    // as a fail it would have been one of three.
+    const headline = json(built.bundleDir, "claim-package.json")["headline"] as Record<string, { n: number; passRate: string }>;
+    expect(headline["oracle"]).toMatchObject({ n: 3, passRate: "1.0000" });
+    expect(headline["terminus-2"]).toMatchObject({ n: 2, passRate: "0.5000" });
+    // Every slot is still accounted for.
+    const matrix = json(built.bundleDir, "matrix.json") as { completeness: Record<string, unknown> };
+    expect(matrix.completeness).toMatchObject({ expected: 6, judged: 6 });
+  }, 300_000);
+
+  test("the same bundle with the capability dropped from the vector is refused", async () => {
+    const built = await slate();
+    const undeclared = detach(built.bundleDir, "slate-undeclared");
+    redeclare(undeclared, ["external-import", "owner-controlled-publication"]);
+    expect(await refusal(undeclared)).toEqual({
+      path: "bundle.manifest.capabilities",
+      message: expect.stringContaining("a brought run on the official slate cannot pass without it"),
     });
   }, 300_000);
 });

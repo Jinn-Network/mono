@@ -2,15 +2,26 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { BENCHMARKING_METHOD_IDS, BENCHMARKING_METHOD_VERSION, parseBenchmark } from "@jinn-network/benchmarking-records";
+import {
+  BENCHMARKING_METHOD_IDS,
+  BENCHMARKING_METHOD_VERSION,
+  BENCHMARKING_PROTOCOL,
+  itemTaskDigest,
+  parseBenchmark,
+  sealBenchmark,
+} from "@jinn-network/benchmarking-records";
+import { sealTask } from "@jinn-network/task-execution-protocol";
+import type { DraftDocument } from "../domain/draft.js";
 import { BenchmarkProductError } from "../errors.js";
+import { buildTerminalBench21Tasks } from "../intake/terminal-bench-2-1.js";
 import { armAdd } from "../operations/arms.js";
+import { attachBenchmarkToDraft } from "../operations/attach.js";
 import type { OperationContext } from "../operations/context.js";
 import { createDraft, readDraftDocument } from "../operations/drafts.js";
 import { initWorkspace } from "../operations/init.js";
 import { sampleInit } from "../operations/sample.js";
 import { VENUE_ISOLATION_POLICY } from "../venue/venue.js";
-import { getSealedBytes } from "../workspace/sealed-store.js";
+import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { compileDraft, compilePreviewRun } from "./compile.js";
 
 let workspaceDir: string;
@@ -628,5 +639,199 @@ describe("compileDraft — explicit wilson selection", () => {
     expect(compiled.plannedRun.record.analysisPlan).toEqual([
       { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION, parameters: { verdictRule: "sole" } },
     ]);
+  });
+});
+
+const OWNER = "urn:uuid:00000000-0000-5000-8000-000000000001";
+const CLOSE_AT = "2026-08-06T00:00:00Z";
+
+/** The first refusal of `compileDraft` and of `compilePreviewRun` over one draft. Both run the same
+ * product-policy refusals, so every case below holds for `quote`, `lock`, and a preview alike. */
+function refusalsOf(draft: DraftDocument): BenchmarkProductError[] {
+  return [
+    () => compileDraft({ workspaceDir, draft, owner: OWNER, closeAt: CLOSE_AT }),
+    () => compilePreviewRun({ workspaceDir, draft, owner: `${OWNER}#preview`, closeAt: CLOSE_AT }),
+  ].map((compile) => {
+    try {
+      compile();
+    } catch (cause) {
+      if (cause instanceof BenchmarkProductError) return cause;
+      throw cause;
+    }
+    throw new Error("expected a refusal");
+  });
+}
+
+/**
+ * A Task that binds no EvaluationSpec has no verdict rule, so no result for it can be judged, and
+ * every reader refuses a bundle that carries one. `quote`, `lock` and a preview therefore refuse
+ * it before the run, for every benchmark and not only the official slate.
+ */
+describe("compileDraft and compilePreviewRun: an item Task must bind an EvaluationSpec that can be read", () => {
+  /** The sample draft with its first item swapped for `replacement(sample Task document)`. */
+  async function draftWithFirstTask(
+    clock: () => string,
+    replacement: (task: Record<string, unknown>) => Record<string, unknown>,
+  ): Promise<{ readonly draft: DraftDocument; readonly taskSha256: string }> {
+    const draftId = await setUpDraftWithSample(clock);
+    addTwoDistinctArms(clock, draftId);
+    const sample = readDraftDocument(workspaceDir, draftId);
+    if (sample.spec.taskSet.kind !== "benchmark") throw new Error("unreachable");
+    const benchmark = parseBenchmark(getSealedBytes(workspaceDir, sample.spec.taskSet.benchmarkSha256));
+    const first = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, itemTaskDigest(benchmark.items[0]!)))) as Record<string, unknown>;
+    const taskSha256 = putSealedBytes(workspaceDir, sealTask(replacement(first)));
+    const resealed = sealBenchmark({
+      protocol: BENCHMARKING_PROTOCOL,
+      name: benchmark.name,
+      description: benchmark.description,
+      version: benchmark.version,
+      reveal: benchmark.reveal,
+      items: [{ task: { digest: { sha256: taskSha256 } } }, ...benchmark.items.slice(1)],
+    });
+    const benchmarkSha256 = putSealedBytes(workspaceDir, resealed.bytes);
+    // The compile functions take the draft document, so the edited task set is passed directly: a
+    // draft's attached Benchmark cannot be replaced once set.
+    return {
+      draft: { ...sample, spec: { ...sample.spec, taskSet: { kind: "benchmark", benchmarkSha256 } } },
+      taskSha256,
+    };
+  }
+
+  test("a Task with no evaluation digest is refused, naming the Task and its item", async () => {
+    const { draft, taskSha256 } = await draftWithFirstTask(makeClock(), ({ evaluation: _dropped, ...task }) => task);
+    for (const refusal of refusalsOf(draft)) {
+      expect(refusal.code).toBe("validation");
+      expect(refusal.issues[0]?.path).toBe("spec.taskSet.items.0");
+      expect(refusal.message).toBe(`Task ${taskSha256} binds no EvaluationSpec, so no result for it could be judged`);
+    }
+  });
+
+  test("a Task whose spec bytes are not in the workspace is refused", async () => {
+    const missing = "e".repeat(64);
+    const { draft, taskSha256 } = await draftWithFirstTask(makeClock(), (task) => ({ ...task, evaluation: { digest: { sha256: missing } } }));
+    for (const refusal of refusalsOf(draft)) {
+      expect(refusal.code).toBe("validation");
+      expect(refusal.issues[0]?.path).toBe("spec.taskSet.items.0");
+      expect(refusal.message).toContain(`Task ${taskSha256} binds EvaluationSpec ${missing}, which cannot be read`);
+    }
+  });
+
+  test("a Task whose bound bytes are not an EvaluationSpec is refused", async () => {
+    const clock = makeClock();
+    // Bytes that are stored and sealed, and are not a specification: another Task.
+    let notASpec = "";
+    const { draft } = await draftWithFirstTask(clock, (task) => {
+      notASpec = putSealedBytes(workspaceDir, sealTask({ ...task, instructions: "not an EvaluationSpec" }));
+      return { ...task, evaluation: { digest: { sha256: notASpec } } };
+    });
+    for (const refusal of refusalsOf(draft)) {
+      expect(refusal.code).toBe("validation");
+      expect(refusal.message).toContain(`binds EvaluationSpec ${notASpec}, which cannot be read`);
+    }
+  });
+
+  test("the sample draft, whose Tasks all bind a spec, still compiles", async () => {
+    const clock = makeClock();
+    const draftId = await setUpDraftWithSample(clock);
+    addTwoDistinctArms(clock, draftId);
+    const draft = readDraftDocument(workspaceDir, draftId);
+    expect(() => compileDraft({ workspaceDir, draft, owner: OWNER, closeAt: CLOSE_AT })).not.toThrow();
+    expect(() => compilePreviewRun({ workspaceDir, draft, owner: `${OWNER}#preview`, closeAt: CLOSE_AT })).not.toThrow();
+  });
+});
+
+/**
+ * A run on the official Terminal-Bench 2.1 slate is reported with the per-arm pass rate only
+ * (operator rulings of 2026-10-06). The official Tasks carry no task provenance, which the paired
+ * methods read, and the sentence a brought slate run seals describes a per-arm rate. So another
+ * analysis is refused before the Run is sealed.
+ */
+describe("compileDraft and compilePreviewRun: analyses on the official Terminal-Bench 2.1 slate", () => {
+  /** A draft bound to the official ten-task slice the way `method terminal-bench-2.1` binds it. */
+  function slateDraft(clock: () => string): DraftDocument {
+    initWorkspace(contextFor(clock));
+    createDraft(contextFor(clock), { draftId: "draft-1", name: "Official slate" });
+    const built = buildTerminalBench21Tasks({ coverage: "ten_task" });
+    putSealedBytes(workspaceDir, built.profile.bytes);
+    for (const task of built.tasks) {
+      putSealedBytes(workspaceDir, task.evaluationSpec.bytes);
+      putSealedBytes(workspaceDir, task.bytes);
+    }
+    attachBenchmarkToDraft(workspaceDir, "draft-1", putSealedBytes(workspaceDir, built.benchmark.bytes), clock());
+    armAdd(contextFor(clock), { draftId: "draft-1", armId: "oracle", pinning: { harness: { id: "harbor", version: "0.21.0" }, agent: { id: "oracle" } } });
+    armAdd(contextFor(clock), { draftId: "draft-1", armId: "terminus-2", pinning: { harness: { id: "harbor", version: "0.21.0" }, agent: { id: "terminus-2" } } });
+    return readDraftDocument(workspaceDir, "draft-1");
+  }
+
+  const PAIRED_DELTA = {
+    method: BENCHMARKING_METHOD_IDS.pairedDelta,
+    version: BENCHMARKING_METHOD_VERSION,
+    baseline: "oracle",
+    candidate: "terminus-2",
+    parameters: { seed: 123456789, resamples: 1000, alpha: "0.05" },
+  };
+
+  test("with no analysis the slate draft compiles to the per-arm rate alone", () => {
+    const draft = slateDraft(makeClock());
+    const compiled = compileDraft({ workspaceDir, draft, owner: OWNER, closeAt: CLOSE_AT });
+    expect(compiled.plannedRun.record.analysisPlan).toEqual([
+      { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION, parameters: { verdictRule: "sole" } },
+    ]);
+    expect(() => compilePreviewRun({ workspaceDir, draft, owner: `${OWNER}#preview`, closeAt: CLOSE_AT, itemLimit: 2 })).not.toThrow();
+  });
+
+  test("a paired analysis is refused, saying the slate is reported with the per-arm rate only", () => {
+    const draft = slateDraft(makeClock());
+    for (const refusal of refusalsOf({ ...draft, spec: { ...draft.spec, analysis: PAIRED_DELTA } })) {
+      expect(refusal.code).toBe("validation");
+      expect(refusal.issues[0]?.path).toBe("spec.analysis");
+      // The remedy is the explicit per-arm selection: `draft update` overwrites a field and cannot
+      // remove one.
+      expect(refusal.message).toBe(
+        "this version reports a run on the official Terminal-Bench 2.1 slate with the per-arm pass rate only, "
+        + `and this draft selects "${BENCHMARKING_METHOD_IDS.pairedDelta}"; set the draft's analysis to `
+        + '"jinn.benchmarking.method/wilson" version "1", which is the per-arm rate',
+      );
+    }
+  });
+
+  test("an additional analysis is refused the same way, naming its entry", () => {
+    const draft = slateDraft(makeClock());
+    for (const refusal of refusalsOf({ ...draft, spec: { ...draft.spec, additionalAnalyses: [PAIRED_DELTA] } })) {
+      expect(refusal.code).toBe("validation");
+      expect(refusal.issues[0]?.path).toBe("spec.additionalAnalyses.0");
+      expect(refusal.message).toBe(
+        "this version reports a run on the official Terminal-Bench 2.1 slate with the per-arm pass rate only, "
+        + `and this draft adds "${BENCHMARKING_METHOD_IDS.pairedDelta}"; a draft cannot drop an additional `
+        + "analysis once it is set, so start a new draft without one",
+      );
+    }
+  });
+
+  test("a binary-instrument analysis is refused by this rule, before its own derivation runs", () => {
+    const draft = slateDraft(makeClock());
+    const analysis = { method: BENCHMARKING_METHOD_IDS.binaryInstrument, version: BENCHMARKING_METHOD_VERSION };
+    for (const refusal of refusalsOf({ ...draft, spec: { ...draft.spec, analysis } })) {
+      expect(refusal.issues[0]?.path).toBe("spec.analysis");
+      expect(refusal.message).toContain("with the per-arm pass rate only");
+    }
+  });
+
+  test("an explicit wilson selection is the per-arm rate itself, and seals the same plan", () => {
+    const draft = slateDraft(makeClock());
+    const analysis = { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION };
+    const implicit = compileDraft({ workspaceDir, draft, owner: OWNER, closeAt: CLOSE_AT });
+    const explicit = compileDraft({ workspaceDir, draft: { ...draft, spec: { ...draft.spec, analysis } }, owner: OWNER, closeAt: CLOSE_AT });
+    expect(explicit.plannedRun.record.analysisPlan).toEqual(implicit.plannedRun.record.analysisPlan);
+  });
+
+  test("the same paired analysis on a benchmark that is not the official slate still compiles", async () => {
+    const clock = makeClock();
+    const draftId = await setUpDraftWithSample(clock, "draft-2");
+    addTwoDistinctArms(clock, draftId);
+    const draft = readDraftDocument(workspaceDir, draftId);
+    const analysis = { ...PAIRED_DELTA, baseline: "baseline", candidate: "sample" };
+    expect(() => compileDraft({ workspaceDir, draft: { ...draft, spec: { ...draft.spec, analysis } }, owner: OWNER, closeAt: CLOSE_AT }))
+      .not.toThrow();
   });
 });

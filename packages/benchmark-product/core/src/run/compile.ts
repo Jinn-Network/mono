@@ -8,7 +8,10 @@
  *
  * Product-policy refusals (draft content this module itself judges invalid) run FIRST, before
  * any platform call: no attached benchmark, and fewer than two arms (charter decision 7 — a
- * comparative benchmark needs at least two configurations to compare). Everything after that is
+ * comparative benchmark needs at least two configurations to compare). Two more of the same kind
+ * follow: an analysis other than the per-arm rate on the official Terminal-Bench 2.1 slate, and an
+ * item Task whose EvaluationSpec cannot be read (`refuseUnreportableSlateAnalyses`,
+ * `refuseItemsWithoutEvaluationSpec`). Everything after that is
  * `planRun`'s and `sealRun`'s own platform-schema validation; failures there are caught and
  * re-raised as this product's typed `"validation"` error carrying the platform's own detail —
  * this module never redefines what a valid Run record is, it only forwards the platform's
@@ -42,6 +45,7 @@ import {
   BENCHMARKING_METHOD_IDS,
   BENCHMARKING_METHOD_VERSION,
   InvalidDocumentError,
+  itemTaskDigest,
   parseBenchmark,
   sealBenchmark,
   type BenchmarkRecord,
@@ -49,6 +53,8 @@ import {
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
 import { planRun, type PlannedRun } from "@jinn-network/benchmarking-run";
+import { parseEvaluationSpec } from "@jinn-network/task-execution-profiles";
+import { carriesOfficialTerminalBench21Slate } from "@colophon-claims/check";
 import { resolveAssurance, type Analysis, type DraftDocument, type DraftSpec, type ResolvedAssurance } from "../domain/draft.js";
 import { refuse, refuseWithIssues } from "../errors.js";
 import { runtimeSubmissionBaseline } from "../runtime/adapter.js";
@@ -326,6 +332,72 @@ function buildAnalysisPlan(
   return [...primaryPlan, ...additionalEntries];
 }
 
+/**
+ * A run on the official Terminal-Bench 2.1 slate is reported with the per-arm pass rate only.
+ *
+ * The official Tasks carry no task provenance, which the paired methods read, and the
+ * comparability sentence a brought slate run seals describes a per-arm rate
+ * (`@colophon-claims/check`, `TERMINAL_BENCH_21_COMPARABILITY_LIMIT`). So any analysis beyond that
+ * rate is refused here, at `quote` and at `lock`, before a Run is sealed and paid for.
+ *
+ * An explicit `wilson` selection is the per-arm rate itself and seals the same plan as no
+ * selection, so it is not refused. It is also the way back: `draft update` overwrites a field and
+ * cannot remove one, so a draft that selected another method is repaired by selecting `wilson`.
+ */
+function refuseUnreportableSlateAnalyses(spec: DraftSpec, benchmark: BenchmarkRecord): void {
+  if (!carriesOfficialTerminalBench21Slate(benchmark)) return;
+  const perArmRateOnly = "this version reports a run on the official Terminal-Bench 2.1 slate with the per-arm pass rate only";
+  const analysis = spec.analysis;
+  if (analysis !== undefined && analysis.method !== BENCHMARKING_METHOD_IDS.wilson) {
+    refuse(
+      "validation",
+      "spec.analysis",
+      `${perArmRateOnly}, and this draft selects "${analysis.method}"; set the draft's analysis to `
+        + `"${BENCHMARKING_METHOD_IDS.wilson}" version "${BENCHMARKING_METHOD_VERSION}", which is the per-arm rate`,
+    );
+  }
+  const additional = spec.additionalAnalyses?.[0];
+  if (additional !== undefined) {
+    refuse(
+      "validation",
+      "spec.additionalAnalyses.0",
+      `${perArmRateOnly}, and this draft adds "${additional.method}"; a draft cannot drop an additional `
+        + "analysis once it is set, so start a new draft without one",
+    );
+  }
+}
+
+/**
+ * Every item Task must bind an EvaluationSpec this build can read.
+ *
+ * A Task with no spec has no verdict rule, so no result for it can be judged, and every reader
+ * refuses a bundle whose Task names no EvaluationSpec. Refusing at `quote`, `lock` and preview
+ * says so before the run, not after it. The bytes are read from the workspace's own store, where
+ * the bind that attached the Benchmark put them.
+ */
+function refuseItemsWithoutEvaluationSpec(workspaceDir: string, benchmark: BenchmarkRecord): void {
+  for (const [index, item] of benchmark.items.entries()) {
+    const taskSha256 = itemTaskDigest(item);
+    const path = `spec.taskSet.items.${index}`;
+    const task = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(getSealedBytes(workspaceDir, taskSha256))) as {
+      readonly evaluation?: { readonly digest?: { readonly sha256?: unknown } };
+    };
+    const evaluationSpecSha256 = task.evaluation?.digest?.sha256;
+    if (typeof evaluationSpecSha256 !== "string") {
+      refuse("validation", path, `Task ${taskSha256} binds no EvaluationSpec, so no result for it could be judged`);
+    }
+    try {
+      parseEvaluationSpec(getSealedBytes(workspaceDir, evaluationSpecSha256));
+    } catch (cause) {
+      refuse(
+        "validation",
+        path,
+        `Task ${taskSha256} binds EvaluationSpec ${evaluationSpecSha256}, which cannot be read: ${detailFromCause(cause)}`,
+      );
+    }
+  }
+}
+
 export interface CompileDraftInput {
   readonly workspaceDir: string;
   readonly draft: DraftDocument;
@@ -426,6 +498,8 @@ export function compileDraft(input: CompileDraftInput): CompiledRun {
 
   const benchmarkSha256 = spec.taskSet.benchmarkSha256;
   const benchmarkRecord = parseBenchmark(getSealedBytes(workspaceDir, benchmarkSha256));
+  refuseUnreportableSlateAnalyses(spec, benchmarkRecord);
+  refuseItemsWithoutEvaluationSpec(workspaceDir, benchmarkRecord);
 
   const binaryParameters = isBinaryInstrumentSpec(spec)
     ? compileBinaryInstrumentProfile({ workspaceDir, draft, benchmark: benchmarkRecord })
@@ -503,6 +577,8 @@ export function compilePreviewRun(input: CompilePreviewRunInput): CompiledPrevie
   }
 
   const fullRecord = parseBenchmark(getSealedBytes(workspaceDir, spec.taskSet.benchmarkSha256));
+  refuseUnreportableSlateAnalyses(spec, fullRecord);
+  refuseItemsWithoutEvaluationSpec(workspaceDir, fullRecord);
   const binaryParameters = isBinaryInstrumentSpec(spec)
     ? compileBinaryInstrumentProfile({ workspaceDir, draft, benchmark: fullRecord })
     : undefined;
