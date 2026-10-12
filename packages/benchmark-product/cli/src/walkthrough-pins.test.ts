@@ -1,8 +1,8 @@
 /**
  * The claimant walkthrough is the one document that prints the whole brought-run path, command by
  * command (issue #4942). It repeats values the product owns: the provider names `anchor` accepts,
- * the order of the claimant commands, the reader line a claim pins, the Harbor dataset pin, and
- * three sealed sentences. A copy that drifts sends a claimant to a refusal, or a reader to a line
+ * the order of the claimant commands, the reader line a claim pins, the Harbor dataset pin, the
+ * Harbor version the reader accepts, and three sealed sentences. A copy that drifts sends a claimant to a refusal, or a reader to a line
  * that does not read the bundle, so each copy is held to its source here.
  *
  * The outputs the walkthrough shows are not held here. They were recorded once, by typing the
@@ -18,7 +18,12 @@ import {
   anchoredPreRegistrationSentence,
   type ClaimAnchor,
 } from "@colophon-claims/check";
-import { CLAIMANT_COMMAND_PATH, LOCAL_VENUE_LIMITS, PRODUCIBLE_ANCHOR_PROFILES } from "@colophon-claims/core";
+import {
+  CLAIMANT_COMMAND_PATH,
+  HARBOR_RUN_IMPORT_VERSIONS,
+  LOCAL_VENUE_LIMITS,
+  PRODUCIBLE_ANCHOR_PROFILES,
+} from "@colophon-claims/core";
 import { describe, expect, test } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -159,6 +164,35 @@ describe("claimant walkthrough: the Harbor commands run the sealed slate", () =>
     expect(method).toMatch(/ --replicates 1$/u);
     // And the task names `inspect` is shown printing are the same ten.
     for (const name of firstTen) expect(walkthrough).toContain(`          "${name}"`);
+  });
+});
+
+describe("claimant walkthrough: the Harbor it installs is a version the reader accepts", () => {
+  // Issue #5021: `run import` refuses a job that any other Harbor version wrote, and an unpinned
+  // install takes the newest release. The install command, its check and the needs list must each
+  // name a version that `HARBOR_RUN_IMPORT_VERSIONS` holds.
+  const accepted: readonly string[] = HARBOR_RUN_IMPORT_VERSIONS;
+  const installs = commands.filter((command) => /^(?:uv tool install|pip install) harbor(?:\s|=|$)/u.test(command));
+  const pinned = /^uv tool install harbor==(\S+)$/u.exec(installs[0] ?? "")?.[1];
+
+  test("the one install command pins a version, and the reader accepts it", () => {
+    expect(installs).toHaveLength(1);
+    expect(pinned, "the install command pins a version with ==").toBeDefined();
+    expect(accepted).toContain(pinned);
+  });
+
+  test("every Harbor version the document pins with == is one the reader accepts", () => {
+    const pins = [...walkthrough.matchAll(/\bharbor==([0-9][^\s`]*)/gu)].map((match) => match[1]!);
+    // The `uv` command, and the `pip` command named beside it.
+    expect(pins.length).toBeGreaterThanOrEqual(2);
+    for (const pin of pins) expect(accepted, `harbor==${pin}`).toContain(pin);
+  });
+
+  test("the version check prints the pinned version, and the needs list names it", () => {
+    const printed = /^```sh\nharbor --version\n```\n\n```text\n(\S+)\n```$/mu.exec(walkthrough)?.[1];
+    expect(printed, "the version check shows the version it prints").toBeDefined();
+    expect(printed).toBe(pinned);
+    expect(walkthrough).toContain(`- Harbor, version ${pinned} exactly.`);
   });
 });
 

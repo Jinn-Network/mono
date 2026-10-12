@@ -780,6 +780,17 @@ describe("readHarborRunImport — the official Terminal-Bench 2.1 slate", () => 
     expect(refused.message).toContain("0.21.0");
   });
 
+  test("the refusal the claimant walkthrough quotes is the one the reader prints (#5021)", async () => {
+    await lockedOfficialSlate();
+    const jobs = copyOfRealJobs();
+    rewriteJson(join(jobs, "terminus-2", "lock.json"), (lock) => {
+      lock["harbor"].version = "0.24.0";
+    });
+    const refused = refusal(() => readHarborRunImport({ workspaceDir, draftId: "draft-1", jobsDir: jobs }));
+    const walkthrough = readFileSync(fileURLToPath(new URL("../../../CLAIMANT-WALKTHROUGH.md", import.meta.url)), "utf8");
+    expect(walkthrough).toContain(`\n${refused.message}\n`);
+  });
+
   test("a later patch release of the accepted line is refused too: there is no fixture for it", async () => {
     await lockedOfficialSlate();
     const jobs = copyOfRealJobs();
