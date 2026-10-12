@@ -45,7 +45,7 @@ White space Jinn plants in:
 
 - **Protocol**, **network** and **market** as the category nouns (not stack or layer): an open protocol and network for work and the data it produces. *Market* names the direction and must not be presented as working; *marketplace* stays the name of the parked task marketplace.
 - **Records** as the noun for what work leaves behind, and **check** and **find** as the verbs for what anyone can do with one (not predict, aggregate, or orchestrate).
-- The **network-runs-without-us** property: only Jinn can credibly stress-test this; the eight competitors above are all VC-backed companies, multisigs, or hedge funds.
+- The **network-runs-without-us** property: only Jinn can credibly stress-test this; the first six competitors above are all VC-backed companies, multisigs, or hedge funds.
 
 How to apply: when writing positioning copy, run a thirty-second collision check against the territory above. If the lead phrase belongs to a competitor, refactor before publishing. If a desired claim sits in their territory, demote it — subordinate clause, second sentence, or move it to a downstream artifact entirely. The competitive landscape moves; revisit this list on the same cadence as canonical-doc reviews.
 
