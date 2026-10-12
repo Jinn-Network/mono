@@ -3,13 +3,9 @@ title: Machine surfaces
 description: What an agent reads instead of these pages.
 ---
 
-Two surfaces are live today:
-
-- [`/llms.txt`](/llms.txt) — the index of every docs page.
-- [`/llms-full.txt`](/llms-full.txt) — every docs page concatenated.
+- [`/llms.txt`](/llms.txt): the index of every docs page.
+- [`/llms-full.txt`](/llms-full.txt): every docs page concatenated.
 
 Both are compiled from the same MDX tree these HTML pages are built from, so they cannot drift.
 
-## Not yet
-
-Pasteable onboarding prompts, an installable plugin, and an MCP server are designed but not yet shipped. The protocol document root moved to a dedicated origin, spec.jinn.network, which is not yet deployed.
+The protocol's own machine-readable documents (schemas, profiles and conformance vectors) are not served by this site. They are in [Jinn-Network/spec](https://github.com/Jinn-Network/spec).

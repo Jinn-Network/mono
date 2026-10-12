@@ -1,0 +1,34 @@
+---
+title: The protocol
+description: Where the Jinn protocol is written, what it says, and how to build on it.
+---
+
+The Jinn protocol is written only in [Jinn-Network/spec](https://github.com/Jinn-Network/spec). That repository holds the normative text, the machine-readable schemas, the conformance vectors, the changelog, and the process by which any of it changes. It holds no implementation. Its first release, [v0.1.0](https://github.com/Jinn-Network/spec/releases/tag/v0.1.0), was published on 24 September 2026.
+
+## What it says
+
+The protocol says how work is described, done, evidenced, judged, trusted and found. It takes no fee and no part in payment.
+
+It sets a floor: [any two implementations](https://github.com/Jinn-Network/spec#what-two-implementations-must-be-able-to-do), written from the text alone, must be able to read each other's records, agree on what they say and whether they are valid, and find each other's records.
+
+## Records
+
+Every record is a sealed JSON document with a published schema, a stable identifier and a digest. One record refers to another by its digest, and where a record is stored is never its identity. The specification defines [the record families](https://github.com/Jinn-Network/spec#the-record-families). A record kind that an application defines on top of the protocol, such as Colophon's sealed benchmark claims, follows the same disciplines, and its owner publishes it.
+
+No Jinn code is needed to check a record. The rules are in [Verifying a record by hand](https://github.com/Jinn-Network/spec#verifying-a-record-by-hand).
+
+## Offers
+
+The holder of a record can publish an offer for it. An offer names the record by its digest, gives its price, or no price for a free offer, and names the gate where a buyer asks for it. The protocol carries offers and lets anyone find and verify them. It does not settle payment: payment for a priced record goes straight to the holder, outside the protocol.
+
+Offers exist in the protocol today. Buying and selling records is the direction, not a working market. The terms are defined in the [glossary](https://github.com/Jinn-Network/mono/blob/next/GLOSSARY.md#records-and-offers), which points at the specification as the authority.
+
+## Build on it
+
+- **Read the text and the schemas.** They are under [`documents/`](https://github.com/Jinn-Network/spec/tree/main/documents), at the paths their identifiers resolve to.
+- **Run the conformance vectors.** Every family ships [vectors](https://github.com/Jinn-Network/spec#conformance-vectors): inputs paired with expected outcomes, as data. An implementation conforms to a family when it produces every expected outcome.
+- **Propose a change.** Anything that is not a draft changes through a [numbered proposal](https://github.com/Jinn-Network/spec#proposing-a-change).
+
+## What it does not yet show
+
+One implementation exists, in TypeScript, in [Jinn-Network/mono](https://github.com/Jinn-Network/mono). No second implementation exists yet, so interoperability is a claim, not a result. The specification's [README](https://github.com/Jinn-Network/spec#readme) keeps the full list of what is still open.

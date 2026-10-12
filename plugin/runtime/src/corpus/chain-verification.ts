@@ -140,22 +140,22 @@ export function createRejectingChainVerification(): ChainVerification {
   });
 }
 
-export const UNVERIFIED_CHAIN_ACKNOWLEDGEMENT =
+export const UNVERIFIED_CHAIN_ACKNOWLEDGMENT =
   "announcement-chain-signatures-are-not-verified-by-this-runtime" as const;
 
-export type UnverifiedChainAcknowledgement = typeof UNVERIFIED_CHAIN_ACKNOWLEDGEMENT;
+export type UnverifiedChainAcknowledgment = typeof UNVERIFIED_CHAIN_ACKNOWLEDGMENT;
 
 /**
  * Mirrors without verifying announcement-chain signatures. The literal
- * acknowledgement argument makes the posture impossible to acquire by
+ * acknowledgment argument makes the posture impossible to acquire by
  * accident, and the `mode: "unverified"` field makes the capability's health
  * check report it rather than pretending. Downstream gates (record-digest
  * validation in the indexer, producer admission at read) still hold.
  */
 export function createUnverifiedChainVerification(
-  acknowledgement: UnverifiedChainAcknowledgement,
+  acknowledgment: UnverifiedChainAcknowledgment,
 ): ChainVerification {
-  void acknowledgement;
+  void acknowledgment;
   return Object.freeze({
     mode: "unverified" as const,
     async verify(): Promise<ChainVerificationOutcome> {

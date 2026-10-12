@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { createFollowedSourceAdmission } from "./admission.js";
 import {
-  UNVERIFIED_CHAIN_ACKNOWLEDGEMENT,
+  UNVERIFIED_CHAIN_ACKNOWLEDGMENT,
   createDriverChainVerification,
   createRejectingChainVerification,
   createUnverifiedChainVerification,
@@ -123,7 +123,7 @@ function mirror(overrides: Partial<Parameters<typeof createCorpusMirror>[0]> = {
     storePaths: paths,
     highWaterMarks: createFileHighWaterMarkStore({ filePath: statePath, fs: corpusFs }),
     admission: createFollowedSourceAdmission([source]),
-    chainVerification: createUnverifiedChainVerification(UNVERIFIED_CHAIN_ACKNOWLEDGEMENT),
+    chainVerification: createUnverifiedChainVerification(UNVERIFIED_CHAIN_ACKNOWLEDGMENT),
     transport,
     log: log(),
     ...overrides,

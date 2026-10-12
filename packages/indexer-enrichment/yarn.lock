@@ -820,12 +820,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@hono/node-server@npm:^2.1.1":
-  version: 2.1.1
-  resolution: "@hono/node-server@npm:2.1.1"
+"@hono/node-server@npm:^2.1.3":
+  version: 2.1.4
+  resolution: "@hono/node-server@npm:2.1.4"
   peerDependencies:
-    hono: ^4
-  checksum: 10c0/7ef810ca647c56d8d9386fd81609e18443b3a5634aa5ecabdf357e7ca724613c535e863c15ded9b7ae89b935a073040fb11e6d59041f3b1c3e153d8ecb699880
+    hono: ^4 || ^5.0.0-0
+  checksum: 10c0/2a09255a816272b95fd5720ada632faf88ec64a33ceb0a1f3e1478680e4fcc1add65ba8b2ab6008a7b9b852856badbb0848be09c60b76f3ac486c122b5224134
   languageName: node
   linkType: hard
 
@@ -892,13 +892,13 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/indexer@portal:../indexer::locator=%40jinn-network%2Findexer-enrichment%40workspace%3A."
   dependencies:
-    "@hono/node-server": "npm:^2.1.1"
+    "@hono/node-server": "npm:^2.1.3"
     "@jinn-network/benchmarking-records": "portal:../benchmarking/records"
     "@jinn-network/contract-abis": "portal:../contract-abis"
     drizzle-orm: "npm:^0.45.3"
-    hono: "npm:^4.13.8"
-    ponder: "npm:^0.17.10"
-    viem: "npm:^2.56.8"
+    hono: "npm:^4.13.13"
+    ponder: "npm:^0.17.12"
+    viem: "npm:^2.57.3"
   languageName: node
   linkType: soft
 
@@ -2616,10 +2616,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hono@npm:^4.13.8":
-  version: 4.13.8
-  resolution: "hono@npm:4.13.8"
-  checksum: 10c0/9c420a6599e38242f78686c5ade10f2539c4e98451b0bd0778ab17e4311691d8d1263ed45cd7047a6274ddd3196db39188c6526a4c2c46dd1baf39f37266819c
+"hono@npm:^4.13.13":
+  version: 4.13.13
+  resolution: "hono@npm:4.13.13"
+  checksum: 10c0/c8524e685a59b4f23a9bea15385eeac5622218949db251cb871b20fd9ef673b751b44ccdee6c22b3df56e5ed4c1b1cebad17b518bdc1823039da39b53ef9c1cf
   languageName: node
   linkType: hard
 
@@ -3002,9 +3002,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ox@npm:0.14.45":
-  version: 0.14.45
-  resolution: "ox@npm:0.14.45"
+"ox@npm:0.14.54":
+  version: 0.14.54
+  resolution: "ox@npm:0.14.54"
   dependencies:
     "@adraffy/ens-normalize": "npm:^1.11.0"
     "@noble/ciphers": "npm:^1.3.0"
@@ -3019,7 +3019,7 @@ __metadata:
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/d1d23e3b85a14d94ec0d608626c08e3dc1852fd90d22486827f1fbe300005958e004ac0db14a8168b2147001c493ff2eb344368513ee8fc82489e45b9115577a
+  checksum: 10c0/8d5fc1b482c5001c80339d73006f95be44da533badf25d4590fb7234d3f437ae615b32a4b38b58a501aa2cd8e48b7e454f74e08834f34d36ac6a86a65e4508ca
   languageName: node
   linkType: hard
 
@@ -3292,9 +3292,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ponder@npm:^0.17.10":
-  version: 0.17.10
-  resolution: "ponder@npm:0.17.10"
+"ponder@npm:^0.17.12":
+  version: 0.17.12
+  resolution: "ponder@npm:0.17.12"
   dependencies:
     "@babel/code-frame": "npm:^7.23.4"
     "@commander-js/extra-typings": "npm:^12.0.1"
@@ -3341,7 +3341,7 @@ __metadata:
       optional: true
   bin:
     ponder: ./dist/esm/bin/ponder.js
-  checksum: 10c0/d6afd2eba8b47bfd9c11dfaca4dad9b25bcedb95599a7487705d9694655c0f44fd7723e8f518e0aaa2bba07c4a54e29708c2725747f084bf8ee187adec175103
+  checksum: 10c0/c809d2fc704b1dac968789902175a5125cb598e74e70d61310292c684c88c275d970c58ef4522b5137c2087c36a1c035f0a38a9f85bf1e3a992a36eebccd26db
   languageName: node
   linkType: hard
 
@@ -3978,9 +3978,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"viem@npm:^2.56.8":
-  version: 2.56.8
-  resolution: "viem@npm:2.56.8"
+"viem@npm:^2.57.3":
+  version: 2.57.4
+  resolution: "viem@npm:2.57.4"
   dependencies:
     "@noble/curves": "npm:1.9.1"
     "@noble/hashes": "npm:1.8.0"
@@ -3988,14 +3988,14 @@ __metadata:
     "@scure/bip39": "npm:1.6.0"
     abitype: "npm:1.2.3"
     isows: "npm:1.0.7"
-    ox: "npm:0.14.45"
+    ox: "npm:0.14.54"
     ws: "npm:8.21.0"
   peerDependencies:
     typescript: ">=5.0.4"
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/7ac525363f6032b32b7a2f2e18f922b8cf8e32fe1c12e855e7f995fdfbda978c7b4a7689a51d63a8d26fafd89804a2bab154943e9ffbee28496aee4b714e2b40
+  checksum: 10c0/5482bbb910299e37441eaf57cdd9f04876d4b357ba9ba8efc3005843fc63c97e43d5eaddf8c99be857a004c1f24f93f3f2aae88f4ab26503761951ee77abf881
   languageName: node
   linkType: hard
 

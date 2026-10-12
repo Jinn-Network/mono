@@ -1,24 +1,26 @@
 ---
 title: Jinn docs
-description: Two doors into the platform — build on Jinn, or run an operator
+description: What exists today, what is direction, and what is parked.
 ---
 
-Jinn is an open platform for work and the evidence work creates. It defines sealed records for requesting work, delivering it, and publishing what happened, and reusable capabilities for executing work and retrieving evidence.
+Jinn is an open protocol and network for work and the data it produces. The protocol is written only in [Jinn-Network/spec](https://github.com/Jinn-Network/spec). It says how work is described, done, evidenced, judged, trusted and found. It takes no fee and no part in payment, and there is no Jinn token.
 
-## Build on Jinn
+## What exists today
 
-Your application or agent becomes the requester: post work, receive an outcome, and read the evidence behind it. Start at [Build on Jinn](/docs/build).
+- [The protocol](/docs/protocol), first released as v0.1.0 on 24 September 2026.
+- The published checker, [`@colophon-claims/verify`](https://www.npmjs.com/package/@colophon-claims/verify). [Check a claim](/docs/check-a-claim) runs it over a published claim.
+- [Colophon](https://colophon.claims/), the first application built on Jinn. Its sealed benchmark claims are Jinn records.
 
-## Run an operator
+## What is direction
 
-Your machine performs and evaluates work others have funded, and records what happened. Operators earn OLAS. Start at [Run an operator](/docs/operate).
+Buying and selling records is the direction, not a working market. A holder announces a record with an offer, free or priced. A buyer finds it, and payment goes straight to the holder, outside the protocol.
 
-## Machine surfaces
+The next application, planned, is the daemon that turns issues into pull requests. Its work records will be published once they can be anonymized.
 
-Agents and scripts have their own entry point into this documentation, separate from these HTML pages. See [Machine surfaces](/docs/machine), or go straight to [`/llms.txt`](/llms.txt) and [`/llms-full.txt`](/llms-full.txt).
+## What is parked
 
-## What this does not yet prove
+The [task marketplace](/docs/task-marketplace), in which a Curator funds tasks and an operator network solves and evaluates them for OLAS, is parked. Nothing in it can be posted, funded or run today.
 
-- The schemas and kits are not yet published, so third-party verification is a designed property no third party has yet exercised.
-- The network runs on Base Sepolia today. Mainnet operation is the Phase-2 target.
-- Per-task settlement economics and evaluator economics are still open design work.
+## For agents
+
+[Machine surfaces](/docs/machine) lists what an agent reads instead of these pages.
