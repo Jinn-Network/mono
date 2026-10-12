@@ -102,15 +102,20 @@ updates:
       # registry, so no Dependabot update to them is ever correct.
       - dependency-name: "@jinn-network/*"
       # Holds specific to /operator. They sit after the shared block and are
-      # not copied to other entries. Each uses update-types, so security
-      # updates for these packages still arrive. Each says what lifts it.
+      # not copied to other entries. Each uses update-types, which Dependabot
+      # does not apply to security updates, so no hold here blocks one. A
+      # security update is only opened when Dependabot security updates are
+      # enabled for the repository; with them off, a fix for a held package
+      # shows as an alert and needs a hand bump. Each hold says what lifts it.
       #
       # zod is pinned to exactly 4.4.3 in 41 manifests, in
       # .github/scripts/plugin-tree-guard-common.mjs and in
       # .github/scripts/colophon-publish-manifest.test.mjs, so a version move
       # is one coordinated change, not a bump. The shared block holds majors;
       # this holds minor and patch (issue #4898).
-      # Lift: remove these two lines when that coordinated change starts.
+      # Lift: remove these two lines when zod is no longer pinned to one exact
+      # version across these manifests. The rule is relative to the current
+      # version, so it keeps holding after a coordinated move.
       - dependency-name: "zod"
         update-types: ["version-update:semver-minor", "version-update:semver-patch"]
       # @slicekit/erc8128 0.4 drops the replay option that
@@ -121,14 +126,12 @@ updates:
       - dependency-name: "@slicekit/erc8128"
         update-types: ["version-update:semver-minor", "version-update:semver-major"]
       # @lmoe/gliner-onnx is pinned to exactly 0.1.0 in packages/core, which
-      # /operator links by portal. Bumping /operator alone to 0.2.0 fails
-      # `yarn install --immutable` with a Link step conflict. On a 0.x version
-      # Dependabot counts 0.1 to 0.2 as minor, so this holds minor and major;
-      # 0.1.x patches still arrive.
-      # Lift: remove when the pin in packages/core/package.json moves to the
-      # new version in the same change as /operator.
+      # /operator links by portal. Any bump in /operator alone, patch included,
+      # fails `yarn install --immutable` with a Link step conflict, so this
+      # holds every update type.
+      # Lift: remove when packages/core no longer pins it to one exact version.
       - dependency-name: "@lmoe/gliner-onnx"
-        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+        update-types: ["version-update:semver-patch", "version-update:semver-minor", "version-update:semver-major"]
       # better-sqlite3 13 needs Node 22, but this package declares engines
       # node >=20 and range ^12.10.0; `resolutions` already holds 13.0.1.
       # Dependabot measures from that resolved 13.0.1, so it files 13.x as a
@@ -139,7 +142,7 @@ updates:
         update-types: ["version-update:semver-minor", "version-update:semver-patch"]
       # canonicalize 4 and 5 change canonical output for inputs Jinn hashes
       # (lone surrogates throw, sparse arrays and some edge values serialize
-      # differently) and need Node 22. Moving it is a digest-sensitive
+      # differently), and 5 needs Node 22. Moving it is a digest-sensitive
       # migration across 12 manifests.
       # Lift: remove when that migration is scheduled.
       - dependency-name: "canonicalize"
@@ -432,15 +435,20 @@ updates:
       # registry, so no Dependabot update to them is ever correct.
       - dependency-name: "@jinn-network/*"
       # Hold specific to /packages/sdk. It sits after the shared block and is
-      # not copied to other entries. It uses update-types, so security
-      # updates still arrive.
+      # not copied to other entries. It uses update-types, which Dependabot
+      # does not apply to security updates, so it does not block one. A
+      # security update is only opened when Dependabot security updates are
+      # enabled for the repository; with them off, a zod fix shows as an
+      # alert and needs a hand bump.
       #
       # zod is pinned to exactly 4.4.3 in 41 manifests, in
       # .github/scripts/plugin-tree-guard-common.mjs and in
       # .github/scripts/colophon-publish-manifest.test.mjs, so a version move
       # is one coordinated change, not a bump. The shared block holds majors;
       # this holds minor and patch (issue #4898).
-      # Lift: remove these two lines when that coordinated change starts.
+      # Lift: remove these two lines when zod is no longer pinned to one exact
+      # version across these manifests. The rule is relative to the current
+      # version, so it keeps holding after a coordinated move.
       - dependency-name: "zod"
         update-types: ["version-update:semver-minor", "version-update:semver-patch"]
 
