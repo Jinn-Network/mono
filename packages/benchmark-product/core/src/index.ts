@@ -610,6 +610,9 @@ export type { ClaimantCommand } from "./cli/claimant-path.js";
 // the claimant walkthrough, which is where a claimant reads them, is tested against this list
 // (issue #4951).
 export { PRODUCIBLE_ANCHOR_PROFILES } from "./anchor/profiles.js";
+// The Harbor versions `run import --from harbor` accepts. Exported so the claimant walkthrough, which
+// tells a claimant which Harbor to install, is tested against this list (issue #5021).
+export { HARBOR_RUN_IMPORT_VERSIONS } from "./intake/harbor-run-records.js";
 
 /** The product core's own version, mirrored from package.json. */
 export const PRODUCT_VERSION = "0.1.0";

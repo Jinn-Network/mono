@@ -26,11 +26,21 @@ The two `harbor run` commands were not run again for this document. Harbor 0.21.
 - Node 22 or newer.
 - Linux x64 or Apple-silicon macOS. `quote` is a required step and is known to run on those two. On any other platform, Linux arm64 included, it stops before it reads or creates anything and names the platform it found and the two it supports.
 - Docker. Harbor runs each task in a container.
+- The Docker daemon running, and the `docker compose` command. Harbor stops at once if the daemon is down, and it starts each task with `docker compose`.
+- Python 3.12 or newer, for Harbor. Harbor 0.21.0 declares `>=3.12`, so pip refuses it on an older Python.
 - Harbor, version 0.21.0 exactly. `run import` refuses a job that any other version wrote, and names the job.
-- A key for the model your agent calls. Harbor uses it. No Colophon command asks for it.
+- A key for the model your agent calls, in the environment variable its provider names: `ANTHROPIC_API_KEY` for an `anthropic/` model, `OPENROUTER_API_KEY` for an `openrouter/` model. Harbor reads it from the environment you run `harbor run` in. No Colophon command asks for it.
 - Two arms. A run compares configurations, so a draft needs at least two. A claim about one arm alone is not supported in this release (decision 3 of [DR-2026-10-06](../../log/decisions/2026-10-06-terminal-bench-2-1-bring-your-run.md)). If you have one agent, add Harbor's `oracle` agent as the second. It applies each task's reference solution and calls no model. It is your control: an oracle that fails a task on your machine tells you not to trust that machine's result for the task.
 
-Check the Harbor version before anything else.
+Install Harbor at that version before anything else.
+
+```sh
+uv tool install harbor==0.21.0
+```
+
+[uv](https://docs.astral.sh/uv/getting-started/installation/) installs Harbor into an environment of its own, on a Python 3.12 or newer that it finds on your machine. If your shell cannot find `harbor` afterward, uv has printed how to put its tool directory on your PATH. Without `==0.21.0` the installer takes Harbor's newest release. `pip install harbor==0.21.0` inside a virtual environment installs the same version.
+
+Then check it.
 
 ```sh
 harbor --version
@@ -39,6 +49,14 @@ harbor --version
 ```text
 0.21.0
 ```
+
+The version is pinned because `run import` accepts a job only from a Harbor version it has a real jobs directory of, which is 0.21.0 alone, and refuses a job from any other after the run, by name:
+
+```text
+Harbor job terminus-2 was written by Harbor 0.24.0. This reader accepts only a job written by Harbor 0.21.0: it is tested against a real jobs directory of each version it accepts, and it has none of any other. Run Harbor 0.21.0 and import that jobs directory.
+```
+
+If `harbor --version` prints anything else, run the install command again, which replaces a newer Harbor that uv installed, and check again before you start a run.
 
 Two rules of order hold for everything below. `lock` comes before the Harbor run. `anchor` comes before `run import`.
 
