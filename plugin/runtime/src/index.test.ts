@@ -156,11 +156,14 @@ describe("public surface", () => {
   });
 
   test("the chain-verification vocabulary is reachable through the mirror options (#4581)", () => {
-    // The recorded posture (`plugin/runtime/README.md`, Chain verification) is that
-    // `ChainVerification` is public *by construction*: it is a required field of the
-    // root-exported `CreateCorpusMirrorOptions`, so a consumer must be able to write an
-    // implementation naming every type its two methods take. `tsc` proves that; the one
-    // runtime assertion below just keeps the block executable.
+    // The recorded posture (`plugin/runtime/README.md`, Chain verification) is that the
+    // five chain-verification types are named from the root, so a consumer annotating an
+    // implementation of `CreateCorpusMirrorOptions["chainVerification"]` can import
+    // `ChainVerificationInput`, `HeadRevalidationInput` and `ChainVerificationOutcome`
+    // instead of deriving them. `tsc` proves that; it does not prove any caller must, and
+    // the sibling-package types those inputs carry (`SourceIdentity`, `SourceHead`,
+    // `DsseEnvelope`, `SyncedEntry`) are not re-exported, so this block does not name them.
+    // The one runtime assertion below just keeps the block executable.
     const verification: runtime.CreateCorpusMirrorOptions["chainVerification"] = {
       mode: "unverified",
       async verify(
