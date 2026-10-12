@@ -1,11 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { QUALIFIED_HARNESS_LOGIN_ARTIFACTS } from "@colophon-claims/core";
 import { describe, expect, test } from "vitest";
 import { BUILD_METADATA_KIND, DEFAULT_QUALIFIED_TARGETS, type ColophonBuildMetadata } from "./build-metadata.js";
-import { browserCommand, localPublishAnswer, runColophonCli, writeQuickstartCompanions } from "./main.js";
+import { browserCommand, localPublishAnswer, runColophonCli, USAGE, writeQuickstartCompanions } from "./main.js";
 
 const TEST_BUILD: ColophonBuildMetadata = {
   kind: BUILD_METADATA_KIND,
@@ -174,6 +174,16 @@ describe("Colophon install surface", () => {
     expect(readFileSync(join(root, "NEXT-STEPS.md"), "utf8")).toContain("colophon open");
   });
 
+  // Issue #4957: `open` acted as a fixed principal and took no way to name another. Only the
+  // refusal is run here: a valid `open` starts the packaged app and waits to be interrupted.
+  test("open takes --principal, and its help says so", async () => {
+    const answer = await runColophonCli(["open", "--principal"], context);
+    expect(answer.exitCode).toBe(2);
+    expect(answer.stderr).toContain("--principal requires a value");
+    expect(answer.stderr).not.toContain("unknown option");
+    expect(USAGE).toContain("colophon open [--workspace <dir>] [--principal <id>] [--port <n>] [--no-browser]");
+  });
+
   test("rejects an unqualified OS and architecture before creating the output root", async () => {
     const parent = mkdtempSync(join(tmpdir(), "colophon-unqualified-"));
     const output = join(parent, "must-not-exist");
@@ -188,6 +198,64 @@ describe("Colophon install surface", () => {
     expect(answer.stderr).toContain("Supported targets: darwin/arm64, linux/x64");
     expect(answer.stderr).toContain("nothing was created");
     expect(existsSync(output)).toBe(false);
+  });
+
+  // Issue #4950: on a platform the package does not qualify, `quote` surfaced a loader error from a
+  // native helper while `demo` named the platform and the supported targets. The workspace named
+  // here does not exist: a refusal on the platform has to come before anything reads or makes it.
+  describe("quote on a platform the package does not qualify", () => {
+    const unqualified = { platform: "linux", architecture: "arm64" } as const;
+    const argv = ["quote", "--workspace", "ws", "--principal", "me", "--draft", "draft-1"];
+
+    function onTarget(runtimeTarget: { readonly platform: NodeJS.Platform; readonly architecture: string }) {
+      const cwd = mkdtempSync(join(tmpdir(), "colophon-unqualified-quote-"));
+      return { cwd, context: { ...context, cwd, buildMetadata: TEST_BUILD, runtimeTarget } };
+    }
+
+    test("refuses in the words demo uses, and creates nothing", async () => {
+      const { cwd, context: target } = onTarget(unqualified);
+      const answer = await runColophonCli(argv, target);
+      expect(answer.exitCode).toBe(1);
+      expect(answer.stdout).toBe("");
+      expect(answer.stderr).toContain("not qualified for linux/arm64");
+      expect(answer.stderr).toContain("Supported targets: darwin/arm64, linux/x64");
+      expect(answer.stderr).toContain("nothing was created");
+      expect(readdirSync(cwd)).toEqual([]);
+    });
+
+    test("refuses with a typed error under --json", async () => {
+      const { context: target } = onTarget(unqualified);
+      const answer = await runColophonCli([...argv, "--json"], target);
+      expect(answer.exitCode).toBe(1);
+      const body = JSON.parse(answer.stdout) as { ok: boolean; error: { code: string; detail: string } };
+      expect(body.ok).toBe(false);
+      expect(body.error.detail).toContain("not qualified for linux/arm64");
+      expect(body.error.detail).toContain("Supported targets: darwin/arm64, linux/x64");
+    });
+
+    test("still prints its help, which names no platform and runs nothing", async () => {
+      const { context: target } = onTarget(unqualified);
+      for (const helpArgv of [["quote", "--help"], ["help", "quote"]]) {
+        const answer = await runColophonCli(helpArgv, target);
+        expect(answer.exitCode, helpArgv.join(" ")).toBe(0);
+        expect(answer.stdout, helpArgv.join(" ")).toContain("quote");
+        expect(answer.stderr, helpArgv.join(" ")).toBe("");
+      }
+    });
+
+    test("does not refuse a qualified platform, and leaves the other verbs alone", async () => {
+      const { context: qualified } = onTarget({ platform: "linux", architecture: "x64" });
+      const quoted = await runColophonCli(argv, qualified);
+      // It reaches core, which refuses because the workspace named does not exist.
+      expect(quoted.exitCode).not.toBe(0);
+      expect(quoted.stderr).not.toContain("not qualified");
+
+      // Verbs that never run the native helper are not gated: init works wherever the CLI starts.
+      const { cwd, context: target } = onTarget(unqualified);
+      const initialized = await runColophonCli(["init", "--workspace", "ws", "--principal", "me"], target);
+      expect(initialized.exitCode, initialized.stderr).toBe(0);
+      expect(existsSync(join(cwd, "ws"))).toBe(true);
+    });
   });
 
   // `publication serve` is the one verb the wrapper cannot serve by forwarding flags alone: it

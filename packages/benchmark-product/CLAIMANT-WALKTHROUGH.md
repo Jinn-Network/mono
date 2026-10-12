@@ -24,7 +24,7 @@ The two `harbor run` commands were not run again for this document. Harbor 0.21.
 ## What you need
 
 - Node 22 or newer.
-- Linux x64 or Apple-silicon macOS. `quote` is a required step and is known to run on those two. On Linux arm64 it fails with a loader error ([#4950](https://github.com/Jinn-Network/mono/issues/4950)).
+- Linux x64 or Apple-silicon macOS. `quote` is a required step and is known to run on those two. On any other platform, Linux arm64 included, it stops before it reads or creates anything and names the platform it found and the two it supports.
 - Docker. Harbor runs each task in a container.
 - Harbor, version 0.21.0 exactly. `run import` refuses a job that any other version wrote, and names the job.
 - A key for the model your agent calls. Harbor uses it. No Colophon command asks for it.

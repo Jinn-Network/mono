@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import * as entry from "./index.js";
 import { BENCHMARKING_PROTOCOL, PRODUCT_VERSION } from "./index.js";
@@ -69,6 +71,29 @@ describe("public surface", () => {
     expect(entry.LOCAL_VENUE_LIMITS).toContainEqual(expect.stringContaining("self-run"));
     expect(entry.HARBOR_ADAPTER_ID).toBe("harbor");
     expect(publicTypesCompile).toBeUndefined();
+  });
+
+  // Issue #4957: the local app must act as a member of the workspace it opens, so a surface that
+  // has no principal yet needs to read the members. The reader is what the operations boundary
+  // already uses; this pins that it is reachable from the entry and still refuses a directory with none.
+  test("exports the authority policy reader, which lists a founded workspace's members", () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "bp-index-authority-"));
+    try {
+      let absent: unknown;
+      try {
+        entry.readAuthorityPolicy(workspaceDir);
+      } catch (cause) {
+        absent = cause;
+      }
+      expect(absent).toBeInstanceOf(entry.BenchmarkProductError);
+      expect((absent as InstanceType<typeof entry.BenchmarkProductError>).code).toBe("not-found");
+
+      const founded = entry.initWorkspace({ workspaceDir, principal: "me", clock: () => "2026-10-12T00:00:00.000Z" });
+      expect(founded.ok).toBe(true);
+      expect(entry.readAuthorityPolicy(workspaceDir).principals.map((principal) => principal.id)).toEqual(["me"]);
+    } finally {
+      rmSync(workspaceDir, { recursive: true, force: true });
+    }
   });
 
   test("keeps private Inspect host protocol and controller internals out of the product entry", () => {

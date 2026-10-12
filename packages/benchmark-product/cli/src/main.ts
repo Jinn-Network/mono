@@ -38,7 +38,7 @@ Primary commands:
   colophon                         Run the bundled sample and open its verified local viewer
   colophon demo [--output <dir>] [--no-open] [--json]
   colophon open --bundle <dir> [--port <n>] [--no-browser]
-  colophon open [--workspace <dir>] [--port <n>] [--no-browser]
+  colophon open [--workspace <dir>] [--principal <id>] [--port <n>] [--no-browser]
   colophon init --help
   colophon draft create --help
   colophon method --help
@@ -322,6 +322,7 @@ async function runOpen(
   progress: (line: string) => void,
 ): Promise<CliResult> {
   const bundle = value(argv, "bundle");
+  const principal = value(argv, "principal");
   const portRaw = value(argv, "port");
   const port = portRaw === undefined ? 0 : Number(portRaw);
   try {
@@ -330,7 +331,12 @@ async function runOpen(
         return result(1, "", "Could not open the local workspace: Colophon needs an absolute product data directory for agent profiles. Set COLOPHON_DATA_HOME to an absolute path and try again.\n");
       }
       const workspace = resolve(cwd, value(argv, "workspace") ?? "colophon-workspace");
-      const app = await startLocalWorkspaceApp({ workspaceDir: workspace, agentDataDir, port });
+      const app = await startLocalWorkspaceApp({
+        workspaceDir: workspace,
+        agentDataDir,
+        port,
+        ...(principal === undefined ? {} : { principal }),
+      });
       return keepViewerOpen(app, !has(argv, "no-browser"), {
         ready: (url) => progress(`Local workspace: ${url}`),
         warning: progress,
@@ -341,6 +347,7 @@ async function runOpen(
         startWorkspace: () => startLocalWorkspaceApp({
           workspaceDir: resolve(cwd, value(argv, "workspace") ?? "colophon-workspace"),
           agentDataDir,
+          ...(principal === undefined ? {} : { principal }),
         }),
       }),
     });
@@ -391,8 +398,15 @@ export async function runColophonCli(argv: readonly string[], context: ColophonC
     }
     if (argv[0] === "open") {
       const options = argv.slice(1);
-      validateTopLevelOptions(options, { boolean: ["no-browser"], value: ["bundle", "workspace", "port"] });
+      validateTopLevelOptions(options, { boolean: ["no-browser"], value: ["bundle", "workspace", "principal", "port"] });
       return runOpen(options, context.cwd, context.agentDataDir, context.progress);
+    }
+    // Issue #4950: on a platform the package does not qualify, `quote` failed with a loader error
+    // from the local backend's native helper while `demo` named the platform and the supported
+    // targets. Say what `demo` says, before anything is read or created. Help names no platform,
+    // so it stays readable everywhere.
+    if (argv[0] === "quote" && !argv.includes("--help")) {
+      assertQualifiedRuntime(context.buildMetadata ?? readPackagedBuildMetadata(), context.runtimeTarget);
     }
     if (argv[0] === "help") {
       const options = argv.slice(1).filter((token) => token !== "--json");
