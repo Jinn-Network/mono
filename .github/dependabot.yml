@@ -20,6 +20,10 @@
 # a major bump that's currently ignored, remove that dependency's line from
 # the ignore block on EVERY npm entry AND close out the migration tracking
 # issue for that package.
+#
+# The /operator and /packages/sdk entries carry directory-specific holds
+# after the shared block. Copy the shared block to a new entry, not those
+# holds. Each hold names the condition that lifts it.
 
 version: 2
 updates:
@@ -97,6 +101,40 @@ updates:
       # (0.1.0 -> 0.0.0). These resolve from the workspace, never from the
       # registry, so no Dependabot update to them is ever correct.
       - dependency-name: "@jinn-network/*"
+      # Holds specific to /operator. They sit after the shared block and are
+      # not copied to other entries. Each uses update-types, so security
+      # updates for these packages still arrive. Each says what lifts it.
+      #
+      # zod is pinned to exactly 4.4.3 in 41 manifests, in
+      # .github/scripts/plugin-tree-guard-common.mjs and in
+      # .github/scripts/colophon-publish-manifest.test.mjs, so a version move
+      # is one coordinated change, not a bump. The shared block holds majors;
+      # this holds minor and patch (issue #4898).
+      # Lift: remove these two lines when that coordinated change starts.
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+      # @slicekit/erc8128 0.4 drops the replay option that
+      # operator/src/auth/erc8128.ts passes. On a 0.x version Dependabot counts
+      # 0.3 to 0.4 as minor, so this holds minor and major; 0.3.x patches
+      # still arrive.
+      # Lift: remove when the signer is migrated to 0.4.
+      - dependency-name: "@slicekit/erc8128"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      # better-sqlite3 13 needs Node 22, but this package declares engines
+      # node >=20 and range ^12.10.0; `resolutions` already holds 13.0.1.
+      # Dependabot measures from that resolved 13.0.1, so it files 13.x as a
+      # patch or minor and rewrites the declared range to ^13, which the
+      # shared major hold cannot match. This holds minor and patch.
+      # Lift: remove when this package's engines floor moves to Node 22.
+      - dependency-name: "better-sqlite3"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+      # canonicalize 4 and 5 change canonical output for inputs Jinn hashes
+      # (lone surrogates throw, sparse arrays and some edge values serialize
+      # differently) and need Node 22. Moving it is a digest-sensitive
+      # migration across 12 manifests.
+      # Lift: remove when that migration is scheduled.
+      - dependency-name: "canonicalize"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: "/apps/operator-console"
@@ -384,6 +422,18 @@ updates:
       # (0.1.0 -> 0.0.0). These resolve from the workspace, never from the
       # registry, so no Dependabot update to them is ever correct.
       - dependency-name: "@jinn-network/*"
+      # Hold specific to /packages/sdk. It sits after the shared block and is
+      # not copied to other entries. It uses update-types, so security
+      # updates still arrive.
+      #
+      # zod is pinned to exactly 4.4.3 in 41 manifests, in
+      # .github/scripts/plugin-tree-guard-common.mjs and in
+      # .github/scripts/colophon-publish-manifest.test.mjs, so a version move
+      # is one coordinated change, not a bump. The shared block holds majors;
+      # this holds minor and patch (issue #4898).
+      # Lift: remove these two lines when that coordinated change starts.
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
 
   # Standalone worker + autopilot packages. Live and first-party, but were
   # omitted from the allowlist above — so they accrued Dependabot security
