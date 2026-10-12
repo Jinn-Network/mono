@@ -120,6 +120,15 @@ updates:
       # Lift: remove when the signer is migrated to 0.4.
       - dependency-name: "@slicekit/erc8128"
         update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      # @lmoe/gliner-onnx is pinned to exactly 0.1.0 in packages/core, which
+      # /operator links by portal. Bumping /operator alone to 0.2.0 fails
+      # `yarn install --immutable` with a Link step conflict. On a 0.x version
+      # Dependabot counts 0.1 to 0.2 as minor, so this holds minor and major;
+      # 0.1.x patches still arrive.
+      # Lift: remove when the pin in packages/core/package.json moves to the
+      # new version in the same change as /operator.
+      - dependency-name: "@lmoe/gliner-onnx"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
       # better-sqlite3 13 needs Node 22, but this package declares engines
       # node >=20 and range ^12.10.0; `resolutions` already holds 13.0.1.
       # Dependabot measures from that resolved 13.0.1, so it files 13.x as a
