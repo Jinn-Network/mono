@@ -78,7 +78,8 @@ updates:
       # pull request (see "Toolchain bands" in architecture/README.md). No
       # update-types, because a major-only rule let minors inside the 24, 25
       # and 26 majors keep coming back.
-      # Lift: remove only in the pull request that moves the band.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
@@ -181,7 +182,8 @@ updates:
       # pull request (see "Toolchain bands" in architecture/README.md). No
       # update-types, because a major-only rule let minors inside the 24, 25
       # and 26 majors keep coming back.
-      # Lift: remove only in the pull request that moves the band.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
@@ -239,7 +241,8 @@ updates:
       # pull request (see "Toolchain bands" in architecture/README.md). No
       # update-types, because a major-only rule let minors inside the 24, 25
       # and 26 majors keep coming back.
-      # Lift: remove only in the pull request that moves the band.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
@@ -297,7 +300,8 @@ updates:
       # pull request (see "Toolchain bands" in architecture/README.md). No
       # update-types, because a major-only rule let minors inside the 24, 25
       # and 26 majors keep coming back.
-      # Lift: remove only in the pull request that moves the band.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
@@ -354,7 +358,8 @@ updates:
       # pull request (see "Toolchain bands" in architecture/README.md). No
       # update-types, because a major-only rule let minors inside the 24, 25
       # and 26 majors keep coming back.
-      # Lift: remove only in the pull request that moves the band.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
@@ -411,7 +416,8 @@ updates:
       # pull request (see "Toolchain bands" in architecture/README.md). No
       # update-types, because a major-only rule let minors inside the 24, 25
       # and 26 majors keep coming back.
-      # Lift: remove only in the pull request that moves the band.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
@@ -492,7 +498,8 @@ updates:
       # pull request (see "Toolchain bands" in architecture/README.md). No
       # update-types, because a major-only rule let minors inside the 24, 25
       # and 26 majors keep coming back.
-      # Lift: remove only in the pull request that moves the band.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
@@ -550,7 +557,8 @@ updates:
       # pull request (see "Toolchain bands" in architecture/README.md). No
       # update-types, because a major-only rule let minors inside the 24, 25
       # and 26 majors keep coming back.
-      # Lift: remove only in the pull request that moves the band.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
@@ -608,7 +616,8 @@ updates:
       # pull request (see "Toolchain bands" in architecture/README.md). No
       # update-types, because a major-only rule let minors inside the 24, 25
       # and 26 majors keep coming back.
-      # Lift: remove only in the pull request that moves the band.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
@@ -665,7 +674,8 @@ updates:
       # pull request (see "Toolchain bands" in architecture/README.md). No
       # update-types, because a major-only rule let minors inside the 24, 25
       # and 26 majors keep coming back.
-      # Lift: remove only in the pull request that moves the band.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
@@ -722,7 +732,8 @@ updates:
       # pull request (see "Toolchain bands" in architecture/README.md). No
       # update-types, because a major-only rule let minors inside the 24, 25
       # and 26 majors keep coming back.
-      # Lift: remove only in the pull request that moves the band.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"

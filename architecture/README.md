@@ -67,14 +67,12 @@ older band.
 ### TypeScript
 
 The band is TypeScript 5.9 (`^5.9.3`) for every package that publishes declarations or is imported
-by another package, in every release group.
+by another package, in every release group, with one named exception: `operator`.
 
 - A leaf application that nothing imports may run a newer major and never has to move back. Today
   `apps/operator-console`, `apps/website` and `packages/benchmark-product/web` run 6.x.
-- `operator` also runs 6.x and publishes declarations. Nothing in the repository imports it, and
-  `.github/scripts/operator-packed-types.test.mjs` compiles a TypeScript 5.9.3 consumer against its
-  packed declarations in CI.
-- No package compiles against declarations produced by a newer major than its own.
+- `operator` is the exception: it publishes declarations and stays on 6.x. Nothing in the repository imports it, and `.github/scripts/operator-packed-types.test.mjs` compiles a TypeScript 5.9.3 consumer against its packed declarations in CI.
+- No package in the repository compiles against declarations produced by a newer major than its own.
 - Fixtures, examples and `contracts` are outside this policy and follow none of it.
 - Dependabot ignores `typescript` major updates in every npm entry of `.github/dependabot.yml`, so no
   package moves to TypeScript 7 until an issue names the first leaf application to move.
