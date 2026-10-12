@@ -77,6 +77,8 @@ jobs:
       - run: node --test .github/scripts/repository-gitlinks.test.mjs
       - name: Docs key guard
         run: node --test .github/scripts/docs-key-guard.test.mjs
+      - name: Reader-vocabulary tables match the spec
+        run: node --test .github/scripts/reader-vocabulary-tables.test.mjs
       - name: Demo-1 sealed pre-run artifacts
         run: node --test .github/scripts/demo1-historical-artifacts.test.mjs
       - name: Autopilot fail-closed resolution
