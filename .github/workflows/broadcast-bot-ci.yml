@@ -1,0 +1,67 @@
+name: Broadcast bot CI
+
+# Pull-request signal for apps/broadcast-bot (#4896). The bot itself runs only
+# from broadcast-bot.yml by manual dispatch, so before this lane a change to it,
+# including a weekly Dependabot bump, merged with no check that said anything
+# about the bot.
+#
+# Deliberately NOT a required check, and deliberately not on `merge_group`.
+# A required context that no run reports leaves a merge-queue entry waiting
+# until the check-response timeout, and the `next` ruleset requires only the
+# aggregate gate contexts listed in .github/scripts/required-check-set.mjs.
+# A workflow-level `paths:` filter is therefore safe here and only here: nothing
+# waits on this lane. Making it required is a ruleset edit plus a `changes`
+# selection job and a gate job in the shape of operator-console-ci.yml, which is
+# a separate change.
+on:
+  pull_request:
+    paths:
+      - "apps/broadcast-bot/**"
+      - ".github/workflows/broadcast-bot-ci.yml"
+  push:
+    branches: [next]
+    paths:
+      - "apps/broadcast-bot/**"
+      - ".github/workflows/broadcast-bot-ci.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  broadcast-bot:
+    name: Broadcast bot install, typecheck, build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/broadcast-bot
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Enable Corepack before the Yarn cache lookup
+        # setup-node resolves the Yarn cache folder by shelling out to `yarn`.
+        # Without Corepack that is the runner image's global Yarn 1, which
+        # refuses every project pinned to `packageManager: yarn@4.13.0`.
+        run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: apps/broadcast-bot/yarn.lock
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Install
+        run: yarn install --immutable
+      - name: Typecheck
+        run: yarn typecheck
+      - name: Build
+        run: yarn build
+      - name: Test
+        run: yarn test
