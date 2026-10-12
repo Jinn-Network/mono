@@ -109,6 +109,10 @@ record remains the Colophon/Jinn bundle.
    count as 0). Do not use `binary-instrument` majority-k. Use the registered
    method that averages all judged replicates per task (wilson@1 is
    acceptable). That is a parameter lock, not a new statistical invention.
+   **Amended by [DR-2026-10-06](./2026-10-06-terminal-bench-2-1-bring-your-run.md):**
+   a trial with no reward stays outside the score and is counted in the
+   accounting, so "(errors count as 0)" does not describe a rate Colophon
+   states. This decision otherwise stands.
 
 7. **Harbor version.** PyPI’s latest stable Harbor line at ratification is
    `0.21.x` (0.21.0 plus 0.21.1.dev nightlies). TB 2.1’s README installs
