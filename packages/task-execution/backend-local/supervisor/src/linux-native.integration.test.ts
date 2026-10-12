@@ -123,18 +123,23 @@ describe.runIf(linux)("Linux native custody shim", () => {
     const meta = join(root, "meta"); const secrets = join(root, "secrets"); const pidsPath = join(root, "escaped.json");
     mkdirSync(meta, { recursive: true }); mkdirSync(secrets, { recursive: true });
     const sleeper = "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)";
+    // A pid file must appear whole. `writeFileSync` creates the file empty and fills it in a
+    // second step, so a reader polling in between reads "", and `Number("")` is pid 0 (#5011).
+    const publish = "const publish=(path,text)=>{fs.writeFileSync(path+'.tmp',text);fs.renameSync(path+'.tmp',path);};";
     const doubleForkProgram = [
       "const {spawn}=require('node:child_process');const fs=require('node:fs');",
+      publish,
       `const child=spawn(process.execPath,['-e',${JSON.stringify(sleeper)}],{detached:true,stdio:'ignore'});`,
-      `fs.writeFileSync(${JSON.stringify(`${pidsPath}.double`)},String(child.pid));child.unref();process.exit(0);`,
+      `publish(${JSON.stringify(`${pidsPath}.double`)},String(child.pid));child.unref();process.exit(0);`,
     ].join("");
     const program = [
       "process.on('SIGTERM',()=>{});",
       "const {spawn}=require('node:child_process');const fs=require('node:fs');",
+      publish,
       `const file=${JSON.stringify(pidsPath)};const code=${JSON.stringify(sleeper)};`,
       "const session=spawn(process.execPath,['-e',code],{detached:true,stdio:'ignore'});session.unref();",
       `spawn(process.execPath,['-e',${JSON.stringify(doubleForkProgram)}],{stdio:'ignore'});`,
-      "const writeEscaped=()=>{try{const double=Number(fs.readFileSync(file+'.double','utf8'));fs.writeFileSync(file,JSON.stringify({session:session.pid,double}));}catch{setTimeout(writeEscaped,5);}};",
+      "const writeEscaped=()=>{try{const double=Number(fs.readFileSync(file+'.double','utf8'));publish(file,JSON.stringify({session:session.pid,double}));}catch{setTimeout(writeEscaped,5);}};",
       "setTimeout(writeEscaped,0);setInterval(()=>{},1000);",
     ].join("");
     spawnShim({ attemptId: "attempt-escape", nonce: "nonce-escape", metaDir: meta, secretsDir: secrets }, {
@@ -144,11 +149,21 @@ describe.runIf(linux)("Linux native custody shim", () => {
     const escaped = await waitFor(() => {
       try { return JSON.parse(readFileSync(pidsPath, "utf8")) as { session: number; double: number }; } catch { return undefined; }
     }, "escaped descendant pids");
+    // Each pid must name a live descendant before the cancellation. Signal 0 to pid 0 probes the
+    // caller's own process group and succeeds, and a non-integer pid throws a TypeError, so an
+    // unchecked pid could read as a survivor, or as gone, with no descendant behind it.
+    const escapedPids = [escaped.session, escaped.double];
+    for (const pid of escapedPids) {
+      expect(Number.isSafeInteger(pid) && pid > 1, `escaped descendant pid ${String(pid)}`).toBe(true);
+      expect(() => process.kill(pid, 0)).not.toThrow();
+    }
     writeShimCancellationCommand(meta, { nonce: "nonce-escape", graceMs: 0, killPollCeilingMs: 2_000 });
     expect(requestShimCancellation(meta, fingerprint)).toBe(true);
     const outcome = await waitFor(() => readOutcome(meta, "nonce-escape") ?? undefined, "escape outcome");
     expect({ attemptId: outcome.attemptId, nonce: outcome.nonce, exitCode: outcome.exitCode, termSignal: outcome.termSignal }).toEqual({ attemptId: "attempt-escape", nonce: "nonce-escape", exitCode: null, termSignal: "SIGKILL" });
-    for (const pid of [escaped.session, escaped.double]) expect(() => process.kill(pid, 0)).toThrow();
+    // No wait: the shim publishes a signaled outcome only after its scan found the custody domain
+    // empty and it reaped what it adopted, so both pids must already be unknown to the kernel.
+    for (const pid of escapedPids) expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
     const custody = await waitFor(() => {
       try { return JSON.parse(readFileSync(join(meta, "custody.json"), "utf8")) as Record<string, unknown>; } catch { return undefined; }
     }, "escape custody outcome");

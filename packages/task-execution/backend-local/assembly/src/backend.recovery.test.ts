@@ -864,6 +864,12 @@ describe("restart reconstruction and §6.4 actions", () => {
         ? { ...event, details: { ...event.details, manifest: [{ path: "patch", sizeBytes: -1, sha256: "wrong" }] } }
         : event));
 
+    // The shim publishes outcome.json before it exits, so on a loaded host it can still be alive
+    // here. Recovery then truthfully classifies the attempt as live supervision, returns
+    // `matching`, and refuses the malformed event later in the resumed worker (a `lost` terminal,
+    // no Delivery) instead of rejecting this call (#5011). This test pins the synchronous
+    // recording-recovery refusal, which needs the shim gone; its exit is guaranteed, so wait for it.
+    await waitFor(() => !probeShimAlive(paths(root, attempt).meta).alive, "shim did not die");
     const recovered = fixture(root);
     await expect(recovered.recover(attempt)).rejects.toMatchObject({
       category: "invalid-document",
