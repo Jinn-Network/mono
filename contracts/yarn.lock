@@ -417,66 +417,66 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@nomicfoundation/edr-darwin-arm64@npm:0.22.0":
-  version: 0.22.0
-  resolution: "@nomicfoundation/edr-darwin-arm64@npm:0.22.0"
+"@nomicfoundation/edr-darwin-arm64@npm:0.22.2":
+  version: 0.22.2
+  resolution: "@nomicfoundation/edr-darwin-arm64@npm:0.22.2"
   conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
-"@nomicfoundation/edr-darwin-x64@npm:0.22.0":
-  version: 0.22.0
-  resolution: "@nomicfoundation/edr-darwin-x64@npm:0.22.0"
+"@nomicfoundation/edr-darwin-x64@npm:0.22.2":
+  version: 0.22.2
+  resolution: "@nomicfoundation/edr-darwin-x64@npm:0.22.2"
   conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
-"@nomicfoundation/edr-linux-arm64-gnu@npm:0.22.0":
-  version: 0.22.0
-  resolution: "@nomicfoundation/edr-linux-arm64-gnu@npm:0.22.0"
+"@nomicfoundation/edr-linux-arm64-gnu@npm:0.22.2":
+  version: 0.22.2
+  resolution: "@nomicfoundation/edr-linux-arm64-gnu@npm:0.22.2"
   conditions: os=linux & cpu=arm64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@nomicfoundation/edr-linux-arm64-musl@npm:0.22.0":
-  version: 0.22.0
-  resolution: "@nomicfoundation/edr-linux-arm64-musl@npm:0.22.0"
+"@nomicfoundation/edr-linux-arm64-musl@npm:0.22.2":
+  version: 0.22.2
+  resolution: "@nomicfoundation/edr-linux-arm64-musl@npm:0.22.2"
   conditions: os=linux & cpu=arm64 & libc=musl
   languageName: node
   linkType: hard
 
-"@nomicfoundation/edr-linux-x64-gnu@npm:0.22.0":
-  version: 0.22.0
-  resolution: "@nomicfoundation/edr-linux-x64-gnu@npm:0.22.0"
+"@nomicfoundation/edr-linux-x64-gnu@npm:0.22.2":
+  version: 0.22.2
+  resolution: "@nomicfoundation/edr-linux-x64-gnu@npm:0.22.2"
   conditions: os=linux & cpu=x64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@nomicfoundation/edr-linux-x64-musl@npm:0.22.0":
-  version: 0.22.0
-  resolution: "@nomicfoundation/edr-linux-x64-musl@npm:0.22.0"
+"@nomicfoundation/edr-linux-x64-musl@npm:0.22.2":
+  version: 0.22.2
+  resolution: "@nomicfoundation/edr-linux-x64-musl@npm:0.22.2"
   conditions: os=linux & cpu=x64 & libc=musl
   languageName: node
   linkType: hard
 
-"@nomicfoundation/edr-win32-x64-msvc@npm:0.22.0":
-  version: 0.22.0
-  resolution: "@nomicfoundation/edr-win32-x64-msvc@npm:0.22.0"
+"@nomicfoundation/edr-win32-x64-msvc@npm:0.22.2":
+  version: 0.22.2
+  resolution: "@nomicfoundation/edr-win32-x64-msvc@npm:0.22.2"
   conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
 
-"@nomicfoundation/edr@npm:0.22.0":
-  version: 0.22.0
-  resolution: "@nomicfoundation/edr@npm:0.22.0"
+"@nomicfoundation/edr@npm:0.22.2":
+  version: 0.22.2
+  resolution: "@nomicfoundation/edr@npm:0.22.2"
   dependencies:
-    "@nomicfoundation/edr-darwin-arm64": "npm:0.22.0"
-    "@nomicfoundation/edr-darwin-x64": "npm:0.22.0"
-    "@nomicfoundation/edr-linux-arm64-gnu": "npm:0.22.0"
-    "@nomicfoundation/edr-linux-arm64-musl": "npm:0.22.0"
-    "@nomicfoundation/edr-linux-x64-gnu": "npm:0.22.0"
-    "@nomicfoundation/edr-linux-x64-musl": "npm:0.22.0"
-    "@nomicfoundation/edr-win32-x64-msvc": "npm:0.22.0"
+    "@nomicfoundation/edr-darwin-arm64": "npm:0.22.2"
+    "@nomicfoundation/edr-darwin-x64": "npm:0.22.2"
+    "@nomicfoundation/edr-linux-arm64-gnu": "npm:0.22.2"
+    "@nomicfoundation/edr-linux-arm64-musl": "npm:0.22.2"
+    "@nomicfoundation/edr-linux-x64-gnu": "npm:0.22.2"
+    "@nomicfoundation/edr-linux-x64-musl": "npm:0.22.2"
+    "@nomicfoundation/edr-win32-x64-msvc": "npm:0.22.2"
   dependenciesMeta:
     "@nomicfoundation/edr-darwin-arm64":
       optional: true
@@ -492,7 +492,7 @@ __metadata:
       optional: true
     "@nomicfoundation/edr-win32-x64-msvc":
       optional: true
-  checksum: 10c0/0752a931bc199aaf200a758bdbc2f8d5ecfed9c96e5af0ba7de07c79eda4d60954bcbec312b98c1060ea6058dfba9096027bc7d5817ae6e3c4da8c3c094bc28a
+  checksum: 10c0/54816bd1344c399ff3968751a06d9e9654faef46a4d1b1a4056b5f55dbcc1a0ce4370172cf5f1cd47ab7eb475b195358c9624600a1ea9fd732de66c62838c82f
   languageName: node
   linkType: hard
 
@@ -532,11 +532,11 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@nomicfoundation/hardhat-ethers-chai-matchers@npm:^3.0.11":
-  version: 3.0.11
-  resolution: "@nomicfoundation/hardhat-ethers-chai-matchers@npm:3.0.11"
+"@nomicfoundation/hardhat-ethers-chai-matchers@npm:^3.0.12":
+  version: 3.0.12
+  resolution: "@nomicfoundation/hardhat-ethers-chai-matchers@npm:3.0.12"
   dependencies:
-    "@nomicfoundation/hardhat-utils": "npm:^4.1.4"
+    "@nomicfoundation/hardhat-utils": "npm:^4.3.0"
     "@types/chai-as-promised": "npm:^8.0.1"
     chai-as-promised: "npm:^8.0.0"
     deep-eql: "npm:^5.0.1"
@@ -545,7 +545,7 @@ __metadata:
     chai: ">=5.1.2 <7"
     ethers: ^6.14.0
     hardhat: ^3.8.0
-  checksum: 10c0/812b9ec370694ffee0fc933a7d4e1f935cbddccd8b8fcc682565a5dc2752c9e44df7efbb9c87f8d8ccc613d843e4c60195e57da0667494886ed0509b2b21a312
+  checksum: 10c0/018992532b775005548bbec0e6e21747c9d3ec742df297eb36254d3f3be8a214c10de2f3f7aa756b2ad8b6935821081c13c13ff500c818d6b3faa0c077dc8604
   languageName: node
   linkType: hard
 
@@ -1480,12 +1480,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"dotenv@npm:^18.0.5":
-  version: 18.0.5
-  resolution: "dotenv@npm:18.0.5"
+"dotenv@npm:^18.0.7":
+  version: 18.0.7
+  resolution: "dotenv@npm:18.0.7"
   bin:
     dotenv: dist/index.cjs
-  checksum: 10c0/fade137f063f3d3483459b71c6ed0f98f18189fa52b14c9f192e57df6b76719340aa6d9a1d194e4fa0e025deb5af9d545efcc3a28f09230af815518f0b9c0785
+  checksum: 10c0/bda2efbfa3194eec5ae592308db16285a3e163b505282a052ec9e10538be1c6a526f0437b431e78183e9bd367db0ad7c446d0180ab62310bc0a384787bec8894
   languageName: node
   linkType: hard
 
@@ -1793,11 +1793,11 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hardhat@npm:3.18.1":
-  version: 3.18.1
-  resolution: "hardhat@npm:3.18.1"
+"hardhat@npm:3.19.0":
+  version: 3.19.0
+  resolution: "hardhat@npm:3.19.0"
   dependencies:
-    "@nomicfoundation/edr": "npm:0.22.0"
+    "@nomicfoundation/edr": "npm:0.22.2"
     "@nomicfoundation/hardhat-errors": "npm:^3.1.0"
     "@nomicfoundation/hardhat-utils": "npm:^4.4.0"
     "@nomicfoundation/hardhat-vendored": "npm:^3.0.4"
@@ -1817,7 +1817,7 @@ __metadata:
     zod: "npm:^3.23.8"
   bin:
     hardhat: dist/src/cli.js
-  checksum: 10c0/8b7d7889901a079d42d86ec6457bb89268acc01f1f132cc8db0a4e0b7c1361bc96e76fa12096162b9ae4c8beeda75845159efee0162ba71d877de295718a4b48
+  checksum: 10c0/8f953af4504ff67ac8cced7af36e269f8660aacd215da76f0b2b6ea1e09c1bd409fb54f66d0c531fbca08beb7cc874f0451a5afcd0245dd69afbac22ada8bdb1
   languageName: node
   linkType: hard
 
@@ -1944,7 +1944,7 @@ __metadata:
     "@account-abstraction/contracts": "npm:^0.8.0"
     "@gnosis.pm/safe-contracts": "npm:^1.3.0"
     "@nomicfoundation/hardhat-ethers": "npm:^4.2.0"
-    "@nomicfoundation/hardhat-ethers-chai-matchers": "npm:^3.0.11"
+    "@nomicfoundation/hardhat-ethers-chai-matchers": "npm:^3.0.12"
     "@nomicfoundation/hardhat-ignition": "npm:^3.1.8"
     "@nomicfoundation/hardhat-ignition-ethers": "npm:^3.1.6"
     "@nomicfoundation/hardhat-keystore": "npm:^3.1.1"
@@ -1959,9 +1959,9 @@ __metadata:
     "@types/chai": "npm:^5.2.3"
     "@types/mocha": "npm:^10.0.10"
     chai: "npm:^6"
-    dotenv: "npm:^18.0.5"
+    dotenv: "npm:^18.0.7"
     ethers: "npm:^6.17.0"
-    hardhat: "npm:3.18.1"
+    hardhat: "npm:3.19.0"
     mocha: "npm:^12.0.3"
     typescript: "npm:6.0"
   languageName: unknown
