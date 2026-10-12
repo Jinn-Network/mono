@@ -82,6 +82,50 @@ describe('acquireArtifactContent', () => {
     expect(warnings[0]).toContain(realSha);
   });
 
+  it('does not refresh last_used_at on a corrupted cache row when the re-fetch fails', async () => {
+    // The cache leg hashes the row before it bumps last_used_at (#4501), so a row about to be
+    // discarded does not look recently used. A successful re-fetch replaces the whole row,
+    // last_used_at included, so only a failing one leaves the corrupt row to show the order.
+    const realSha = (await import('node:crypto')).createHash('sha256').update(realBytes).digest('hex');
+    const fetchedAt = '2026-04-30T00:00:00.000Z';
+    store.saveNetworkArtifact({
+      sha256: realSha,
+      artifactType: 'design_document',
+      content: Buffer.from('corrupted on disk'),
+      source: 'origin',
+      paidAmountUsdc: '0',
+      fetchedAt,
+    });
+    // saveNetworkArtifact seeds last_used_at from fetchedAt, so the row starts long before now.
+    expect(store.getNetworkArtifact(realSha)!.lastUsedAt).toBe(fetchedAt);
+    const acquireFn = vi.fn(async () => ({ ok: false as const, reason: 'not_found' as const, message: 'HTTP 404' }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(
+      acquireArtifactContent({
+        sha256: realSha,
+        artifactType: 'design_document',
+        access,
+        store,
+        selfSafeAddress: '0x' + 'f'.repeat(40),
+        privateKey: TEST_KEY,
+        acquireFn,
+        ownerSafe: '0x' + 'a'.repeat(40),
+      }),
+    ).rejects.toThrow(/not_found/);
+    const warnings = warn.mock.calls.map((call) => String(call[0]));
+    warn.mockRestore();
+
+    expect(acquireFn).toHaveBeenCalledOnce();
+    // The corrupt row was treated as a miss, not served.
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(realSha);
+    // Nothing repaired the row, and nothing marked it as used.
+    const row = store.getNetworkArtifact(realSha)!;
+    expect(row.content.toString()).toBe('corrupted on disk');
+    expect(row.lastUsedAt).toBe(fetchedAt);
+  });
+
   it('self-store fast path serves and mirrors to cache', async () => {
     const realSha = (await import('node:crypto')).createHash('sha256').update(realBytes).digest('hex');
     store.saveServedArtifact({

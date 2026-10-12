@@ -34,7 +34,10 @@ export async function loadBenchmarkingFixtureJson(relativePath: string): Promise
 }
 
 export async function listBenchmarkingFixtures(relativeDirectory = ""): Promise<string[]> {
-  const url = benchmarkingFixtureUrl(relativeDirectory.endsWith("/") ? relativeDirectory : `${relativeDirectory}/`);
+  // The empty default is the corpus root. Appending "/" to it would make an absolute path.
+  const url = benchmarkingFixtureUrl(
+    relativeDirectory === "" || relativeDirectory.endsWith("/") ? relativeDirectory : `${relativeDirectory}/`,
+  );
   const fixtureRoot = fileURLToPath(new URL("../fixtures/", import.meta.url));
   return (await readdir(url, { recursive: true, withFileTypes: true }))
     .filter((entry) => entry.isFile())
