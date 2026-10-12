@@ -4,24 +4,34 @@
  * This is the only packed-closure path allowed to consult the npm registry
  * for range resolution (`npm install --package-lock-only`). Smoke uses the
  * result via npm ci and never re-resolves.
+ *
+ * The resolve carries a release-age floor (#4897): no version published less than
+ * `JINN_HERMETIC_REFRESH_MIN_RELEASE_AGE_DAYS` days ago (default 7) enters the
+ * lockfile, and the run prints what the floor held back. Age and exceptions are
+ * set in `lib/hermetic-packed-closure.mjs`.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   assertFixtureLockfilePresent,
+  assertNpmSupportsReleaseAge,
   buildConsumerThirdPartyDependencies,
   discoverPackageRoots,
   firstPartyArchiveDependencies,
   fixtureDir,
   fixtureLockfilePath,
+  formatHeldBack,
+  heldBackPackages,
+  minReleaseAgeDaysFromEnv,
   packedClosurePackageNames,
   readPackageJson,
   refreshLockfileArgs,
   requirePackageRoot,
   sanitizedManifest,
+  unconstrainedRefreshLockfileArgs,
   withoutLocalArchiveIntegrity,
   writeConsumerPackageJson,
 } from './lib/hermetic-packed-closure.mjs';
@@ -35,6 +45,9 @@ const workRoot = mkdtempSync(join(tmpdir(), 'jinn-hermetic-packed-closure-refres
 // resolve identically in both.
 const archivesRoot = join(workRoot, 'archives');
 const consumerRoot = join(workRoot, 'consumer');
+// A sibling of `consumerRoot`, so the manifest's `file:../archives/...` entries resolve
+// the same way. Used only to report what the release-age floor held back.
+const unconstrainedRoot = join(workRoot, 'consumer-unconstrained');
 const stagingRoot = join(workRoot, 'staging');
 
 function run(command, args, context, options = {}) {
@@ -74,6 +87,10 @@ function packManifest(name, manifest) {
 }
 
 try {
+  // Before any archive is packed or the registry is asked anything: an older npm would
+  // ignore the floor with only a warning.
+  const minReleaseAgeDays = minReleaseAgeDaysFromEnv(process.env);
+  assertNpmSupportsReleaseAge(run('npm', ['--version'], 'read the npm version').stdout);
   const packageRoots = discoverPackageRoots(packagesRoot);
   const clientManifest = readPackageJson(clientRoot);
   const names = packedClosurePackageNames(clientManifest, packageRoots);
@@ -92,10 +109,19 @@ try {
     },
     devDependencies: thirdParty.devDependencies,
   });
-  run('npm', refreshLockfileArgs(), 'refresh packed-closure lockfile', {
+  run('npm', refreshLockfileArgs({ minReleaseAgeDays }), 'refresh packed-closure lockfile', {
     cwd: consumerRoot,
   });
   const lock = JSON.parse(readFileSync(join(consumerRoot, 'package-lock.json'), 'utf8'));
+  // npm does not say what a release-age floor skipped, so resolve the same manifest once
+  // more without it and report the difference. That lockfile is discarded with workRoot.
+  mkdirSync(unconstrainedRoot, { recursive: true });
+  copyFileSync(join(consumerRoot, 'package.json'), join(unconstrainedRoot, 'package.json'));
+  run('npm', unconstrainedRefreshLockfileArgs(), 'resolve without the release-age floor', {
+    cwd: unconstrainedRoot,
+  });
+  const unconstrainedLock = JSON.parse(readFileSync(join(unconstrainedRoot, 'package-lock.json'), 'utf8'));
+  console.log(formatHeldBack(heldBackPackages(unconstrainedLock, lock), minReleaseAgeDays));
   mkdirSync(fixtureDir(scriptsRoot), { recursive: true });
   writeFileSync(
     fixtureLockfilePath(scriptsRoot),
