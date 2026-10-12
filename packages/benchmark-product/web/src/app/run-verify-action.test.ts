@@ -33,6 +33,7 @@ const RUN_VERIFY_RESULT_KEYS = [
   "anchoringWindow",
   "reportEnvelopeSha256",
   "additionalReports",
+  "readerChecksNotRun",
   "runtimeMethod",
 ] as const satisfies readonly (keyof RunVerifyResult)[];
 
@@ -67,6 +68,28 @@ describe("run.verify GUI/CLI field equivalence", () => {
     expect(state).toEqual({ status: "success", result });
     expect(state.status === "success" ? Object.keys(state.result as object).sort() : []).toEqual(
       Object.keys(result).sort(),
+    );
+  });
+
+  test("the action carries the reader checks verify did not run, though the card does not show them yet", async () => {
+    // Issue #4940: a reported run names the reader checks `publish` runs on the bundle that `verify`
+    // did not. The action passes the field through unchanged, as it does every key above.
+    // `VerificationForm` reads only the keys it names, so the card does not render this one until
+    // issue #5026 decides how it should look.
+    const result: RunVerifyResult = {
+      draftId: "draft-1",
+      checks: ["matrix-rederivation", "report-verification", "claim-consistency"],
+      matrixSha256: DIGEST,
+      reportEnvelopeSha256: "b".repeat(64),
+      readerChecksNotRun: ["manifest", "evidence-closure", "trust"],
+    };
+    runVerifyMock.mockResolvedValue({ ok: true, result });
+    const data = new FormData();
+    data.set("draftId", "draft-1");
+    const state = await runVerifyAction({ status: "idle" }, data);
+    expect(state).toEqual({ status: "success", result });
+    expect(state.status === "success" ? (state.result as RunVerifyResult).readerChecksNotRun : undefined).toEqual(
+      ["manifest", "evidence-closure", "trust"],
     );
   });
 });
