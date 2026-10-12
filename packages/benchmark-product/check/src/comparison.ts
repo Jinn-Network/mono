@@ -6,6 +6,7 @@ import {
 import { TaskSpecificationSchema } from "@jinn-network/task-execution-protocol";
 import type { BundleAssemblyCell } from "./schema.js";
 import { INSPECT_TASK_PROFILE_URI } from "./profile/artifacts.js";
+import type { ClaimTerminalBench21ComparabilitySection } from "./profile/terminal-bench-2-1-comparability.js";
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
 const SHA256 = /^[a-f0-9]{64}$/u;
@@ -39,12 +40,13 @@ export interface PublicComparisonCell {
   readonly armId: string;
   readonly replicate: number;
   readonly outcome: MatrixRecord["cells"][number]["outcome"];
+  /** The task's name, short enough to head a cell. Set only by the official-suite projector; a
+   * cell without it is headed by its Task digest. */
+  readonly taskLabel?: string;
   readonly outputSummary: string;
-  readonly primaryScore?: {
-    readonly name: "solverBrier";
-    readonly value: string;
-    readonly direction: "lower-is-better";
-  };
+  readonly primaryScore?:
+    | { readonly name: "solverBrier"; readonly value: string; readonly direction: "lower-is-better" }
+    | { readonly name: "reward"; readonly value: string; readonly direction: "higher-is-better" };
   readonly outputs: readonly PublicComparisonOutput[];
   readonly verdicts: readonly PublicComparisonVerdict[];
   readonly evidencePaths: readonly string[];
@@ -77,6 +79,19 @@ export interface DerivePublicComparisonInput {
   readonly matrix: MatrixRecord;
   readonly assemblyCells: readonly BundleAssemblyCell[];
   readonly recordBytes: ReadonlyMap<string, Uint8Array>;
+  /**
+   * The bundle's VERIFIED `terminalBench21Comparability` claim section, passed exactly when its
+   * claim carries one. It turns on the Terminal-Bench 2.1 projector: each task is labelled by its
+   * official name, and each cell shows its verdict and its reward.
+   *
+   * The gate is this section and never the Task's profile. The page is byte-pinned to the reader a
+   * claim names, and a slate draft can be published in a rollback format whose pinned reader has
+   * no projector, so a branch keyed on the profile would move a page that reader cannot rebuild.
+   * The section exists only on a composed claim whose bundle declares the capability, and the
+   * checker has by then held every Benchmark item to the pinned official Task of its name.
+   * Absent, the view is exactly the one derived before the projector existed.
+   */
+  readonly officialSuite?: ClaimTerminalBench21ComparabilitySection;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -185,6 +200,44 @@ function taskProjection(
   };
 }
 
+/** The first 12 hex digits of a `sha256:` reference, the length every other projector prints. */
+function shortDigest(reference: string): string {
+  return reference.replace(/^sha256:/u, "").slice(0, 12);
+}
+
+/**
+ * One official Terminal-Bench 2.1 item under a verified claim section. The name and the package
+ * are the sealed Task's own. The dataset and its revision are the section's, which the checker
+ * has compared with its pins.
+ */
+function officialSuiteTaskProjection(
+  digest: string,
+  bytes: Uint8Array,
+  officialSuite: ClaimTerminalBench21ComparabilitySection,
+): { readonly task: PublicComparisonTask; readonly profileUri: string } {
+  const parsed = TaskSpecificationSchema.parse(exactJson(bytes, `Task ${digest}`));
+  const profileUri = parsed.profile.uri ?? "unprofiled";
+  const payload = isObject(parsed.payload) ? parsed.payload : {};
+  const taskName = payload["taskName"];
+  const packageRef = payload["packageRef"];
+  if (typeof taskName !== "string" || typeof packageRef !== "string") {
+    throw new TypeError(`Task ${digest} names no Terminal-Bench 2.1 task and package, so it is not an item of the verified official slate`);
+  }
+  return {
+    task: {
+      digest,
+      profileUri,
+      label: bounded(taskName, 180),
+      summary: bounded(
+        `Terminal-Bench 2.1 task; dataset ${officialSuite.datasetId} at revision ${shortDigest(officialSuite.datasetRevision)}; package ${shortDigest(packageRef)}`,
+        480,
+      ),
+      evidencePath: `records/${digest}.bin`,
+    },
+    profileUri,
+  };
+}
+
 function outputProjection(
   profileUri: string,
   name: string,
@@ -209,6 +262,29 @@ function commonBrier(verdicts: readonly PublicComparisonVerdict[]): string | und
   const values = verdicts.map((verdict) => verdict.measurements["solverBrier"]);
   if (values.length === 0 || values.some((value) => typeof value !== "string")) return undefined;
   return values.every((value) => value === values[0]) ? values[0] as string : undefined;
+}
+
+/** A reward as a sealed record carries it: a safe integer, or a plain decimal string for any other
+ * value. Nothing else is read as a reward. */
+function sealedReward(value: string | number | boolean | undefined): string | undefined {
+  if (typeof value === "number") return Number.isSafeInteger(value) ? String(value) : undefined;
+  return typeof value === "string" && /^-?\d+(?:\.\d+)?$/u.test(value) ? value : undefined;
+}
+
+/** The reward every verdict of the cell carries, when they all carry the same sealed value. */
+function commonReward(verdicts: readonly PublicComparisonVerdict[]): string | undefined {
+  const values = verdicts.map((verdict) => verdict.measurements["reward"]);
+  if (values.length === 0 || values.some((value) => value !== values[0])) return undefined;
+  return sealedReward(values[0]);
+}
+
+/** What the cell's verdicts say, or `undefined` for a cell with none. */
+function verdictSummary(verdicts: readonly PublicComparisonVerdict[]): string | undefined {
+  if (verdicts.length === 0) return undefined;
+  const stated = verdicts.map((verdict) => verdict.verdict);
+  return stated.every((verdict) => verdict === stated[0])
+    ? `Verdict: ${stated[0]}`
+    : `Verdicts disagree: ${stated.join(", ")}`;
 }
 
 function descriptiveComparison(arms: readonly string[], cells: readonly PublicComparisonCell[]): PublicDescriptiveComparison | undefined {
@@ -255,8 +331,12 @@ export function derivePublicComparison(input: DerivePublicComparisonInput): Publ
   const bundledPredictionSample = input.benchmark.name === SAMPLE_BENCHMARK_NAME;
   const taskDigests = [...new Set(input.benchmark.items.map(itemTaskDigest))];
   const taskByDigest = new Map<string, ReturnType<typeof taskProjection>>();
+  const officialSuite = input.officialSuite;
   const tasks = taskDigests.map((digest) => {
-    const projected = taskProjection(digest, requiredRecord(input.recordBytes, digest, "Task"), bundledPredictionSample);
+    const taskBytes = requiredRecord(input.recordBytes, digest, "Task");
+    const projected = officialSuite === undefined
+      ? taskProjection(digest, taskBytes, bundledPredictionSample)
+      : officialSuiteTaskProjection(digest, taskBytes, officialSuite);
     taskByDigest.set(digest, projected);
     return projected.task;
   });
@@ -265,8 +345,9 @@ export function derivePublicComparison(input: DerivePublicComparisonInput): Publ
   const cells = input.matrix.cells.map((matrixCell): PublicComparisonCell => {
     const assembly = assemblyByKey.get(matrixCell.cellKey);
     if (assembly === undefined) throw new TypeError(`comparison cell ${matrixCell.cellKey} is absent from the verified assembly`);
-    const profileUri = taskByDigest.get(matrixCell.taskDigest)?.profileUri;
-    if (profileUri === undefined) throw new TypeError(`comparison cell ${matrixCell.cellKey} names an unknown Task`);
+    const projectedTask = taskByDigest.get(matrixCell.taskDigest);
+    if (projectedTask === undefined) throw new TypeError(`comparison cell ${matrixCell.cellKey} names an unknown Task`);
+    const profileUri = projectedTask.profileUri;
     const outputs = (assembly.solveOutputs ?? []).map((output) => outputProjection(
       profileUri,
       output.name,
@@ -283,14 +364,26 @@ export function derivePublicComparison(input: DerivePublicComparisonInput): Publ
     const outputSummary = outputs.length === 0
       ? "No solve output is present for this accounted cell."
       : outputs.map((output) => output.summary).join("; ");
+    // Under the official-suite projector a cell is headed by its task's name, states its verdict,
+    // and takes its reward as its score. A cell with no verdict keeps the generic text. Its outputs
+    // stay listed beneath it either way.
+    const reward = officialSuite === undefined ? undefined : commonReward(verdicts);
     return {
       cellKey: matrixCell.cellKey,
       taskDigest: matrixCell.taskDigest,
       armId: matrixCell.armId,
       replicate: matrixCell.replicate,
       outcome: matrixCell.outcome,
-      outputSummary,
-      ...(brier === undefined ? {} : { primaryScore: { name: "solverBrier" as const, value: brier, direction: "lower-is-better" as const } }),
+      ...(officialSuite === undefined
+        ? {
+          outputSummary,
+          ...(brier === undefined ? {} : { primaryScore: { name: "solverBrier" as const, value: brier, direction: "lower-is-better" as const } }),
+        }
+        : {
+          taskLabel: projectedTask.task.label,
+          outputSummary: verdictSummary(verdicts) ?? outputSummary,
+          ...(reward === undefined ? {} : { primaryScore: { name: "reward" as const, value: reward, direction: "higher-is-better" as const } }),
+        }),
       outputs,
       verdicts,
       evidencePaths: [

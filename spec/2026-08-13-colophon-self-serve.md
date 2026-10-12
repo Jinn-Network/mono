@@ -179,6 +179,7 @@ Success output starts with the answer:
 Recomputed: 6 of 6 checks passed
 Bundle: sha256:<bundle-id>
 Format: benchmark-product-public-bundle/2
+Run: <run-sha256>
 
 Not checked by this tool: whether the machine that produced this bundle was
 honest, and whether the compared identities are independent parties. What is
