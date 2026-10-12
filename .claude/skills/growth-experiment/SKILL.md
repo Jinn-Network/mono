@@ -5,7 +5,7 @@ description: Drive one cycle of Jinn's growth experiment loop — PLAN an attemp
 
 # growth-experiment
 
-Implements the cycle in [`GROWTH.md`](../../../GROWTH.md). See §1 for the model and Mayfield rungs, §2 for the eight knobs, §4 for the non-negotiables. This skill is their enforcement and the only sanctioned writer of new log entries.
+Implements the cycle in [`GROWTH.md`](../../../GROWTH.md). See §4 for the model and Mayfield rungs, §5 for the eight knobs, §7 for the non-negotiables. This skill is their enforcement and the only sanctioned writer of new log entries.
 
 ## When to invoke
 
@@ -40,7 +40,7 @@ Both are operator-private (gitignored). Create them on first PLAN call if absent
 
 ## Enforcement
 
-Enforces [`GROWTH.md`](../../../GROWTH.md) §4. Skill-specific specifics:
+Enforces [`GROWTH.md`](../../../GROWTH.md) §7. Skill-specific specifics:
 
 - PLAN rejects vague predictions and refuses co-varied attempts (override flag required).
 - LOG marks any no-prediction entry `inconclusive` regardless of result shape.
