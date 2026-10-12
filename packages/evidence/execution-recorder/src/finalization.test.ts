@@ -1003,6 +1003,11 @@ describe("execution finalization", () => {
     },
   );
 
+  // The two cases below finalize a fresh workspace once per repository fault point and take 3 to
+  // 5 seconds each on a healthy hosted runner. The 30 second package limit would leave them less
+  // room than any other case, so they carry a limit sized to their own cost (#4982).
+  const FAULT_SWEEP_TIMEOUT_MS = 180_000;
+
   test("recovers faults before and after every repository operation without rewriting checkpoints", async () => {
     const input: FinalizeExecutionInput = {
       outcome: "completed",
@@ -1072,7 +1077,7 @@ describe("execution finalization", () => {
         "after:record:execution-evidence",
       ]);
     }
-  }, 30_000);
+  }, FAULT_SWEEP_TIMEOUT_MS);
 
   test("recovers faults before and after every resumed repository operation", async () => {
     const input: FinalizeExecutionInput = {
@@ -1136,7 +1141,7 @@ describe("execution finalization", () => {
       );
       expect(recovered.result).toEqual(baseline.result);
     }
-  }, 30_000);
+  }, FAULT_SWEEP_TIMEOUT_MS);
 
   test("rejects nonconforming exact metadata before repository writes", async () => {
     const repository = new FinalizationFaultRepository();

@@ -9,9 +9,8 @@ import { defineConfig } from "vitest/config";
 // 0.3 to 1.4 seconds locally took 5.0 to 6.6 seconds in one merge-queue run and tripped the
 // 5 second default, which ejected an unrelated change from the queue (#4982).
 //
-// 30 seconds is the limit the two heaviest cases in `finalization.test.ts` already carry, and it
-// leaves roughly four times the slowest case observed on the runner. It is still a bound: a case
-// that waits on something that never resolves fails at 30 seconds, well inside the job timeout.
+// 30 seconds is still a bound: a case that waits on something that never resolves fails there,
+// well inside the job timeout. The two fault-sweep cases in `finalization.test.ts` set their own.
 const TEST_TIMEOUT_MS = 30_000;
 
 export default defineConfig({
@@ -25,5 +24,7 @@ export default defineConfig({
     // fully-skipped file (which fires no `afterAll`), a hard-killed worker, and Ctrl-C.
     globalSetup: ["../../../test-support/tmp-isolation/global-tmp-root.ts"],
     testTimeout: TEST_TIMEOUT_MS,
+    // Teardown removes every workspace a case created, so hooks take the same bound.
+    hookTimeout: TEST_TIMEOUT_MS,
   },
 });
