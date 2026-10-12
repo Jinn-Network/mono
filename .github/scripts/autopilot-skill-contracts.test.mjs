@@ -306,3 +306,29 @@ test("file-issue has no unquoted placeholder in a runnable command", () => {
   }
   assert.deepEqual(unquoted, []);
 });
+
+test("file-issue appends to a PR body through a temp file, not a bare relative path", () => {
+  const { text } = fileIssueFiles[0];
+  const commands = fileIssueRunnableLines(text);
+  const recipe = commands.filter(({ command }) => /\bgh pr edit\s+\S+\s+--body-file\s+\S/u.test(command));
+  assert.equal(recipe.length, 1, "SKILL.md must carry exactly one PR-body append recipe");
+  const [{ line }] = recipe;
+  // The recipe is the fenced block that holds the `gh pr edit` line; read it whole.
+  const block = commands.filter((entry) => Math.abs(entry.line - line) <= 3);
+  assert.ok(
+    block.some(({ command }) => /=\$\(mktemp \/tmp\/[^)]*XXXXXX[^)]*\)/u.test(command)),
+    "the recipe must take its scratch path from mktemp under /tmp",
+  );
+  for (const { command } of block) {
+    assert.doesNotMatch(
+      command,
+      /(?:>>?|--body-file)\s*["']?[A-Za-z0-9._-]+\.md\b/u,
+      `a literal relative file name in the recipe: ${command.trim()}`,
+    );
+  }
+  assert.match(
+    text.replace(/\s+/gu, " "),
+    /gh pr edit --body-file` \*\*replaces\*\* the whole body/u,
+    "the recipe must keep saying that --body-file replaces the whole body",
+  );
+});
