@@ -401,6 +401,13 @@ export async function runColophonCli(argv: readonly string[], context: ColophonC
       validateTopLevelOptions(options, { boolean: ["no-browser"], value: ["bundle", "workspace", "principal", "port"] });
       return runOpen(options, context.cwd, context.agentDataDir, context.progress);
     }
+    // Issue #4950: on a platform the package does not qualify, `quote` failed with a loader error
+    // from the local backend's native helper while `demo` named the platform and the supported
+    // targets. Say what `demo` says, before anything is read or created. Help names no platform,
+    // so it stays readable everywhere.
+    if (argv[0] === "quote" && !argv.includes("--help")) {
+      assertQualifiedRuntime(context.buildMetadata ?? readPackagedBuildMetadata(), context.runtimeTarget);
+    }
     if (argv[0] === "help") {
       const options = argv.slice(1).filter((token) => token !== "--json");
       if (options.length === 0) return result(0, USAGE);
