@@ -1,11 +1,23 @@
 # @jinn-network/operator
 
-Jinn operator daemon. Runs a headless daemon that participates in the Jinn training loop: create Tasks, solve them through Harnesses, evaluate Solutions, and earn rewards for measured work.
+The Jinn operator daemon: a headless program built to take on tasks from the Jinn task marketplace, solve them through Harnesses, and evaluate other operators' Solutions.
 
-**Network status:** the task marketplace on Base Sepolia is parked and is not running tasks, so a daemon started today finds no work and earns nothing. The testnet runbook is kept as the record of how operators ran:
-<https://github.com/Jinn-Network/mono/blob/next/docs/operator-testnet.md>
+**Status: parked.** The operator network and the task marketplace it served are parked until there is demand for them. The marketplace on Base Sepolia is not running tasks. Its last settled work was on 13 August 2026, and every settled task and verdict up to then is on the [Jinn network explorer](https://jinn-indexer-production.up.railway.app/). A daemon started today finds no work and earns nothing. There is no mainnet operator flow ([`docs/operator-mainnet.md`](https://github.com/Jinn-Network/mono/blob/next/docs/operator-mainnet.md)).
 
-## Operator console (separate app)
+The software is retained, not offered. Nothing in this README is an invitation to run an operator, fund a wallet, stake OLAS, or move to mainnet. Do not fund any account because of it.
+
+## What you can still do here
+
+- **Read how it works.** [`operator/ARCHITECTURE.md`](https://github.com/Jinn-Network/mono/blob/next/operator/ARCHITECTURE.md) is the integrating narrative: the operator app, CLI, daemon loops, task lifecycle, and extension points, with code pointers for each layer. [`SPEC.md`](https://github.com/Jinn-Network/mono/blob/next/SPEC.md) is the design of the Base network and its parked task marketplace.
+- **Read the record of how operators ran.** [`docs/operator-testnet.md`](https://github.com/Jinn-Network/mono/blob/next/docs/operator-testnet.md) is the testnet runbook as it stood when the marketplace was parked. The reference below keeps the commands and settings it relied on.
+- **Build it and run its tests.** [`CONTRIBUTING.md`](https://github.com/Jinn-Network/mono/blob/next/operator/CONTRIBUTING.md) covers development setup, running from source, and testing. `yarn e2e` runs the loop end to end against a local Anvil fork (it needs Foundry), with no real funds.
+- **Look for what works today.** The [root README](https://github.com/Jinn-Network/mono/blob/next/README.md) lists it.
+
+## Reference: how an operator ran
+
+Everything below documents how the operator ran while the marketplace was live. It is kept so a returning operator can see what each command and setting did. It is not a current offer. The commands that start a daemon, bootstrap a fleet, stake, or move funds act on a network that is not running tasks: do not run them to get started, and do not fund any account because of them.
+
+### Operator console (separate app)
 
 The daemon is headless. Running `jinn run` starts the API on
 `http://127.0.0.1:7331` (`GET /` returns `{ "error": "no_human_surface" }`).
@@ -28,7 +40,9 @@ While fleet bootstrap is incomplete, the API surface comes up immediately and
 the daemon's intent loops are gated until bootstrap reaches `complete`. The
 console Overview page renders that 11-step machine and funding as projections.
 
-## Install
+### Install
+
+How operators installed the CLI. Installing does not start an operator.
 
 ```bash
 npm install -g @jinn-network/operator@latest
@@ -40,52 +54,57 @@ Or with Yarn:
 yarn global add @jinn-network/operator@latest
 ```
 
-## Quick start
+### How a new operator started
 
-The fast path for a new operator on Base Sepolia:
+On Base Sepolia, a new operator ran one command. Starting it today finds no work and earns nothing, so this describes the command; it is not a step to follow.
 
 ```bash
-# Zero-to-running: opens the app, then wallet + funding check + bootstrap + run.
+# Historical: the one-shot first run. Opens the app, then wallet + funding check
+# + bootstrap + run. Do not run it to start an operator.
 jinn run
 ```
 
 On first run, `jinn run` generates a random keystore password, saves
 it to `~/.jinn-operator/keystore-password` (mode 0600; read-fallback from
 `~/.jinn-client` when the new directory is empty), and prints a summary
-with the master address and a pointer to back up your mnemonic. Subsequent
+with the master address and a pointer to back up the mnemonic. Subsequent
 verbs (`jinn run`, `jinn bootstrap`, `jinn claim-rewards`, …) pick up the
-password from that file automatically — no env var needed.
-If Claude Code authentication or runtime setup is needed, complete it in the
+password from that file automatically, with no env var needed.
+If Claude Code authentication or runtime setup is needed, it is completed in the
 operator app that `jinn run` opens.
 
-**Back up your mnemonic before you fund anything:**
+An operator with an existing keystore can export its mnemonic:
 
 ```bash
 jinn keys backup --output ~/jinn-mnemonic.txt  # mode 0600; treat as seed material
 ```
 
-**Advanced / CI — manage the password yourself:** set `JINN_PASSWORD` before
-`jinn run` and no file will be written to disk. Use `--password-fd N` for
+**Advanced / CI: manage the password yourself.** Set `JINN_PASSWORD` before
+`jinn run` and no file is written to disk. Use `--password-fd N` for
 CI pipelines that read from a secret manager:
 
 ```bash
+# Historical: supply the keystore password yourself. Do not run it to start an operator.
 JINN_PASSWORD=your-secret jinn run
 ```
 
-**Step by step** (skip if `jinn run` worked):
+**Step by step** (what `jinn run` did, one verb at a time):
 
 ```bash
+# Historical: the step-by-step first run. Do not run it to start an operator.
+
 # 1. Generate the encrypted keystore (picks an HD wallet deterministically).
 JINN_PASSWORD=your-secret jinn init
 
 # 2. Verify the environment and resolved deployment.
 jinn doctor --human
 
-# 3. List exact funding gaps. On testnet this is ETH only — the staking pool
-#    is managed protocol-side and operators don't hold bond tokens directly.
+# 3. List exact funding gaps. On testnet this was ETH only: the staking pool
+#    was managed protocol-side and operators did not hold bond tokens directly.
 jinn fund-requirements --human
 
-# 4. Send the requested testnet funds to the printed master address, then:
+# 4. The operator then sent the listed testnet funds to the printed master
+#    address (do not fund any account for the parked network) and ran:
 jinn bootstrap
 
 # 5. Start the daemon.
@@ -93,21 +112,18 @@ jinn run
 ```
 
 `jinn init`, `jinn fund-requirements`, `jinn bootstrap`, and `jinn run` all
-share the same encrypted keystore and fleet state under `~/.jinn-client/earning/`
-by default. They are idempotent — re-run any of them safely.
+share the same encrypted keystore and fleet state under `~/.jinn-operator/earning/`
+by default. They are idempotent, so any of them can be re-run safely.
 
-To keep testnet and mainnet state side-by-side on the same machine, set
+To keep state for different networks side by side on the same machine, set
 `JINN_EARNING_DIR` to a network-specific path:
 
 ```bash
-# Testnet (Phase 1b default):
+# Historical: a testnet-only earning directory. Do not run it to start an operator.
 JINN_EARNING_DIR=~/.jinn-client/earning-testnet jinn run
-
-# Mainnet (after Phase 2 launch):
-JINN_NETWORK=mainnet JINN_EARNING_DIR=~/.jinn-client/earning-mainnet jinn run
 ```
 
-### Password resolution
+#### Password resolution
 
 Any verb that touches private keys resolves its password in this order:
 
@@ -128,20 +144,21 @@ deletion, set `JINN_PASSWORD` yourself.
 
 **Security note:** when `jinn run` auto-generates the password, it lives
 in plaintext next to the encrypted keystore. That's convenient for tester
-workflows but means anyone with shell access can decrypt your mnemonic —
-treat the wallet as hot and keep funds to the gas + rewards minimum.
+workflows but means anyone with shell access can decrypt your mnemonic.
+Treat the wallet as hot and hold no more in it than the gas and rewards minimum.
 
-## Try without installing
+### Try without installing
+
+The no-install form of one preflight verb. `doctor` runs preflight checks without mutation and does not start a daemon.
 
 ```bash
 npx @jinn-network/operator@latest doctor
 ```
 
-## Let your agent do it
+### Agent integrations
 
-If you already use Claude Code, Codex, Cursor, Gemini CLI, VS Code, or another
-MCP-capable tool, you can skip the shell commands above. After installing
-the client, wire Jinn into your agent:
+If you use Claude Code, Codex, Cursor, Gemini CLI, VS Code, or another
+MCP-capable tool, `jinn integrations install` wires Jinn into it:
 
 ```bash
 jinn integrations install
@@ -152,23 +169,21 @@ This detects every supported tool on your machine and, for each one, adds the
 Claude Code, Claude Desktop, Cursor, VS Code, Gemini CLI, Antigravity, Codex.
 Run `jinn integrations doctor --human` to see what's detected.
 
-Then open your agent and paste:
-
-> Set up a Jinn Network testnet operator on this machine. Run `jinn run`,
-> fund the master address via CDP if needed, and report back when the daemon is
-> running. Keep me in the loop if anything needs my input.
-
 The `jinn-operator` skill activates on mentions of "jinn", "jinn network", and
-"jinn run", then walks your agent through install, app-guided setup, bootstrap, and
-daemon lifecycle. You stay in the loop for funding decisions.
+"jinn run", and walks an agent through install, app-guided setup, bootstrap, and
+daemon lifecycle for the marketplace as it ran, funding decisions included. Treat
+it as reference, not as a current offer: an agent should not fund an account on
+the strength of it. The prompt operators pasted to have an agent set up a testnet
+node is recorded in the
+[testnet runbook](https://github.com/Jinn-Network/mono/blob/next/docs/operator-testnet.md).
 
-## Opting in to SolverNets
+### Opting in to SolverNets
 
-After `jinn run`, your daemon participates in deterministic `prediction.v0`
-Tasks by default on testnet through the Prediction SolverNet. Other SolverNets,
-like one for `portfolio.v0`, which
-executes trades against a Hyperliquid master account — are **off by default**
-because they need credentials only you can provide. This prevents your daemon
+While the marketplace ran, a daemon started with `jinn run` took on deterministic
+`prediction.v0` Tasks by default on testnet, through the Prediction SolverNet.
+Other SolverNets, like one for `portfolio.v0`, which
+executes trades against a Hyperliquid master account, are **off by default**
+because they need credentials only you can provide. This prevents a daemon
 from claiming a request it can't actually fulfill.
 
 Inspect and toggle participation with `jinn solver-nets`:
@@ -194,7 +209,7 @@ operator through a SolverNet automatically.
 
 Each Harness reads its **own** auth store (the daemon only forwards an
 allowlisted set of env vars — it does not hold your provider keys). For the
-per-harness auth store, the canonical rotate command/file, and why `client/.env`
+per-harness auth store, the canonical rotate command/file, and why `operator/.env`
 must not be used to set provider keys at runtime, see
 [`docs/operator/rotating-harness-keys.md`](https://github.com/Jinn-Network/mono/blob/next/docs/operator/rotating-harness-keys.md).
 
@@ -203,7 +218,9 @@ responsible Harness is actually ready. If a portfolio.v0 request arrives and you
 api-wallet isn't approved, the daemon records the Task as FAILED locally
 with a clear reason instead of wasting gas claiming it.
 
-## Docker
+### Docker
+
+How the containerized daemon was run. A container started today finds no work, so this is reference.
 
 The daemon spawns the Anthropic `claude` CLI as a subprocess for
 restorations; to keep costs low, use Claude's OAuth authentication (prompt
@@ -219,7 +236,7 @@ and make sure the deployment can pull the pinned verifier image. Keep the
 sidecar isolated; adding a host socket mount would defeat the evaluator trust
 boundary.
 
-### Recommended path: `claude setup-token` + `.env`
+#### Recommended path: `claude setup-token` + `.env`
 
 1. **Mint a long-lived OAuth token on the host** (one-time, opens browser):
    ```bash
@@ -235,13 +252,13 @@ boundary.
    EOF
    ```
 
-3. **Start the daemon:**
+3. **Start the daemon** (historical: there is no work for it to find today):
    ```bash
    docker compose up -d
    docker compose logs -f jinn-daemon
    ```
 
-The compose file lives at `client/docker-compose.yml` if you cloned the
+The compose file lives at `operator/docker-compose.yml` if you cloned the
 repo. If you installed via `npm install -g @jinn-network/operator@latest`,
 copy it out first:
 
@@ -249,7 +266,7 @@ copy it out first:
 cp "$(npm root -g)/@jinn-network/operator/docker-compose.yml" .
 ```
 
-### Fallback: interactive OAuth inside the container
+#### Fallback: interactive OAuth inside the container
 
 If `claude setup-token` isn't available on your host (e.g., you don't
 have Claude Code installed locally), run the interactive OAuth flow
@@ -261,15 +278,17 @@ docker compose run --rm -it --entrypoint claude jinn-daemon auth login
 docker compose up -d
 ```
 
-### Quick test
+#### Quick test
 
 ```bash
 docker run --rm ghcr.io/jinn-network/operator:next version --json
 ```
 
-## Operator commands
+### Operator commands
 
-### Lifecycle
+The package still ships this CLI. The commands that start the daemon (`jinn run`, `jinn bootstrap`) or act on tasks, rewards, and fleet wallets (`jinn tasks submit`, `jinn claim-rewards`, `jinn fleet scale`, `jinn withdraw`) belong to the marketplace as it ran. There is no work for a daemon to take on today.
+
+#### Lifecycle
 
 | Command | Purpose | Idempotent |
 |---|---|---|
@@ -281,10 +300,10 @@ docker run --rm ghcr.io/jinn-network/operator:next version --json
 | `jinn stop` | Signal a running daemon to stop | Yes |
 | `jinn kill` | Force-terminate jinn daemon processes by cmdline enumeration (`--all` for multiple) | Yes |
 | `jinn version` | Version, phase, deployment digest | Yes |
-| `jinn update` | Update the client package + refresh integrations | Yes |
+| `jinn update` | Update the operator package + refresh integrations | Yes |
 | `jinn integrations install` | Wire Jinn into Claude Code / Codex / other AI tools | Yes |
 
-### Monitoring
+#### Monitoring
 
 | Command | Purpose |
 |---|---|
@@ -297,23 +316,23 @@ docker run --rm ghcr.io/jinn-network/operator:next version --json
 | `jinn logs` | Structured event stream |
 | `jinn logs --follow` | Live tail of lifecycle events |
 
-Operator panel: when `jinn run` is active, open [`http://127.0.0.1:7331/`](http://127.0.0.1:7331/) for live in-flight Tasks, verdicts, earnings, fleet balances, recent activity, and next actions. See [Operator panel](#operator-panel-local-web-ui) above for auth + setup-mode details.
+The daemon serves an API, not a human surface. For live in-flight Tasks, verdicts, earnings, fleet balances, recent activity, and next actions, use the [operator console](#operator-console-separate-app), which authenticates to the daemon with a UI token.
 
-### Actions
+#### Actions
 
 All action verbs support `--dry-run` and `--yes`.
 
 | Command | Purpose |
 |---|---|
 | `jinn tasks submit` | Publish a Task |
-| `jinn claim-rewards` | Pull pending protocol rewards |
+| `jinn claim-rewards` | Pull pending rewards |
 | `jinn fleet scale --to N` | Grow or shrink fleet |
 | `jinn fleet retire <index>` | Retire one service |
 | `jinn withdraw --to <addr>` | Sweep wallets to external address |
 | `jinn keys backup --output <path>` | Export mnemonic (writes plaintext; treat the output file as seed material) |
 | `jinn keys change-password` | Re-encrypt the keystore with a new password |
 
-## Output contract
+### Output contract
 
 - **JSON by default** for operational verbs unless you pass `--human` (headless- and agent-friendly regardless of TTY).
 - Add `--human` for readable terminal output.
@@ -323,18 +342,19 @@ All action verbs support `--dry-run` and `--yes`.
 
 See the [client surface spec](https://github.com/Jinn-Network/mono/blob/next/spec/2026-04-14-client-surface.md) for the full CLI reference.
 
-## Configuration
+### Configuration
 
 Config file first, env var override. Default location: `~/.jinn-operator/config.json`
 (read-fallback from `~/.jinn-client` when the new directory is empty).
 
 ```bash
+# Historical: pass a config file. Do not run it to start an operator.
 JINN_PASSWORD=secret jinn run --config ./my-config.json
 ```
 
 | Config key | Env override | Default |
 |---|---|---|
-| network | JINN_NETWORK | `testnet` (Phase 1b default; flips to `mainnet` at Phase 2 launch) |
+| network | JINN_NETWORK | `testnet` (Base Sepolia). `mainnet` selects Base mainnet, where there is no operator flow. |
 | rpcUrl | BASE_RPC_URL / JINN_RPC_URL | testnet: two-provider fallback chain `[publicnode, sepolia.base.org]`; mainnet: single `mainnet.base.org`. Accepts string OR array; env values split on commas. See "RPC fallback chain" below. |
 | claudeModel | JINN_CLAUDE_MODEL | claude-haiku-4-5-20251001 |
 | claudePath | JINN_CLAUDE_PATH | claude |
@@ -344,11 +364,11 @@ JINN_PASSWORD=secret jinn run --config ./my-config.json
 | dbPath | JINN_DB_PATH | ~/.jinn-operator/jinn.db |
 | earningDir | JINN_EARNING_DIR | ~/.jinn-operator/earning |
 | peers | JINN_PEERS | [] |
-| tasks | JINN_TASKS | [] (testnet auto-task generator posts `prediction.v0`) |
+| tasks | JINN_TASKS | [] |
 
 `JINN_PASSWORD` is env-only (keystore encryption, never in config files). Alternatively, use `--password-fd <N>` to read from a file descriptor.
 
-### RPC fallback chain
+#### RPC fallback chain
 
 Out of the box on testnet, `jinn run` uses a two-provider fallback chain —
 no key required, zero config:
@@ -363,7 +383,7 @@ transparently falls through to the next slot. When every slot fails the
 daemon throws `AllRpcsFailedError` (visible in the dashboard's NetworkSection
 and in stderr).
 
-#### Bring your own paid primary
+##### Bring your own paid primary
 
 Operators with a paid Alchemy / Tenderly / QuickNode endpoint should
 **prepend** their URL — the public free chain stays as automatic backup:
@@ -381,13 +401,14 @@ Operators with a paid Alchemy / Tenderly / QuickNode endpoint should
 Or via env (comma-separated, same chain capped at 4 providers):
 
 ```bash
+# Historical: an RPC override. Do not run it to start an operator.
 JINN_RPC_URL='https://my-alchemy-key.example,https://base-sepolia.publicnode.com,https://sepolia.base.org' jinn run
 ```
 
 The chain is built with viem's `fallback({ rank: false })` so operator slot
 order is preserved (no latency-based reshuffling).
 
-#### Automatic failure modes
+##### Automatic failure modes
 
 | Failure                                     | What used to happen           | What now happens                                |
 |---------------------------------------------|--------------------------------|-------------------------------------------------|
@@ -414,39 +435,32 @@ Note this is the JSON-RPC transport layer. It is distinct from
 layer (Ponder indexer → direct `eth_getLogs` floor). The RPC fallback chain
 operates beneath both.
 
-## Tokens
+### Tokens
 
-| Role | Phase 1b (testnet, Base Sepolia) | Phase 2 (mainnet, Base) |
+| Role | Testnet (Base Sepolia) | Mainnet (Base), design only |
 |---|---|---|
 | Gas (native) | ETH (CDP auto-funded on testnet) | ETH |
 | Staking bond | Pooled, protocol-managed via stOLAS distributor (operators hold nothing) | OLAS (operator-held) |
-| Reward | stOLAS | OLAS (+ JINN incentives after launch) |
+| Reward | stOLAS | OLAS |
 
-**Important:** under stOLAS standard mode (the Phase 1b default), operators
-**do not hold a bond token themselves**. The stOLAS distributor pools JINN
-contributed by stakers and stakes on behalf of operators; your service gets
-created against that shared pool. `jinn fund-requirements` surfaces only the
-per-wallet ETH you need. While the testnet marketplace ran, a drained
+**Important:** under stOLAS standard mode (the testnet default), operators
+did **not hold a bond token themselves**. The stOLAS distributor's pool
+provided the bond and staked on behalf of operators; a service was created
+against that shared pool. `jinn fund-requirements` surfaced only the
+per-wallet ETH an operator needed. While the testnet marketplace ran, a drained
 distributor pool showed up as a failed `distributor_reachable` check in
 `jinn doctor`. An operator could not fix it locally: bootstrap worked again
 only once the pool was refilled.
 
-## Switching to mainnet
+### Mainnet
 
-When Phase 2 launches, the default flips. Until then:
+There is no mainnet operator flow, and nothing here is an invitation to move an operator to mainnet, where the ETH and OLAS involved are real. [`docs/operator-mainnet.md`](https://github.com/Jinn-Network/mono/blob/next/docs/operator-mainnet.md) is a placeholder, not a runbook.
 
-```bash
-JINN_NETWORK=mainnet \
-JINN_EARNING_DIR=~/.jinn-client/earning-mainnet \
-JINN_PASSWORD=secret \
-jinn run
-```
-
-Use a distinct `JINN_EARNING_DIR` to keep testnet and mainnet keystore
-state isolated. Mixing them on the same directory is an easy way to
+Whichever network a daemon points at, give each network its own `JINN_EARNING_DIR`
+so keystore and fleet state stay isolated. Mixing them on the same directory is an easy way to
 point a mainnet daemon at a testnet-derived master wallet.
 
-## Troubleshooting
+### Troubleshooting
 
 The task marketplace on Base Sepolia is parked, so this section is a record:
 the failures operators hit while it ran, and what resolved them at the time.
@@ -480,11 +494,3 @@ troubleshooting section of the testnet runbook:
   host. Running the daemon from `$HOME`, or from any directory without a
   `docker-compose.yml` that named `jinn-daemon`, avoided it. That heuristic
   has since been removed from `detectAuthContext`.
-
-## How it works
-
-See [`operator/ARCHITECTURE.md`](https://github.com/Jinn-Network/mono/blob/next/operator/ARCHITECTURE.md) for the integrating narrative — operator app, CLI, daemon loops, task lifecycle, and extension points — with code pointers for each layer.
-
-## Development
-
-See [CONTRIBUTING.md](https://github.com/Jinn-Network/mono/blob/next/operator/CONTRIBUTING.md) for development setup, running from source, and testing.
