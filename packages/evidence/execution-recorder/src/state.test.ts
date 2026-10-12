@@ -31,9 +31,11 @@ const ORIGIN = {
 };
 const temporaryDirectories: string[] = [];
 afterEach(async () => {
+  // A case abandoned at its time limit may still be writing. Retry the removal so a late write
+  // cannot fail this teardown with ENOTEMPTY (#4982).
   await Promise.all(
     temporaryDirectories.splice(0).map((path) =>
-      rm(path, { recursive: true, force: true }),
+      rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }),
     ),
   );
 });
