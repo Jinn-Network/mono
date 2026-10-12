@@ -108,6 +108,7 @@ export function fixtureCatalog() {
   }));
   return {
     catalogVersion: 1,
+    specPin: null,
     manifestRoots: [
       { path: 'packages', mode: 'recursive', excludedDirectories: ['node_modules'] },
       { path: 'apps/broadcast-bot', mode: 'package' },

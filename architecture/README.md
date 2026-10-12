@@ -38,6 +38,25 @@ union, and its publication flags must agree with every member. Canary packing, t
 generation, and registry access independently require a catalog-eligible canary group. A directory
 name is never release authority.
 
+## Spec release pin
+
+The protocol's documents are authored in
+[`Jinn-Network/spec`](https://github.com/Jinn-Network/spec), and this repository consumes one
+pinned release of them
+([DR-2026-09-03](../log/decisions/2026-09-03-protocol-spec-repository.md), decision 1). The
+catalog records the pin in two places that must agree:
+
+- `specPin` is `null` or one object: `tag` (the release tag, `v<major>.<minor>.<patch>`),
+  `groups` (the SHA-256 of the signed manifest the release ships for each release group), and
+  `signingKey` (the id of the key that signed those manifests, and the SHA-256 of that key's
+  canonical SPKI PEM).
+- A package whose `schemas`, `profiles`, or `fixtures` are vendored from the pinned release
+  carries `pinned: true`. A package that is not vendored leaves the field out.
+
+`specPin: null` with no `pinned` marker means no release is pinned. The catalog loader refuses a
+marker without a pin, a pin with a release group in which no package is pinned, a pinned package
+whose release group has no manifest digest, and a pinned package with no document surface.
+
 ## Ownership and generated views
 
 Task 6's architecture-control validator applies last-match semantics from
