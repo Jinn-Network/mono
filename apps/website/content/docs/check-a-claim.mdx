@@ -42,7 +42,7 @@ It shows that the downloaded records belong together and support the result that
 
 ## Without the checker
 
-The checker is a convenience, not a requirement. A bundle is JSON with SHA-256 digests and signed records, and [External verification of public bundles](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/EXTERNAL-VERIFICATION.md) walks the same checks with other tools. For any Jinn record, the rules are in [Verifying a record by hand](https://github.com/Jinn-Network/spec#verifying-a-record-by-hand).
+A bundle is JSON with SHA-256 digests and signed records. `bundle.json` lists each file with its SHA-256, so any tool can recompute those digests. [External verification of public bundles](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/EXTERNAL-VERIFICATION.md) tabulates what your own tools can prove, what only the checker proves, and what no tool proves. That table and its step-by-step walkthrough are written for an earlier bundle format; for this bundle's format the document says to run the checker. For any Jinn record, the rules are in [Verifying a record by hand](https://github.com/Jinn-Network/spec#verifying-a-record-by-hand).
 
 ## Sealing your own claim
 
