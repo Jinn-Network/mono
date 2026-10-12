@@ -1116,6 +1116,26 @@ describe("portable public bundle", () => {
     expect(readRunState(workspaceDir, "draft-1")?.bundleIdentity).toBeUndefined();
   });
 
+  test("workspace verify and the checks it names as not run add up to the checks publish runs on the bundle", async () => {
+    // Issue #4940: `verify` printed a clean result and `publish` then refused for a check `verify`
+    // does not run. The remedy is that `verify` lists what it left to the reader. This ties that list
+    // to the reader's own run over the materialized bundle, so it cannot drift from what `publish`
+    // really checks.
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    expect((await runReport(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+    const verified = await runVerify(contextFor(clock), { draftId: "draft-1" });
+    expect(verified.ok, JSON.stringify(verified)).toBe(true);
+    if (!verified.ok) return;
+    const published = await runPublish(contextFor(clock), { draftId: "draft-1" });
+    expect(published.ok, JSON.stringify(published)).toBe(true);
+    if (!published.ok) return;
+
+    const notRun = verified.result.readerChecksNotRun;
+    expect(notRun).toContain("evidence-closure");
+    expect([...verified.result.checks, ...(notRun ?? [])].sort()).toEqual([...published.result.checks].sort());
+  });
+
   // A refused publication used to leave `artifacts/<draft>/public-bundles` behind, empty (issue
   // #4941). `materializePublicBundle` creates that parent before anything can refuse, and the
   // refusal cleanup removes the bundle directories it staged but never the parent. The three seams

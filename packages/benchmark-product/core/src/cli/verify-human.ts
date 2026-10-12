@@ -37,6 +37,11 @@ function renderSubjects(report: IntegrityAnchorsReport): string {
 
 export function renderWorkspaceVerifyHuman(value: RunVerifyResult): string {
   const lines = [`verified draft ${value.draftId}: ${value.checks.join(", ")}`];
+  // The first line names only what ran. This one names what `publish` will run on the bundle that
+  // this operation did not (issue #4940), so a pass is not read as a prediction that `publish` succeeds.
+  if (value.readerChecksNotRun !== undefined) {
+    lines.push(`not run here (publish runs them on the bundle and refuses if one fails): ${value.readerChecksNotRun.join(", ")}`);
+  }
   for (const anchor of value.anchors?.anchors ?? []) {
     const basis = [anchor.provider, anchor.timeBasis].filter((part) => part !== undefined).join(", ");
     lines.push(
