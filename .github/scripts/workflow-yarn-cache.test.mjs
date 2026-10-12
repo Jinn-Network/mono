@@ -411,6 +411,8 @@ function shellTokens(indentedRun) {
       while (index < run.length && !breaks.test(run[index])) {
         const inner = run[index];
         if (inner === '"' || inner === "'") {
+          // Unbounded for the same reason as the word branch below: a delimiter quote that
+          // never closes is a shell syntax error, not a shape a working workflow uses (#4414).
           const close = run.indexOf(inner, index + 1);
           const content = close === -1 ? run.slice(index + 1) : run.slice(index + 1, close);
           delimiter += quotedContent(inner, content);
@@ -450,6 +452,13 @@ function shellTokens(indentedRun) {
       while (index < run.length && !breaks.test(run[index])) {
         const inner = run[index];
         if (inner === '"' || inner === "'") {
+          // Deliberately unbounded, unlike `wordEnd` above: a quote this line never closes
+          // reads to the end of the block. A real shell does the same and then fails the
+          // step on an unexpected EOF, so the words swallowed here are words that never run.
+          // `wordEnd` is bounded because a redirection target is data, and a stray quote in
+          // one hid every install after it in a block that otherwise ran; a command word
+          // has no such case. The cost is one forward `indexOf`, and the cursor then jumps
+          // to the end of input, so the scan stays linear (#4414).
           const close = run.indexOf(inner, index + 1);
           const content = close === -1 ? run.slice(index + 1) : run.slice(index + 1, close);
           word += quotedContent(inner, content);
@@ -515,7 +524,14 @@ const prefixArgumentPattern = /^(?:-|\d)/u;
 //     canonical good form the guard must resolve is `cd app && yarn install`.
 //   - `for` is absent from this set on purpose, so that a `for` whose `do` sits on the
 //     next line leaves its body's `cd` unconditional as well.
-// Tracked in #4414, together with the unbounded lane this guard runs in.
+// Two more shapes fail the same way, and unlike the three above they are decidable: in
+// `cd app | cat` and `cd app &` the `cd` runs in a subshell, so the shell stays where it
+// was, while this walk follows it into `app` because `|` and `&` reach here as plain
+// separators. They could be scoped the way `( … )` is. They are not, because the tokenizer
+// shares those characters with `&>`, `>&` and `|&` (`cd app &> /dev/null` is a foreground
+// `cd`), so scoping them means teaching it to tell the spellings apart. That is a behavior
+// risk this guard has taken before and should take with its own regression suite, not in passing.
+// Tracked in #4414, together with the lane this guard runs in, which is now bounded.
 const unmodeledKeywords = new Set([
   'if', 'elif', 'else', 'then', 'while', 'until', 'case',
   // `done` closes a loop whose last iteration decides where the shell ends up.
@@ -716,14 +732,20 @@ function shellInstallDirectories(run, loopValues) {
   return installs;
 }
 
-function shellLoopValues(run) {
+// The indentation before `for` is `[^\S\n]*`, not `\s*`. `(?:^|\n)` already anchors the
+// match at the start of the line, so the indentation is the whitespace that is not itself a
+// newline; letting `\s*` cross newlines restarted the scan at every blank line, which is
+// quadratic in a block of them (#4414). The trailing `;\s*do` stays wide on purpose: a `do`
+// on the line after the `;` is a loop header too.
+export const loopHeaderPattern = /(?:^|\n)[^\S\n]*for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([^;\n]+);\s*do/gu;
+
+export function shellLoopValues(run) {
   const commands = run.split('\n')
     .filter((line) => !line.trimStart().startsWith('#'))
     .join('\n')
     .replace(/\\\s*\n\s*/gu, ' ');
   const values = new Map();
-  const loopPattern = /(?:^|\n)\s*for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([^;\n]+);\s*do/gu;
-  for (const match of commands.matchAll(loopPattern)) {
+  for (const match of commands.matchAll(loopHeaderPattern)) {
     const entries = match[2].trim().split(/\s+/u).map(unquote).filter(Boolean);
     // Glob / substitution / brace values are refused at expansion (`expandShellWorkingDirectories`
     // returns nothing for them), the same cut a command substitution already takes. Collecting
@@ -2444,6 +2466,106 @@ jobs:
     const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
     assert.ok(elapsedMs < 5000, `scalar reading took ${elapsedMs.toFixed(0)}ms`);
   });
+});
+
+test('a long run of blank lines does not make loop discovery quadratic (#4414)', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+    // `(?:^|\n)\s*for` let the `\s*` after each newline run across every following
+    // newline, so the scan restarted at each blank line and read the rest of the block
+    // again. Measured through this same entry point before the fix: 39 KB of input took
+    // 770 ms and 157 KB took 12 s, growing four times per doubling. This block is 120 KB.
+    const blank = '\n'.repeat(120000);
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          yarn install --immutable
+${blank}
+`);
+    const startedAt = process.hrtime.bigint();
+    const violations = yarnCacheViolations(fixtureWorkflows, fixtureRoot);
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+    assert.ok(elapsedMs < 1000, `walk took ${elapsedMs.toFixed(0)}ms`);
+    assert.deepEqual(violations, []);
+  });
+});
+
+// The loop-header pattern as it stood before #4414 narrowed its leading `\s*`. Kept here
+// as the reference the narrowed pattern is compared against, not as a second copy to keep
+// in step: it exists so that "behavior-preserving" is a checked claim.
+const legacyLoopHeaderPattern = /(?:^|\n)\s*for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([^;\n]+);\s*do/gu;
+
+test('the narrowed loop-header pattern matches exactly what the original matched (#4414)', () => {
+  // Every string of up to five of these pieces. They cover the shapes the narrowing could
+  // plausibly change: blank lines before the keyword, indentation by space, tab and
+  // carriage return, a `do` on the same line or on the next, a missing `;`, and a keyword
+  // that is not the first word on its line.
+  const pieces = [
+    '\n', ' ', '\t', '\r', 'for ', 'for a in x;', 'a in x;', 'do', ' do',
+  ];
+  const capturesOf = (pattern, text) => [...text.matchAll(pattern)].map((m) => [m[1], m[2]]);
+  let compared = 0;
+  let withMatches = 0;
+  const visit = (prefix, remaining) => {
+    const expected = capturesOf(legacyLoopHeaderPattern, prefix);
+    const actual = capturesOf(loopHeaderPattern, prefix);
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      assert.deepEqual(actual, expected, `diverged on ${JSON.stringify(prefix)}`);
+    }
+    compared += 1;
+    if (expected.length > 0) withMatches += 1;
+    if (remaining === 0) return;
+    for (const piece of pieces) visit(prefix + piece, remaining - 1);
+  };
+  visit('', 5);
+  assert.ok(compared > 60000, `only ${compared} strings compared`);
+  assert.ok(withMatches > 5000, `only ${withMatches} strings contained a loop header`);
+
+  // The shapes a real workflow uses, spelled out so a reader can see each one is covered.
+  for (const run of [
+    'for d in a b; do cd $d; done',
+    '\n\n\n    for d in a b; do cd $d; done',
+    'yarn install\n\n\t\r  for d in a b; do cd $d; done',
+    // The `;\s*do` tail crosses a newline: the loop body starts on the next line.
+    'for d in a b;\ndo\n  cd $d\ndone',
+    'for d in a b;\n\n   do cd $d; done',
+    'for d in a b; do cd $d; done\n\nfor e in c d; do cd $e; done',
+    'echo for d in a b; do x; done',
+  ]) {
+    assert.deepEqual(
+      capturesOf(loopHeaderPattern, run),
+      capturesOf(legacyLoopHeaderPattern, run),
+      JSON.stringify(run),
+    );
+  }
+  assert.deepEqual(
+    [...shellLoopValues('for d in a b;\ndo\n  cd $d\ndone')],
+    [['d', ['a', 'b']]],
+  );
+});
+
+test('the lane that runs this guard declares a job timeout (#4414)', () => {
+  // The guard parses every workflow on every pull request, including from a fork, in the
+  // `gitlinks` job. Without a bound a hostile `run:` scalar could hold a runner until
+  // GitHub's 360-minute ceiling, so this is what caps every superlinear read at once.
+  const source = readFileSync(join(workflowsDir, 'repository-structure.yml'), 'utf8');
+  const job = jobRanges(source).find(({ name }) => name === 'gitlinks');
+  assert.ok(job, 'repository-structure.yml has no gitlinks job');
+  assert.ok(
+    job.lines.some((line) => /^ {4}timeout-minutes:\s*[1-9][0-9]*\s*(?:#.*)?$/u.test(line)),
+    'the gitlinks job must declare timeout-minutes',
+  );
+  const guard = job.lines.join('\n');
+  assert.match(guard, /node --test \.github\/scripts\/workflow-yarn-cache\.test\.mjs/u);
 });
 
 test('the directory walk stays bounded when every command multiplies the candidates', () => {

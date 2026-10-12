@@ -40,23 +40,46 @@ postures, and the `corpus-chain-verification` health check reports which one is 
 
 **The chain-verification vocabulary is part of the package's public surface (#4581).**
 `ChainVerification` is a required field of `CreateCorpusMirrorOptions`, which the package
-root exports, so a consumer that calls `createCorpusMirror` must name it — and, through its
-two methods, `ChainVerificationInput`, `HeadRevalidationInput`, `ChainVerificationOutcome`,
-and `WalkTruncation`. That half of the vocabulary is public *by construction*: it cannot be
-made internal without also withdrawing the mirror factory. (`createCorpusCapability` is the
-other way round — it takes an optional `VerifyDriver` and derives the posture itself, so it
-does not force the vocabulary on its caller.)
+root exports. Its two methods take `ChainVerificationInput` and `HeadRevalidationInput` and
+return `ChainVerificationOutcome`, and `ChainVerificationInput` carries a
+`WalkTruncation`. All five types are exported from the root. `createCorpusMirror` does not force a caller to import any
+of them: `chainVerification: createRejectingChainVerification()`, or an inline object
+literal whose `verify` and `revalidateHead` parameters take their types from
+`CreateCorpusMirrorOptions`, compiles with none of them named, and still would if the five
+were not exported from the root.
 
-The rest is public by decision rather than by construction, and the decision is the same
-one. `SYNC_TRUNCATED_REASON`, `SYNC_ABORTED_REASON`, `UNVERIFIED_CHAIN_ACKNOWLEDGEMENT`,
-`UnverifiedChainAcknowledgement`, and the three constructors —
-`createDriverChainVerification`, `createRejectingChainVerification`,
-`createUnverifiedChainVerification` — stay exported so a composition root able to name the
-interface can build the standard implementation, and branch on a refusal reason, instead of
-reimplementing posture logic it has no way to get right from the outside.
+What the root export gives a consumer is a name that resolves. A consumer that imports one
+of the five by name needs it. So does a library that compiles with `declaration: true` and
+exports a value whose inferred type is `ChainVerification`, for example
+`export const verification = createRejectingChainVerification()`. Without the root export,
+TypeScript reports TS2742 for that library, because the `exports` map in `package.json`
+offers only `"."` and no specifier reaches `dist/corpus/chain-verification`. That was
+checked with TypeScript 5.9.3 under `bundler` and `nodenext` module resolution; a
+resolution mode that ignores `exports` does not raise it, and neither does an explicit
+annotation such as `CreateCorpusMirrorOptions["chainVerification"]`. So removing
+`ChainVerification` from the root is a breaking change for those libraries, and removing any
+of the five is one for a consumer that imports it. `createCorpusCapability` takes an
+optional `VerifyDriver` and derives the posture itself, so its caller supplies no
+`ChainVerification` at all.
 
-Consequence for both halves: a signature change here is a breaking change to this package
-and is versioned as one — a semver-major bump plus an entry in this section. PR #4430 added
+The fields of those inputs are typed from sibling packages, and this root does not
+re-export them: `SourceIdentity` and `SourceHead` from
+`@jinn-network/record-discovery-protocol`, `DsseEnvelope` from `@jinn-network/trust-core`,
+and `SyncedEntry` from `@jinn-network/record-discovery-client`. All three are
+`dependencies` of this package. A consumer can reach the same types without importing them,
+for example `ChainVerificationInput["source"]`. Importing one by name needs that package to
+resolve from the consumer's own project.
+
+The rest is public by decision rather than by any compile-time requirement, and the
+decision is the same one. `SYNC_TRUNCATED_REASON`, `SYNC_ABORTED_REASON`,
+`UNVERIFIED_CHAIN_ACKNOWLEDGMENT`, `UnverifiedChainAcknowledgment`, and the three
+constructors (`createDriverChainVerification`, `createRejectingChainVerification`,
+`createUnverifiedChainVerification`) stay exported so a composition root can build the
+standard implementation, and branch on a refusal reason, instead of reimplementing posture
+logic it has no way to get right from the outside.
+
+Consequence: a signature change to anything above is a breaking change to this package and
+is versioned as one, with a semver-major bump and an entry in this section. PR #4430 added
 a required `RuntimeLogger` parameter to `createDriverChainVerification` and broke nothing
 only because every caller was in-repo; the next such change must be carried that way rather
 than discovered from a downstream break.

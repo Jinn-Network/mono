@@ -41,7 +41,34 @@ export function pinnedInstallArgs(): string[];
 
 export function packedOverlayInstallArgs(archives: readonly string[]): string[];
 
-export function refreshLockfileArgs(): string[];
+export const DEFAULT_MIN_RELEASE_AGE_DAYS: number;
+
+export const MIN_RELEASE_AGE_EXCLUDE: readonly string[];
+
+export const MIN_RELEASE_AGE_ENV: string;
+
+export const MIN_REFRESH_NPM_VERSION: string;
+
+export function refreshLockfileArgs(options?: {
+  minReleaseAgeDays?: number;
+  exclude?: readonly string[];
+}): string[];
+
+export function unconstrainedRefreshLockfileArgs(): string[];
+
+export function minReleaseAgeDaysFromEnv(env: Record<string, string | undefined>): number;
+
+export function assertNpmSupportsReleaseAge(version: string): void;
+
+export function heldBackPackages(
+  unconstrainedLock: { packages?: Record<string, Record<string, unknown>> },
+  constrainedLock: { packages?: Record<string, Record<string, unknown>> },
+): { name: string; unconstrained: string[]; constrained: string[] }[];
+
+export function formatHeldBack(
+  held: readonly { name: string; unconstrained: readonly string[]; constrained: readonly string[] }[],
+  minReleaseAgeDays: number,
+): string;
 
 export function buildConsumerThirdPartyDependencies(input: {
   operatorManifest: Record<string, unknown>;

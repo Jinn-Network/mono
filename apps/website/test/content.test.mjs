@@ -116,7 +116,7 @@ test('every content/docs/**/meta.json is bidirectionally complete with its direc
   assert.deepEqual(violations, []);
 });
 
-test('app/(home)/page.tsx carries exactly one CTA, and it is the Telegram link (GROWTH.md §3)', () => {
+test('app/(home)/page.tsx carries exactly one CTA, and it is "Bring a claim" (GROWTH.md §3)', () => {
   const pagePath = resolve(root, 'app/(home)/page.tsx');
   const text = readFileSync(pagePath, 'utf8');
 
@@ -124,36 +124,55 @@ test('app/(home)/page.tsx carries exactly one CTA, and it is the Telegram link (
   assert.equal(
     buttonOpens.length,
     1,
-    'app/(home)/page.tsx must contain exactly one <Button — GROWTH.md §3 binds every outward ' +
-      'surface to a single CTA until the v0 gate produces a result',
+    'app/(home)/page.tsx must contain exactly one <Button: GROWTH.md §3 names one call to ' +
+      'action for every outward surface',
   );
 
-  // The single Button's block should carry the Telegram href.
+  // The single Button's block carries the CTA destination and the CTA's own words.
   const buttonBlockMatch = text.match(/<Button[\s\S]*?<\/Button>/);
   assert.ok(buttonBlockMatch, 'could not locate the <Button>...</Button> block');
   assert.ok(
-    buttonBlockMatch[0].includes('links.telegram'),
-    'the single <Button> on app/(home)/page.tsx must use links.telegram as its href — ' +
-      'GROWTH.md §3 single CTA',
+    buttonBlockMatch[0].includes('links.bringAClaim'),
+    'the single <Button> on app/(home)/page.tsx must use links.bringAClaim as its href ' +
+      '(GROWTH.md §3 single CTA)',
+  );
+  assert.match(
+    buttonBlockMatch[0],
+    />\s*Bring a claim\s*</,
+    'the single <Button> must read "Bring a claim", the call to action GROWTH.md §3 names',
   );
 
-  // No literal t.me/ string outside of the links.telegram indirection.
-  const literalTme = text.match(/t\.me\//g) ?? [];
+  // The destination lives in lib/shared.ts and nowhere else on the page.
+  const shared = readFileSync(resolve(root, 'lib/shared.ts'), 'utf8');
+  assert.match(
+    shared,
+    /bringAClaim:\s*'https:\/\/colophon\.claims\/[^']*'/,
+    'links.bringAClaim must point at colophon.claims',
+  );
+  const literalHosts = text.match(/colophon\.claims|t\.me\//g) ?? [];
   assert.equal(
-    literalTme.length,
+    literalHosts.length,
     0,
-    'app/(home)/page.tsx must not contain a literal "t.me/" string — route the CTA through ' +
-      'links.telegram (lib/shared.ts) instead, per GROWTH.md §3',
+    'app/(home)/page.tsx must not hard-code an outbound host; route it through links (lib/shared.ts)',
   );
 });
 
-const FORBIDDEN_VERBS = ['paid', 'pays', 'compensation', 'proven', 'guaranteed', 'co-founder'];
+const FORBIDDEN_VERBS = [
+  'paid',
+  'pays',
+  'compensation',
+  'proven',
+  'guaranteed',
+  'co-founder',
+  'team',
+  'executive',
+];
 const FORBIDDEN_VERBS_RE = new RegExp(
   `\\b(${FORBIDDEN_VERBS.map((v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`,
   'i',
 );
 
-test('no forbidden verbs in content/** or app/**', () => {
+test('no forbidden words in content/** or app/**', () => {
   const files = ['content', 'app'].flatMap((d) => walk(resolve(root, d)));
   const violations = [];
   for (const file of files) {
@@ -161,9 +180,123 @@ test('no forbidden verbs in content/** or app/**', () => {
     text.split('\n').forEach((line, i) => {
       const match = line.match(FORBIDDEN_VERBS_RE);
       if (match) {
-        violations.push(`${relPath(file)}:${i + 1}: forbidden verb "${match[1]}" — ${line.trim()}`);
+        violations.push(`${relPath(file)}:${i + 1}: forbidden word "${match[1]}": ${line.trim()}`);
       }
     });
   }
   assert.deepEqual(violations, []);
+});
+
+// Where the site's copy lives: the docs tree, the page and layout modules,
+// and the shared nav and link table.
+function copyFiles() {
+  return [
+    ...walk(resolve(root, 'content')),
+    ...walk(resolve(root, 'app')).filter((f) => f.endsWith('.tsx')),
+    ...walk(resolve(root, 'lib')),
+  ];
+}
+
+function scanCopy(re) {
+  const violations = [];
+  for (const file of copyFiles()) {
+    readFileSync(file, 'utf8')
+      .split('\n')
+      .forEach((line, i) => {
+        const match = line.match(re);
+        if (match) violations.push(`${relPath(file)}:${i + 1}: "${match[0]}": ${line.trim()}`);
+      });
+  }
+  return violations;
+}
+
+test('copy has no em dashes', () => {
+  assert.deepEqual(scanCopy(/—/), []);
+});
+
+// The task marketplace is parked. The site may say so; it may not hand a
+// visitor a command, a package, or a door that belongs to it.
+const PARKED_FLOW_RE = new RegExp(
+  [
+    '@jinn-network/(client|operator)',
+    '\\bjinn (run|init|bootstrap|doctor|fund-requirements|tasks|evidence|solver-nets)\\b',
+    '\\.jinn-(client|operator)\\b',
+    'JINN_PASSWORD',
+    '/docs/(build|operate)\\b',
+  ].join('|'),
+);
+
+test('nothing walks the parked task marketplace as if it were live', () => {
+  assert.deepEqual(scanCopy(PARKED_FLOW_RE), []);
+});
+
+// Copy the parked story used, and stub notices. None of it comes back.
+const RETIRED_COPY_RE = new RegExp(
+  [
+    'not yet written',
+    'coming soon',
+    'open work that compounds',
+    'knowledge economy',
+    'evidence work creates',
+    'post a task',
+    'run an operator',
+    'operators earn',
+    'join the telegram',
+  ].join('|'),
+  'i',
+);
+
+test('no stub notices and no copy from the parked story', () => {
+  assert.deepEqual(scanCopy(RETIRED_COPY_RE), []);
+});
+
+// Only `@colophon-claims/verify` is published. The other Colophon packages
+// are 0.0.0 name reservations, so no command on the site may install or run
+// them, and the checker is always pinned to an exact version.
+test('every Colophon command on the site runs a published, pinned package', () => {
+  const unpublished = scanCopy(
+    /\b(npx|npm (i|install|exec)|yarn (add|dlx)|pnpm (add|dlx))\b[^\n]*@colophon-claims\/(?!verify\b)/,
+  );
+  assert.deepEqual(unpublished, []);
+
+  const unpinned = scanCopy(/\bnpx\b[^\n]*@colophon-claims\/verify(?!@\d+\.\d+\.\d+)/);
+  assert.deepEqual(unpinned, []);
+});
+
+test('the landing page names Colophon, links the specification, and labels the explorer', () => {
+  const page = readFileSync(resolve(root, 'app/(home)/page.tsx'), 'utf8');
+  assert.match(page, /links\.colophon\b/, 'the landing page must link Colophon (links.colophon)');
+  assert.match(page, /links\.spec\b/, 'the landing page must link the specification (links.spec)');
+
+  const shared = readFileSync(resolve(root, 'lib/shared.ts'), 'utf8');
+  assert.match(
+    shared,
+    /spec:\s*'https:\/\/github\.com\/Jinn-Network\/spec'/,
+    'links.spec must be the specification repository',
+  );
+
+  // An explorer link is a link to a record of the parked network. Its own
+  // words must say so, wherever it appears in a page or in the nav.
+  const unlabelled = [];
+  for (const file of copyFiles().filter((f) => f.endsWith('.tsx'))) {
+    const text = readFileSync(file, 'utf8');
+    for (const match of text.matchAll(/<a\s+href=\{links\.explorer\}[^>]*>([\s\S]*?)<\/a>/g)) {
+      if (!/record/i.test(match[1])) unlabelled.push(`${relPath(file)}: ${match[0]}`);
+    }
+    for (const match of text.matchAll(/\{[^{}]*links\.explorer[^{}]*\}/g)) {
+      if (/text:/.test(match[0]) && !/record/i.test(match[0])) {
+        unlabelled.push(`${relPath(file)}: ${match[0]}`);
+      }
+    }
+  }
+  for (const file of mdxFilesUnder(resolve(root, 'content/docs'))) {
+    const text = readFileSync(file, 'utf8');
+    for (const match of text.matchAll(/\[([^\]]*)\]\(([^)]*explorer\.jinn\.network[^)]*)\)/g)) {
+      if (!/record/i.test(match[1])) unlabelled.push(`${relPath(file)}: ${match[0]}`);
+    }
+    // A bare explorer URL carries no label at all.
+    const bare = text.replace(/\]\([^)]*\)/g, '').match(/https?:\/\/explorer\.jinn\.network\S*/);
+    if (bare) unlabelled.push(`${relPath(file)}: bare link ${bare[0]}`);
+  }
+  assert.deepEqual(unlabelled, []);
 });

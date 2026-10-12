@@ -14,6 +14,7 @@
   than left implicit. The waiver covers the Discussion step only — it does not amend
   [`spec/2026-04-28-canonical-docs.md`](../../spec/2026-04-28-canonical-docs.md), which
   still governs every other canonical-doc change.
+- **Superseded in part by the [`GROWTH.md`](../../GROWTH.md) revision proposed in [Discussion #4903](https://github.com/Jinn-Network/mono/discussions/4903) and merged in PR [#4904](https://github.com/Jinn-Network/mono/pull/4904) on 2026-09-30:** decision 1 superseded for GROWTH.md §1 to §3, where growth through the data market replaces the product-led strategy; the engine (§4 to §8) is retained, and decisions 2 and 3 (the default beachhead and the commitment gate) stand.
 - **Owning docs:** [`GROWTH.md`](../../GROWTH.md) (strategy layer, decision 1); the
   standalone benchmark product charter v0.2 §5 (session-attached, not in-repo) and the
   program plan [`2026-08-05-standalone-benchmarking-product-program.md`](../../docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md) §3

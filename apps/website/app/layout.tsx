@@ -18,18 +18,21 @@ const jetbrainsMono = JetBrains_Mono({
   display: 'swap',
 });
 
+// BRAND.md's canonical line, with "offered" where it says "sold": selling
+// records is the direction, and a link preview has no room to say so.
+const title = `${appName}: an open protocol and network for work and the data it produces`;
 const description =
-  'Jinn is an open platform for work and the evidence work creates. Sealed records for requesting work, delivering it, and publishing what happened.';
+  'Jinn is an open protocol and network for work and the data it produces: checkable by anyone, findable, and offered straight by whoever holds it.';
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: `${appName} — open platform for work and the evidence work creates`,
-    template: `%s — ${appName}`,
+    default: title,
+    template: `%s | ${appName}`,
   },
   description,
   openGraph: {
-    title: `${appName} — open work that compounds`,
+    title,
     description,
     url: siteUrl,
     siteName: appName,

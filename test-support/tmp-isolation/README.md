@@ -42,10 +42,14 @@ carries the worked example.
 Both readings scan the config text for quoted paths, one list element at a time, and
 read an element only when it holds exactly one string. `fileURLToPath(new URL('../..',
 import.meta.url))` reads fine; `path.join(base, '..', 'shared')` holds two strings and
-is unreadable, so the element is dropped rather than guessed at. A dropped `setupFiles`
-or `globalSetup` entry reds the wiring gate; a dropped `server.fs.allow` entry just
-withholds coverage, which is only visible on a web-shaped suite. Write the path as a
-single string if a helper would otherwise split it.
+is unreadable, so the element is dropped rather than guessed at. What a drop costs
+depends on which element it is. Dropping the seam entry from `setupFiles` or
+`globalSetup` reds the wiring gate, which looks for one readable entry resolving to the
+seam in each. Dropping any other entry of either list is silent in both gates: the
+wiring gate never looks at it, and the reachability check only judges entries it could
+read, so an unreadable entry pointing outside the Vite root is never reported. A dropped
+`server.fs.allow` entry just withholds coverage, which is only visible on a web-shaped
+suite. Write the path as a single string if a helper would otherwise split it.
 
 A config that declares `projects` gets one Vite config per entry, and the gate reads
 `server.fs.allow` the same way: an allowance inside a `projects` entry covers only the

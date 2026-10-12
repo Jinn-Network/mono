@@ -290,13 +290,13 @@ describe("corpus configuration", () => {
     expect(unverified.corpus.chainVerification).toBe("unverified");
   });
 
-  test("the unverified posture is unreachable without the acknowledgement", () => {
+  test("the unverified posture is unreachable without the acknowledgment", () => {
     expect(() =>
       resolveRuntimeConfig({ ...base, file: { corpus: { chainVerification: "unverified" } } }),
     ).toThrow(/acknowledgeUnverifiedChain/);
   });
 
-  test("the acknowledgement alone still selects the unverified posture", () => {
+  test("the acknowledgment alone still selects the unverified posture", () => {
     // The pre-`chainVerification` spelling of the same intent: an install that
     // wrote only the flag keeps mirroring, rather than being silently
     // upgraded into a posture it has no driver for.
