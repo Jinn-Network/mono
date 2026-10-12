@@ -318,6 +318,13 @@ references it; shared across many Tasks or per-task.
 | `evidenceConventions` | what the grader must attach as evidence refs (test logs, reports, oracle readings) |
 | namespaced extensions | TEP §21.3 rules |
 
+> **Note (2026-10-06).** The `family` row lists the four families this design shipped with. Two
+> were added since, each as one enum member plus one typed block: `state-predicate`
+> ([chain-environment family design](2026-07-31-chain-environment-family-design.md) §6, CF1) and
+> `external-verifier` (proposal 0002, `proposals/0002-external-verifier-grader-family.md` in the
+> protocol specification repository). The set the code accepts is `GRADER_FAMILIES` in
+> `packages/task-execution/profiles/src/evaluation-spec/schema.ts`.
+
 **Access classification generalizes to every referenced artifact**, not only graders: test
 material, rubrics, and reference data each carry digest + media type + access class. The
 recommended posture: **the spec document's own bytes are public** — so `verdictRule`,
@@ -350,6 +357,12 @@ composite's own `verdictRule`; sub-spec unscorable class names are namespaced by
   declaration (parallel to the judge-model declaration), not evaluator selection — who the
   reviewer is remains Submission/deployment policy, preserving TEP §7.3's spec/policy split.
   Verifying identity and qualification is the trust layer's job.
+
+> **Note (2026-10-06).** Two later family blocks are not described above. The `state-predicate`
+> block is specified in the
+> [chain-environment family design](2026-07-31-chain-environment-family-design.md) §6. The
+> `external-verifier` block is specified in proposal 0002 and summarised in
+> `packages/task-execution/profiles/README.md`.
 
 ### 7.3 The verdict rule — declarative, checkable, checked
 

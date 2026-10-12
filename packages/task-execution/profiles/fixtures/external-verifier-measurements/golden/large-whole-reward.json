@@ -1,0 +1,8 @@
+{
+  "input": {
+    "harness": "harbor",
+    "measurements": [{ "name": "reward", "type": "number", "required": true }],
+    "rewards": { "reward": 1152921504606847232 }
+  },
+  "expect": { "reward": "1152921504606847200" }
+}

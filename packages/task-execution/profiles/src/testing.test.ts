@@ -8,13 +8,17 @@ import {
   FIXTURE_FAMILIES,
   checkAdmissionReceipt,
   checkAllOfConstruction,
+  checkExternalVerifierBlock,
+  checkExternalVerifierSpec,
   checkMeasurementCoverage,
   checkStatePredicateBlock,
   checkStatePredicateSpec,
   checkVerdictConsistency,
   deriveEvaluationTask,
   evaluatePredicates,
+  harborPackageContentHash,
   loadFixtureFamily,
+  readExternalVerifierMeasurements,
   resolveFamilyUri,
   runStructuralCheck,
 } from "./testing.js";
@@ -88,12 +92,16 @@ describe("./testing re-export surface (design §12, plan Task 15)", () => {
   it("re-exports every structural check named in the plan's Task 15 interfaces block", () => {
     expect(typeof checkAdmissionReceipt).toBe("function");
     expect(typeof checkAllOfConstruction).toBe("function");
+    expect(typeof checkExternalVerifierBlock).toBe("function");
+    expect(typeof checkExternalVerifierSpec).toBe("function");
     expect(typeof checkMeasurementCoverage).toBe("function");
     expect(typeof checkStatePredicateBlock).toBe("function");
     expect(typeof checkStatePredicateSpec).toBe("function");
     expect(typeof checkVerdictConsistency).toBe("function");
     expect(typeof deriveEvaluationTask).toBe("function");
     expect(typeof evaluatePredicates).toBe("function");
+    expect(typeof harborPackageContentHash).toBe("function");
+    expect(typeof readExternalVerifierMeasurements).toBe("function");
     expect(typeof resolveFamilyUri).toBe("function");
   });
 
@@ -102,6 +110,29 @@ describe("./testing re-export surface (design §12, plan Task 15)", () => {
     for (const family of ["state-predicate-block", "state-predicate-evaluation"] as const) {
       const cases = await loadFixtureFamily(`${fixturesRoot}/${family}`);
       expect(cases.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("runs the external-verifier fixture families through the kit path", async () => {
+    const fixturesRoot = fileURLToPath(new URL("../fixtures", import.meta.url));
+    const checks: Record<string, (input: unknown) => unknown> = {
+      "external-verifier-block": checkExternalVerifierBlock,
+      "external-verifier-measurements": (input) =>
+        readExternalVerifierMeasurements(input as Parameters<typeof readExternalVerifierMeasurements>[0]),
+      "external-verifier-package-digest": (input) => ({
+        contentHash: harborPackageContentHash(
+          (input as { files: Parameters<typeof harborPackageContentHash>[0] }).files,
+        ),
+      }),
+    };
+    for (const [family, check] of Object.entries(checks)) {
+      expect(FIXTURE_FAMILIES).toContain(family);
+      const cases = await loadFixtureFamily(`${fixturesRoot}/${family}`);
+      expect(cases.some((fixtureCase) => fixtureCase.kind === "golden"), family).toBe(true);
+      expect(cases.some((fixtureCase) => fixtureCase.kind === "adversarial"), family).toBe(true);
+      for (const result of runStructuralCheck(cases, check)) {
+        expect(result, `${family}/${result.kind}/${result.case}: ${result.detail ?? ""}`).toMatchObject({ ok: true });
+      }
     }
   });
 });
