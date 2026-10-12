@@ -4,6 +4,7 @@ import { existsSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { LOCAL_OPERATOR, readWorkspaceMemberIds, resolveLocalAppPrincipal } from "./workspace-principal.js";
 
 const LOCAL_APP_DIRECTORY = "local-web";
 const LOCAL_APP_SERVER = "local-server.mjs";
@@ -91,6 +92,7 @@ export function localAppEnvironment(
   capability: string,
   port = 0,
   inherited: Readonly<Record<string, string | undefined>> = process.env,
+  principal = LOCAL_OPERATOR,
 ): Readonly<Record<string, string | undefined>> {
   if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) throw new TypeError("port must be an integer from 0 to 65535");
   const environment: Record<string, string | undefined> = {};
@@ -103,7 +105,7 @@ export function localAppEnvironment(
   environment.PORT = String(port);
   environment.BENCHMARK_PRODUCT_WORKSPACE_DIR = workspaceDir;
   environment.BENCHMARK_PRODUCT_AGENT_DATA_DIR = agentDataDir;
-  environment.BENCHMARK_PRODUCT_PRINCIPAL = "local-operator";
+  environment.BENCHMARK_PRODUCT_PRINCIPAL = principal;
   environment.COLOPHON_LOCAL_APP_CAPABILITY = capability;
   return environment;
 }
@@ -115,12 +117,13 @@ export function localAppCommand(
   capability: string,
   port = 0,
   inherited: Readonly<Record<string, string | undefined>> = process.env,
+  principal = LOCAL_OPERATOR,
 ): LocalAppCommand {
   return {
     command: process.execPath,
     args: [app.server],
     cwd: app.root,
-    environment: localAppEnvironment(workspaceDir, agentDataDir, capability, port, inherited),
+    environment: localAppEnvironment(workspaceDir, agentDataDir, capability, port, inherited, principal),
   };
 }
 
@@ -171,6 +174,11 @@ export interface StartLocalWorkspaceAppOptions {
   /** Non-secret Colophon OS user-data root; never sourced from HOME/XDG in the child. */
   readonly agentDataDir: string;
   readonly port?: number;
+  /**
+   * The workspace member the app acts as. When absent it is chosen from the workspace's own
+   * members (`resolveLocalAppPrincipal`); a workspace with several and no choice refuses.
+   */
+  readonly principal?: string;
   readonly packageRoot?: string;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
 }
@@ -178,8 +186,12 @@ export interface StartLocalWorkspaceAppOptions {
 /** Starts the packaged UI on an OS-selected loopback port and returns its one-time URL. */
 export async function startLocalWorkspaceApp(options: StartLocalWorkspaceAppOptions): Promise<LocalWorkspaceApp> {
   const app = assertPackagedLocalApp(options.packageRoot);
+  const principal = resolveLocalAppPrincipal({
+    ...(options.principal === undefined ? {} : { explicit: options.principal }),
+    members: readWorkspaceMemberIds(options.workspaceDir),
+  });
   const capability = createLocalAppCapability();
-  const command = localAppCommand(app, options.workspaceDir, options.agentDataDir, capability, options.port, options.inheritedEnvironment);
+  const command = localAppCommand(app, options.workspaceDir, options.agentDataDir, capability, options.port, options.inheritedEnvironment, principal);
   const child = spawn(command.command, command.args, {
     cwd: command.cwd,
     env: command.environment,

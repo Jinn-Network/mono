@@ -388,7 +388,9 @@ export { readAuditEntries } from "./audit/journal.js";
 export type { AuditEntry } from "./audit/journal.js";
 
 // Principals and authority v1 (spec §4.2): local-process policy enforcement, honestly scoped.
-export { GATED_OPERATIONS } from "./authority/policy.js";
+// `readAuthorityPolicy` is exported so a surface that must pick its acting principal (the local
+// app, issue #4957) can read a workspace's members without acting as one of them first.
+export { GATED_OPERATIONS, readAuthorityPolicy } from "./authority/policy.js";
 export type { AuthorityPolicy, GatedOperation, Principal } from "./authority/policy.js";
 
 // The operations facade (spec §5.1) — the boundary every surface calls.

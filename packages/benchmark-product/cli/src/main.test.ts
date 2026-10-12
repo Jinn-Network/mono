@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { QUALIFIED_HARNESS_LOGIN_ARTIFACTS } from "@colophon-claims/core";
 import { describe, expect, test } from "vitest";
 import { BUILD_METADATA_KIND, DEFAULT_QUALIFIED_TARGETS, type ColophonBuildMetadata } from "./build-metadata.js";
-import { browserCommand, localPublishAnswer, runColophonCli, writeQuickstartCompanions } from "./main.js";
+import { browserCommand, localPublishAnswer, runColophonCli, USAGE, writeQuickstartCompanions } from "./main.js";
 
 const TEST_BUILD: ColophonBuildMetadata = {
   kind: BUILD_METADATA_KIND,
@@ -172,6 +172,16 @@ describe("Colophon install surface", () => {
     const bytes = readFileSync(join(root, "quickstart-receipt.json"), "utf8");
     expect(bytes).not.toContain("must-not-appear");
     expect(readFileSync(join(root, "NEXT-STEPS.md"), "utf8")).toContain("colophon open");
+  });
+
+  // Issue #4957: `open` acted as a fixed principal and took no way to name another. Only the
+  // refusal is run here: a valid `open` starts the packaged app and waits to be interrupted.
+  test("open takes --principal, and its help says so", async () => {
+    const answer = await runColophonCli(["open", "--principal"], context);
+    expect(answer.exitCode).toBe(2);
+    expect(answer.stderr).toContain("--principal requires a value");
+    expect(answer.stderr).not.toContain("unknown option");
+    expect(USAGE).toContain("colophon open [--workspace <dir>] [--principal <id>] [--port <n>] [--no-browser]");
   });
 
   test("rejects an unqualified OS and architecture before creating the output root", async () => {
