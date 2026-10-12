@@ -1,22 +1,14 @@
 #!/usr/bin/env node
 
-import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
+import { createPrivateKey, sign } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const PAYLOAD_TYPE = 'application/vnd.jinn.profile-manifest+json';
-export const SIGNATURE_FILE_NAME = 'manifest.dsse.json';
+import { PAYLOAD_TYPE, preAuthenticationEncoding } from './dsse.mjs';
 
-export function preAuthenticationEncoding(payloadType, payload) {
-  const typeBytes = Buffer.from(payloadType, 'utf8');
-  return Buffer.concat([
-    Buffer.from(`DSSEv1 ${typeBytes.length} `, 'utf8'),
-    typeBytes,
-    Buffer.from(` ${payload.length} `, 'utf8'),
-    payload,
-  ]);
-}
+export { PAYLOAD_TYPE, preAuthenticationEncoding, verifyEnvelope } from './dsse.mjs';
+export const SIGNATURE_FILE_NAME = 'manifest.dsse.json';
 
 export function signManifest(payloadBytes, privateKeyPem, keyId) {
   const payload = Buffer.from(payloadBytes);
@@ -26,21 +18,6 @@ export function signManifest(payloadBytes, privateKeyPem, keyId) {
     payloadType: PAYLOAD_TYPE,
     signatures: [{ keyid: keyId, sig: signature.toString('base64') }],
   };
-}
-
-export function verifyEnvelope(envelope, publicKeyPem) {
-  try {
-    const payload = Buffer.from(envelope.payload, 'base64');
-    const pae = preAuthenticationEncoding(envelope.payloadType, payload);
-    return envelope.signatures.some((signature) => verify(
-      null,
-      pae,
-      createPublicKey(publicKeyPem),
-      Buffer.from(signature.sig, 'base64'),
-    ));
-  } catch {
-    return false;
-  }
 }
 
 if (

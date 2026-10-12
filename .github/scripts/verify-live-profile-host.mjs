@@ -37,13 +37,14 @@
 // so the test suite drives the whole gate offline against an injected fetch. The CLI
 // entry is guarded so `import` is side-effect-free.
 
-import { createHash, createPublicKey, randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { assertLiteralRoutePath, assertReleaseGroupSegment } from './build-profile-host-bundle.mjs';
 import { canonicalJsonBytes, catalogSha256 } from './build-prepublication-bundle.mjs';
+import { canonicalPublicKeySha256 } from './dsse.mjs';
 import { loadPlatformCatalog } from './platform-catalog.mjs';
 import {
   CANONICAL_IDENTIFIER_ORIGIN,
@@ -51,6 +52,8 @@ import {
   jinnIdentifierServedPath,
 } from './public-surface-assets.mjs';
 import { PAYLOAD_TYPE, SIGNATURE_FILE_NAME, verifyEnvelope } from './sign-profile-manifest.mjs';
+
+export { canonicalPublicKeySha256 } from './dsse.mjs';
 
 /**
  * The origin every hosted protocol identifier names, imported rather than restated.
@@ -192,26 +195,6 @@ export function selfIdentifyingClaim(servedPath, bytes, identifierOrigin = IDENT
     return { error: `${servedPath} declares multiple self-identifying claims under ${identifierOrigin}` };
   }
   return claims[0] ?? null;
-}
-
-/**
- * Canonical SHA-256 of a public key: the key is re-exported as SPKI PEM before
- * digesting, so line endings and trailing whitespace in the published file cannot
- * change the pinned value.
- * @returns {{ sha256: string, pem: string } | { error: string }}
- */
-export function canonicalPublicKeySha256(pem) {
-  let key;
-  try {
-    key = createPublicKey(pem);
-  } catch (error) {
-    return { error: `published public key is not a readable key: ${error?.message ?? String(error)}` };
-  }
-  if (key.asymmetricKeyType !== 'ed25519') {
-    return { error: `published public key must be ed25519, got ${String(key.asymmetricKeyType)}` };
-  }
-  const canonical = key.export({ type: 'spki', format: 'pem' }).toString();
-  return { sha256: createHash('sha256').update(canonical).digest('hex'), pem: canonical };
 }
 
 /** @returns {{ ok: true } | { ok: false, reason: string }} */
