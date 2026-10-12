@@ -4,7 +4,7 @@
 |---|---|
 | **Version** | 0.3 |
 | **Date** | 2026-08-07 |
-| **Amended** | 2026-08-19 — catalog `method.bind` form ([DR-2026-08-19](../../../log/decisions/2026-08-19-colophon-method-cli-discover.md)); 2026-09-02 — declared and strict all-slots denominators on the headline tables (issue #2977); 2026-09-04 — per-subject sourcing of the strict denominator and the negative-delta state message (issues #3700, #3701) |
+| **Amended** | 2026-08-19 — catalog `method.bind` form ([DR-2026-08-19](../../../log/decisions/2026-08-19-colophon-method-cli-discover.md)); 2026-09-02 — declared and strict all-slots denominators on the headline tables (issue #2977); 2026-09-04 — per-subject sourcing of the strict denominator and the negative-delta state message (issues #3700, #3701); 2026-10-07 — no rate stated for a headline arm with `n` 0 (issue #4975) |
 | **Author** | Packet BP-30, amended by packet BP-31 of the standalone benchmarking product implementation program |
 | **Shape** | `feat` |
 | **Status** | draft |
@@ -391,6 +391,14 @@ headline is per subject, so each rendered subject reads its own
 subject digest. A subject with no matching sealed disclosure withholds its
 strict number rather than borrowing the run-wide one: stating a wrong number
 is worse than stating none.
+
+An arm whose headline `n` is 0 states no rate and no interval in either table
+(issue #4975). The rate cell reads "No rate is stated" and the interval cell
+"Not stated". `wilson@1` seals `0.0000` for the rate and both bounds of such an
+arm, and shown as sealed that reads as an arm that failed every task when it
+was never scored. These two cells are the one place the tables do not print a
+stored value as stored. The stored records are unchanged, and an arm that was
+scored and failed every task keeps its sealed zero.
 
 The published bundle page does not carry the pair. Its bytes are pinned by the
 verifier that every allocated bundle format names, so rendering it there is a

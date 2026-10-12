@@ -119,6 +119,8 @@ export interface ResolveMethodOperandInput {
   readonly ids?: string;
   readonly n?: string;
   readonly hostPath?: string;
+  /** `--replicates`: planned trials of each task. Only `terminal-bench-2.1` reads it. */
+  readonly replicates?: string;
 }
 
 export type ResolvedMethod =
@@ -129,6 +131,8 @@ export type ResolvedMethod =
       readonly coverage: SuiteCoverage;
       readonly selectedIds?: readonly string[];
       readonly host: Record<string, unknown>;
+      /** Present only when `--replicates` was given. Absent, the bind leaves the draft's count. */
+      readonly replicates?: number;
     }
   | {
       readonly kind: "file";
@@ -214,6 +218,27 @@ function parseN(n: string): number {
   return Number.parseInt(n, 10);
 }
 
+function parseReplicates(replicates: string): number {
+  if (!/^[1-9][0-9]*$/u.test(replicates)) {
+    refuse("invalid-invocation", "--replicates", "--replicates must be a positive integer");
+  }
+  return Number.parseInt(replicates, 10);
+}
+
+/**
+ * `--replicates` is refused wherever the bind would not act on it, so a claimant is never left
+ * believing a count was planned that the draft does not carry. Only the `terminal-bench-2.1`
+ * catalog id sets a draft's replicate count: a method file is a complete document, and every other
+ * catalog id binds an identity and no count.
+ */
+function refuseIgnoredReplicates(): never {
+  refuse(
+    "invalid-invocation",
+    "--replicates",
+    "--replicates is only valid with the terminal-bench-2.1 catalog id; no other method sets a draft's replicate count",
+  );
+}
+
 function unknownMethodRef(ref: string): never {
   refuse("invalid-invocation", "method.ref", `"${ref}" is not a suite and not a file; known catalog ids: ${knownCatalogIds()}`);
 }
@@ -283,6 +308,7 @@ export function resolveMethodOperand(input: ResolveMethodOperandInput): Resolved
     if (input.ids !== undefined) refuse("invalid-invocation", "--ids", "--ids is only valid with a catalog id");
     if (input.n !== undefined) refuse("invalid-invocation", "--n", "--n is only valid with a catalog id");
     if (input.hostPath !== undefined) refuse("invalid-invocation", "--host", "--host is only valid with a catalog id");
+    if (input.replicates !== undefined) refuseIgnoredReplicates();
     const path = resolvePath(input.cwd, input.ref);
     const raw = readJsonObject(path, "method.ref");
     const { documentKind, official } = documentKindFrom(raw);
@@ -291,6 +317,8 @@ export function resolveMethodOperand(input: ResolveMethodOperandInput): Resolved
   }
   const catalogId = input.ref;
   if (!isMethodCatalogId(catalogId)) unknownMethodRef(input.ref);
+  if (input.replicates !== undefined && catalogId !== "terminal-bench-2.1") refuseIgnoredReplicates();
+  const replicates = input.replicates === undefined ? {} : { replicates: parseReplicates(input.replicates) };
   const row = METHOD_CATALOG[catalogId];
   const hostPath = input.hostPath === undefined || input.hostPath === "" ? undefined : input.hostPath;
   if (hostPath === undefined && row.hostRequired) {
@@ -317,6 +345,7 @@ export function resolveMethodOperand(input: ResolveMethodOperandInput): Resolved
       coverage: "custom",
       selectedIds: parseIds(input.ids),
       host,
+      ...replicates,
     };
   }
   if (input.slice !== undefined) {
@@ -326,6 +355,7 @@ export function resolveMethodOperand(input: ResolveMethodOperandInput): Resolved
       protocol: row.protocol,
       coverage: coverageFromSlice(parseHumanSlice(input.slice)),
       host,
+      ...replicates,
     };
   }
   if (n === undefined) {
@@ -340,6 +370,7 @@ export function resolveMethodOperand(input: ResolveMethodOperandInput): Resolved
       coverage: "custom",
       selectedIds: sliced.selectedIds,
       host,
+      ...replicates,
     };
   }
   return {
@@ -348,5 +379,6 @@ export function resolveMethodOperand(input: ResolveMethodOperandInput): Resolved
     protocol: row.protocol,
     coverage: sliced.coverage,
     host,
+    ...replicates,
   };
 }

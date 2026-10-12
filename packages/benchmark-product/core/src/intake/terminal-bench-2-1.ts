@@ -1,9 +1,11 @@
 /**
  * Official Terminal-Bench 2.1 knowing-half slate (issue #3990, DR-2026-09-04 decision 5).
  *
- * The Benchmark a `method terminal-bench-2.1` bind produces is the official task list at a
- * named upstream commit and a digest — not a prediction-market fixture with a relabelled
- * placeholder payload. Harbor host selection stays off this path.
+ * The Benchmark a `method terminal-bench-2.1` bind produces is the official task list, read at a
+ * named upstream commit, with each task package named by the content hash Harbor gives it and the
+ * whole pinned by a digest. It is not a prediction-market fixture with a relabelled placeholder
+ * payload. The commit names where the list was read; a package's bytes are identified by its
+ * package ref (`terminal-bench-2-1-slate.ts`). Harbor host selection stays off this path.
  */
 import { BENCHMARKING_PROTOCOL, parseBenchmark, sealBenchmark } from "@jinn-network/benchmarking-records";
 import { TASK_EXECUTION_PROTOCOL_URI, sealTask } from "@jinn-network/task-execution-protocol";
@@ -301,10 +303,15 @@ export function buildTerminalBench21Tasks(
   const sealed = sealBenchmark({
     protocol: BENCHMARKING_PROTOCOL,
     name: "terminal-bench-2.1",
+    // The commit names where the task list was read and nothing more. It does not identify a
+    // package's bytes: one published package differs from the repository at that commit
+    // (`terminal-bench-2-1-slate.ts`), so this text never says the tasks are "at" the commit.
     description:
-      resolved.coverage === "full"
-        ? "Official Terminal-Bench 2.1 task list at the sealed upstream commit and digest."
-        : `Official Terminal-Bench 2.1 ${resolved.coverage} slice of the sealed upstream commit and digest.`,
+      `${
+        resolved.coverage === "full"
+          ? "Official Terminal-Bench 2.1 task list, read at the sealed upstream commit."
+          : `Official Terminal-Bench 2.1 ${resolved.coverage} slice of the task list read at the sealed upstream commit.`
+      } Each task package is identified by its sealed Harbor package ref, not by that commit.`,
     version: "2.1.0",
     items: tasks.map((task) => ({ task: { digest: { sha256: task.sha256 } } })),
     reveal: { policy: "immediate" },

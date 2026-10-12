@@ -455,6 +455,37 @@ describe("resolveMethodOperand", () => {
     }
   });
 
+  test("--replicates is a positive integer that only the terminal-bench-2.1 catalog id carries", () => {
+    const dir = cwd();
+    // Absent, the resolved method carries no count: the bind then leaves the draft's own.
+    expect(resolveMethodOperand({ ref: "terminal-bench-2.1", cwd: dir, slice: "10" })).not.toHaveProperty("replicates");
+    for (const coverage of [{ slice: "all" }, { ids: "fix-git" }, { n: "1" }, { n: "20" }]) {
+      expect(resolveMethodOperand({ ref: "terminal-bench-2.1", cwd: dir, ...coverage, replicates: "5" }))
+        .toMatchObject({ kind: "catalog", catalogId: "terminal-bench-2.1", replicates: 5 });
+    }
+    for (const replicates of ["0", "01", "-1", "1.5", "five", ""]) {
+      const error = refuse(() => resolveMethodOperand({ ref: "terminal-bench-2.1", cwd: dir, slice: "10", replicates }));
+      expect(error.code, replicates).toBe("invalid-invocation");
+      expect(error.issues[0]?.path, replicates).toBe("--replicates");
+    }
+  });
+
+  test("refuses --replicates on every other catalog id and on a file, which would ignore it", () => {
+    const dir = cwd();
+    const hostPath = join(dir, "host.json");
+    writeFileSync(hostPath, JSON.stringify({ executable: "/bin/true" }));
+    for (const row of listMethodCatalog()) {
+      if (row.id === "terminal-bench-2.1") continue;
+      const error = refuse(() => resolveMethodOperand({ ref: row.id, cwd: dir, slice: "1", hostPath, replicates: "5" }));
+      expect(error.code, row.id).toBe("invalid-invocation");
+      expect(error.issues[0]?.path, row.id).toBe("--replicates");
+      expect(error.message, row.id).toContain("only valid with the terminal-bench-2.1 catalog id");
+    }
+    const filePath = join(dir, "method.json");
+    writeFileSync(filePath, JSON.stringify({ schema: TERMINAL_BENCH_2_1_SELECTION_SCHEMA, coverage: "ten_task" }));
+    expect(refuse(() => resolveMethodOperand({ ref: filePath, cwd: dir, replicates: "5" })).issues[0]?.path).toBe("--replicates");
+  });
+
   test("relative file refs resolve from cwd", () => {
     const dir = cwd();
     mkdirSync(join(dir, "nested"));

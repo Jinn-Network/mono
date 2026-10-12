@@ -646,11 +646,38 @@ sentence again:
 | Field | Meaning |
 | --- | --- |
 | `datasetId`, `datasetRevision` | the dataset, and the revision of it the leaderboard pins |
-| `upstreamCommit` | the commit of the dataset's source repository the slate was read at |
+| `upstreamCommit` | the commit of the dataset's source repository where the official task list was read; it does not identify a task package's bytes, which the package ref does |
 | `slateDigest` | the digest of the slate: every official task name with its package ref |
 | `coverage` | `one_task`, `ten_task`, `full`, or `custom`, recomputed from the selected names |
 | `selectedTaskCount`, `datasetTaskCount` | how many of the dataset's tasks this Benchmark carries |
 | `limit` | the sentence above |
+
+The upstream commit and the package refs say two different things. Each official
+Task seals both, as `payload.upstreamCommit` and `payload.packageRef`, and the
+Benchmark's extension seals the repository and the commit. The commit names
+where the task list was read: the 89 task names, in slate order, are the entries
+of `tasks/dataset.toml` in the dataset's source repository at that commit, and
+the dataset revision is the one that repository's leaderboard code pins there. A
+package ref is the content hash Harbor gives the package it publishes for that
+dataset revision. It is the value a Harbor trial records, and it is what
+identifies a package's bytes.
+
+The two agree for 88 of the 89 tasks and differ for one. For 88 tasks the
+repository at the upstream commit lists the same ref and holds the same files as
+the published package, once the `.gitignore` at the root of each task directory
+in the repository, which Harbor does not publish, is left out. For
+`sanitize-git-repo` one file differs, `tests/test_outputs.py`: the repository
+writes five placeholder credentials as two joined string literals each, and the
+published package writes each as one literal, 25 bytes fewer in all. So the
+repository at that commit lists
+`sha256:73c94a21ebe370bae843adbeeaaa9e991374867b18483aaf56c7cd470dcddea7` for
+that task, and the slate pins
+`sha256:6e86297715fae62cd499fbdd27013e11a38d05d7e05b7f661cb50b4ecead128f`, the
+package Harbor publishes and runs. A reader who hashes the repository's task
+directories at the upstream commit by Harbor's rule, leaving out the
+`.gitignore` at the root of each task directory and nothing else, reproduces 88
+of the slate's refs and not that one. One package, `install-windows-3.11`,
+publishes a nested `environment/isos/.gitignore`; that file stays in.
 
 A bundle is on the official slate because its records are, not because its
 vector says so. The checker carries its own copy of the slate: the dataset
@@ -687,7 +714,10 @@ place, and no other file under the package's `tests/`, `environment/` or
 every package before it writes the values the specs are sealed from, and
 `core/test/fixtures/terminal-bench-2-1-packages/manifest.json` lists every
 package file by path and SHA-256, so the chain from a spec's digests to the
-slate's package refs can be recomputed without the packages.
+slate's package refs can be recomputed without the packages. The manifest lists
+the packages as Harbor publishes them for the pinned dataset revision, which is
+what the package refs name. It does not list the repository's files at the
+upstream commit, which differ for one task as stated above.
 
 Each spec names one required evidence reference, `trial-result.json`. That is
 the name under which the Harbor reader carries the `result.json` Harbor wrote
@@ -714,6 +744,18 @@ verdict states neither. This naming is keyed on the verified
 that does not declare the capability renders the page it rendered before, with
 each task labelled by its Task digest: every earlier format, and a slate run
 this product drove itself.
+
+The same page says how much of the dataset the run covers, before it states any
+rate. `index.html` carries a `Tasks` fact in its header, directly under the
+scope line, reading `<selected> of the <dataset count> in Terminal-Bench 2.1`,
+for example `3 of the 89 in Terminal-Bench 2.1`, or
+`all 89 in Terminal-Bench 2.1` when the Benchmark carries every task of the
+dataset. `README.md` carries the same words as one line under its scope line,
+`Tasks: 3 of the 89 in Terminal-Bench 2.1.`, and `share.txt` carries that
+sentence directly after its scope. Both numbers are the verified section's
+`selectedTaskCount` and `datasetTaskCount`, and nothing else is read. A page
+without the section carries no such line. The badge and the social card do not
+carry it.
 
 The same page names its rate by what was judged, and every v10 page states no
 rate where nothing was. On a declaring bundle the rate column of the per-arm
@@ -857,6 +899,15 @@ rather than from the format.
 Every row but `.../10` runs as `npx @colophon-claims/verify<line> <bundle-dir>`. The `.../10` row
 states its package in full and runs as `npx <line> <bundle-dir>`. Append the anchor flags where
 the row lists them.
+
+From `@colophon-claims/check@0.2.1` on, the reader's report names the run it checked: under
+`Format:` it prints a `Run:` line, on every format but `.../5`. The `verify` releases the earlier
+rows pin print no such line; for those, compute the value yourself with `shasum -a 256 run.json`.
+The value is the SHA-256 of the bundle's `run.json`, as 64 hex characters, and it is the digest
+`lock` printed when the method was sealed. A claimant who made that digest public before the run
+gives a reader something to hold this line against.
+[`CLAIMANT-WALKTHROUGH.md`](CLAIMANT-WALKTHROUGH.md) has that step, and every other command of a
+run brought from Harbor.
 
 Every row above but `.../10` names `@colophon-claims/verify`, because that is the name those
 formats sealed. `.../10` is the first format sealed under the checker's own name,
@@ -1283,8 +1334,9 @@ filesystem carries the bit, which the check establishes by probe rather than
 assumption; where it does not, or where the probe cannot be run, the mode
 dimension is dropped and `executableBitChecked` says so.
 
-The standalone verifier package checks a published tree with no product install:
-`colophon-verify <bundle> --freeze-repo <dir>`, exit `1` on drift.
+The standalone checker package checks a published tree with no product install:
+`colophon-check <bundle> --freeze-repo <dir>`, exit `1` on drift. `colophon-check` is the command
+that package installs.
 
 A bundle with no qualification graph has no freeze artifacts, and a Benchmark
 record that declares no licence has no licence data to generate scaffolding from.

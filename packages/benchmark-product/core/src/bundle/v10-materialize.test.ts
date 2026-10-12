@@ -512,6 +512,11 @@ describe("composed bundle v10: a run brought onto the official Terminal-Bench 2.
   const SLATE_VECTOR = ["external-import", "owner-controlled-publication", "terminal-bench-2-1-comparability"] as const;
   const SLATE_CHECKS = [...PUBLIC_BUNDLE_VERIFICATION_CHECKS, "external-import"];
   const slate = () => once("official-slate", (workspaceDir) => createTerminalBench21SlateBundleFixture({ workspaceDir }));
+  const read = (bundleDir: string, path: string): string => readFileSync(join(bundleDir, path), "utf8");
+  /** How much of the dataset the fixture's three-task run covers, as the report face words it. */
+  const COVERAGE_VALUE = "3 of the 89 in Terminal-Bench 2.1";
+  const COVERAGE_ROW = `<dl class="facts"><div><dt>Tasks</dt><dd>${COVERAGE_VALUE}</dd></div></dl>`;
+  const COVERAGE_LINE = `Tasks: ${COVERAGE_VALUE}.`;
 
   test("the checker accepts the published bundle, with the capability declared", async () => {
     const built = await slate();
@@ -588,6 +593,49 @@ describe("composed bundle v10: a run brought onto the official Terminal-Bench 2.
     // Every slot is still accounted for.
     const matrix = json(built.bundleDir, "matrix.json") as { completeness: Record<string, unknown> };
     expect(matrix.completeness).toMatchObject({ expected: 6, judged: 6 });
+  }, 300_000);
+
+  test("the page, README.md and share.txt say how much of the dataset the run covers", async () => {
+    // Three of the dataset's 89 tasks. Before this line the count was only in claim-package.json.
+    const built = await slate();
+    const html = read(built.bundleDir, "index.html");
+    expect(html.slice(html.indexOf("<header>"), html.indexOf("</header>"))).toContain(
+      `</p>\n${COVERAGE_ROW}\n<p class="neutral">`,
+    );
+    expect(html.split(COVERAGE_ROW)).toHaveLength(2);
+    expect(read(built.bundleDir, "README.md")).toMatch(
+      /\nScope: 3 tasks [^\n]+\.\n\nTasks: 3 of the 89 in Terminal-Bench 2\.1\.\n\nReport SHA-256: /u,
+    );
+    expect(read(built.bundleDir, "share.txt")).toContain(` ${COVERAGE_LINE} `);
+    // It is the claim section's two counts, in words.
+    expect(json(built.bundleDir, "claim-package.json")["terminalBench21Comparability"]).toMatchObject({
+      selectedTaskCount: 3,
+      datasetTaskCount: 89,
+    });
+  }, 300_000);
+
+  test("a bundle whose coverage line was edited is refused on the file that carries it", async () => {
+    const built = await slate();
+    for (const path of ["index.html", "README.md", "share.txt"]) {
+      const edited = detach(built.bundleDir, `slate-coverage-${path}`);
+      const original = read(edited, path);
+      expect(original, path).toContain(COVERAGE_VALUE);
+      // The manifest is re-sealed over the edited file, so the refusal is the page's own.
+      writeFileSync(join(edited, path), original.replace(COVERAGE_VALUE, "all 89 in Terminal-Bench 2.1"));
+      redeclare(edited, SLATE_VECTOR);
+      expect(await refusal(edited), path).toEqual({
+        path,
+        message: `${path} is not the exact projection of verified public facts`,
+      });
+    }
+    // Taking the line out is refused the same way.
+    const dropped = detach(built.bundleDir, "slate-coverage-dropped");
+    writeFileSync(join(dropped, "index.html"), read(dropped, "index.html").replace(`\n${COVERAGE_ROW}`, ""));
+    redeclare(dropped, SLATE_VECTOR);
+    expect(await refusal(dropped)).toEqual({
+      path: "index.html",
+      message: "index.html is not the exact projection of verified public facts",
+    });
   }, 300_000);
 
   test("the same bundle with the capability dropped from the vector is refused", async () => {

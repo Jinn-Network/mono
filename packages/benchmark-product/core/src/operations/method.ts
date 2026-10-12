@@ -1,7 +1,8 @@
 /** One method bind and one derived export (DR-2026-08-18-f). */
-import type { DraftDocument } from "../domain/draft.js";
+import { parseDraftSpec, type DraftDocument } from "../domain/draft.js";
 import { isDraftMutable } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
+import { atomicWriteFileSync } from "../fs/atomic.js";
 import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
 import { HARBOR_ADAPTER_ID } from "../runtime/harbor/manifest.js";
 import { SWE_BENCH_HARNESS_ADAPTER_ID } from "../runtime/swe-bench-verified/manifest.js";
@@ -24,6 +25,7 @@ import { executeBindInspectBinaryJudge } from "./inspect-binary-judge.js";
 import { executeSelectHarborRuntime } from "./harbor-runtime.js";
 import { attachBenchmarkToDraft } from "./attach.js";
 import { buildTerminalBench21Tasks } from "../intake/terminal-bench-2-1.js";
+import { draftPath } from "../workspace/layout.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
 import {
   executeExportHarborHubPackage,
@@ -122,15 +124,63 @@ function slateInputFromTerminalBench21File(document: Record<string, unknown>): {
   return { coverage: named ?? "full" };
 }
 
+const HOUR_MS = 3_600_000;
+
+/**
+ * The run window a draft on the official Terminal-Bench 2.1 slate needs: two hours for every task
+ * and replicate, and never less than 24 hours, which is the default a new draft carries (operator
+ * rulings of 2026-10-06, decision 8).
+ *
+ * `lock` seals the close time from the window, and `run import` refuses a trial dated after it, so
+ * a window that is too short is met only after the Harbor run has been paid for. The default of 24
+ * hours is shorter than a full slate takes.
+ *
+ * Two hours is an allowance and not a measurement. The verifier timeouts the slate pins average
+ * 1,676 seconds (`TERMINAL_BENCH_21_VERIFIER_PINS`). The agent timeouts are not among the pins; a
+ * reading of the 89 task packages put their mean near 1,700 seconds. A trial that runs to both
+ * timeouts then takes about 56 minutes, so two hours covers two arms run one after the other with
+ * nothing in parallel. The full slate is 178 hours at one replicate and 890 hours at five.
+ */
+function officialTerminalBench21RunWindowMs(taskCount: number, replicates: number): number {
+  return Math.max(24 * HOUR_MS, taskCount * replicates * 2 * HOUR_MS);
+}
+
+/**
+ * What the official slate decides about a draft's run plan: the replicate count, when
+ * `--replicates` gave one, and a run window that fits the slate at the count the draft then
+ * carries. A count the draft already holds stays when the flag is absent, and a window the
+ * claimant already set longer is kept, because a longer window fits the same run.
+ *
+ * The planned spec is parsed here, so a count the draft cannot carry is a refusal the caller meets
+ * before it stores or attaches anything.
+ */
+function planOfficialTerminalBench21Run(
+  spec: DraftDocument["spec"],
+  taskCount: number,
+  requestedReplicates: number | undefined,
+): { readonly replicates: number; readonly closeAfterMs: number } {
+  const replicates = requestedReplicates ?? spec.replicates;
+  const closeAfterMs = Math.max(spec.policy.closeAfterMs, officialTerminalBench21RunWindowMs(taskCount, replicates));
+  parseDraftSpec({ ...spec, replicates, policy: { ...spec.policy, closeAfterMs } });
+  return { replicates, closeAfterMs };
+}
+
 function attachOfficialTerminalBench21Slate(
   context: OperationContext,
   draftId: string,
   input: {
     readonly coverage?: Exclude<SuiteCoverage, "custom">;
     readonly taskNames?: readonly string[];
+    readonly replicates?: number;
   },
 ): { readonly draft: DraftDocument; readonly benchmarkSha256: string } {
-  const built = buildTerminalBench21Tasks(input);
+  const { replicates, ...slate } = input;
+  const built = buildTerminalBench21Tasks(slate);
+  const plan = planOfficialTerminalBench21Run(
+    readDraftDocument(context.workspaceDir, draftId).spec,
+    built.tasks.length,
+    replicates,
+  );
   putSealedBytes(context.workspaceDir, built.profile.bytes);
   for (const task of built.tasks) {
     // The spec beside the Task that binds it: collect, publish and every reader resolve a Task's
@@ -146,10 +196,21 @@ function attachOfficialTerminalBench21Slate(
       "official Terminal-Bench 2.1 Benchmark bytes changed while storing",
     );
   }
-  return {
-    draft: attachBenchmarkToDraft(context.workspaceDir, draftId, built.benchmark.sha256, context.clock()),
-    benchmarkSha256: built.benchmark.sha256,
+  const attached = attachBenchmarkToDraft(context.workspaceDir, draftId, built.benchmark.sha256, context.clock());
+  const benchmarkSha256 = built.benchmark.sha256;
+  if (plan.replicates === attached.spec.replicates && plan.closeAfterMs === attached.spec.policy.closeAfterMs) {
+    return { draft: attached, benchmarkSha256 };
+  }
+  const draft: DraftDocument = {
+    ...attached,
+    spec: {
+      ...attached.spec,
+      replicates: plan.replicates,
+      policy: { ...attached.spec.policy, closeAfterMs: plan.closeAfterMs },
+    },
   };
+  atomicWriteFileSync(draftPath(context.workspaceDir, draftId), JSON.stringify(draft, null, 2));
+  return { draft, benchmarkSha256 };
 }
 
 function bindNamedSuiteIdentity(
@@ -171,6 +232,7 @@ function bindOfficialTerminalBench21(
   input: {
     readonly coverage?: Exclude<SuiteCoverage, "custom">;
     readonly taskNames?: readonly string[];
+    readonly replicates?: number;
   },
 ): SelectMethodResult {
   return finish(attachOfficialTerminalBench21Slate(context, draftId, input), "terminal-bench-2.1", true);
@@ -222,6 +284,7 @@ function bindCatalog(
     return bindOfficialTerminalBench21(context, draftId, {
       ...(coverage === undefined ? {} : { coverage }),
       ...(ids === undefined ? {} : { taskNames: ids }),
+      ...(resolved.replicates === undefined ? {} : { replicates: resolved.replicates }),
     });
   }
   return bindNamedSuiteIdentity(context, draftId, resolved.catalogId, true);

@@ -116,6 +116,15 @@ describe("refusals and verb help name what a claimant must supply", () => {
     expect(help).toContain("pairwise distinct");
   });
 
+  // Issue #4946, third acceptance line: the help is a flag list and one example, so it says where
+  // the worked example and the matching rule are written out in full.
+  test("arm add --help points to the claimant walkthrough", async () => {
+    const help = (await ok(["arm", "add", "--help"], context())).stdout;
+    expect(help).toContain(
+      "\nThe full walkthrough is CLAIMANT-WALKTHROUGH.md, linked from the\n@colophon-claims/cli README.\n",
+    );
+  });
+
   test("anchor --help lists every accepted provider value and says an endpoint must be supplied", async () => {
     const help = (await ok(["anchor", "--help"], context())).stdout;
     expect(help).toContain("--subject lock|matrix [--provider <profileUri>] [--endpoint <url>]");

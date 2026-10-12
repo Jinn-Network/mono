@@ -38,6 +38,8 @@ export const CLAIM_PIN_SOURCES = [
  * Dated plans and decision records elsewhere in the repository are historical and out of scope.
  */
 export const READER_INSTRUCTION_DOCS = [
+  // The claimant walkthrough ends with the reader's check, so it prints the checker's line too.
+  'packages/benchmark-product/CLAIMANT-WALKTHROUGH.md',
   'packages/benchmark-product/EXTERNAL-VERIFICATION.md',
   'packages/benchmark-product/PUBLIC-BUNDLE.md',
   'packages/benchmark-product/README.md',

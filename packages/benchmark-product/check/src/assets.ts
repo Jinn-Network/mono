@@ -1173,6 +1173,37 @@ function taskSelectionFactText(input: PublicAssetInput): string | undefined {
   return section === undefined ? undefined : `Task selection: ${section.mode}.`;
 }
 
+/**
+ * How much of the dataset a run on the official Terminal-Bench 2.1 slate covers, as a header fact
+ * (issue #4972): the page names each task and the claim package carries the two counts, but
+ * nothing readable said that three tasks are three of 89.
+ *
+ * Projected from the claim's `terminalBench21Comparability` section and from nothing else. Both
+ * numbers are the section's, which `claim-consistency` has already rebuilt from the verified
+ * Benchmark. Keyed on that section, as the rate name and the task-name projector are: no earlier
+ * claim id can carry it, so every page without it renders what it rendered before this line
+ * existed. It stands under the scope line, above every rate.
+ */
+function datasetCoverageValue(input: PublicAssetInput): string | undefined {
+  const section = input.claim.terminalBench21Comparability;
+  if (section === undefined) return undefined;
+  return section.selectedTaskCount === section.datasetTaskCount
+    ? `all ${section.datasetTaskCount} in Terminal-Bench 2.1`
+    : `${section.selectedTaskCount} of the ${section.datasetTaskCount} in Terminal-Bench 2.1`;
+}
+
+function datasetCoverageFactHtml(input: PublicAssetInput): string {
+  const value = datasetCoverageValue(input);
+  return value === undefined
+    ? ""
+    : `\n<dl class="facts"><div><dt>Tasks</dt><dd>${escapeMarkup(value)}</dd></div></dl>`;
+}
+
+function datasetCoverageFactText(input: PublicAssetInput): string | undefined {
+  const value = datasetCoverageValue(input);
+  return value === undefined ? undefined : `Tasks: ${value}.`;
+}
+
 function buildIndex(
   input: PublicAssetInput,
   reportFacts: MethodFacts,
@@ -1239,7 +1270,7 @@ ${embeddedFontCss()}
 <p class="eyebrow">${escapeMarkup(PRODUCT_BRANDING.categoryDescriptor)}</p>
 <p class="status" data-run-outcome="${outcome}">${escapeMarkup(status)}</p>
 <h1>Colophon report</h1>
-<p class="lede">${escapeMarkup(scopeLine(input))}</p>${taskSelectionFactHtml(input)}
+<p class="lede">${escapeMarkup(scopeLine(input))}</p>${datasetCoverageFactHtml(input)}${taskSelectionFactHtml(input)}
 ${neutralClaimHtml(reportFacts)}
 </header>
 <main>
@@ -1496,12 +1527,13 @@ function buildReadme(
     : `${outcomeLabel(input.matrix.completeness.runOutcome)}. No comparative winner is stated.`;
   const pair = pageDenominators(input, reportFacts, claimFacts, capabilities);
   const rateNames = pageRateNames(input, reportFacts, claimFacts);
+  const datasetCoverage = datasetCoverageFactText(input);
   const taskSelection = taskSelectionFactText(input);
   return `# Colophon report
 
 **${documentStatus}**
 
-Scope: ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${escapeMarkdown(input.claim.scope.venue)}.${taskSelection === undefined ? "" : `\n\n${escapeMarkdown(taskSelection)}`}
+Scope: ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${escapeMarkdown(input.claim.scope.venue)}.${datasetCoverage === undefined ? "" : `\n\n${escapeMarkdown(datasetCoverage)}`}${taskSelection === undefined ? "" : `\n\n${escapeMarkdown(taskSelection)}`}
 
 Report SHA-256: \`${input.reportSha256}\`
 
@@ -1631,8 +1663,12 @@ function buildShareText(
 ): string {
   const taskSelection = taskSelectionFactText(input);
   const taskSelectionClause = taskSelection === undefined ? "" : ` ${plainText(taskSelection)}`;
+  // Empty unless the claim carries the Terminal-Bench 2.1 section, so the sentence stays
+  // byte-identical everywhere else.
+  const datasetCoverage = datasetCoverageFactText(input);
+  const datasetCoverageClause = datasetCoverage === undefined ? "" : ` ${plainText(datasetCoverage)}`;
   if (reportFacts.kind === "binary") {
-    return `Colophon · verified qualification. ${plainText(scopeLine(input))}.${taskSelectionClause} Report ${input.reportSha256}. Full evidence: index.html; verify: index.html#verification with ${plainText(input.claim.verification.command)}.\n`;
+    return `Colophon · verified qualification. ${plainText(scopeLine(input))}.${datasetCoverageClause}${taskSelectionClause} Report ${input.reportSha256}. Full evidence: index.html; verify: index.html#verification with ${plainText(input.claim.verification.command)}.\n`;
   }
   // Paired branch only (P4b Task 6): empty string for wilson keeps this sentence byte-identical
   // to before this dispatch existed.
@@ -1641,7 +1677,7 @@ function buildShareText(
   // Empty for every format but `/10`, and for a `/10` Report whose arms each state a rate, so the
   // sentence stays byte-identical there.
   const unstatedRateClause = unstatedRateFacts(reportFacts, capabilities).map((fact) => ` ${plainText(fact)}`).join("");
-  return `Colophon · ${outcomeLabel(input.matrix.completeness.runOutcome)}; no comparative winner stated. ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${plainText(input.claim.scope.venue)}.${taskSelectionClause} ${plainText(compactStatus(input, reportFacts))}.${unstatedRateClause} Report ${input.reportSha256}.${pairedClause} Full report: index.html; limitations: index.html#limitations; verify: index.html#verification with ${plainText(input.claim.verification.command)}. ${PRODUCT_BRANDING.attribution}\n`;
+  return `Colophon · ${outcomeLabel(input.matrix.completeness.runOutcome)}; no comparative winner stated. ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${plainText(input.claim.scope.venue)}.${datasetCoverageClause}${taskSelectionClause} ${plainText(compactStatus(input, reportFacts))}.${unstatedRateClause} Report ${input.reportSha256}.${pairedClause} Full report: index.html; limitations: index.html#limitations; verify: index.html#verification with ${plainText(input.claim.verification.command)}. ${PRODUCT_BRANDING.attribution}\n`;
 }
 
 /** Fixed, deterministic presentation bytes for the format `input.format` names. The builder only

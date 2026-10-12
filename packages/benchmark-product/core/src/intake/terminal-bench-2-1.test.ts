@@ -128,6 +128,28 @@ describe("Terminal-Bench 2.1 official slate pin", () => {
     expect(customSlate.selectedTaskNames).toEqual(["write-compressor", "qemu-startup"]);
   });
 
+  test("the Benchmark description says what the upstream commit names, and what identifies a package", () => {
+    // The commit is where the task list was read. It is not what identifies a package's bytes:
+    // the published `sanitize-git-repo` package differs from the repository at that commit in one
+    // test file (PUBLIC-BUNDLE.md), and its package ref names the published one. So no Benchmark
+    // says its tasks are "at" the commit, whatever it selects.
+    const packages = "Each task package is identified by its sealed Harbor package ref, not by that commit.";
+    const described = (input: Parameters<typeof buildTerminalBench21Tasks>[0]): string =>
+      parseBenchmark(buildTerminalBench21Tasks(input).benchmark.bytes).description as string;
+    expect(described({ coverage: "full" })).toBe(
+      `Official Terminal-Bench 2.1 task list, read at the sealed upstream commit. ${packages}`,
+    );
+    expect(described({ coverage: "ten_task" })).toBe(
+      `Official Terminal-Bench 2.1 ten_task slice of the task list read at the sealed upstream commit. ${packages}`,
+    );
+    expect(described({ coverage: "one_task" })).toBe(
+      `Official Terminal-Bench 2.1 one_task slice of the task list read at the sealed upstream commit. ${packages}`,
+    );
+    expect(described({ taskNames: ["sanitize-git-repo", "qemu-startup"] })).toBe(
+      `Official Terminal-Bench 2.1 custom slice of the task list read at the sealed upstream commit. ${packages}`,
+    );
+  });
+
   test("refuses a name that is not on the official slate", () => {
     try {
       buildTerminalBench21Tasks(["not-a-terminal-bench-2-1-task"]);
@@ -258,7 +280,10 @@ describe("the EvaluationSpec of an official Terminal-Bench 2.1 task", () => {
     expect(built.profile.sha256).toBe("be35444162406ef9b2720be2e49c30570a2b1bd49af2bd88855c867a14e2574b");
     expect(built.tasks[0]!.evaluationSpec.sha256).toBe("f8a23fcec481a0bc9382b2e820a0dbbf574c324bd454d35f82ad0acc8eef1b59");
     expect(built.tasks[0]!.sha256).toBe("8c5e35f7096a5c2e3b7f4a8c4fc3d9a2c9134c6980ca5a01789bfddadc6af916");
-    expect(built.benchmark.sha256).toBe("738b5bca6c8e455b101153c5628048d629069000fe09874a41028c82c9cc67a0");
+    // The Benchmark alone moved once more, when its description stopped saying its tasks are "at"
+    // the upstream commit (it was 738b5bca...). No Task and no profile carries that text, so the
+    // three digests above and the checker's pin table stayed where they were.
+    expect(built.benchmark.sha256).toBe("4d78c13b27d937de0b929c0f02309e5a06b6d5fc584949877950a12c7f79cb08");
     // The slate digest covers names and package refs only, so it does not move.
     expect(built.slateDigest).toBe("sha256:0192806b9856af79819833c8cacd409a52f8ae56352936b0d392c3c463ec504d");
   });

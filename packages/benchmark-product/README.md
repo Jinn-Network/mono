@@ -113,6 +113,10 @@ The service launches Harbor on Colophon's venue.
 
 The service launches Terminal-Bench 2.1 on Colophon's venue.
 
+To bring a Terminal-Bench 2.1 run you made on Harbor yourself, follow the
+[claimant walkthrough](CLAIMANT-WALKTHROUGH.md). It lists every command in
+order, from an empty directory to a bundle checked on a second machine.
+
 ## Terminal-Bench 3.0
 
 The service launches Terminal-Bench 3.0 on Colophon's venue.
@@ -141,6 +145,9 @@ The service launches Inspect eval on Colophon's venue.
 - [Public bundle](./PUBLIC-BUNDLE.md) — frozen
   `benchmark-product-public-bundle/2` layout, citation, trust, privacy,
   limitations, and portable verification.
+- [Claimant walkthrough](./CLAIMANT-WALKTHROUGH.md) — every command of the
+  bring-your-run path for Terminal-Bench 2.1 on Harbor, in order: arms, lock,
+  anchor, the Harbor commands, import, publish, hosting, and the reader's check.
 - [External run-record import](./EXTERNAL-RUN-IMPORT.md) — the per-attempt
   record shape, both dump dialects, the closed import vocabulary, the
   `--template` workflow, and how an imported run publishes as composed `/10`

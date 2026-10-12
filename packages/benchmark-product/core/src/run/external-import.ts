@@ -37,6 +37,7 @@ import {
   deriveEvaluationTask,
   evaluateVerdictRule,
   parseEvaluationSpec,
+  readExternalVerifierMeasurements,
   type EvaluationSpec,
   type MeasurementDeclaration,
   type MeasurementMap,
@@ -791,24 +792,26 @@ function coerceMeasurement(
 }
 
 /**
- * The shortest decimal string that reads back as the same binary64 value, written without an
- * exponent, so it fits the decimal grammar the verdict rule compares. `undefined` for a value
- * with no decimal form (NaN and the infinities).
+ * The decimal string a number is sealed as when a sealed number cannot hold it: the shortest one
+ * that reads back as the same binary64 value, written without an exponent, so it fits the decimal
+ * grammar the verdict rule compares. `undefined` for a value with no decimal form (NaN and the
+ * infinities).
+ *
+ * The rule is not written here. It is the one proposal 0002
+ * (`proposals/0002-external-verifier-grader-family.md`, section 4) gives for a harness reward,
+ * and the profiles package holds its only implementation, inside the reward-map reader the Harbor
+ * reader also calls. That package exports the reader and not the bare rule, so a generic dump's
+ * number is put through it as a one-key reward map. A JSONL number and a Harbor reward of the same
+ * value then seal the same string, and there is one renderer to keep right.
  */
 function decimalStringOf(value: number): string | undefined {
   if (!Number.isFinite(value)) return undefined;
-  // `String()` is already the shortest spelling that round-trips. All that is left is to write
-  // out its exponent, which it uses below 1e-6 and from 1e21 up, as digits.
-  const match = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$/u.exec(String(value));
-  if (match === null) return undefined;
-  const [spelling, sign = "", intDigits = "", fracDigits = "", exponent] = match;
-  if (exponent === undefined) return spelling;
-  const digits = intDigits + fracDigits;
-  /** Where the decimal point falls, counted in digits from the left of `digits`. */
-  const point = intDigits.length + Number(exponent);
-  if (point <= 0) return `${sign}0.${"0".repeat(-point)}${digits}`;
-  if (point >= digits.length) return `${sign}${digits}${"0".repeat(point - digits.length)}`;
-  return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
+  const carried = readExternalVerifierMeasurements({
+    harness: "harbor",
+    measurements: [{ name: "value", type: "number", required: true }],
+    rewards: { value },
+  })["value"];
+  return typeof carried === "string" ? carried : undefined;
 }
 
 /** Canonical form of a decimal-grammar string, so "0.50", "0.5", and "00.5" compare equal. */
