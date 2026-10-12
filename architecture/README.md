@@ -38,6 +38,59 @@ union, and its publication flags must agree with every member. Canary packing, t
 generation, and registry access independently require a catalog-eligible canary group. A directory
 name is never release authority.
 
+## Spec release pin
+
+The protocol's documents are authored in
+[`Jinn-Network/spec`](https://github.com/Jinn-Network/spec), and this repository consumes one
+pinned release of them
+([DR-2026-09-03](../log/decisions/2026-09-03-protocol-spec-repository.md), decision 1). The
+catalog records the pin in two places that must agree:
+
+- `specPin` is `null` or one object: `tag` (the release tag, `v<major>.<minor>.<patch>`),
+  `groups` (the SHA-256 of the signed manifest the release ships for each release group), and
+  `signingKey` (the id of the key that signed those manifests, and the SHA-256 of that key's
+  canonical SPKI PEM).
+- A package whose `schemas`, `profiles`, or `fixtures` are vendored from the pinned release
+  carries `pinned: true`. A package that is not vendored leaves the field out.
+
+`specPin: null` with no `pinned` marker means no release is pinned. The catalog loader refuses a
+marker without a pin, a pin with a release group in which no package is pinned, a pinned package
+whose release group has no manifest digest, and a pinned package with no document surface.
+
+### Syncing a release
+
+[`.github/scripts/sync-spec-release.mjs`](../.github/scripts/sync-spec-release.mjs) is the only
+sanctioned way to change a vendored byte or the pin. Given a release tag it fetches the signed
+manifest the release attaches for each release group and the `documents/` tree at that tag,
+verifies each manifest's DSSE signature against the pinned key and each document against the
+digest its manifest names, places every document through the provenance rows, and writes:
+
+- the documents, into the packages' existing `schemas/`, `profiles/`, and `fixtures/` directories;
+- `architecture/spec-provenance.v1.json`: the release, and for each vendored file its served
+  path, its repository path, its SHA-256, and the release it came from;
+- `architecture/spec-release/`: a byte copy of each signed manifest and its envelope;
+- the catalog's `specPin` and `pinned` markers.
+
+```bash
+# Report what syncing a release would change. Writes nothing.
+node .github/scripts/sync-spec-release.mjs --tag v0.2.0 --check
+# Vendor it.
+node .github/scripts/sync-spec-release.mjs --tag v0.2.0
+```
+
+It refuses and never skips. A missing or failing signature, a document whose digest differs, a
+document no manifest lists, a provenance row the release no longer ships, a document with no
+place in this tree, and a pinned tag that comes back with another manifest are all errors, and a
+refused sync writes nothing.
+
+The signing key's identity is `specPin.signingKey`, and its bytes are read from
+`.github/keys/<key id>.pub`, which must hash to that identity. While the catalog pins nothing,
+pass the identity with `--key-id` and `--public-key-sha256`. A released document that has no
+provenance row yet is an error unless `--adopt` is passed, and `--adopt` places only what the tree
+can show: the file this repository already serves at that path, or, for a path scoped by its
+source package's name, the same relative path inside that package's declared `schemas`,
+`profiles`, or `fixtures`.
+
 ## Ownership and generated views
 
 Task 6's architecture-control validator applies last-match semantics from

@@ -32,6 +32,7 @@ jobs:
           mkdir -p .architecture-control
           node --test \
             .github/scripts/platform-catalog.test.mjs \
+            .github/scripts/sync-spec-release.test.mjs \
             .github/scripts/colophon-publish-manifest.test.mjs \
             .github/scripts/transition-manifest.test.mjs \
             .github/scripts/phase-d-transition-deletion.test.mjs \

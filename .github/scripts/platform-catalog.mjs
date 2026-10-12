@@ -70,6 +70,9 @@ const REQUIRED_PACKAGE_FIELDS = [
   'replacedBy',
 ];
 const PUBLIC_SURFACE_FIELDS = ['schemas', 'profiles', 'fixtures', 'conformance'];
+// The public-surface kinds that hold documents. A conformance entry is an export of code,
+// so it is never vendored from a spec release.
+const VENDORED_SURFACE_FIELDS = ['schemas', 'profiles', 'fixtures'];
 const MANIFEST_EXCLUSION_CLASSIFICATIONS = new Set([
   'vendored',
   'fixture',
@@ -375,6 +378,10 @@ function validateTopLevel(catalog) {
   requireObject(catalog.tierRules, 'tierRules');
   requireObject(catalog.tierRules.allowedDependencies, 'tierRules.allowedDependencies');
   if (!Array.isArray(catalog.packages)) throw new Error('packages must be an array');
+  if (!Object.hasOwn(catalog, 'specPin')) {
+    throw new Error('specPin must be present; it is null while no spec release is pinned');
+  }
+  if (catalog.specPin !== null) requireObject(catalog.specPin, 'specPin');
   if (catalog.resolvableIdentifiers !== undefined && !Array.isArray(catalog.resolvableIdentifiers)) {
     throw new Error('resolvableIdentifiers must be an array');
   }
@@ -521,6 +528,9 @@ function validatePackageShape(pkg, index, catalog, repoRoot) {
       }
     }
   }
+  if ('pinned' in pkg && pkg.pinned !== true) {
+    throw new Error(`${pkg.name}.pinned must be true when present; leave it out for a package that is not vendored`);
+  }
   requireStringArray(pkg.supersedes, `${pkg.name}.supersedes`);
   requireStringArray(pkg.replacedBy, `${pkg.name}.replacedBy`);
   if (['deprecated', 'transitional'].includes(pkg.stability)) {
@@ -533,6 +543,40 @@ function validatePackageShape(pkg, index, catalog, repoRoot) {
   if (!group) throw new Error(`${pkg.name}: unknown release group ${pkg.releaseGroup}`);
   if (!group.publishPolicies.includes(pkg.publishPolicy)) {
     throw new Error(`${pkg.name}: publish policy ${pkg.publishPolicy} is not permitted by ${pkg.releaseGroup}`);
+  }
+}
+
+// DR-2026-09-03 decision 1: the catalog carries the pinned release of Jinn-Network/spec and
+// marks each package whose document surface is vendored from it. The block and the markers
+// are one statement, so they must agree in both directions: `specPin: null` with no marker
+// is the explicit "no release is pinned yet" state, and a pin names at least one pinned
+// package in every release group it carries a manifest digest for.
+function validateSpecPin(catalog) {
+  const pin = catalog.specPin;
+  const pinned = catalog.packages.filter((pkg) => pkg.pinned === true);
+  if (pin === null) {
+    if (pinned.length > 0) {
+      throw new Error(`${pinned[0].name}: marked pinned but the catalog pins no spec release (specPin is null)`);
+    }
+    return;
+  }
+  for (const groupId of Object.keys(pin.groups)) {
+    if (!Object.hasOwn(catalog.releaseGroups, groupId)) {
+      throw new Error(`specPin.groups names unknown release group ${groupId}`);
+    }
+    if (!pinned.some((pkg) => pkg.releaseGroup === groupId)) {
+      throw new Error(`specPin pins release group ${groupId} but no package in it is marked pinned`);
+    }
+  }
+  for (const pkg of pinned) {
+    if (!Object.hasOwn(pin.groups, pkg.releaseGroup)) {
+      throw new Error(
+        `${pkg.name}: marked pinned but specPin carries no manifest digest for its release group ${pkg.releaseGroup}`,
+      );
+    }
+    if (VENDORED_SURFACE_FIELDS.every((field) => pkg.publicSurface[field].length === 0)) {
+      throw new Error(`${pkg.name}: marked pinned but declares no schemas, profiles, or fixtures to vendor`);
+    }
   }
 }
 
@@ -721,6 +765,7 @@ export function validatePlatformCatalog(catalog, { repoRoot, schemaPath = PLATFO
   validateTopLevel(catalog);
   validateDefinitions(catalog, root);
   catalog.packages.forEach((pkg, index) => validatePackageShape(pkg, index, catalog, root));
+  validateSpecPin(catalog);
   validateReleaseGroups(catalog);
   const manifests = validateManifestAgreement(catalog, root);
   validateDependencies(catalog, manifests, root);

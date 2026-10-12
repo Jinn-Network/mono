@@ -391,6 +391,193 @@ test('applies the closed schema contract to top-level, package, and nested objec
   }
 });
 
+const SHA256_A = 'a'.repeat(64);
+const SHA256_B = 'b'.repeat(64);
+
+function specPin(overrides = {}) {
+  return {
+    tag: 'v0.2.0',
+    groups: { 'platform-v1': { manifestSha256: SHA256_A } },
+    signingKey: { keyId: 'jinn-profile-manifest-2026-09', publicKeySha256: SHA256_B },
+    ...overrides,
+  };
+}
+
+// A catalog that pins a release and marks one package with a document surface as vendored.
+function pinnedFixtureCatalog() {
+  const catalog = fixtureCatalog();
+  catalog.specPin = specPin();
+  catalog.packages[0].publicSurface.schemas = ['schemas'];
+  catalog.packages[0].pinned = true;
+  return catalog;
+}
+
+test('the live catalog states that no spec release is pinned yet', () => {
+  const raw = JSON.parse(readFileSync(join(repoRoot, 'architecture/platform-packages.v1.json'), 'utf8'));
+  assert.ok(Object.hasOwn(raw, 'specPin'), 'the unpinned state is written down, not left out');
+  assert.equal(raw.specPin, null);
+  assert.deepEqual(raw.packages.filter((pkg) => 'pinned' in pkg), []);
+  assert.equal(loadPlatformCatalog(repoRoot).specPin, null);
+});
+
+test('a catalog must say whether a spec release is pinned', () => {
+  const catalog = fixtureCatalog();
+  delete catalog.specPin;
+  const root = fixtureRepo({ catalog });
+  try {
+    assert.throws(
+      () => loadPlatformCatalog(root),
+      /schema validation failed at catalog: missing required field specPin/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('accepts a spec pin together with the packages it marks as vendored', () => {
+  const root = fixtureRepo({ catalog: pinnedFixtureCatalog() });
+  try {
+    const catalog = loadPlatformCatalog(root);
+    assert.deepEqual(catalog.specPin, specPin());
+    assert.deepEqual(
+      catalog.packages.filter((pkg) => pkg.pinned === true).map(({ name }) => name),
+      ['@jinn-network/fixture-protocol'],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('self-test: a malformed spec pin block is refused', async (t) => {
+  const cases = [
+    {
+      name: 'unknown field',
+      mutate(catalog) { catalog.specPin.branch = 'main'; },
+      pattern: /schema validation failed at catalog\.specPin: unknown field branch/u,
+    },
+    {
+      name: 'missing signing key',
+      mutate(catalog) { delete catalog.specPin.signingKey; },
+      pattern: /schema validation failed at catalog\.specPin: missing required field signingKey/u,
+    },
+    {
+      name: 'missing key digest',
+      mutate(catalog) { delete catalog.specPin.signingKey.publicKeySha256; },
+      pattern: /schema validation failed at catalog\.specPin\.signingKey: missing required field publicKeySha256/u,
+    },
+    {
+      name: 'no group digest',
+      mutate(catalog) { catalog.specPin.groups = {}; },
+      pattern: /schema validation failed at catalog\.specPin\.groups: expected at least 1 properties/u,
+    },
+    {
+      name: 'a tag that is not a release version',
+      mutate(catalog) { catalog.specPin.tag = 'main'; },
+      pattern: /schema validation failed at catalog\.specPin\.tag: value does not match/u,
+    },
+    {
+      name: 'a tag without the v prefix',
+      mutate(catalog) { catalog.specPin.tag = '0.2.0'; },
+      pattern: /schema validation failed at catalog\.specPin\.tag: value does not match/u,
+    },
+    {
+      name: 'an uppercase manifest digest',
+      mutate(catalog) { catalog.specPin.groups['platform-v1'].manifestSha256 = 'A'.repeat(64); },
+      pattern: /schema validation failed at catalog\.specPin\.groups\.platform-v1\.manifestSha256: value does not match/u,
+    },
+    {
+      name: 'a truncated key digest',
+      mutate(catalog) { catalog.specPin.signingKey.publicKeySha256 = 'b'.repeat(63); },
+      pattern: /schema validation failed at catalog\.specPin\.signingKey\.publicKeySha256: value does not match/u,
+    },
+    {
+      name: 'a key id that is not one path segment',
+      mutate(catalog) { catalog.specPin.signingKey.keyId = '../key'; },
+      pattern: /schema validation failed at catalog\.specPin\.signingKey\.keyId: value does not match/u,
+    },
+    {
+      name: 'a pin that is neither an object nor null',
+      mutate(catalog) { catalog.specPin = 'v0.2.0'; },
+      pattern: /schema validation failed at catalog\.specPin: expected exactly one of 2 schema branches/u,
+    },
+    {
+      name: 'a package marked not pinned',
+      mutate(catalog) { catalog.packages[1].pinned = false; },
+      pattern: /schema validation failed at catalog\.packages\[1\]\.pinned: expected constant true/u,
+    },
+  ];
+  for (const entry of cases) {
+    await t.test(entry.name, () => {
+      const catalog = pinnedFixtureCatalog();
+      entry.mutate(catalog);
+      const root = fixtureRepo({ catalog });
+      try {
+        assert.throws(() => loadPlatformCatalog(root), entry.pattern);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+test('self-test: a spec pin and pinned markers that disagree are refused', async (t) => {
+  // The near miss: the same catalog before any mutation is a valid pinned catalog.
+  const valid = fixtureRepo({ catalog: pinnedFixtureCatalog() });
+  try {
+    assert.doesNotThrow(() => loadPlatformCatalog(valid));
+  } finally {
+    rmSync(valid, { recursive: true, force: true });
+  }
+  const cases = [
+    {
+      name: 'a package marked pinned while no release is pinned',
+      mutate(catalog) { catalog.specPin = null; },
+      pattern: /@jinn-network\/fixture-protocol: marked pinned but the catalog pins no spec release/u,
+    },
+    {
+      name: 'a pinned release group with no pinned package',
+      mutate(catalog) { delete catalog.packages[0].pinned; },
+      pattern: /specPin pins release group platform-v1 but no package in it is marked pinned/u,
+    },
+    {
+      name: 'a pinned package whose release group carries no manifest digest',
+      mutate(catalog) {
+        const experimental = catalog.packages.find(
+          ({ releaseGroup }) => releaseGroup === 'experimental-environment-supply',
+        );
+        experimental.publicSurface.fixtures = ['fixtures'];
+        experimental.pinned = true;
+      },
+      pattern: /@jinn-network\/record-discovery-facts-environments: marked pinned but specPin carries no manifest digest for its release group experimental-environment-supply/u,
+    },
+    {
+      name: 'a pinned package with nothing to vendor',
+      mutate(catalog) {
+        catalog.packages[0].publicSurface.schemas = [];
+        catalog.packages[0].publicSurface.conformance = ['./conformance'];
+      },
+      pattern: /@jinn-network\/fixture-protocol: marked pinned but declares no schemas, profiles, or fixtures to vendor/u,
+    },
+    {
+      name: 'an unknown release group',
+      mutate(catalog) { catalog.specPin.groups['missing-v1'] = { manifestSha256: SHA256_A }; },
+      pattern: /specPin\.groups names unknown release group missing-v1/u,
+    },
+  ];
+  for (const entry of cases) {
+    await t.test(entry.name, () => {
+      const catalog = pinnedFixtureCatalog();
+      entry.mutate(catalog);
+      const root = fixtureRepo({ catalog });
+      try {
+        assert.throws(() => loadPlatformCatalog(root), entry.pattern);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 test('fails closed when the catalog schema uses an unsupported keyword', () => {
   const schema = structuredClone(catalogSchema);
   schema.properties.packages.unenforcedKeyword = true;
@@ -918,6 +1105,7 @@ test('the canonical repository catalog validates its topology without a second m
     'releaseGroups',
     'tierRules',
     'packages',
+    'specPin',
   ]);
   assert.doesNotThrow(() => validatePlatformCatalog(catalog, { repoRoot }));
 });

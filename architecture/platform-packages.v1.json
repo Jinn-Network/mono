@@ -1,5 +1,6 @@
 {
   "catalogVersion": 1,
+  "specPin": null,
   "manifestRoots": [
     {
       "path": "packages",

@@ -28,9 +28,9 @@ import {
   resolveRequestedReleaseGroup,
 } from './platform-catalog.mjs';
 import {
-  CANONICAL_IDENTIFIER_ORIGIN,
   enumeratePublicSurfaceAssets,
   jinnIdentifierServedPath,
+  publicSurfaceServedPath,
 } from './public-surface-assets.mjs';
 
 const MEDIA_TYPES = new Map([
@@ -210,24 +210,7 @@ export function buildProfileRoot({
       // sidecar file itself is simply not part of the served profile root.
       if (asset.relativeSource.endsWith('.sha256')) continue;
       const bytes = readFileSync(absolutePath);
-      const fixture = asset.kind === 'fixtures';
-      const fallbackPath = fixture
-        ? `${pkg.name}/${asset.relativeSource}`
-        : asset.relativeSource;
-      // A document that declares no identity is served exactly as publicly as one that
-      // does, so it answers to the same path law -- and this builder is the layer
-      // public-surface-assets.mjs credits with enforcing that law, which an unguarded
-      // fallback made untrue. The case that matters cannot reach the guarded branch at
-      // all: `declaredClaim` returns null for anything not ending in `.json`, so a
-      // `.gitignore` committed into a declared publicSurface directory -- an ordinary
-      // developer act, not an attack -- can never HAVE a claim. Unguarded it produced an
-      // attested, signed profile root serving `profiles/.gitignore`, and only the deploy
-      // bundle refused it: red on `next` after attestation, instead of here in platform
-      // verification.
-      const servedPath = asset.claim?.servedPath ?? jinnIdentifierServedPath(
-        `${CANONICAL_IDENTIFIER_ORIGIN}${fallbackPath}`,
-        `${pkg.name} public surface document ${asset.relativeSource}`,
-      );
+      const servedPath = publicSurfaceServedPath(asset);
       const claimed = claims.get(servedPath);
       if (claimed) {
         if (claimed !== pkg.name) {
