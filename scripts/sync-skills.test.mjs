@@ -243,6 +243,65 @@ test('--check fails on a dangling symlink under a generated mirror', () => {
   }
 });
 
+// The by-hand advisory is only true for the canonical tree: the generator never writes
+// there. A mirror-side link is the generator's to prune, and telling the contributor to
+// fix it by hand sent them away from the one command that repairs it (#3598).
+const HAND_FIX_ADVISORY = /not generated - fix or remove it by hand/;
+
+test('--check names the canonical tree in the hand-fix advisory for a canonical dangling link', () => {
+  const root = fixture(['eng-day']);
+  try {
+    assert.equal(run(root).status, 0);
+    symlinkSync('../../gone/reference.md', join(root, '.claude', 'skills', 'eng-day', 'reference.md'));
+    const result = run(root, ['--check']);
+    assert.notEqual(result.status, 0);
+    assert.ok(
+      result.stderr.includes(
+        `a dangling symlink under ${join(root, '.claude', 'skills')} is not generated - fix or remove it by hand`,
+      ),
+      result.stderr,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('--check does not print the hand-fix advisory for a mirror-only dangling link', () => {
+  const root = fixture(['eng-day']);
+  try {
+    assert.equal(run(root).status, 0);
+    for (const mirror of MIRRORS) {
+      const dangling = mirrorLink(root, mirror, 'removed-skill');
+      symlinkSync(`${REL}/removed-skill`, dangling);
+      const result = run(root, ['--check']);
+      // Still a failing gate, still reports the drift and the generator command.
+      assert.notEqual(result.status, 0, mirror);
+      assert.ok(result.stderr.includes(`drift: dangling symlink ${dangling} -> `), `${mirror}: ${result.stderr}`);
+      assert.match(result.stderr, /run \.\/scripts\/sync-skills\.sh and commit/, mirror);
+      // But it must not send the contributor to hand-edit a tree the script prunes itself.
+      assert.doesNotMatch(result.stderr, HAND_FIX_ADVISORY, mirror);
+      assert.doesNotMatch(result.stderr, /by hand/, mirror);
+      rmSync(dangling);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('--check still prints the hand-fix advisory when a canonical and a mirror link both dangle', () => {
+  const root = fixture(['eng-day']);
+  try {
+    assert.equal(run(root).status, 0);
+    symlinkSync('../../gone/reference.md', join(root, '.claude', 'skills', 'eng-day', 'reference.md'));
+    symlinkSync(`${REL}/removed-skill`, mirrorLink(root, '.codex/skills', 'removed-skill'));
+    const result = run(root, ['--check']);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, HAND_FIX_ADVISORY);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('write prunes a dangling mirror link and then passes', () => {
   const root = fixture(['eng-day']);
   try {
