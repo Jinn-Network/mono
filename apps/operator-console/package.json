@@ -18,15 +18,15 @@
     "@jinn-network/lifecycle-notifications": "portal:../../packages/lifecycle-notifications",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "lucide-react": "^1.52.0",
-    "next": "16.3.8",
+    "lucide-react": "^1.54.0",
+    "next": "16.4.0",
     "radix-ui": "^1.7.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.63.0",
+    "@playwright/test": "^1.64.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^24.19.1",
     "@types/react": "^19.3.0",
