@@ -57,9 +57,9 @@ The corollary is a stress-test, not an intention: the network *should* be able t
 The surfaces where founder dependence usually hides, and our stance on each:
 
 - **Treasury.** None. There is no Jinn token and no treasury, and the protocol takes no fee.
-- **Governance keys.** No admin keys, pause functions, or upgrade paths reserved for the team.
+- **Governance keys.** No admin keys, pause functions, or upgrade paths reserved for us.
 - **Validator/operator set.** Permissionless. No founder-run nodes carrying disproportionate weight.
-- **Protocol upgrades.** Same governance path as any parameter change. No privileged channel for the team.
+- **Protocol upgrades.** Same governance path as any parameter change. No privileged channel for us.
 - **Brand and identity.** Early network stewards, not founders. The protocol's identity does not route through personal or company brand.
 
 A network you can step out of is the only kind worth running a client on; anything else is rented.
