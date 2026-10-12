@@ -30,9 +30,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "smol-toml": "^1.9.0",
+    "smol-toml": "^1.9.1",
     "twitter-api-v2": "^1.29.1",
-    "viem": "^2.57.3",
+    "viem": "^2.57.4",
     "zod": "^3.23.0"
   },
   "devDependencies": {
