@@ -54,7 +54,7 @@
  * the crash-safety ordering above.
  */
 
-import { BENCHMARKING_METHOD_IDS, parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
+import { BENCHMARKING_METHOD_IDS, parseBenchmark, parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
 import { produceReport, type ProducedReport } from "@jinn-network/benchmarking-aggregate";
 import { readRunAnchorCarriage } from "../anchor/carriage.js";
 import { join } from "node:path";
@@ -71,8 +71,12 @@ import {
   EXTERNAL_IMPORT_CAPABILITY,
   OWNER_CONTROLLED_PUBLICATION_CAPABILITY,
   OWNER_CONTROLLED_PUBLICATION_LIMIT,
+  TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY,
+  TERMINAL_BENCH_21_COMPARABILITY_LIMIT,
   activeCapabilityVector,
+  carriesOfficialTerminalBench21Slate,
   deriveClaimTaskSelection,
+  projectClaimTerminalBench21Comparability,
 } from "@colophon-claims/check";
 import { readRunDisclosureCarriage } from "../disclosure/carriage.js";
 import { buildClaimPackage, writeClaimPackage, type ClaimPackage } from "../report/claim.js";
@@ -268,6 +272,36 @@ export function runReport(
       }
       const importedRun = importedCarriage !== undefined;
 
+      // A run brought onto the official Terminal-Bench 2.1 slate (operator rulings of 2026-10-06,
+      // decisions 2 and 7). Its report declares `terminal-bench-2-1-comparability`: one sealed
+      // sentence, and a claim section projected from the Benchmark's own official-slate extension.
+      // The projection is the checker's, and it is run HERE, before anything is sealed: it holds the
+      // extension and every item to the slate the checker pins, and the import marker to Harbor. A
+      // draft that fails it would be refused by every reader after the single-shot transition
+      // below, so it is refused now, while the operator can still read why.
+      //
+      // A slate run this product drove itself is not imported, declares nothing, and keeps the
+      // older suite sentence its bound runtime derives. The two never meet on one Report unless a
+      // bound runtime was also imported, and then this one follows that one.
+      const benchmarkRecord = parseBenchmark(getSealedBytes(clockedContext.workspaceDir, benchmarkSha256));
+      const officialTerminalBench21Slate = carriesOfficialTerminalBench21Slate(benchmarkRecord);
+      const comparability = importedCarriage !== undefined && officialTerminalBench21Slate
+        ? projectClaimTerminalBench21Comparability({
+          benchmarkRecord,
+          importSourceHarness: importedCarriage.claim.source.harness,
+        })
+        : undefined;
+      if (comparability !== undefined && comparability.section === undefined) {
+        refuse(
+          "record-integrity",
+          `runs.${input.draftId}.terminalBench21Comparability`,
+          `draft ${input.draftId} imported its results onto the official Terminal-Bench 2.1 slate, so its report`
+          + ` declares ${TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY}, but ${comparability.contradiction}; every reader`
+          + " would refuse that bundle, so nothing is sealed",
+        );
+      }
+      const comparabilitySection = comparability?.section;
+
       // BP-20 (spec §7.2): a pure read of this draft's own preview log — every logged preview
       // necessarily precedes this run's lock (module header). `previewed` is `undefined`'s own
       // presence check narrowed alongside `count > 0`, so both branches below can trust
@@ -410,6 +444,8 @@ export function runReport(
             // Issue #3416: a fact about the sealed Run, so every entry of a declaring run declares it
             // and the builder projects every entry's section from the same Run.
             declaresTaskSelection: deriveClaimTaskSelection(runRecord) !== undefined,
+            // A fact about the Benchmark, so every entry of a brought slate run declares it too.
+            officialTerminalBench21Slate,
           })
           : undefined;
         const entryIsDisclosed = composedCapabilities !== undefined
@@ -424,6 +460,12 @@ export function runReport(
         // declaration -- every rollback entry -- the Report and the claim keep the five byte for byte.
         const entryPublicationDisclosed = composedCapabilities !== undefined
           && composedCapabilities.includes(OWNER_CONTROLLED_PUBLICATION_CAPABILITY);
+        // The comparability sentence follows the vector exactly as its section does. Its slot is
+        // directly after `suiteLimits` in both branches below: after the binary-instrument lines,
+        // before the paired-estimate line. Both claim-consistency copies hold it there.
+        const entryIsComparable = composedCapabilities !== undefined
+          && composedCapabilities.includes(TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY);
+        const comparabilityLimits = entryIsComparable ? [TERMINAL_BENCH_21_COMPARABILITY_LIMIT] : [];
         const venueLimits = localVenueLimitsForRun(runRecord, importedRun, entryPublicationDisclosed);
         const venueHonesty = buildLocalVenueHonesty(
           matrixRecord.cells,
@@ -446,12 +488,13 @@ export function runReport(
               ...venueLimits,
               ...inspectLimits,
               ...suiteLimits,
+              ...comparabilityLimits,
               PAIRED_ESTIMATE_LIMITATION,
               ...(previewLimitation === undefined ? [] : [previewLimitation]),
             ]
           : previewLimitation === undefined
-            ? [...venueLimits, ...inspectLimits, ...binaryLimits, ...suiteLimits]
-            : [...venueLimits, ...inspectLimits, ...binaryLimits, ...suiteLimits, previewLimitation];
+            ? [...venueLimits, ...inspectLimits, ...binaryLimits, ...suiteLimits, ...comparabilityLimits]
+            : [...venueLimits, ...inspectLimits, ...binaryLimits, ...suiteLimits, ...comparabilityLimits, previewLimitation];
 
         let produced: ProducedReport;
         try {
@@ -522,6 +565,9 @@ export function runReport(
           ...(entryIsDisclosed ? { disclosure: disclosureCarriage!.disclosure } : {}),
           ...(entryIsImported ? { externalImport: importedCarriage!.claim } : {}),
           ...(entryPublicationDisclosed ? { ownerControlledPublication: OWNER_CONTROLLED_PUBLICATION_LIMIT } : {}),
+          // Declared exactly when the run is imported and on the slate, which is exactly when the
+          // projection above ran and did not refuse.
+          ...(entryIsComparable ? { terminalBench21Comparability: comparabilitySection! } : {}),
           ...(composedCapabilities === undefined ? {} : { composedCapabilities }),
           ...(previewLog !== undefined && previewLog.count > 0
             ? { previewDisclosure: { previewCount: previewLog.count, timestamps: previewLog.previews.map((preview) => preview.at) } }

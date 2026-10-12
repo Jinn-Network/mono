@@ -66,7 +66,7 @@ function entry(token: string, order: number, overrides: Partial<CapabilityEntry>
 }
 
 describe("the registered capabilities", () => {
-  test("exactly six, under their stable wire tokens", () => {
+  test("exactly seven, under their stable wire tokens", () => {
     expect(CAPABILITY_REGISTRY.map((capability) => capability.token)).toEqual([
       "binary-qualification",
       "anchoring",
@@ -74,7 +74,9 @@ describe("the registered capabilities", () => {
       "external-import",
       "task-selection",
       "owner-controlled-publication",
+      "terminal-bench-2-1-comparability",
     ]);
+    expect(CAPABILITY_REGISTRY.map((capability) => capability.order)).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
 
   test("the registry satisfies every invariant", () => {
@@ -170,6 +172,29 @@ describe("the registered capabilities", () => {
     expect(publication.checks).toEqual([]);
     expect(publication.claimSection).toBe("ownerControlledPublication");
     expect(expectedChecks(["owner-controlled-publication"])).toEqual(expectedChecks([]));
+  });
+
+  test("terminal-bench-2-1-comparability adds a sealed sentence and a section, and rides external-import", () => {
+    // The first capability that requires another additive one. It states a fact about a run that
+    // was imported, so a vector naming it without `external-import` does not resolve. No member, no
+    // grammar, no role, and no check of its own: both claim-consistency copies rebuild the section
+    // from the Benchmark's verified official-slate extension and hold the sentence to its slot.
+    const comparability = CAPABILITY_REGISTRY[6]!;
+    expect(comparability.token).toBe("terminal-bench-2-1-comparability");
+    expect(comparability.order).toBe(7);
+    expect(comparability.requires).toEqual(["external-import"]);
+    expect(comparability.conflicts).toEqual([]);
+    expect(comparability.mandatoryFiles).toEqual([]);
+    expect(comparability.memberPatterns).toEqual([]);
+    expect(comparability.refines).toEqual([]);
+    expect(comparability.roleDerivations).toEqual([]);
+    expect(comparability.checks).toEqual([]);
+    expect(comparability.claimSection).toBe("terminalBench21Comparability");
+    expect(expectedChecks(["external-import", "terminal-bench-2-1-comparability"]))
+      .toEqual(expectedChecks(["external-import"]));
+    const refusal = expectRefusal(() => composeClosure(["terminal-bench-2-1-comparability"]));
+    expect(refusal.issues[0]!.message).toContain('"terminal-bench-2-1-comparability"');
+    expect(refusal.issues[0]!.message).toContain('"external-import"');
   });
 });
 
@@ -434,6 +459,8 @@ describe("reader instructions", () => {
       "task-selection": "check@0.2.1",
       // Issue #3401: the sentence ships inside the first checker release (same ruling).
       "owner-controlled-publication": "check@0.2.1",
+      // Operator ruling of 2026-10-06, decision 7: it lands before the first checker release.
+      "terminal-bench-2-1-comparability": "check@0.2.1",
     });
   });
 
@@ -452,6 +479,7 @@ describe("producer-side activation", () => {
     declaresDisclosure: false,
     importedRun: false,
     declaresTaskSelection: false,
+    officialTerminalBench21Slate: false,
   };
   // Interoperability profile section 9.3: a self-run publisher's publication source is
   // owner-controlled. Every bundle this product builds is self-run, so every composed vector
@@ -471,6 +499,7 @@ describe("producer-side activation", () => {
       declaresDisclosure: true,
       importedRun: false,
       declaresTaskSelection: false,
+      officialTerminalBench21Slate: false,
     })).toEqual(["anchoring", "binary-qualification", "disclosure-specification", PUBLICATION]);
     expect(activeCapabilityVector({
       anchoredClosure: true,
@@ -478,7 +507,35 @@ describe("producer-side activation", () => {
       declaresDisclosure: true,
       importedRun: true,
       declaresTaskSelection: true,
+      officialTerminalBench21Slate: false,
     })).toEqual(["anchoring", "binary-qualification", "disclosure-specification", "external-import", PUBLICATION, "task-selection"]);
+    expect(activeCapabilityVector({
+      anchoredClosure: true,
+      projectsBinaryQualification: true,
+      declaresDisclosure: true,
+      importedRun: true,
+      declaresTaskSelection: true,
+      officialTerminalBench21Slate: true,
+    })).toEqual([
+      "anchoring",
+      "binary-qualification",
+      "disclosure-specification",
+      "external-import",
+      PUBLICATION,
+      "task-selection",
+      "terminal-bench-2-1-comparability",
+    ]);
+  });
+
+  test("terminal-bench-2-1-comparability needs the official slate and the import together", () => {
+    // Decision 2 of the 2026-10-06 rulings says every BROUGHT run carries the sentence. A slate run
+    // this product drove itself is not one, and an imported run on another benchmark is not on the
+    // slate, so neither fact alone turns the token on.
+    const COMPARABILITY = "terminal-bench-2-1-comparability";
+    expect(activeCapabilityVector({ ...NONE, officialTerminalBench21Slate: true })).toEqual([PUBLICATION]);
+    expect(activeCapabilityVector({ ...NONE, importedRun: true })).toEqual(["external-import", PUBLICATION]);
+    expect(activeCapabilityVector({ ...NONE, importedRun: true, officialTerminalBench21Slate: true }))
+      .toEqual(["external-import", PUBLICATION, COMPARABILITY]);
   });
 
   test("a task-selection declaration rides every analysis of the run, whatever it projects", () => {
@@ -507,9 +564,18 @@ describe("producer-side activation", () => {
         for (const declaresDisclosure of [false, true]) {
           for (const importedRun of [false, true]) {
             for (const declaresTaskSelection of [false, true]) {
-              const facts = { anchoredClosure, projectsBinaryQualification, declaresDisclosure, importedRun, declaresTaskSelection };
-              expect(() => composeClosure(activeCapabilityVector(facts)), JSON.stringify(facts)).not.toThrow();
-              expect(activeCapabilityVector(facts), JSON.stringify(facts)).toContain(PUBLICATION);
+              for (const officialTerminalBench21Slate of [false, true]) {
+                const facts = {
+                  anchoredClosure,
+                  projectsBinaryQualification,
+                  declaresDisclosure,
+                  importedRun,
+                  declaresTaskSelection,
+                  officialTerminalBench21Slate,
+                };
+                expect(() => composeClosure(activeCapabilityVector(facts)), JSON.stringify(facts)).not.toThrow();
+                expect(activeCapabilityVector(facts), JSON.stringify(facts)).toContain(PUBLICATION);
+              }
             }
           }
         }

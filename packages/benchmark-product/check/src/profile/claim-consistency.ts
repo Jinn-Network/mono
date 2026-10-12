@@ -5,8 +5,9 @@ import { buildClaimPackage, type BuildClaimPackageInput, type ClaimPackage } fro
 import type { ClaimAnchor } from "./anchor-claims.js";
 import type { ClaimDisclosureSection } from "./disclosure.js";
 import type { ClaimExternalImportSection } from "./external-import.js";
-import { EXTERNAL_IMPORT_CAPABILITY, OWNER_CONTROLLED_PUBLICATION_CAPABILITY } from "../capabilities.js";
+import { EXTERNAL_IMPORT_CAPABILITY, OWNER_CONTROLLED_PUBLICATION_CAPABILITY, TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY } from "../capabilities.js";
 import { OWNER_CONTROLLED_PUBLICATION_LIMIT, assertOwnerControlledPublicationLimitations } from "./owner-controlled-publication.js";
+import { TERMINAL_BENCH_21_COMPARABILITY_LIMIT, assertTerminalBench21ComparabilityLimitations, deriveClaimTerminalBench21Comparability } from "./terminal-bench-2-1-comparability.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "./run-results.js";
 import { previewDisclosureSummaryLine } from "./preview-log.js";
 import { venueIsolationPostureForPolicy } from "./isolation.js";
@@ -46,7 +47,7 @@ export function firstDifference(actual: unknown, expected: unknown, path = "clai
 }
 
 export function assertClaimConsistency(input: { readonly claim: ClaimPackage; readonly identities: ClaimRecordIdentities; readonly benchmarkRecord: BenchmarkRecord; readonly runRecord: RunRecord; readonly matrixRecord: MatrixRecord; readonly reportRecord: ReportRecord; readonly draftId: string; readonly assurancePreset: string; readonly additionalLimitations?: readonly string[]; readonly rehearsal?: { readonly previewCount: number; readonly timestamps: readonly string[] }; /** anchor-evidence §7.4: the anchors section re-derived from the carried AnchorEvidence bytes, never read from the claim under test. */ readonly anchors?: readonly ClaimAnchor[]; /** issue #3403: the capability vector a composed bundle's manifest declares, so the rebuilt claim is the composed generation's, with the id, check list, and reader line that vector derives. Read from the BUNDLE, never from the claim under test — that is what makes a section the vector does not declare a difference rather than a tautology. */ readonly composedCapabilities?: BuildClaimPackageInput["composedCapabilities"]; /** disclosure-specification-record design §7 step 10: the disclosure section re-derived from the carried record's own bytes, never read from the claim under test. */ readonly disclosure?: ClaimDisclosureSection; /** issue #3417: the external-import section re-derived from the authenticated marker, never read from the claim under test. */ readonly externalImport?: ClaimExternalImportSection; }): void {
-  const { claim, identities, runRecord, matrixRecord, reportRecord } = input;
+  const { claim, identities, benchmarkRecord, runRecord, matrixRecord, reportRecord } = input;
   if (identities.reportSha256 === undefined) refuse("record-integrity", "claim-consistency", "verified Report identity is absent");
   const plan = runRecord.analysisPlan?.find((entry) => entry.method === reportRecord.method.id && entry.version === reportRecord.method.version);
   const verdictRule = (plan?.parameters as { verdictRule?: unknown } | undefined)?.verdictRule;
@@ -59,7 +60,14 @@ export function assertClaimConsistency(input: { readonly claim: ClaimPackage; re
   const imported = input.composedCapabilities?.includes(EXTERNAL_IMPORT_CAPABILITY) === true;
   // issue #3401: the sixth venue sentence and its section, rebuilt from the declared vector.
   const ownerControlledPublication = input.composedCapabilities?.includes(OWNER_CONTROLLED_PUBLICATION_CAPABILITY) === true;
-  const expected = buildClaimPackage({ draftId: input.draftId, benchmarkSha256: identities.benchmarkSha256, runRecord, runSha256: identities.runSha256, matrixRecord, matrixSha256: identities.matrixSha256, reportRecord, reportSha256: identities.reportSha256, reportEnvelopeSha256: identities.reportEnvelopeSha256, venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, anchors ?? [], undefined, imported, ownerControlledPublication), verificationCommandVerb: "bundle verify", assurance: { preset: input.assurancePreset, resolved: { independence: runRecord.policy.independence, minVerdicts, distinctEvaluator, verdictRule } }, ...(input.rehearsal === undefined ? {} : { previewDisclosure: input.rehearsal }), ...(anchors === undefined ? {} : { anchors }), ...(input.composedCapabilities === undefined ? {} : { composedCapabilities: input.composedCapabilities }), ...(input.disclosure === undefined ? {} : { disclosure: input.disclosure }), ...(input.externalImport === undefined ? {} : { externalImport: input.externalImport }), ...(ownerControlledPublication ? { ownerControlledPublication: OWNER_CONTROLLED_PUBLICATION_LIMIT } : {}) });
+  // The comparability section, rebuilt from the bundle's own Benchmark and import marker and never
+  // from the claim under test. Deriving it is what holds the Benchmark to the pinned official
+  // slate: an extension off the pin, a Task digest off the pin, or an import that does not name
+  // Harbor refuses here, before the claim is compared.
+  const comparability = input.composedCapabilities?.includes(TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY) === true
+    ? deriveClaimTerminalBench21Comparability({ benchmarkRecord, importSourceHarness: input.externalImport?.source.harness })
+    : undefined;
+  const expected = buildClaimPackage({ draftId: input.draftId, benchmarkSha256: identities.benchmarkSha256, runRecord, runSha256: identities.runSha256, matrixRecord, matrixSha256: identities.matrixSha256, reportRecord, reportSha256: identities.reportSha256, reportEnvelopeSha256: identities.reportEnvelopeSha256, venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, anchors ?? [], undefined, imported, ownerControlledPublication), verificationCommandVerb: "bundle verify", assurance: { preset: input.assurancePreset, resolved: { independence: runRecord.policy.independence, minVerdicts, distinctEvaluator, verdictRule } }, ...(input.rehearsal === undefined ? {} : { previewDisclosure: input.rehearsal }), ...(anchors === undefined ? {} : { anchors }), ...(input.composedCapabilities === undefined ? {} : { composedCapabilities: input.composedCapabilities }), ...(input.disclosure === undefined ? {} : { disclosure: input.disclosure }), ...(input.externalImport === undefined ? {} : { externalImport: input.externalImport }), ...(ownerControlledPublication ? { ownerControlledPublication: OWNER_CONTROLLED_PUBLICATION_LIMIT } : {}), ...(comparability === undefined ? {} : { terminalBench21Comparability: comparability }) });
   if (!equal(canonicalJsonBytes(claim), canonicalJsonBytes(expected))) refuse("record-integrity", "claim-consistency", `claim package ${firstDifference(claim, expected) ?? "claim"} is not the exact projection of verified facts`);
   const rehearsalLine = input.rehearsal === undefined ? undefined : previewDisclosureSummaryLine(input.rehearsal);
   const binaryLimitations = reportRecord.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument
@@ -76,14 +84,19 @@ export function assertClaimConsistency(input: { readonly claim: ClaimPackage; re
       ? [PAIRED_ESTIMATE_LIMITATION]
       : [];
   const venueLimits = localVenueLimitsForRun(runRecord, imported, ownerControlledPublication);
+  // The comparability sentence's slot: after the binary-instrument lines, before the
+  // paired-estimate line. Mirrors where core's `report` seals it.
+  const beforeComparability = [...venueLimits, ...(input.additionalLimitations ?? []), ...binaryLimitations];
   const expectedLimitations = [
-    ...venueLimits,
-    ...(input.additionalLimitations ?? []),
-    ...binaryLimitations,
+    ...beforeComparability,
+    ...(comparability === undefined ? [] : [TERMINAL_BENCH_21_COMPARABILITY_LIMIT]),
     ...pairedEstimateLimitation,
     ...(rehearsalLine === undefined ? [] : [rehearsalLine]),
   ];
   assertOwnerControlledPublicationLimitations({ reportLimitations: reportRecord.limitations ?? [], venueLimits, declared: ownerControlledPublication });
+  // The whole-list compare below runs only under its gate, so the capability settles its own
+  // sentence on every bundle: once and in its slot when declared, nowhere when not.
+  assertTerminalBench21ComparabilityLimitations({ reportLimitations: reportRecord.limitations ?? [], precedingLimitations: beforeComparability, declared: comparability !== undefined });
   const posture = venueIsolationPostureForPolicy(runRecord.policy.submissionBaseline?.isolationPolicy);
   // The gate itself is UNCHANGED by the paired-estimate addition (still isolation posture,
   // caller-supplied additionalLimitations, or the existing binary-instrument arm). Deliberately

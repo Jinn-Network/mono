@@ -385,6 +385,14 @@ export function renderVerifiedBundle(
     .join("\n");
   const totalChecks = outcome.total;
   const identity = bundleIdentityLabel(result);
+  // The Run digest in the one form the other surfaces print it: `lock` prints `run <64 hex>` and
+  // the report page prints the Run SHA-256 the same way, so a reader holds the three against each
+  // other as strings. That is why this line is bare hex where `Bundle:` above it carries a
+  // `sha256:` prefix. The evidence-native (`/5`) result carries no Run digest, so it prints no
+  // line.
+  const run = "runSha256" in result && result.runSha256 !== undefined
+    ? `\nRun: ${result.runSha256}`
+    : "";
   const anchors = "anchors" in result && result.anchors !== undefined
     ? renderAnchorReport(result.anchors)
     : "";
@@ -426,7 +434,7 @@ export function renderVerifiedBundle(
     : `Recomputed: ${outcome.passed} of ${totalChecks} checks passed, ${outcome.notFetched} not fetched`;
   return withoutInternalProtocolIdentifiers(`${verdictLine}
 Bundle: ${identity}
-Format: ${result.format}
+Format: ${result.format}${run}
 
 ${caveats}
 

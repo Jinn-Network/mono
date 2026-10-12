@@ -98,7 +98,13 @@ import {
 } from "../runtime/inspect/binary-judge-manifest.js";
 import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
-import { activeCapabilityVector, deriveClaimTaskSelection, derivePublicComparison, EXTERNAL_IMPORT_BUNDLE_MEMBER } from "@colophon-claims/check";
+import {
+  activeCapabilityVector,
+  carriesOfficialTerminalBench21Slate,
+  deriveClaimTaskSelection,
+  derivePublicComparison,
+  EXTERNAL_IMPORT_BUNDLE_MEMBER,
+} from "@colophon-claims/check";
 
 const ROLE_ORDER: readonly BundleV4EvidenceRole[] = BUNDLE_V4_EVIDENCE_ROLES;
 
@@ -1118,6 +1124,10 @@ function recordClosure(input: MaterializeBundleInput): {
       record.sha256,
       getSealedBytes(workspaceDir, record.sha256),
     ])),
+    // The Terminal-Bench 2.1 projector is keyed on the claim section `report` sealed, the same
+    // fact the checker keys it on, so the page rendered here is the page it rebuilds. A claim
+    // sealed in a rollback format carries no such section and renders the page it always did.
+    ...(claim.terminalBench21Comparability === undefined ? {} : { officialSuite: claim.terminalBench21Comparability }),
   });
   // Hoisted above the render because `buildPublicAssets` now needs it: the format selects which
   // presentation generation's page is rendered, and the verifier byte-compares the result against
@@ -1128,8 +1138,9 @@ function recordClosure(input: MaterializeBundleInput): {
   // The vector comes from the registry's activation predicates over the facts derived above --
   // the same facts, and the same predicates, `report` sealed the claim's sections from. An
   // imported run is a fourth fact (issue #3417), and a Run declaring its task selection a fifth
-  // (issue #3416). `composedFormat: false` at `report` still seals
-  // a legacy claim, and this function then emits the enumerated cell that claim implies.
+  // (issue #3416). A Benchmark carrying the official Terminal-Bench 2.1 slate is a sixth, and with
+  // the import it declares `terminal-bench-2-1-comparability`. `composedFormat: false` at `report`
+  // still seals a legacy claim, and this function then emits the enumerated cell that claim implies.
   const legacyFormat = anchored
     ? binaryQualification
       ? disclosed
@@ -1188,6 +1199,7 @@ function recordClosure(input: MaterializeBundleInput): {
           declaresDisclosure: disclosureCarriage !== undefined,
           importedRun: importedCarriage !== undefined,
           declaresTaskSelection: deriveClaimTaskSelection(run) !== undefined,
+          officialTerminalBench21Slate: carriesOfficialTerminalBench21Slate(benchmark),
         }),
       }
       : { format: legacyFormat }),

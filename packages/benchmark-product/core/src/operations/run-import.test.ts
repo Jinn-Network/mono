@@ -10,27 +10,42 @@
  * special case downstream, these tests would be the first thing to break.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { defineBenchmark } from "@jinn-network/benchmarking-interop";
 import { expectedCellSet, parseBenchmark, parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
-import { deriveEvaluationTask } from "@jinn-network/task-execution-profiles";
+import {
+  buildPredictionForecastProfile,
+  deriveEvaluationTask,
+  parseEvaluationSpec,
+  sealEvaluationSpec,
+  sealTaskProfile,
+} from "@jinn-network/task-execution-profiles";
+import { sealTask } from "@jinn-network/task-execution-protocol";
 import { EVALUATOR_REQUIREMENT_KEY } from "../venue/provisioner.js";
-import { readExternalRunRecordsCsv, type ExternalRunRecord } from "../intake/external-run-records.js";
+import {
+  readExternalRunRecords,
+  readExternalRunRecordsCsv,
+  type ExternalRunRecord,
+} from "../intake/external-run-records.js";
+import { buildSampleBenchmark } from "../intake/sample.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import { requireWorkspaceAuthorship } from "../run/publication-authority.js";
 import { externalRunImportMarker } from "../run/imported-run.js";
 import { readRunState, writeRunState } from "../run/state.js";
 import {
+  dumpIdentityFromPath,
   EXTERNAL_RUN_IMPORT_DECLARATION_PROTOCOL,
   EXTERNAL_RUN_IMPORT_EVALUATOR_ID,
   ExternalRunImportDeclarationSchema,
 } from "../run/external-import.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
-import { readVerdictEnvelope } from "../venue/signing.js";
-import { getSealedBytes } from "../workspace/sealed-store.js";
+import { readOrderedVerdictMeasurements, readVerdictEnvelope } from "../venue/signing.js";
+import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { armAdd } from "./arms.js";
+import { attachBenchmarkToDraft } from "./attach.js";
 import type { OperationContext } from "./context.js";
 import { createDraft, readDraftDocument, updateDraft } from "./drafts.js";
 import { importRunRecords } from "./run-import.js";
@@ -657,6 +672,222 @@ describe("run.import — imported measurements are typed against the sealed spec
     if (outcome.ok) return;
     expect(outcome.error.detail).toMatch(/madeUp/u);
   }, 60_000);
+});
+
+describe("run.import, a declared number measurement", () => {
+  /**
+   * The ladder up to a LOCKED draft whose three sample Tasks bind a spec declaring one `number`
+   * measurement, `reward`, under the guarded rule the official Terminal-Bench 2.1 slate is ruled
+   * to seal: pass at 1, fail at 0, inconclusive for any other value. Everything but the
+   * measurements and the rule is the bundled sample's own spec and Tasks.
+   */
+  async function lockedRewardRun(clock: () => string, draftId = "draft-1"): Promise<readonly string[]> {
+    initWorkspace(contextFor(clock));
+    createDraft(contextFor(clock), { draftId, name: "Reward Import Test" });
+    const sample = await buildSampleBenchmark();
+    const spec = sealEvaluationSpec({
+      ...parseEvaluationSpec(sample.evaluationSpec.bytes),
+      measurements: [
+        { name: "reward", type: "number", required: true },
+        { name: "note", type: "string", required: false },
+      ],
+      verdictRule: {
+        all: [
+          {
+            inconclusiveWhen: {
+              not: {
+                any: [
+                  { threshold: { measurement: "reward", op: "eq", value: 0 } },
+                  { threshold: { measurement: "reward", op: "eq", value: 1 } },
+                ],
+              },
+            },
+            class: "non-binary-reward",
+          },
+          { threshold: { measurement: "reward", op: "eq", value: 1 } },
+        ],
+      },
+      unscorable: [{ name: "non-binary-reward", disposition: "recorded-inconclusive" }],
+    });
+    const evaluationSpecSha256 = putSealedBytes(workspaceDir, spec.bytes);
+    putSealedBytes(workspaceDir, sealTaskProfile(buildPredictionForecastProfile()).bytes);
+    const tasks = sample.tasks.map((task) => {
+      const source = JSON.parse(new TextDecoder().decode(task.bytes)) as Record<string, unknown>;
+      const bytes = sealTask({
+        ...source,
+        evaluation: { name: "evaluation-spec.json", digest: { sha256: evaluationSpecSha256 } },
+      });
+      return { bytes, digest: `sha256:${putSealedBytes(workspaceDir, bytes)}` as const };
+    });
+    const benchmark = defineBenchmark(tasks, {
+      name: "reward-import-test",
+      description: "Sample tasks bound to a spec that declares one number measurement.",
+      version: "1.0.0",
+    });
+    attachBenchmarkToDraft(workspaceDir, draftId, putSealedBytes(workspaceDir, benchmark.bytes), clock());
+    armAdd(contextFor(clock), { draftId, armId: "baseline", pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } });
+    armAdd(contextFor(clock), { draftId, armId: "sample", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } });
+    const quoted = await runQuote(contextFor(clock), { draftId });
+    expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
+    const locked = runLock(contextFor(clock), { draftId });
+    expect(locked.ok, JSON.stringify(locked)).toBe(true);
+
+    const runState = readRunState(workspaceDir, draftId)!;
+    runOpenAt = runState.lockedAt!;
+    const document = readDraftDocument(workspaceDir, draftId);
+    if (document.spec.taskSet.kind !== "benchmark") throw new Error("unreachable");
+    const cellKeys = expectedCellSet(
+      parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256)),
+      parseRun(getSealedBytes(workspaceDir, runState.runSha256!)),
+    ).map((coord) => coord.cellKey);
+    expect(cellKeys.length).toBe(6);
+    return cellKeys;
+  }
+
+  /** One JSONL line for a `graded` row, written the way a harness would write it: a JSON number
+   * stays a JSON number in the file, so `0.5` reaches the reader as the float it is. */
+  function rewardLine(cellKey: string, measurements: Record<string, string | number>): string {
+    return JSON.stringify({
+      cellKey,
+      outcome: "graded",
+      startedAt: runOpenAt,
+      endedAt: runOpenAt,
+      durationMs: 0,
+      evidence: [{ name: "result", path: writeEvidence(cellKey, "result.json", `{"cell":"${cellKey}"}`) }],
+      measurements,
+    });
+  }
+
+  /** Imports a JSONL dump file through the same two calls `run import --file` makes. */
+  function importDumpFile(clock: () => string, lines: readonly string[]) {
+    const file = join(evidenceRoot, "records.jsonl");
+    writeFileSync(file, `${lines.join("\n")}\n`);
+    const text = new TextDecoder().decode(new Uint8Array(readFileSync(file)));
+    const records = readExternalRunRecords(text, "jsonl");
+    return importRunRecords(contextFor(clock), {
+      draftId: "draft-1",
+      records,
+      source: SOURCE,
+      evidenceRoot,
+      dump: dumpIdentityFromPath(file, records),
+    });
+  }
+
+  test("a fractional measurement is sealed as a decimal string and judged by the sealed rule", async () => {
+    const clock = makeClock();
+    const cellKeys = await lockedRewardRun(clock);
+    // `0.5`, `"0.5"`, `"0.50"`, and one ten-millionth, then the two whole values the rule grades.
+    const supplied: readonly (string | number)[] = [0.5, "0.5", "0.50", 1e-7, 1, 0];
+    const imported = await importDumpFile(clock, cellKeys.map((cellKey, index) =>
+      rewardLine(cellKey, { reward: supplied[index]! })));
+    expect(imported.ok, JSON.stringify(imported)).toBe(true);
+    if (!imported.ok) return;
+    expect(imported.result.written).toEqual({ graded: 6, ungradeable: 0, notDelivered: 0 });
+    // Six evidence files of this many bytes each; the operation reports what it carried.
+    expect(imported.result.evidenceBytes).toBe(cellKeys.reduce((total, cellKey) =>
+      total + new TextEncoder().encode(`{"cell":"${cellKey}"}`).length, 0));
+
+    const collected = await runCollect(contextFor(clock), { draftId: "draft-1" });
+    expect(collected.ok, JSON.stringify(collected)).toBe(true);
+    if (!collected.ok) return;
+    const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
+    const sealed = cellKeys.map((cellKey) => {
+      const cell = matrix.cells.find((candidate) => candidate.cellKey === cellKey)!;
+      expect(cell.outcome, cellKey).toBe("judged");
+      const envelope = getSealedBytes(workspaceDir, cell.verdicts[0]!.slice("sha256:".length));
+      return {
+        reward: readOrderedVerdictMeasurements(envelope).find((measurement) => measurement.name === "reward")!.value,
+        verdict: readVerdictEnvelope(envelope).verdict,
+      };
+    });
+    expect(sealed).toEqual([
+      { reward: "0.5", verdict: "inconclusive" },
+      { reward: "0.5", verdict: "inconclusive" },
+      { reward: "0.50", verdict: "inconclusive" },
+      { reward: "0.0000001", verdict: "inconclusive" },
+      { reward: 1, verdict: "pass" },
+      { reward: 0, verdict: "fail" },
+    ]);
+  }, 120_000);
+
+  test("a value the sealer refuses is refused before the run leaves locked, and the draft stays importable", async () => {
+    const clock = makeClock();
+    const cellKeys = await lockedRewardRun(clock);
+    // An unpaired surrogate types as a string and no canonical JSON document can carry it. The
+    // verdict statement is sealed after the `locked -> running` transition, which has no way
+    // back, so a refusal there would strand the run for good.
+    const refused = await importDumpFile(clock, cellKeys.map((cellKey, index) =>
+      rewardLine(cellKey, index === 3 ? { reward: 1, note: "\ud800" } : { reward: 1 })));
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.code).toBe("validation");
+    expect(refused.error.detail).toContain(cellKeys[3]!);
+    expect(refused.error.detail).toContain("cannot be sealed");
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+    expect(readRunJournalEntries(workspaceDir, "draft-1")).toHaveLength(0);
+    expect(readRunState(workspaceDir, "draft-1")?.launchedAt).toBeUndefined();
+
+    const imported = await importDumpFile(clock, cellKeys.map((cellKey) => rewardLine(cellKey, { reward: 1 })));
+    expect(imported.ok, JSON.stringify(imported)).toBe(true);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("running");
+  }, 120_000);
+
+  test("records that cannot be hashed as given are refused before the run leaves locked", async () => {
+    const clock = makeClock();
+    const cellKeys = await lockedRewardRun(clock);
+    // No `dump` identity is supplied here, so the operation hashes the canonical JSON of the
+    // records itself, and canonical JSON cannot carry the float `0.5`. That hash used to be taken
+    // after the transition.
+    const refused = await importRunRecords(contextFor(clock), {
+      draftId: "draft-1",
+      records: readExternalRunRecords(`${cellKeys.map((cellKey) => rewardLine(cellKey, { reward: 0.5 })).join("\n")}\n`, "jsonl"),
+      source: SOURCE,
+      evidenceRoot,
+    });
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.code).toBe("validation");
+    expect(refused.error.detail).toContain("dump identity");
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+    expect(readRunJournalEntries(workspaceDir, "draft-1")).toHaveLength(0);
+    expect(readRunState(workspaceDir, "draft-1")?.launchedAt).toBeUndefined();
+  }, 120_000);
+
+  test("the aggregate evidence cap is the caller's to set, and a breach leaves the run locked", async () => {
+    const clock = makeClock();
+    const cellKeys = await lockedRewardRun(clock);
+    const lines = cellKeys.map((cellKey) => rewardLine(cellKey, { reward: 1 }));
+    const carried = cellKeys.reduce((total, cellKey) =>
+      total + new TextEncoder().encode(`{"cell":"${cellKey}"}`).length, 0);
+    const file = join(evidenceRoot, "records.jsonl");
+    writeFileSync(file, `${lines.join("\n")}\n`);
+    const records = readExternalRunRecords(`${lines.join("\n")}\n`, "jsonl");
+
+    const refused = await importRunRecords(contextFor(clock), {
+      draftId: "draft-1",
+      records,
+      source: SOURCE,
+      evidenceRoot,
+      dump: dumpIdentityFromPath(file, records),
+      maxAggregateEvidenceBytes: carried - 1,
+    });
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.detail).toContain(`above the ${carried - 1}-byte cap`);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+
+    const imported = await importRunRecords(contextFor(clock), {
+      draftId: "draft-1",
+      records,
+      source: SOURCE,
+      evidenceRoot,
+      dump: dumpIdentityFromPath(file, records),
+      maxAggregateEvidenceBytes: carried,
+    });
+    expect(imported.ok, JSON.stringify(imported)).toBe(true);
+    if (!imported.ok) return;
+    expect(imported.result.evidenceBytes).toBe(carried);
+  }, 120_000);
 });
 
 describe("run.import — a refused dump leaves the draft importable", () => {

@@ -207,4 +207,40 @@ describe("declaration is authoritative", () => {
       message: expect.stringContaining("taskSelection"),
     });
   });
+
+  test("declared without its requirement: terminal-bench-2-1-comparability does not resolve without external-import", async () => {
+    // The sentence states a fact about an imported run, so the registry makes the token require
+    // `external-import`. A vector naming it alone is refused at resolution, before any member is read.
+    const bundleDir = await composedGolden();
+    // The producer's own manifest builder resolves the vector, so it cannot seal this one at all.
+    expect(() => reseal(bundleDir, ["terminal-bench-2-1-comparability"]))
+      .toThrow(/capability "terminal-bench-2-1-comparability" requires "external-import"/u);
+    // A manifest written by hand reaches the reader, which refuses it the same way.
+    const manifest = json(bundleDir, "bundle.json");
+    manifest["capabilities"] = ["terminal-bench-2-1-comparability"];
+    writeFileSync(join(bundleDir, "bundle.json"), canonicalJsonBytes(manifest as never));
+    expect(await refusal(bundleDir)).toEqual({
+      path: "bundle.manifest.capabilities",
+      message: expect.stringContaining('capability "terminal-bench-2-1-comparability" requires "external-import"'),
+    });
+  });
+
+  test("declared without the fact: terminal-bench-2-1-comparability over a Benchmark that is not the official slate is refused", async () => {
+    // The capability has no member, so the member closure has nothing to miss. The golden Benchmark
+    // carries no official-suite-slate/v1 extension, so there is no slate for the section to project
+    // and the sentence would be false. Refused on the vector, before any claim is rebuilt. The
+    // marker file is planted only so the vector's `external-import` passes the member closure and
+    // the reader reaches the binding.
+    const bundleDir = await composedGolden();
+    writeFileSync(join(bundleDir, "external-import.json"), "{}");
+    reseal(
+      bundleDir,
+      ["external-import", "terminal-bench-2-1-comparability"],
+      [...memberPaths(bundleDir), "external-import.json"],
+    );
+    expect(await refusal(bundleDir)).toEqual({
+      path: "bundle.manifest.capabilities",
+      message: expect.stringContaining("carries no official-suite-slate/v1 extension naming Terminal-Bench 2.1"),
+    });
+  });
 });

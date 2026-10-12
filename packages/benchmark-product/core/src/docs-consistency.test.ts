@@ -32,6 +32,8 @@ import {
   BEACON_SOURCES,
   MAX_BEACON_ROUND,
   OWNER_CONTROLLED_PUBLICATION_LIMIT,
+  TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY,
+  TERMINAL_BENCH_21_COMPARABILITY_LIMIT,
   expectedChecks,
 } from "@colophon-claims/check";
 import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
@@ -335,6 +337,25 @@ describe("product documentation consistency", () => {
       expect(guide, sentence).toContain(`\n- ${sentence}\n`);
     }
     expect(read(bundleReadmePath)).toContain(`\n> ${OWNER_CONTROLLED_PUBLICATION_LIMIT}\n`);
+  });
+
+  it("mirrors the Terminal-Bench 2.1 comparability sentence verbatim, and names its token", () => {
+    // The sentence freezes at the first checker publish. Both documents quote it, so an edit to
+    // either copy, or to the constant, fails here rather than drifting apart on a reader's screen.
+    const guide = read(externalVerificationPath);
+    const bundle = read(bundleReadmePath);
+    expect(guide).toContain(`\n- ${TERMINAL_BENCH_21_COMPARABILITY_LIMIT}\n`);
+    expect(bundle).toContain(`\n> ${TERMINAL_BENCH_21_COMPARABILITY_LIMIT}\n`);
+    for (const document of [guide, bundle]) {
+      expect(document).toContain(`\`${TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY}\``);
+      expect(document).toContain("`terminalBench21Comparability`");
+    }
+    // The capability table states a count and one row per registered token.
+    expect(CAPABILITY_REGISTRY).toHaveLength(7);
+    expect(bundle).toContain("\nSeven capabilities are registered.");
+    for (const capability of CAPABILITY_REGISTRY) {
+      expect(bundle, capability.token).toContain(`\n| \`${capability.token}\` | `);
+    }
   });
 
   it("files the domain-publication lookup under tools the reader can run (issue #3692)", () => {

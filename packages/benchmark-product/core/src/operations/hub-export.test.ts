@@ -1,4 +1,8 @@
-import { parseMatrix } from "@jinn-network/benchmarking-records";
+import { parseBenchmark, parseMatrix, parseReport } from "@jinn-network/benchmarking-records";
+import {
+  TERMINAL_BENCH_21_COMPARABILITY_LIMIT,
+  carriesOfficialTerminalBench21Slate,
+} from "@colophon-claims/check";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +25,7 @@ import { runCollect } from "./run-collect.js";
 import { runLaunch } from "./run-launch.js";
 import { runLock } from "./run-lock.js";
 import { runQuote } from "./run-quote.js";
+import { runReport } from "./report.js";
 import { requireRunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { prepareTerminalBench21Draft } from "../runtime/testing/terminal-bench-2-1-draft.js";
@@ -398,6 +403,23 @@ describe("Harbor Hub export", () => {
     expect(exported.result.instructions).toContain("harbor upload --public");
     expect(exported.result.instructions).toContain("uv run lb submit <hub-url>");
     expect(exported.result.instructions).toContain(COMMUNITY_SUBMISSIONS_CLOSED_SENTENCE);
+
+    // This is a slate run the product drove itself, not a brought run. Its Benchmark keeps the
+    // official-slate extension, and its report still declares no `terminal-bench-2-1-comparability`:
+    // the claim carries no section, and neither the signed Report nor the claim carries the
+    // sentence that says a run was imported from a Harbor jobs directory.
+    const reported = await runReport(context, { draftId: "ready" });
+    expectOk("runReport", reported);
+    if (!reported.ok) return;
+    const claim = reported.result.claimPackage;
+    expect(carriesOfficialTerminalBench21Slate(
+      parseBenchmark(getSealedBytes(workspaceDir, claim.records.benchmarkSha256)),
+    )).toBe(true);
+    expect(claim.externalImport).toBeUndefined();
+    expect(claim.terminalBench21Comparability).toBeUndefined();
+    expect(claim.limitations).not.toContain(TERMINAL_BENCH_21_COMPARABILITY_LIMIT);
+    expect(parseReport(getSealedBytes(workspaceDir, reported.result.reportSha256)).limitations ?? [])
+      .not.toContain(TERMINAL_BENCH_21_COMPARABILITY_LIMIT);
   }, 120_000);
 });
 

@@ -1,6 +1,14 @@
 import { describe, expect, test } from "vitest";
 import { parseBenchmark } from "@jinn-network/benchmarking-records";
 import { TaskSpecificationSchema } from "@jinn-network/task-execution-protocol";
+import {
+  OFFICIAL_SUITE_SLATE_EXTENSION,
+  SUITE_COVERAGE as CHECKER_SUITE_COVERAGE,
+  TERMINAL_BENCH_21_PINS,
+  coverageFromSelectedNames as checkerCoverageFromSelectedNames,
+  deriveClaimTerminalBench21Comparability,
+  namedSliceTaskNames as checkerNamedSliceTaskNames,
+} from "@colophon-claims/check";
 import { BenchmarkProductError } from "../errors.js";
 import {
   TERMINAL_BENCH_21_ITEM_PROFILE_URI,
@@ -16,6 +24,8 @@ import {
   TERMINAL_BENCH_21_UPSTREAM_REPOSITORY,
 } from "./terminal-bench-2-1-slate.js";
 import { TERMINAL_BENCH_2_1_DATASET_ID, TERMINAL_BENCH_2_1_DATASET_REF } from "../runtime/terminal-bench-2-1/manifest.js";
+import { SUITE_COVERAGE } from "../runtime/suite-protocol/comparability.js";
+import { coverageFromSelectedNames, namedSliceTaskNames } from "../runtime/suite-protocol/manifest.js";
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
@@ -115,5 +125,61 @@ describe("Terminal-Bench 2.1 official slate pin", () => {
       expect((error as BenchmarkProductError).code).toBe("validation");
       expect((error as BenchmarkProductError).message).toMatch(/not in the official slate/u);
     }
+  });
+});
+
+/**
+ * The checker carries a generated copy of this slate (`check/src/profile/terminal-bench-2-1-pins.ts`,
+ * written by `core/scripts/generate-terminal-bench-2-1-pins.mjs`), and a bundle that declares
+ * `terminal-bench-2-1-comparability` is held to it. The builder stays here, so this is where the
+ * two are compared: any change that moves a Task digest fails here until the table is regenerated
+ * in the same change.
+ */
+describe("the checker's pinned copy of the official slate", () => {
+  test("names the same dataset, upstream commit, and slate digest as the builder", () => {
+    expect(OFFICIAL_SUITE_SLATE_EXTENSION).toBe(TERMINAL_BENCH_21_OFFICIAL_SLATE_EXTENSION);
+    expect({ ...TERMINAL_BENCH_21_PINS, tasks: undefined }).toEqual({
+      protocol: "terminal-bench-2.1",
+      datasetId: TERMINAL_BENCH_2_1_DATASET_ID,
+      datasetRevision: TERMINAL_BENCH_2_1_DATASET_REF,
+      upstreamRepository: TERMINAL_BENCH_21_UPSTREAM_REPOSITORY,
+      upstreamCommit: TERMINAL_BENCH_21_UPSTREAM_COMMIT,
+      slateDigest: terminalBench21SlateDigest(),
+      datasetTaskCount: TERMINAL_BENCH_21_OFFICIAL_TASK_COUNT,
+      tasks: undefined,
+    });
+  });
+
+  test("pins every official task, in slate order, at the Task digest the builder seals", () => {
+    const built = buildTerminalBench21Tasks(officialTerminalBench21TaskNames());
+    expect(TERMINAL_BENCH_21_PINS.tasks).toEqual(
+      built.tasks.map((task) => ({ name: task.taskName, taskSha256: task.sha256 })),
+    );
+  });
+
+  test("every Benchmark the builder seals projects through the checker's pin", () => {
+    for (const input of [
+      { coverage: "one_task" },
+      { coverage: "ten_task" },
+      { coverage: "full" },
+      { taskNames: ["write-compressor", "qemu-startup"] },
+    ] as const) {
+      const built = buildTerminalBench21Tasks(input);
+      expect(deriveClaimTerminalBench21Comparability({
+        benchmarkRecord: parseBenchmark(built.benchmark.bytes),
+        importSourceHarness: "harbor",
+      })).toMatchObject({
+        coverage: built.coverage,
+        selectedTaskCount: built.selectedTaskNames.length,
+        datasetTaskCount: 89,
+        slateDigest: built.slateDigest,
+      });
+    }
+  });
+
+  test("the coverage helpers are the checker's, re-exported, and the coverage words agree", () => {
+    expect(namedSliceTaskNames).toBe(checkerNamedSliceTaskNames);
+    expect(coverageFromSelectedNames).toBe(checkerCoverageFromSelectedNames);
+    expect(SUITE_COVERAGE).toEqual(CHECKER_SUITE_COVERAGE);
   });
 });

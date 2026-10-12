@@ -123,7 +123,9 @@ export type ExternalRunImportProblemCode = (typeof EXTERNAL_RUN_IMPORT_PROBLEMS)
 
 /** DoS bounds on an operator-supplied dump (issue #3417). A 10k-row cap is well above any
  * sealed slate this product currently runs, and the two byte caps keep one hostile evidence
- * tree from filling the workspace CAS. */
+ * tree from filling the workspace CAS. The aggregate figure is the DEFAULT: a caller that knows
+ * how much evidence its run legitimately carries passes its own
+ * (`PreflightExternalRunImportInput.maxAggregateEvidenceBytes`). */
 export const EXTERNAL_IMPORT_MAX_ROWS = 10_000;
 export const EXTERNAL_IMPORT_MAX_EVIDENCE_FILE_BYTES = 8 * 1024 * 1024;
 export const EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES = 64 * 1024 * 1024;
@@ -152,11 +154,14 @@ export function dumpIdentityFromPath(
 }
 
 /** The closing three lines are load-bearing: they name the ONLY sanctioned way to not have a
- * result for a slot, so an operator reading the refusal cannot conclude that dropping it is one. */
+ * result for a slot, so an operator reading the refusal cannot conclude that dropping it is one.
+ * The last line says "accounting", not "denominator": such a slot is one of its arm's planned
+ * slots and is counted there, while the pass rate is taken over judged cells only, and the
+ * report page lists the slot under "Not in the denominator". */
 const REMEDY =
   "Every expected slot must appear exactly once. There is no exclude flag.\n" +
   'A slot you cannot supply is recorded with outcome "error", "timeout", or "unrun"\n' +
-  "and a non-blank reason; it is counted in the denominator exactly like every other slot.";
+  "and a non-blank reason; it stays in the run's accounting as one of its arm's planned slots.";
 
 /** Slot-level labels are padded to a common width so the keys line up under each other. */
 const LABEL_WIDTH = 15;
@@ -485,6 +490,8 @@ export interface PreparedImportCell {
 /** The resolved plan, in expected-cell order — one entry per `plan.cells` entry. */
 export interface ExternalRunImportPreflight {
   readonly cells: readonly PreparedImportCell[];
+  /** Total bytes of every evidence file read: what the aggregate cap was measured against. */
+  readonly evidenceBytes: number;
 }
 
 export interface PreflightExternalRunImportInput {
@@ -493,6 +500,9 @@ export interface PreflightExternalRunImportInput {
   readonly runRecord: RunRecord;
   /** Directory a relative `evidence[].path` resolves against, and may not escape. */
   readonly evidenceRoot: string;
+  /** The most evidence, in bytes, the whole import may carry. Defaults to
+   * `EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES`. The per-file cap is not the caller's to move. */
+  readonly maxAggregateEvidenceBytes?: number;
 }
 
 /** Resolves everything the write path would otherwise resolve mid-write. Writes nothing. */
@@ -500,7 +510,17 @@ export function preflightExternalRunImport(
   input: PreflightExternalRunImportInput,
 ): ExternalRunImportPreflight {
   const { workspaceDir, plan, runRecord, evidenceRoot } = input;
-  const budget = { used: 0 };
+  const max = input.maxAggregateEvidenceBytes ?? EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES;
+  // A cap that is not a whole byte count would never trip (`used > NaN` is false), which would
+  // switch the bound off without anyone having asked for that.
+  if (!Number.isSafeInteger(max) || max < 0) {
+    refuse(
+      "validation",
+      "maxAggregateEvidenceBytes",
+      `the aggregate evidence cap must be a whole number of bytes, got ${String(max)}`,
+    );
+  }
+  const budget: EvidenceBudget = { used: 0, max };
   const cells = plan.cells.map((cell): PreparedImportCell => {
     const { coord, cellKey, outcome } = cell;
     // `unrun` claims no attempt at all, so it needs neither an arm nor evidence.
@@ -516,7 +536,13 @@ export function preflightExternalRunImport(
     if (outcome === "ungradeable") return { cell, arm, evidence };
     return { cell, arm, evidence, grading: prepareGrading(workspaceDir, cell) };
   });
-  return { cells };
+  return { cells, evidenceBytes: budget.used };
+}
+
+/** Evidence bytes read so far across the whole import, against the cap they may not pass. */
+interface EvidenceBudget {
+  used: number;
+  readonly max: number;
 }
 
 /**
@@ -540,7 +566,7 @@ export function preflightExternalRunImport(
 function readImportedEvidence(
   evidenceRoot: string,
   cell: ExternalRunImportCell,
-  budget: { used: number },
+  budget: EvidenceBudget,
 ): PreparedEvidence[] {
   const root = resolvePath(evidenceRoot);
   const at = `row ${cell.record.row}`;
@@ -574,7 +600,7 @@ function readEvidenceFileNoFollow(
   name: string,
   cell: ExternalRunImportCell,
   at: string,
-  budget: { used: number },
+  budget: EvidenceBudget,
 ): Uint8Array {
   const refuseFile = (why: string): never => refuse(
     "validation",
@@ -622,10 +648,10 @@ function readEvidenceFileNoFollow(
     );
   }
   budget.used += bytes.length;
-  if (budget.used > EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES) {
+  if (budget.used > budget.max) {
     return refuseFile(
       `would take the import's evidence aggregate to ${budget.used} bytes, above the `
-        + `${EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES}-byte cap`,
+        + `${budget.max}-byte cap`,
     );
   }
   return bytes;
@@ -641,6 +667,20 @@ function prepareGrading(workspaceDir: string, cell: ExternalRunImportCell): Prep
   );
   const spec = parseEvaluationSpec(getSealedBytes(workspaceDir, evaluationSpecSha256));
   const measurements = typeImportedMeasurements(spec, cell);
+  // These values are sealed inside the signed verdict statement, and that seal happens AFTER the
+  // draft has left `locked`. Running the same sealer over them here is what turns a value it
+  // would refuse there (an unpaired surrogate in a string, say) into a refusal that leaves the
+  // draft importable, whatever the typing above let through.
+  try {
+    canonicalJsonBytes(measurements);
+  } catch (cause) {
+    refuse(
+      "validation",
+      `row ${cell.record.row}`,
+      `row ${cell.record.row}: the measurements for ${cell.cellKey} cannot be sealed: `
+        + (cause instanceof Error ? cause.message : String(cause)),
+    );
+  }
   // The verdict is COMPUTED, never imported. There is no pass/fail column in the dump precisely so
   // that this line is the only place a verdict can come from; `checkVerdictRuleConsistency`
   // recomputes it at assembly from the same spec and the same measurements.
@@ -725,21 +765,50 @@ function coerceMeasurement(
     return refuseValue();
   }
   if (declaration.type === "number") {
-    if (typeof value === "number") return Number.isFinite(value) ? value : refuseValue();
-    if (typeof value !== "string" || !DECIMAL_STRING_PATTERN.test(value)) return refuseValue();
-    // A decimal string that a JS number cannot hold EXACTLY stays the string it already was:
-    // `compare()` parses decimal strings as exact decimals via BigInt, so leaving it alone is
-    // strictly more faithful than rounding it into a float that means something else.
-    const asNumber = Number(value);
-    const roundTrip = String(asNumber);
-    if (!DECIMAL_STRING_PATTERN.test(roundTrip) || normalizeDecimal(roundTrip) !== normalizeDecimal(value)) {
-      return value;
+    // A sealed number must be whole: both sealers refuse any JSON number that is not an I-JSON
+    // safe integer, so `0.5` as a number could be typed and judged here and then refused at the
+    // seal. A value therefore has two sealable forms and no third. A whole number a sealed number
+    // can hold is carried as that number. Every other value is carried as a decimal string, which
+    // `compare()` reads as an exact decimal via BigInt.
+    if (typeof value === "number") {
+      if (Number.isSafeInteger(value)) return value;
+      return decimalStringOf(value) ?? refuseValue();
     }
-    return asNumber;
+    if (typeof value !== "string" || !DECIMAL_STRING_PATTERN.test(value)) return refuseValue();
+    // A decimal string stays the string it already was, unless it spells a whole number a sealed
+    // number holds exactly: "1" and "1.0" are the number 1, so a CSV column and a JSONL number
+    // seal the same value. Leaving every other string alone is strictly more faithful than
+    // rounding it into a float that means something else.
+    const asNumber = Number(value);
+    if (Number.isSafeInteger(asNumber) && normalizeDecimal(String(asNumber)) === normalizeDecimal(value)) {
+      return asNumber;
+    }
+    return value;
   }
   // `string`: a JSONL boolean or number for a string-declared measurement is a shape disagreement
   // with the sealed spec, not something to stringify on the operator's behalf.
   return typeof value === "string" ? value : refuseValue();
+}
+
+/**
+ * The shortest decimal string that reads back as the same binary64 value, written without an
+ * exponent, so it fits the decimal grammar the verdict rule compares. `undefined` for a value
+ * with no decimal form (NaN and the infinities).
+ */
+function decimalStringOf(value: number): string | undefined {
+  if (!Number.isFinite(value)) return undefined;
+  // `String()` is already the shortest spelling that round-trips. All that is left is to write
+  // out its exponent, which it uses below 1e-6 and from 1e21 up, as digits.
+  const match = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$/u.exec(String(value));
+  if (match === null) return undefined;
+  const [spelling, sign = "", intDigits = "", fracDigits = "", exponent] = match;
+  if (exponent === undefined) return spelling;
+  const digits = intDigits + fracDigits;
+  /** Where the decimal point falls, counted in digits from the left of `digits`. */
+  const point = intDigits.length + Number(exponent);
+  if (point <= 0) return `${sign}0.${"0".repeat(-point)}${digits}`;
+  if (point >= digits.length) return `${sign}${digits}${"0".repeat(point - digits.length)}`;
+  return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
 }
 
 /** Canonical form of a decimal-grammar string, so "0.50", "0.5", and "00.5" compare equal. */

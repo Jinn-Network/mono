@@ -97,6 +97,18 @@ the claim's `ownerControlledPublication` section:
 Every bundle the product emits on v10 declares it. A bundle on an earlier
 format, or a v10 bundle that does not declare it, carries the five alone.
 
+A v10 bundle that declares the `terminal-bench-2-1-comparability` capability
+carries one more sentence. It is not a venue sentence: it is sealed in the
+Report `limitations`, and so in the claim's copy of them, after the venue
+sentences and any binary-instrument lines, and again as `limit` in the claim's
+`terminalBench21Comparability` section:
+
+- This run is not a Terminal-Bench 2.1 leaderboard submission: it was run outside Colophon and imported from a Harbor jobs directory, and nothing in this bundle shows that it met the leaderboard's protocol. The pass rate is taken over the cells that reached a pass or fail verdict. A trial with no reward is left out of that rate and counted in the accounting, so the rate can be higher than Harbor's mean for the same job, which counts such a trial as 0.
+
+A run declares it when its results were imported from a Harbor jobs directory
+onto the official Terminal-Bench 2.1 slate. [`PUBLIC-BUNDLE.md`](PUBLIC-BUNDLE.md)
+states what the checker compares before it accepts the declaration.
+
 The trust root is equally blunt, from `claim-package.json` `verification.trustRoot`:
 "Signatures verify against the bundle-carried public keys minted by this
 workspace; there is no third-party trust anchor on the self-run venue."
