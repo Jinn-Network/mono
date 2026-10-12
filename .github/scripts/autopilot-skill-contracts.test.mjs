@@ -238,3 +238,97 @@ test("review-pr classifies the D3 rename trigger under Review pass", () => {
     "a missed re-ground must classify as merge-blocking",
   );
 });
+
+// file-issue is human-invoked rather than an Autopilot session skill, but agents run its
+// commands as written, so the same drift applies: an unquoted `<pr>` in a runnable command
+// is read by the shell as a redirection (#4855), and a bare relative scratch file such as
+// `body.md` is left in the working directory for a later `git add -A` to commit (#3498).
+const fileIssueFiles = ["SKILL.md", "references/gh-taxonomy.md"].map((name) => ({
+  name,
+  text: readFileSync(join(root, ".claude/skills/file-issue", name), "utf8"),
+}));
+
+/**
+ * The text a shell would execute, line by line: every line inside a fenced code
+ * block (a quoted heredoc body is data and is skipped), and every inline code span
+ * that starts with `gh `. Quoted strings and comments are blanked out, because a
+ * placeholder inside quotes reaches the command as a literal and is inert.
+ */
+function fileIssueRunnableLines(text) {
+  const runnable = [];
+  let inFence = false;
+  let heredocEnd = null;
+  for (const [index, line] of text.split("\n").entries()) {
+    if (/^\s*```/u.test(line)) {
+      inFence = !inFence;
+      heredocEnd = null;
+      continue;
+    }
+    if (!inFence) {
+      for (const span of line.matchAll(/`(gh [^`]+)`/gu)) {
+        runnable.push({ line: index + 1, command: span[1] });
+      }
+      continue;
+    }
+    if (heredocEnd !== null) {
+      if (line.trim() === heredocEnd) heredocEnd = null;
+      continue;
+    }
+    runnable.push({ line: index + 1, command: line });
+    const heredoc = /<<-?\s*['"]?([A-Za-z_]+)['"]?/u.exec(line);
+    if (heredoc) heredocEnd = heredoc[1];
+  }
+  return runnable.map(({ line, command }) => ({
+    line,
+    command,
+    bare: command
+      .replace(/'[^']*'/gu, "''")
+      .replace(/"[^"]*"/gu, '""')
+      .replace(/(?:^|\s)#.*$/u, ""),
+  }));
+}
+
+test("file-issue has no unquoted placeholder in a runnable command", () => {
+  // The scanner has to see a hazardous line and pass a quoted or commented one, or an
+  // empty result below would prove nothing.
+  const probe = fileIssueRunnableLines(
+    ["```bash", "gh pr view <pr> --json body", 'gh pr view "<pr>"', "# gh pr view <pr>", "```"].join("\n"),
+  );
+  assert.deepEqual(
+    probe.filter(({ bare }) => /<[A-Za-z][A-Za-z0-9_-]*>/u.test(bare)).map(({ line }) => line),
+    [2],
+  );
+  const unquoted = [];
+  for (const { name, text } of fileIssueFiles) {
+    for (const { line, command, bare } of fileIssueRunnableLines(text)) {
+      if (/<[A-Za-z][A-Za-z0-9_-]*>/u.test(bare)) unquoted.push(`${name}:${line}: ${command.trim()}`);
+    }
+  }
+  assert.deepEqual(unquoted, []);
+});
+
+test("file-issue appends to a PR body through a temp file, not a bare relative path", () => {
+  const { text } = fileIssueFiles[0];
+  const commands = fileIssueRunnableLines(text);
+  const recipe = commands.filter(({ command }) => /\bgh pr edit\s+\S+\s+--body-file\s+\S/u.test(command));
+  assert.equal(recipe.length, 1, "SKILL.md must carry exactly one PR-body append recipe");
+  const [{ line }] = recipe;
+  // The recipe is the fenced block that holds the `gh pr edit` line; read it whole.
+  const block = commands.filter((entry) => Math.abs(entry.line - line) <= 3);
+  assert.ok(
+    block.some(({ command }) => /=\$\(mktemp \/tmp\/[^)]*XXXXXX[^)]*\)/u.test(command)),
+    "the recipe must take its scratch path from mktemp under /tmp",
+  );
+  for (const { command } of block) {
+    assert.doesNotMatch(
+      command,
+      /(?:>>?|--body-file)\s*["']?[A-Za-z0-9._-]+\.md\b/u,
+      `a literal relative file name in the recipe: ${command.trim()}`,
+    );
+  }
+  assert.match(
+    text.replace(/\s+/gu, " "),
+    /gh pr edit --body-file` \*\*replaces\*\* the whole body/u,
+    "the recipe must keep saying that --body-file replaces the whole body",
+  );
+});

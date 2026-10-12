@@ -85,7 +85,11 @@ if [[ ${#SKILLS[@]} -gt 0 ]]; then
 fi
 
 DRIFT=0
+# DANGLING is any dangling link, canonical or mirror. DANGLING_CANON is the subset under
+# the canonical tree, the only place the generator cannot repair and the hand-fix advisory
+# is true.
 DANGLING=0
+DANGLING_CANON=0
 
 report_drift() {
   echo "drift: $1" >&2
@@ -176,6 +180,9 @@ check_dangling() {
     [[ -n "${link}" ]] || continue
     if [[ ! -e "${link}" ]]; then
       DANGLING=1
+      if [[ "${dir}" == "${CANON}" ]]; then
+        DANGLING_CANON=1
+      fi
       report_drift "dangling symlink ${link} -> $(readlink "${link}")"
     fi
   done < <(find "${dir}" -type l | LC_ALL=C sort)
@@ -204,7 +211,7 @@ done
 if [[ "${CHECK}" -eq 1 ]]; then
   if [[ "${DRIFT}" -ne 0 ]]; then
     echo "skill mirror drifted; run ./scripts/sync-skills.sh and commit the generated trees" >&2
-    if [[ "${DANGLING}" -ne 0 ]]; then
+    if [[ "${DANGLING_CANON}" -ne 0 ]]; then
       echo "a dangling symlink under ${CANON} is not generated - fix or remove it by hand" >&2
     fi
     exit 1
