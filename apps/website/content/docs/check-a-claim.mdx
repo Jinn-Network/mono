@@ -1,0 +1,49 @@
+---
+title: Check a claim
+description: Run the published checker over a sealed benchmark claim, on your own machine.
+---
+
+A sealed Colophon claim is a Jinn record, and anyone can check one from its own bytes. This page checks the public claim [Judging the LoCoMo judges](https://colophon.claims/reports/locomo-judge-report/). Checking is free and needs no account.
+
+## Run the checker
+
+You need Node 22 or newer, `curl`, `tar`, and about 400 MB of free disk. The archive is 98.1 MB.
+
+<PromptBlock label="Check">
+{`curl -fLO 'https://github.com/colophon-claims/locomo-judge-report/releases/download/locomo-judge-report-run-completion-2026-09-01/de169c04a24bbb4d9d5b52e398b8bfe92e939ba4d8a8c9e6e3e551cf10aa3774.tar.gz'
+tar -xzf 'de169c04a24bbb4d9d5b52e398b8bfe92e939ba4d8a8c9e6e3e551cf10aa3774.tar.gz'
+mv 'de169c04a24bbb4d9d5b52e398b8bfe92e939ba4d8a8c9e6e3e551cf10aa3774' bundle
+npx @colophon-claims/verify@0.2.1 ./bundle`}
+</PromptBlock>
+
+Run that exact version. Releases before 0.2.1 refuse this bundle format.
+
+A passing run starts like this:
+
+```text
+Verified: 7 of 7 checks passed
+Bundle: sha256:de169c04a24bbb4d9d5b52e398b8bfe92e939ba4d8a8c9e6e3e551cf10aa3774
+Format: benchmark-product-public-bundle/7
+
+manifest                passed
+evidence-closure        passed
+trust                   passed
+matrix-rederivation     passed
+report-verification     passed
+claim-consistency       passed
+integrity-anchors       passed
+```
+
+The archive is named by the bundle's evidence ID, which is the SHA-256 of its file list, `bundle.json`. `shasum -a 256 bundle/bundle.json` prints the same value.
+
+## What a passing check shows
+
+It shows that the downloaded records belong together and support the result that was published. It does not show that the machine that produced the bundle was honest, that the benchmark was well chosen, or that distinct signing keys belong to distinct parties. Colophon lists [the limits of a report](https://colophon.claims/docs/#limits).
+
+## Without the checker
+
+The checker is a convenience, not a requirement. A bundle is JSON with SHA-256 digests and signed records, and [External verification of public bundles](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/EXTERNAL-VERIFICATION.md) walks the same checks with other tools. For any Jinn record, the rules are in [Verifying a record by hand](https://github.com/Jinn-Network/spec#verifying-a-record-by-hand).
+
+## Sealing your own claim
+
+The sealing tool, `@colophon-claims/cli`, is not published yet, so sealing a claim is still local. There is no hosted service, account or billing. [Colophon](https://colophon.claims/#publish) says how to bring a claim today.

@@ -7,153 +7,223 @@ import { links, repoFile } from '@/lib/shared';
 /**
  * The landing page.
  *
- * Copy provenance — every claim on this page traces to a ratified document,
- * per the DevX surface design §11 success criterion 3:
- *   - the identity paragraph and the "does not yet prove" caveats are
- *     DR-2026-07-30 §11 (docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md);
- *   - the loop, the boundary, and the open-by-design wager are the platform
- *     one-pager (docs/positioning/2026-07-29-jinn-platform-one-pager.md);
- *   - the verb discipline and the absolutist-claim ban come from the
- *     positioning spine's messaging guardrails, and `test/content.test.mjs`
- *     asserts them over this file.
+ * Copy provenance: every claim on this page traces to a canonical document.
+ *   - What Jinn is, what exists today and what is direction: THESIS.md §3 and
+ *     §4, and the root README.md.
+ *   - Record, holder, offer and price: GLOSSARY.md "Records and offers", which
+ *     points at Jinn-Network/spec as the authority.
+ *   - Colophon: the root README.md "What you can do here".
+ *   - The caveats: the specification's own list of what is still open,
+ *     THESIS.md §4, and the limits Colophon's checker prints.
+ *   - The verb rules are CLAUDE.md "External Communication"; the protocol
+ *     takes no part in payment, so it is never the subject of a payment verb.
+ *     `test/content.test.mjs` asserts them over this file.
  *
- * Call to action — GROWTH.md §3 binds every outward surface to a single CTA
- * (the Telegram group) until the v0 gate produces a result. The two doors
- * below are navigation into /docs, not a second ask. There is exactly one
- * button on this page.
+ * Selling records is the direction, not a working market. Nothing here says
+ * or implies otherwise: the hero says a holder can offer a record, and the
+ * one step that involves payment is marked as direction.
+ *
+ * Call to action: GROWTH.md §3 names "Bring a claim" as the single call to
+ * action on every outward surface. The doors below are navigation, not a
+ * second ask. There is exactly one button on this page.
  */
 
 const doors = [
   {
-    title: 'Build on Jinn',
-    href: '/docs/build',
-    body: 'Your application or agent becomes the requester. Post a task, receive the outcome, and retrieve the evidence behind it.',
-    detail: 'Works end to end on testnet today.',
+    title: 'Check a claim',
+    href: '/docs/check-a-claim',
+    body: 'Run the published checker over a sealed benchmark claim, on your own machine.',
+    detail: 'Free, with no account. Needs Node 22 or newer.',
+    label: 'Read the docs',
   },
   {
-    title: 'Run an operator',
-    href: '/docs/operate',
-    body: 'Your machine performs and evaluates work others have funded, and records what happened.',
-    detail: 'Operators earn OLAS on the canonical network; that network runs on Base Sepolia today.',
+    title: 'Find a claim',
+    href: links.colophonFind,
+    body: 'Every public claim listed on Colophon, newest first.',
+    detail: 'One claim is listed as of 12 October 2026.',
+    label: 'Open Colophon',
+  },
+  {
+    title: 'Build on the protocol',
+    href: '/docs/protocol',
+    body: 'The normative text, the schemas and the conformance vectors, in one public repository.',
+    detail: 'Release v0.1.0. One implementation exists so far.',
+    label: 'Read the docs',
   },
 ];
 
-const loop = [
-  { step: '01', name: 'Request', body: 'An entity describes work and escrows the fee.' },
-  { step: '02', name: 'Execute', body: 'An operator claims it and does the work.' },
-  { step: '03', name: 'Evaluate', body: 'A second party checks the result and records a verdict.' },
-  { step: '04', name: 'Deliver', body: 'The outcome goes to whoever asked for it.' },
-  { step: '05', name: 'Publish', body: 'The evidence of how it was done stays open to everyone.' },
+const steps = [
+  {
+    step: '01',
+    name: 'Record',
+    body: 'Work produces a record: a sealed document with a published schema, a stable identifier and a digest.',
+  },
+  {
+    step: '02',
+    name: 'Check',
+    body: 'Anyone can check it from its own bytes, with their own tools. No Jinn code is needed.',
+  },
+  { step: '03', name: 'Offer', body: 'Its holder publishes an offer for it, free or priced.' },
+  { step: '04', name: 'Find', body: 'Others find the record and its offer.' },
+  {
+    step: '05',
+    name: 'Buy',
+    body: 'A buyer asks the holder for the record. Payment goes straight to the holder, outside the protocol.',
+    direction: true,
+  },
 ];
 
-const built = [
-  'Benchmarks',
-  'Reputation systems',
-  'Skill factories',
-  'Dataset builders',
-  'Harness optimizers',
-  'Audit and provenance tools',
-];
+const doorClassName =
+  'border-border hover:border-accent-sky group flex flex-col rounded-lg border p-8 no-underline transition-colors';
 
 export default function HomePage() {
   return (
     <main className="flex flex-1 flex-col">
       <section className="border-border mx-auto w-full max-w-5xl border-b px-6 py-20 sm:py-28">
         <h1 className="font-serif max-w-[20ch] text-4xl leading-[1.05] text-balance sm:text-6xl">
-          An open platform for work and the evidence work creates.
+          An open protocol and network for work and the data it produces.
         </h1>
         <p className="text-muted-foreground mt-10 max-w-[62ch] text-[15px] leading-relaxed text-pretty">
-          Jinn defines sealed records for requesting work, delivering it, and publishing
-          what happened — designed so third parties can produce and verify them without
-          running Jinn&rsquo;s code — and reusable capabilities for executing work and
-          retrieving evidence.
+          Most work leaves an answer behind and discards the record of how it was reached.
+          The Jinn protocol says how work is described, done, evidenced, judged, trusted and
+          found.
         </p>
         <p className="text-muted-foreground mt-5 max-w-[62ch] text-[15px] leading-relaxed text-pretty">
-          Jinn contributors operate a canonical network on Base where work is escrowed,
-          delivered, and evaluated, and operators earn OLAS. Everything above that —
-          operators, benchmarks, skill factories, agents — is a product anyone can build,
-          swap, or compete with.
+          A record can be kept in Jinn&rsquo;s standard formats or its producer&rsquo;s own.
+          Either way anyone can check it from its own bytes, with their own tools, and find
+          it. Whoever holds a record can offer it, free or priced. The protocol takes no fee
+          and no part in payment, and there is no Jinn token.
         </p>
       </section>
 
       <section className="border-border mx-auto w-full max-w-5xl border-b px-6 py-16">
-        <div className="grid gap-5 sm:grid-cols-2">
-          {doors.map((door) => (
-            <Link
-              key={door.href}
-              href={door.href}
-              className="border-border hover:border-accent-sky group flex flex-col rounded-lg border p-8 no-underline transition-colors"
-            >
-              <h2 className="font-serif text-3xl leading-tight">{door.title}</h2>
-              <p className="text-foreground mt-4 text-sm leading-relaxed">{door.body}</p>
-              <p className="text-dim mt-3 text-xs leading-relaxed">{door.detail}</p>
-              <span className="text-accent-sky mt-8 inline-flex items-center gap-2 text-xs tracking-[0.14em] uppercase">
-                Read the docs
-                <ArrowRight aria-hidden="true" className="size-3" />
-              </span>
-            </Link>
-          ))}
+        <div className="grid gap-5 sm:grid-cols-3">
+          {doors.map((door) => {
+            const content = (
+              <>
+                <h2 className="font-serif text-3xl leading-tight">{door.title}</h2>
+                <p className="text-foreground mt-4 text-sm leading-relaxed">{door.body}</p>
+                <p className="text-dim mt-3 text-xs leading-relaxed">{door.detail}</p>
+                <span className="text-accent-sky mt-8 inline-flex items-center gap-2 text-xs tracking-[0.14em] uppercase">
+                  {door.label}
+                  <ArrowRight aria-hidden="true" className="size-3" />
+                </span>
+              </>
+            );
+            return door.href.startsWith('/') ? (
+              <Link key={door.href} href={door.href} className={doorClassName}>
+                {content}
+              </Link>
+            ) : (
+              <a key={door.href} href={door.href} className={doorClassName}>
+                {content}
+              </a>
+            );
+          })}
         </div>
       </section>
 
       <section className="border-border mx-auto w-full max-w-5xl border-b px-6 py-20">
         <p className="text-muted-foreground text-xs tracking-[0.14em] uppercase">
-          How it works
+          Where things stand
+        </p>
+        <h2 className="font-serif mt-5 max-w-[24ch] text-4xl leading-tight sm:text-5xl">
+          The protocol and its checker exist. The market is the direction.
+        </h2>
+        <div className="mt-12 grid gap-5 sm:grid-cols-3">
+          <div className="border-border rounded-lg border p-8">
+            <p className="text-muted-foreground text-xs tracking-[0.14em] uppercase">
+              Exists today
+            </p>
+            <ul className="mt-6 space-y-3 text-sm leading-relaxed">
+              <li>
+                The protocol, written only in <a href={links.spec}>Jinn-Network/spec</a> and
+                first released as <a href={links.specRelease}>v0.1.0</a> on 24 September 2026.
+              </li>
+              <li>
+                The checker, published on npm as{' '}
+                <a href={links.verifier}>@colophon-claims/verify</a>.
+              </li>
+              <li>
+                <a href={links.colophon}>Colophon</a>&rsquo;s sealed benchmark claims, which
+                are Jinn records.
+              </li>
+            </ul>
+          </div>
+          <div className="border-border rounded-lg border p-8">
+            <p className="text-gold text-xs tracking-[0.14em] uppercase">Direction</p>
+            <ul className="mt-6 space-y-3 text-sm leading-relaxed">
+              <li>
+                A market in records. Buying and selling records is the direction, not a
+                working market.
+              </li>
+              <li>
+                Work records from the daemon that turns issues into pull requests, published
+                once they can be anonymized.
+              </li>
+            </ul>
+          </div>
+          <div className="border-border rounded-lg border p-8">
+            <p className="text-dim text-xs tracking-[0.14em] uppercase">Parked</p>
+            <ul className="mt-6 space-y-3 text-sm leading-relaxed">
+              <li>
+                The <Link href="/docs/task-marketplace">task marketplace</Link>, in which a
+                Curator funds tasks and an operator network solves and evaluates them for
+                OLAS.
+              </li>
+              <li>
+                Its network on Base Sepolia has recorded no attempt or verdict since 13
+                August 2026. A node started today finds no work and earns nothing.
+              </li>
+              <li>
+                <a href={links.explorer}>The record of what ran</a>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section className="border-border mx-auto w-full max-w-5xl border-b px-6 py-20">
+        <p className="text-muted-foreground text-xs tracking-[0.14em] uppercase">
+          How a record moves
         </p>
         <h2 className="font-serif mt-5 max-w-[22ch] text-4xl leading-tight sm:text-5xl">
-          Every execution produces two outputs.
+          Work leaves a record, and anyone can check it.
         </h2>
         <ol className="mt-14 grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
-          {loop.map((item) => (
+          {steps.map((item) => (
             <li key={item.step} className="border-border rounded-lg border p-6">
               <p className="text-dim text-xs tracking-[0.14em] uppercase">
-                {item.step} — {item.name}
+                {item.step} {item.name}
               </p>
+              {item.direction ? (
+                <p className="text-gold mt-2 text-xs tracking-[0.14em] uppercase">Direction</p>
+              ) : null}
               <p className="mt-3 text-sm leading-relaxed">{item.body}</p>
             </li>
           ))}
         </ol>
         <p className="text-muted-foreground mt-10 max-w-[64ch] text-sm leading-relaxed text-pretty">
-          A conventional work marketplace ends at result and settlement. Jinn keeps the
-          evidence and leaves it open, so the supply of work is also the supply of
-          evidence.
+          The first four steps are in the protocol today. Buying and selling records is the
+          direction, not a working market.
         </p>
       </section>
 
       <section className="border-border mx-auto w-full max-w-5xl border-b px-6 py-20">
         <p className="text-muted-foreground text-xs tracking-[0.14em] uppercase">
-          The boundary
+          The first application
         </p>
         <h2 className="font-serif mt-5 max-w-[24ch] text-4xl leading-tight sm:text-5xl">
-          Jinn coordinates the work and preserves the evidence. The rest is products.
+          Colophon is the first application built on Jinn.
         </h2>
-        <div className="mt-12 grid gap-5 sm:grid-cols-2">
-          <div className="border-border rounded-lg border p-8">
-            <p className="text-muted-foreground text-xs tracking-[0.14em] uppercase">
-              The platform
-            </p>
-            <ul className="mt-6 space-y-3 text-sm leading-relaxed">
-              <li>Describe and publish work</li>
-              <li>Coordinate execution and evaluation</li>
-              <li>Deliver results and artifacts</li>
-              <li>Escrow and settle the fee</li>
-              <li>Record tasks, attempts, outputs, and evaluations</li>
-              <li>Store, index, discover, and retrieve evidence</li>
-            </ul>
-          </div>
-          <div className="border-border rounded-lg border p-8">
-            <p className="text-gold text-xs tracking-[0.14em] uppercase">Built on it</p>
-            <ul className="mt-6 space-y-3 text-sm leading-relaxed">
-              {built.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </div>
-        </div>
         <p className="text-muted-foreground mt-10 max-w-[64ch] text-sm leading-relaxed text-pretty">
-          Jinn does not decide what a piece of evidence means. Applications remain
-          responsible for what they trust and how they use it. Work whose evidence has to
-          stay private is a poor fit, and that is deliberate.
+          <a href={links.colophon}>Colophon</a> turns a preregistered comparison of agent
+          configurations into a portable bundle anyone can check from its own bytes. Its
+          sealed benchmark claims are Jinn records.
+        </p>
+        <p className="text-muted-foreground mt-5 max-w-[64ch] text-sm leading-relaxed text-pretty">
+          Checking a published claim is free. The sealing tool is not published yet, so
+          sealing a claim is still local, and there is no hosted service, account or billing.
         </p>
       </section>
 
@@ -163,33 +233,31 @@ export default function HomePage() {
         </p>
         <ul className="mt-8 max-w-[68ch] space-y-4 text-sm leading-relaxed">
           <li>
-            The schemas and kits are not yet published, so third-party verification is a
-            designed property no third party has yet exercised.
+            One implementation of the protocol exists. Until a second one passes the
+            conformance vectors, &ldquo;written from the specification alone&rdquo; is a
+            claim, not a result.
           </li>
+          <li>Buying and selling records is the direction, not a working market.</li>
           <li>
-            The network runs on Base Sepolia today. Mainnet operation is the Phase-2
-            target.
+            A passing check covers a bundle&rsquo;s integrity, evidence, calculations and
+            report. It does not show that the machine that produced the bundle was honest,
+            or that distinct signing keys belong to distinct parties.
           </li>
-          <li>
-            Per-task settlement economics and evaluator economics are still open design
-            work.
-          </li>
+          <li>The task marketplace is parked until demand for it exists.</li>
         </ul>
         <p className="text-dim mt-8 max-w-[68ch] text-xs leading-relaxed">
-          Source:{' '}
-          <a href={repoFile('docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md')}>
-            the ratified platform architecture
-          </a>
-          . Watch the network at <a href={links.explorer}>explorer.jinn.network</a>.
+          Sources: <a href={links.specOpenQuestions}>the specification</a>,{' '}
+          <a href={repoFile('THESIS.md')}>the thesis</a>, and{' '}
+          <a href={links.colophonLimits}>the limits of a Colophon report</a>.
         </p>
       </section>
 
       <section className="mx-auto flex w-full max-w-5xl flex-col items-center gap-10 px-6 py-24 text-center">
-        <h2 className="font-serif max-w-[20ch] text-4xl leading-tight text-balance sm:text-5xl">
-          The network is small and early. That is when it is easiest to shape.
+        <h2 className="font-serif max-w-[24ch] text-4xl leading-tight text-balance sm:text-5xl">
+          What AI performance claim or decision do you need other people to trust next?
         </h2>
         <Button asChild size="lg">
-          <a href={links.telegram}>Join the Telegram</a>
+          <a href={links.bringAClaim}>Bring a claim</a>
         </Button>
       </section>
 
@@ -198,9 +266,11 @@ export default function HomePage() {
           <JinnSigil className="text-dim size-6" />
           <div className="flex flex-wrap items-center gap-6 text-xs">
             <Link href="/docs">Docs</Link>
-            <a href={links.explorer}>Explorer</a>
+            <a href={links.spec}>Protocol</a>
+            <a href={links.colophon}>Colophon</a>
             <a href={links.github}>GitHub</a>
             <Link href="/llms.txt">llms.txt</Link>
+            <a href={links.explorer}>Record of the parked network</a>
           </div>
         </div>
       </footer>
