@@ -38,12 +38,14 @@ Crowded territory — avoid leading copy with these phrases:
 - **"Co-own AI"** / **"unified network for off-chain services"** — Olas.
 - **"AI agent launchpad"** / **"tokenise agents"** — Virtuals.
 - **"Encrypted data"** / tournament framing — Numerai.
+- **"Data economy"**: Ocean Protocol.
+- **"Open protocol for AI data"**: Vana.
 
 White space Jinn plants in:
 
 - **Protocol**, **network** and **market** as the category nouns (not stack or layer): an open protocol and network for work and the data it produces. *Market* names the direction and must not be presented as working; *marketplace* stays the name of the parked task marketplace.
 - **Records** as the noun for what work leaves behind, and **check** and **find** as the verbs for what anyone can do with one (not predict, aggregate, or orchestrate).
-- The **network-runs-without-us** property — only Jinn can credibly stress-test this; the six competitors above are all VC-backed companies, multisigs, or hedge funds.
+- The **network-runs-without-us** property: only Jinn can credibly stress-test this; the eight competitors above are all VC-backed companies, multisigs, or hedge funds.
 
 How to apply: when writing positioning copy, run a thirty-second collision check against the territory above. If the lead phrase belongs to a competitor, refactor before publishing. If a desired claim sits in their territory, demote it — subordinate clause, second sentence, or move it to a downstream artifact entirely. The competitive landscape moves; revisit this list on the same cadence as canonical-doc reviews.
 
@@ -68,10 +70,9 @@ These phrasings landed cleanly in a builder context — keep them in active voca
 - "insider allocation" — the precise term builders are wary of; use it.
 - "rugged into a corporate moat" — names the failure mode.
 - "no exit to satisfy" — names the pressure investors create.
-- "minted only from useful network activity" — the positive framing of the same point.
 - "community pushback" — names the visible consequence of insider allocation; builders recognise it from their own experience.
 
-These phrasings live inside the once-per-piece antagonist slot from "Lead from structure, not from fear" — use them when the antagonist appears, not as a recurring drumbeat. "Minted only from useful network activity" is the exception: it's positive framing, not antagonist framing, and can recur. The others belong on a budget of one per piece.
+These phrasings live inside the once-per-piece antagonist slot from "Lead from structure, not from fear": use them when the antagonist appears, not as a recurring drumbeat. They belong on a budget of one per piece.
 
 ### Drop ironic or self-deprecating subtitles
 
@@ -93,7 +94,7 @@ This is brand posture, not decoration. Jinn is a *headless brand* in the sense O
 
 A headless brand has three properties:
 
-1. **No centralized managerial control.** No entity (not the founding team, not the DAO, not a brand council) owns the brand presence. Participants drive the narrative.
+1. **No centralized managerial control.** No entity (not the founders, not the DAO, not a brand council) owns the brand presence. Participants drive the narrative.
 2. **Immutable protocol foundations.** A small set of core design decisions is fixed so that narratives can layer on top without fragmenting. Bitcoin's 21M supply and proof-of-work are the canonical example.
 3. **User-stakeholder incentives.** Users are financial stakeholders and workers in the network; they stand to gain from adoption, so they spread their own interpretations of the brand.
 
