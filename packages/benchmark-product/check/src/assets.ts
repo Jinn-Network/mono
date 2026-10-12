@@ -34,11 +34,18 @@ import { armDenominators, type ArmDenominators, type PlannedSlotAccounting } fro
  * `origin-free-identifiers` is issue #2981: reader-facing HTML and README print a protocol
  * identifier whole only when the spec origin serves it, and otherwise its name without the origin,
  * while sealed records keep the raw identifiers.
+ *
+ * `zero-judged-rate-unstated` is issue #4939 (operator rulings of 2026-10-06, decision 6): a
+ * `wilson@1` arm with `n` 0 states no rate. `wilson@1` seals `0.0000` for that arm's rate and both
+ * interval bounds, and printed as sealed they read as "failed every task, with certainty" about an
+ * arm that was never scored. The claim package schema requires the strings, so the sealed values
+ * stay and only what is shown changes.
  */
 export type PresentationCapability =
   | "report-prose-singularity"
   | "declared-strict-denominators"
-  | "origin-free-identifiers";
+  | "origin-free-identifiers"
+  | "zero-judged-rate-unstated";
 
 /**
  * Which presentation capabilities each format's page renders.
@@ -60,7 +67,12 @@ export const FORMAT_PRESENTATION_CAPABILITIES: {
   "benchmark-product-public-bundle/6": [],
   "benchmark-product-public-bundle/7": [],
   "benchmark-product-public-bundle/8": [],
-  [BUNDLE_V10_FORMAT]: ["report-prose-singularity", "declared-strict-denominators", "origin-free-identifiers"],
+  [BUNDLE_V10_FORMAT]: [
+    "report-prose-singularity",
+    "declared-strict-denominators",
+    "origin-free-identifiers",
+    "zero-judged-rate-unstated",
+  ],
 };
 
 interface PublicAssetInputBase {
@@ -590,9 +602,32 @@ function scopeLine(input: PublicAssetInput): string {
   return `${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${input.claim.scope.venue}`;
 }
 
-function adverseFacts(input: PublicAssetInput, reportFacts: MethodFacts): readonly string[] {
+/**
+ * One sentence per `wilson@1` arm the page states no rate for, in the Report's arm order. The
+ * sentence is the page's and the claim text's statement of it (issue #4939): it sits among the
+ * adverse facts on `index.html` and `README.md`, after the Matrix line, and rides in `share.txt`.
+ * Its reason uses the words the `terminal-bench-2-1-comparability` sentence uses for the same set
+ * of cells, and it is true of every way an arm reaches `n` 0: no verdict at all, or only verdicts
+ * the rule could not reduce to a pass or a fail.
+ */
+function unstatedRateFacts(
+  reportFacts: MethodFacts,
+  capabilities: ReadonlySet<PresentationCapability>,
+): readonly string[] {
+  if (reportFacts.kind !== "wilson" || !capabilities.has("zero-judged-rate-unstated")) return [];
+  return reportFacts.arms
+    .filter((arm) => arm.n === 0)
+    .map((arm) => `No rate is stated for arm ${arm.armId}: none of its cells reached a pass or fail verdict.`);
+}
+
+function adverseFacts(
+  input: PublicAssetInput,
+  reportFacts: MethodFacts,
+  capabilities: ReadonlySet<PresentationCapability>,
+): readonly string[] {
   const facts: string[] = [];
   if (input.matrix.completeness.runOutcome !== "complete") facts.push(`Matrix: ${reportFacts.kind === "binary" ? qualificationOutcomeLabel(input.matrix.completeness.runOutcome) : outcomeLabel(input.matrix.completeness.runOutcome)}; incomplete cells remain accounted below.`);
+  facts.push(...unstatedRateFacts(reportFacts, capabilities));
   if (reportFacts.conflicted.count > 0) facts.push(`Report conflicted cells: ${reportFacts.conflicted.count}.`);
   if (input.claim.conflicted.count > 0) facts.push(`Claim conflicted cells: ${input.claim.conflicted.count}.`);
   if (input.dissentCellKeys.length > 0) facts.push(`Verification assembly dissenting cells: ${input.dissentCellKeys.length}.`);
@@ -662,6 +697,53 @@ function pageDenominators(
   };
 }
 
+/**
+ * The name of a `wilson@1` table's rate column (operator rulings of 2026-10-06, decision 2).
+ *
+ * A page whose claim carries the verified `terminalBench21Comparability` section calls the rate
+ * Terminal-Bench 2.1 accuracy only when every cell was judged, read here as every cell of the
+ * dataset: the Benchmark carries all of the dataset's tasks, and every arm's `n` is its planned
+ * slots. Otherwise the rate is the pass rate over judged cells, which is what a slice is too.
+ *
+ * `n` against planned slots, never the Matrix's judged count: a cell whose reward is neither 0 nor
+ * 1 carries a valid `inconclusive` verdict, so the Matrix counts it as judged while `wilson@1`
+ * leaves it out of the rate. A withheld strict number, a declared denominator larger than the
+ * planned slots, and an arm that states no rate each keep the name off.
+ *
+ * Keyed on the claim section, as the task-name projector is, and not on the format: no earlier
+ * claim id can carry the section, so a page without it keeps "Pass rate" byte for byte.
+ */
+function wilsonRateName(input: PublicAssetInput, facts: MethodFacts, accounting: PlannedSlotAccounting): string {
+  const section = input.claim.terminalBench21Comparability;
+  if (section === undefined || facts.kind !== "wilson") return "Pass rate";
+  const everyPlannedCellJudged = section.selectedTaskCount === section.datasetTaskCount
+    && armDenominators(facts.arms, accounting).every((arm) => arm.declared > 0 && arm.declared === arm.allSlots);
+  return everyPlannedCellJudged ? "Terminal-Bench 2.1 accuracy" : "Pass rate over judged cells";
+}
+
+/** Each table is named from its own source, as its denominator pair is (`pageDenominators`). */
+function pageRateNames(
+  input: PublicAssetInput,
+  reportFacts: MethodFacts,
+  claimFacts: MethodFacts,
+): { readonly report: string; readonly claim: string } {
+  return {
+    report: wilsonRateName(input, reportFacts, input.matrix.attrition),
+    claim: wilsonRateName(input, claimFacts, claimPlannedSlots(input.claim.attrition)),
+  };
+}
+
+/** What an arm's rate cell and its two interval cells print: the sealed strings, or, under
+ * `zero-judged-rate-unstated`, that none is stated for an arm with `n` 0. */
+function armRateCells(
+  arm: WilsonArmFact,
+  capabilities: ReadonlySet<PresentationCapability>,
+): { readonly rate: string; readonly low: string; readonly high: string } {
+  return capabilities.has("zero-judged-rate-unstated") && arm.n === 0
+    ? { rate: "No rate is stated", low: "Not stated", high: "Not stated" }
+    : { rate: arm.passRate, low: arm.low, high: arm.high };
+}
+
 /** Negative leftover is a disagreement between two sealed numbers, not a count, and is stated
  * fail-loud. Wording is source-neutral: this helper feeds both the Report table (Matrix
  * accounting) and the Claim table (`claimPlannedSlots`). Naming the Matrix here would lie on the
@@ -678,7 +760,11 @@ function excludedFromDeclaredMarkup(value: number | undefined): string {
   return `<span role="alert">${escapeMarkup(excludedFromDeclaredText(value))}</span>`;
 }
 
-function armRows(facts: WilsonFacts, denominators: readonly ArmDenominators[] | undefined): string {
+function armRows(
+  facts: WilsonFacts,
+  denominators: readonly ArmDenominators[] | undefined,
+  capabilities: ReadonlySet<PresentationCapability>,
+): string {
   return facts.arms.map((arm, index) => {
     // Three adjacent cells, or none. Adjacency is the whole point of the pair (issue #3698): a
     // reader must not have to carry the declared denominator down the page to the Matrix attrition
@@ -688,7 +774,8 @@ function armRows(facts: WilsonFacts, denominators: readonly ArmDenominators[] | 
       ? ""
       : `<td>${pair.allSlots === undefined ? "Not stated" : pair.allSlots}</td>`
         + `<td>${excludedFromDeclaredMarkup(pair.excludedFromDeclared)}</td>`;
-    return `<tr><th scope="row">${escapeMarkup(arm.armId)}</th><td>${arm.n}</td>${denominatorCells}<td>${escapeMarkup(arm.passRate)}</td><td>${escapeMarkup(arm.low)}</td><td>${escapeMarkup(arm.high)}</td></tr>`;
+    const cells = armRateCells(arm, capabilities);
+    return `<tr><th scope="row">${escapeMarkup(arm.armId)}</th><td>${arm.n}</td>${denominatorCells}<td>${escapeMarkup(cells.rate)}</td><td>${escapeMarkup(cells.low)}</td><td>${escapeMarkup(cells.high)}</td></tr>`;
   }).join("");
 }
 
@@ -696,6 +783,8 @@ function armResultTable(
   facts: WilsonFacts,
   caption: string,
   denominators: readonly ArmDenominators[] | undefined,
+  rateName: string,
+  capabilities: ReadonlySet<PresentationCapability>,
 ): string {
   // `n` becomes `Judged n` only where the strict number sits beside it: alone, `n` is the only
   // denominator on the page and needs no qualifier; beside `All planned slots` it is one of two and
@@ -706,7 +795,7 @@ function armResultTable(
   const denominatorHeaders = denominators === undefined
     ? ""
     : '<th scope="col">All planned slots</th><th scope="col">Not in the denominator</th>';
-  return `<div class="table-scroll" tabindex="0" role="region" aria-label="${escapeMarkup(caption)}"><table><caption>${escapeMarkup(caption)}</caption><thead><tr><th scope="col">Arm</th><th scope="col">${declaredHeader}</th>${denominatorHeaders}<th scope="col">Pass rate</th><th scope="col">Interval low</th><th scope="col">Interval high</th></tr></thead><tbody>${armRows(facts, denominators)}</tbody></table></div>`;
+  return `<div class="table-scroll" tabindex="0" role="region" aria-label="${escapeMarkup(caption)}"><table><caption>${escapeMarkup(caption)}</caption><thead><tr><th scope="col">Arm</th><th scope="col">${declaredHeader}</th>${denominatorHeaders}<th scope="col">${rateName}</th><th scope="col">Interval low</th><th scope="col">Interval high</th></tr></thead><tbody>${armRows(facts, denominators, capabilities)}</tbody></table></div>`;
 }
 
 /** Operator-approved P4b copy. The order is part of the public reading contract: direction,
@@ -820,14 +909,16 @@ function neutralClaimStatesNoWinner(facts: MethodFacts): boolean {
 
 /** Dispatches the arm/comparison facts block on `facts.kind` (P4b Task 6). `denominators` is
  * present only for a wilson table under `declared-strict-denominators`; earlier formats pass
- * `undefined` and keep the declared-only table. */
+ * `undefined` and keep the declared-only table. `rateName` is the wilson table's own
+ * (`wilsonRateName`). */
 function armResultsHtml(
   facts: MethodFacts,
   wilsonCaption: string,
   capabilities: ReadonlySet<PresentationCapability>,
   denominators: readonly ArmDenominators[] | undefined,
+  rateName: string,
 ): string {
-  if (facts.kind === "wilson") return armResultTable(facts, wilsonCaption, denominators);
+  if (facts.kind === "wilson") return armResultTable(facts, wilsonCaption, denominators, rateName, capabilities);
   if (facts.kind === "comparison") return comparisonFactsHtml(facts);
   if (facts.kind === "pairwise-disagreement") return pairwiseDisagreementFactsHtml(facts);
   if (facts.kind === "paired-majority-delta") return pairedMajorityDeltaFactsHtml(facts);
@@ -881,7 +972,7 @@ function comparisonCellDetailsHtml(comparison: PublicComparisonView): string {
   return comparison.cells.map((cell) => {
     const outputLinks = cell.outputs.map((output) => `<li><a href="index.html#records-heading">${escapeMarkup(output.name)}</a>: ${escapeMarkup(output.summary)} <span class="digest">${escapeMarkup(output.sha256)}</span></li>`).join("");
     const verdicts = cell.verdicts.map((verdict) => `<li><a href="index.html#records-heading">${escapeMarkup(verdict.evaluator)}</a>: ${escapeMarkup(verdict.verdict)}<pre>${escapeMarkup(canonicalText(verdict.measurements))}</pre></li>`).join("");
-    return `<details id="cell-${escapeMarkup(cell.cellKey)}" class="cell-detail"><summary><strong>${escapeMarkup(cell.armId)}</strong> · Task ${escapeMarkup(cell.taskDigest.slice(0, 12))} · replicate ${cell.replicate} · ${escapeMarkup(cellScore(cell))}</summary><p>${escapeMarkup(cell.outputSummary)}</p><h4>Authenticated outputs</h4><ul>${outputLinks || "<li>No solve output.</li>"}</ul><h4>Authenticated verdict evidence</h4><ul>${verdicts || "<li>No verdict evidence.</li>"}</ul></details>`;
+    return `<details id="cell-${escapeMarkup(cell.cellKey)}" class="cell-detail"><summary><strong>${escapeMarkup(cell.armId)}</strong> · ${escapeMarkup(cell.taskLabel ?? `Task ${cell.taskDigest.slice(0, 12)}`)} · replicate ${cell.replicate} · ${escapeMarkup(cellScore(cell))}</summary><p>${escapeMarkup(cell.outputSummary)}</p><h4>Authenticated outputs</h4><ul>${outputLinks || "<li>No solve output.</li>"}</ul><h4>Authenticated verdict evidence</h4><ul>${verdicts || "<li>No verdict evidence.</li>"}</ul></details>`;
   }).join("");
 }
 
@@ -1090,7 +1181,7 @@ function buildIndex(
 ): string {
   const outcome = input.matrix.completeness.runOutcome;
   const status = reportFacts.kind === "binary" ? qualificationOutcomeLabel(outcome) : outcomeLabel(outcome);
-  const adverse = adverseFacts(input, reportFacts);
+  const adverse = adverseFacts(input, reportFacts, capabilities);
   const arms = input.claim.scope.arms.map((arm) =>
     `<li><strong>${escapeMarkup(arm.armId)}</strong><pre>${escapeMarkup(canonicalText(arm.pinning))}</pre></li>`
   ).join("");
@@ -1118,6 +1209,7 @@ function buildIndex(
   // it below -- and the later two source labels end at their authenticated record link. That
   // shortened shape already exists on this page: the dissent section renders exactly it.
   const pair = pageDenominators(input, reportFacts, claimFacts, capabilities);
+  const rateNames = pageRateNames(input, reportFacts, claimFacts);
   const laterSourceSuffix = capabilities.has("report-prose-singularity")
     ? "."
     : "; values below are copied without reconciliation.";
@@ -1154,8 +1246,8 @@ ${neutralClaimHtml(reportFacts)}
 <section class="adverse" aria-labelledby="adverse-heading"><h2 id="adverse-heading">Prominent adverse facts</h2>${list(adverse, "No adverse facts stated.")}</section>${input.comparison === undefined ? "" : `\n${comparisonSectionHtml(input.comparison, reportFacts, capabilities)}`}
 <section aria-labelledby="scope-heading"><h2 id="scope-heading">Benchmark and configuration scope</h2><dl class="facts"><div><dt>Benchmark digest</dt><dd class="digest">${input.claim.scope.benchmarkSha256}</dd></div><div><dt>Tasks</dt><dd>${input.claim.scope.taskCount}</dd></div><div><dt>Replicates</dt><dd>${input.claim.scope.replicates}</dd></div><div><dt>Venue</dt><dd>${escapeMarkup(input.claim.scope.venue)}</dd></div></dl><h3>Arms and pinned configuration</h3><ul>${arms}</ul></section>${reportFacts.kind === "binary" ? binaryAdmissionHtml(input) : ""}${disclosureSpecificationHtml(input)}
 <section aria-labelledby="matrix-heading"><h2 id="matrix-heading">Sealed Matrix accounting</h2><p class="source-label">Source: authenticated <a href="matrix.json">matrix.json</a>; values below are copied without reconciliation.</p><pre>${escapeMarkup(canonicalText({ completeness: input.matrix.completeness, attrition: input.matrix.attrition }))}</pre><h3>Completeness and attrition</h3><dl class="facts"><div><dt>Matrix run outcome</dt><dd>${escapeMarkup(outcome)}</dd></div><div><dt>Matrix expected</dt><dd>${input.matrix.completeness.expected}</dd></div><div><dt>Matrix judged</dt><dd>${input.matrix.completeness.judged}</dd></div><div><dt>Matrix floor</dt><dd>${escapeMarkup(input.matrix.completeness.floor)}</dd></div></dl><div class="table-scroll" tabindex="0" role="region" aria-label="Per-arm Matrix attrition"><table><caption>Exact per-arm attrition stored in the Matrix</caption><thead><tr><th scope="col">Arm</th><th scope="col">Expected</th><th scope="col">Judged</th><th scope="col">Unjudged</th><th scope="col">Unscorable</th><th scope="col">Expired</th><th scope="col">Invalidated</th><th scope="col">Excluded</th><th scope="col">Replacements</th></tr></thead><tbody>${attritionRows(input)}</tbody></table></div><h3>Matrix asymmetry flags</h3>${list(input.matrix.attrition.asymmetryFlags, "None recorded in the Matrix.")}</section>
-<section aria-labelledby="report-heading"><h2 id="report-heading">Sealed Report facts</h2><p class="source-label">Source: authenticated <a href="report.json">report.json</a>${laterSourceSuffix}</p><h3>${factsHeading(reportFacts, "report")}</h3>${armResultsHtml(reportFacts, "Exact wilson@1 values from the sealed Report", capabilities, pair.report)}<h3>Method and assurance facts stored in the Report</h3><dl class="facts"><div><dt>Report method</dt><dd>${escapeMarkup(input.report.method.id)} @ ${escapeMarkup(input.report.method.version)}</dd></div><div><dt>Report preregistered</dt><dd>${input.report.preregistered === true ? "Yes" : "No"}</dd></div></dl><h3>Report parameters</h3><pre>${escapeMarkup(canonicalText(input.report.method.parameters))}</pre><h3>Report conflicts</h3><pre>${escapeMarkup(canonicalText(reportFacts.conflicted))}</pre><h3>Report disclosures</h3><pre>${escapeMarkup(canonicalText(input.report.disclosures))}</pre></section>
-<section aria-labelledby="claim-heading"><h2 id="claim-heading">Stored Claim facts</h2><p class="source-label">Source: authenticated <a href="claim-package.json">claim-package.json</a>${laterSourceSuffix}</p><h3>${factsHeading(claimFacts, "claim")}</h3>${armResultsHtml(claimFacts, "Exact arm values stored in the Claim package", capabilities, pair.claim)}<h3>Claim method and preregistration</h3><dl class="facts"><div><dt>Claim method</dt><dd>${escapeMarkup(input.claim.method.id)} @ ${escapeMarkup(input.claim.method.version)}</dd></div><div><dt>Claim preregistered</dt><dd>${input.claim.method.preregistered ? "Yes" : "No"}</dd></div><div><dt>Assurance preset</dt><dd>${escapeMarkup(input.claim.assurance.preset)}</dd></div></dl><h3>Claim parameters</h3><pre>${escapeMarkup(canonicalText(input.claim.method.parameters))}</pre><h3>Claim completeness</h3><pre>${escapeMarkup(canonicalText(input.claim.completeness))}</pre><h3>Claim attrition</h3><pre>${escapeMarkup(canonicalText(input.claim.attrition))}</pre><h3>Claim conflicts</h3><pre>${escapeMarkup(canonicalText(input.claim.conflicted))}</pre><h3>Claim disclosures</h3><h4>Unverifiable axes, integrity tiers, and per-subject disclosures</h4><pre>${escapeMarkup(canonicalText(input.claim.disclosures))}</pre><h3>Resolved assurance primitives</h3><pre>${escapeMarkup(canonicalText(input.claim.assurance.resolved))}</pre><p>${escapeMarkup(input.claim.assurance.disclosure)}</p><h3>Rehearsal disclosure</h3>${rehearsalHtml}</section>
+<section aria-labelledby="report-heading"><h2 id="report-heading">Sealed Report facts</h2><p class="source-label">Source: authenticated <a href="report.json">report.json</a>${laterSourceSuffix}</p><h3>${factsHeading(reportFacts, "report")}</h3>${armResultsHtml(reportFacts, "Exact wilson@1 values from the sealed Report", capabilities, pair.report, rateNames.report)}<h3>Method and assurance facts stored in the Report</h3><dl class="facts"><div><dt>Report method</dt><dd>${escapeMarkup(input.report.method.id)} @ ${escapeMarkup(input.report.method.version)}</dd></div><div><dt>Report preregistered</dt><dd>${input.report.preregistered === true ? "Yes" : "No"}</dd></div></dl><h3>Report parameters</h3><pre>${escapeMarkup(canonicalText(input.report.method.parameters))}</pre><h3>Report conflicts</h3><pre>${escapeMarkup(canonicalText(reportFacts.conflicted))}</pre><h3>Report disclosures</h3><pre>${escapeMarkup(canonicalText(input.report.disclosures))}</pre></section>
+<section aria-labelledby="claim-heading"><h2 id="claim-heading">Stored Claim facts</h2><p class="source-label">Source: authenticated <a href="claim-package.json">claim-package.json</a>${laterSourceSuffix}</p><h3>${factsHeading(claimFacts, "claim")}</h3>${armResultsHtml(claimFacts, "Exact arm values stored in the Claim package", capabilities, pair.claim, rateNames.claim)}<h3>Claim method and preregistration</h3><dl class="facts"><div><dt>Claim method</dt><dd>${escapeMarkup(input.claim.method.id)} @ ${escapeMarkup(input.claim.method.version)}</dd></div><div><dt>Claim preregistered</dt><dd>${input.claim.method.preregistered ? "Yes" : "No"}</dd></div><div><dt>Assurance preset</dt><dd>${escapeMarkup(input.claim.assurance.preset)}</dd></div></dl><h3>Claim parameters</h3><pre>${escapeMarkup(canonicalText(input.claim.method.parameters))}</pre><h3>Claim completeness</h3><pre>${escapeMarkup(canonicalText(input.claim.completeness))}</pre><h3>Claim attrition</h3><pre>${escapeMarkup(canonicalText(input.claim.attrition))}</pre><h3>Claim conflicts</h3><pre>${escapeMarkup(canonicalText(input.claim.conflicted))}</pre><h3>Claim disclosures</h3><h4>Unverifiable axes, integrity tiers, and per-subject disclosures</h4><pre>${escapeMarkup(canonicalText(input.claim.disclosures))}</pre><h3>Resolved assurance primitives</h3><pre>${escapeMarkup(canonicalText(input.claim.assurance.resolved))}</pre><p>${escapeMarkup(input.claim.assurance.disclosure)}</p><h3>Rehearsal disclosure</h3>${rehearsalHtml}</section>
 <section aria-labelledby="dissent-heading"><h2 id="dissent-heading">Verification assembly dissent</h2><p class="source-label">Source: authenticated <a href="verification/assembly.jsonl">verification assembly</a>.</p><dl class="facts"><div><dt>Dissenting cells</dt><dd>${input.dissentCellKeys.length}</dd></div></dl>${list(input.dissentCellKeys, "None recorded in the verification assembly.")}</section>
 <section id="limitations" aria-labelledby="limitations-heading"><h2 id="limitations-heading">Limitations by stored source</h2><h3>Sealed Report limitations</h3>${list(input.report.limitations ?? [], "None recorded in the sealed Report.")}<h3>Stored Claim limitations</h3>${list(input.claim.limitations, "None recorded in the stored Claim.")}<h3>Local self-run trust boundary stored in the Claim</h3><pre>${escapeMarkup(canonicalText(input.claim.venueHonesty))}</pre></section>
 <section aria-labelledby="records-heading"><h2 id="records-heading">Records and exact identities</h2><dl class="facts"><div><dt>Report SHA-256</dt><dd class="digest">${input.reportSha256}</dd></div><div><dt>Matrix SHA-256</dt><dd class="digest">${input.matrixSha256}</dd></div><div><dt>Run SHA-256</dt><dd class="digest">${input.claim.records.runSha256}</dd></div><div><dt>Report envelope SHA-256</dt><dd class="digest">${input.claim.records.reportEnvelopeSha256}</dd></div></dl><h3>Top-level records and catalogs</h3><ul class="compact-list">${topLevelFiles.map(([path, label]) => `<li><a href="${path}">${escapeMarkup(label)} <span class="digest">(${path})</span></a></li>`).join("")}</ul><h3>Every manifest-listed content-addressed record</h3><ul class="compact-list">${casFiles.map((path) => `<li><a href="${path}">CAS record <span class="digest">(${path})</span></a></li>`).join("")}</ul></section>
@@ -1245,21 +1337,30 @@ function buildSocialCard(input: PublicAssetInput, reportFacts: MethodFacts): str
   return `<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 1200 630" width="1200" height="630" style="max-width:100%;height:auto"><title id="title">Colophon · ${escapeMarkup(outcomeLabel(input.matrix.completeness.runOutcome))}; neutral benchmark report</title><desc id="desc">${escapeMarkup(`${scope}. Exact configuration arm IDs: ${armIds}. ${status}. Full Report SHA-256 ${input.reportSha256}. Read index.html limitations and verification.`)}</desc><metadata>${escapeMarkup(`Report SHA-256: ${input.reportSha256}; exact arm IDs: ${armIds}`)}</metadata><style>${embeddedFontCss()}</style><rect width="1200" height="630" fill="#f7f4ed"/><line x1="72" x2="1128" y1="72" y2="72" stroke="#14120e" stroke-width="2"/><rect x="78" y="93" width="18" height="18" transform="rotate(45 87 102)" fill="#c7402a"/><text x="118" y="112" fill="#14120e" font-family="Newsreader,serif" font-size="32" font-weight="650">Colophon</text><text data-field="neutral-status" x="78" y="180" fill="#c7402a" font-family="Public Sans,sans-serif" font-size="20" font-weight="700" letter-spacing="1">${escapeMarkup(outcomeLabel(input.matrix.completeness.runOutcome))} · NO COMPARATIVE WINNER STATED</text><text x="78" y="290" fill="#14120e" font-family="Newsreader,serif" font-size="76" font-weight="500">Benchmark report</text><text data-field="adverse-status" x="78" y="350" fill="#c7402a" font-family="Public Sans,sans-serif" font-size="22">${escapeMarkup(visualStatus)}</text><text data-field="config-summary" x="78" y="405" fill="#14120e" font-family="Public Sans,sans-serif" font-size="23">${escapeMarkup(visualConfig)}</text><text x="78" y="452" fill="#14120e" font-family="Public Sans,sans-serif" font-size="22">${escapeMarkup(scope)}</text><line x1="78" x2="1122" y1="492" y2="492" stroke="#cfc8bb"/><a href="index.html#verification"><text x="78" y="540" fill="#27406b" font-family="IBM Plex Mono,monospace" font-size="16">Report ${digest} · index.html#limitations · index.html#verification</text></a><text x="78" y="580" fill="#6b675f" font-family="Public Sans,sans-serif" font-size="16">${escapeMarkup(PRODUCT_BRANDING.attribution)}</text>${pairedRow}</svg>\n`;
 }
 
-function markdownArmTable(facts: WilsonFacts, denominators: readonly ArmDenominators[] | undefined): string {
+function markdownArmTable(
+  facts: WilsonFacts,
+  denominators: readonly ArmDenominators[] | undefined,
+  rateName: string,
+  capabilities: ReadonlySet<PresentationCapability>,
+): string {
+  const rateCells = (arm: WilsonArmFact): string => {
+    const cells = armRateCells(arm, capabilities);
+    return `${escapeMarkdown(cells.rate)} | ${escapeMarkdown(cells.low)} | ${escapeMarkdown(cells.high)}`;
+  };
   if (denominators === undefined) {
     return [
-      "| Arm | n | Pass rate | Wilson low | Wilson high |",
+      `| Arm | n | ${rateName} | Wilson low | Wilson high |`,
       "|---|---:|---:|---:|---:|",
-      ...facts.arms.map((arm) => `| ${escapeMarkdown(arm.armId)} | ${arm.n} | ${escapeMarkdown(arm.passRate)} | ${escapeMarkdown(arm.low)} | ${escapeMarkdown(arm.high)} |`),
+      ...facts.arms.map((arm) => `| ${escapeMarkdown(arm.armId)} | ${arm.n} | ${rateCells(arm)} |`),
     ].join("\n");
   }
   return [
-    "| Arm | Judged n | All planned slots | Not in the denominator | Pass rate | Wilson low | Wilson high |",
+    `| Arm | Judged n | All planned slots | Not in the denominator | ${rateName} | Wilson low | Wilson high |`,
     "|---|---:|---:|---:|---:|---:|---:|",
     ...facts.arms.map((arm, index) => {
       const pair = denominators[index]!;
       const allSlots = pair.allSlots === undefined ? "Not stated" : String(pair.allSlots);
-      return `| ${escapeMarkdown(arm.armId)} | ${arm.n} | ${allSlots} | ${escapeMarkdown(excludedFromDeclaredText(pair.excludedFromDeclared))} | ${escapeMarkdown(arm.passRate)} | ${escapeMarkdown(arm.low)} | ${escapeMarkdown(arm.high)} |`;
+      return `| ${escapeMarkdown(arm.armId)} | ${arm.n} | ${allSlots} | ${escapeMarkdown(excludedFromDeclaredText(pair.excludedFromDeclared))} | ${rateCells(arm)} |`;
     }),
   ].join("\n");
 }
@@ -1352,12 +1453,15 @@ function pairedMajorityDeltaFactsMarkdown(facts: PairedMajorityDeltaFacts): stri
 
 /** Dispatches the arm/comparison facts block on `facts.kind` (P4b Task 6), markdown counterpart
  * to `armResultsHtml`. `denominators` follows the same capability gate so the two tables cannot
- * disagree about whether the pair is present. */
+ * disagree about whether the pair is present, and `rateName` and `capabilities` are the ones the
+ * HTML table was given, so they cannot disagree about the rate's name or about a stated rate. */
 function armResultsMarkdown(
   facts: MethodFacts,
   denominators: readonly ArmDenominators[] | undefined,
+  rateName: string,
+  capabilities: ReadonlySet<PresentationCapability>,
 ): string {
-  if (facts.kind === "wilson") return markdownArmTable(facts, denominators);
+  if (facts.kind === "wilson") return markdownArmTable(facts, denominators, rateName, capabilities);
   if (facts.kind === "comparison") return comparisonFactsMarkdown(facts);
   if (facts.kind === "pairwise-disagreement") return pairwiseDisagreementFactsMarkdown(facts);
   if (facts.kind === "paired-majority-delta") return pairedMajorityDeltaFactsMarkdown(facts);
@@ -1370,7 +1474,7 @@ function buildReadme(
   claimFacts: MethodFacts,
   capabilities: ReadonlySet<PresentationCapability>,
 ): string {
-  const adverse = adverseFacts(input, reportFacts);
+  const adverse = adverseFacts(input, reportFacts, capabilities);
   const arms = input.claim.scope.arms.map((arm) =>
     `- **${escapeMarkdown(arm.armId)}** — pinning: ${escapeMarkdown(canonicalText(arm.pinning))}`
   ).join("\n");
@@ -1391,6 +1495,7 @@ function buildReadme(
     ? `${qualificationOutcomeLabel(input.matrix.completeness.runOutcome)}. Verified binary-instrument qualification.`
     : `${outcomeLabel(input.matrix.completeness.runOutcome)}. No comparative winner is stated.`;
   const pair = pageDenominators(input, reportFacts, claimFacts, capabilities);
+  const rateNames = pageRateNames(input, reportFacts, claimFacts);
   const taskSelection = taskSelectionFactText(input);
   return `# Colophon report
 
@@ -1424,7 +1529,7 @@ Source: authenticated [\`report.json\`](report.json). These stored values are no
 
 ### ${factsHeading(reportFacts, "report")}
 
-${armResultsMarkdown(reportFacts, pair.report)}
+${armResultsMarkdown(reportFacts, pair.report, rateNames.report, capabilities)}
 
 ### Report method and preregistration
 
@@ -1450,7 +1555,7 @@ Source: authenticated [\`claim-package.json\`](claim-package.json). These stored
 
 ### ${factsHeading(claimFacts, "claim")}
 
-${armResultsMarkdown(claimFacts, pair.claim)}
+${armResultsMarkdown(claimFacts, pair.claim, rateNames.claim, capabilities)}
 
 ### Claim method and preregistration
 
@@ -1519,7 +1624,11 @@ ${FONT_LICENSES.map(([name, path]) => `## ${name} font license\n\n\`\`\`text\n${
 `;
 }
 
-function buildShareText(input: PublicAssetInput, reportFacts: MethodFacts): string {
+function buildShareText(
+  input: PublicAssetInput,
+  reportFacts: MethodFacts,
+  capabilities: ReadonlySet<PresentationCapability>,
+): string {
   const taskSelection = taskSelectionFactText(input);
   const taskSelectionClause = taskSelection === undefined ? "" : ` ${plainText(taskSelection)}`;
   if (reportFacts.kind === "binary") {
@@ -1529,7 +1638,10 @@ function buildShareText(input: PublicAssetInput, reportFacts: MethodFacts): stri
   // to before this dispatch existed.
   const pairedFragment = pairedCompactFragment(reportFacts);
   const pairedClause = pairedFragment === "" ? "" : ` ${plainText(pairedFragment)}.`;
-  return `Colophon · ${outcomeLabel(input.matrix.completeness.runOutcome)}; no comparative winner stated. ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${plainText(input.claim.scope.venue)}.${taskSelectionClause} ${plainText(compactStatus(input, reportFacts))}. Report ${input.reportSha256}.${pairedClause} Full report: index.html; limitations: index.html#limitations; verify: index.html#verification with ${plainText(input.claim.verification.command)}. ${PRODUCT_BRANDING.attribution}\n`;
+  // Empty for every format but `/10`, and for a `/10` Report whose arms each state a rate, so the
+  // sentence stays byte-identical there.
+  const unstatedRateClause = unstatedRateFacts(reportFacts, capabilities).map((fact) => ` ${plainText(fact)}`).join("");
+  return `Colophon · ${outcomeLabel(input.matrix.completeness.runOutcome)}; no comparative winner stated. ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${plainText(input.claim.scope.venue)}.${taskSelectionClause} ${plainText(compactStatus(input, reportFacts))}.${unstatedRateClause} Report ${input.reportSha256}.${pairedClause} Full report: index.html; limitations: index.html#limitations; verify: index.html#verification with ${plainText(input.claim.verification.command)}. ${PRODUCT_BRANDING.attribution}\n`;
 }
 
 /** Fixed, deterministic presentation bytes for the format `input.format` names. The builder only
@@ -1569,6 +1681,6 @@ export function buildPublicAssets(input: PublicAssetInput): Readonly<Record<stri
     "badge.svg": encoder.encode(buildBadge(input, reportFacts)),
     "social-card.svg": encoder.encode(buildSocialCard(input, reportFacts)),
     "README.md": encoder.encode(presentReaderText(buildReadme(input, reportFacts, claimFacts, capabilities), capabilities)),
-    "share.txt": encoder.encode(buildShareText(input, reportFacts)),
+    "share.txt": encoder.encode(buildShareText(input, reportFacts, capabilities)),
   };
 }

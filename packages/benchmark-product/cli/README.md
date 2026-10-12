@@ -102,7 +102,7 @@ That line reads the bundle formats through public-bundle/6, and only the claims 
 Reader lines are not forward compatible, and a reader that is too old refuses with the same code
 an invalid bundle earns, so before concluding anything from a refusal, read the line the bundle's
 own claim package pins in `verification.command` — the producer named it for that exact bundle.
-The per-format table in [`PUBLIC-BUNDLE.md`](../PUBLIC-BUNDLE.md) covers the case where you have
+The per-format table in [`PUBLIC-BUNDLE.md`](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/PUBLIC-BUNDLE.md) covers the case where you have
 only `bundle.json`; the format string alone is not sufficient, because prompted-screening bundles
 pin a later line without changing their format.
 
