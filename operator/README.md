@@ -274,6 +274,7 @@ inside the container instead — it saves the token to a persistent volume
 so the daemon can use it on subsequent runs:
 
 ```bash
+# Historical: the container fallback. Do not run it to start an operator.
 docker compose run --rm -it --entrypoint claude jinn-daemon auth login
 docker compose up -d
 ```
@@ -286,7 +287,7 @@ docker run --rm ghcr.io/jinn-network/operator:next version --json
 
 ### Operator commands
 
-The package still ships this CLI. The commands that start the daemon (`jinn run`, `jinn bootstrap`) or act on tasks, rewards, and fleet wallets (`jinn tasks submit`, `jinn claim-rewards`, `jinn fleet scale`, `jinn withdraw`) belong to the marketplace as it ran. There is no work for a daemon to take on today.
+The package still ships this CLI. The commands that start the daemon (`jinn run`), bootstrap a fleet (`jinn bootstrap`), or act on tasks, rewards, and fleet wallets (`jinn tasks submit`, `jinn claim-rewards`, `jinn fleet scale`, `jinn withdraw`) belong to the marketplace as it ran. There is no work for a daemon to take on today.
 
 #### Lifecycle
 
