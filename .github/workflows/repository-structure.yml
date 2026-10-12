@@ -67,6 +67,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
+    # This job runs the yarn-cache workflow guard, which parses every workflow on every
+    # pull request including from a fork. The bound caps any superlinear read in it (#4414).
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
