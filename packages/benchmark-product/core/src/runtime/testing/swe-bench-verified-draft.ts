@@ -68,7 +68,8 @@ async function executeSelectSwebenchVerifiedRuntime(
       const selected = resolveSwebenchVerifiedSelection(context.workspaceDir, input);
       putSealedBytes(context.workspaceDir, sealTaskProfile(buildPredictionForecastProfile()).bytes);
       const built = await buildSwebenchVerifiedTasks(selected.selectedInstanceIds);
-      void built.evaluationSpec.sha256;
+      // Stored, as a bind stores it: `quote` and `lock` refuse a Task whose spec they cannot read.
+      putSealedBytes(context.workspaceDir, built.evaluationSpec.bytes);
       const author = loadOrCreateReportSigningKey(context.workspaceDir).keyId;
       const authoredTasks: Array<{ taskName: string; taskSha256: string; bytes: Uint8Array }> = [];
       for (const task of built.tasks) {

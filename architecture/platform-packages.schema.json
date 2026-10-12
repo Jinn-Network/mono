@@ -12,11 +12,28 @@
     "gateDefinitions",
     "releaseGroups",
     "tierRules",
-    "packages"
+    "packages",
+    "specPin"
   ],
   "properties": {
     "catalogVersion": {
       "const": 1
+    },
+    "specPin": {
+      "oneOf": [
+        {
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "if": {
+        "type": "object"
+      },
+      "then": {
+        "$ref": "#/$defs/specPin"
+      }
     },
     "manifestRoots": {
       "type": "array",
@@ -318,6 +335,58 @@
         "minLength": 1
       }
     },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "specPin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tag",
+        "groups",
+        "signingKey"
+      ],
+      "properties": {
+        "tag": {
+          "type": "string",
+          "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+        },
+        "groups": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "manifestSha256"
+            ],
+            "properties": {
+              "manifestSha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          }
+        },
+        "signingKey": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "keyId",
+            "publicKeySha256"
+          ],
+          "properties": {
+            "keyId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+            },
+            "publicKeySha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        }
+      }
+    },
     "authoritySource": {
       "type": "object",
       "additionalProperties": false,
@@ -487,6 +556,9 @@
               "$ref": "#/$defs/stringList"
             }
           }
+        },
+        "pinned": {
+          "const": true
         },
         "supersedes": {
           "$ref": "#/$defs/stringList"

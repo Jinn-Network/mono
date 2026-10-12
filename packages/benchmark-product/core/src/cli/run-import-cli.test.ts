@@ -156,6 +156,55 @@ describe("run import — the slate template", () => {
   }, 60_000);
 });
 
+/**
+ * The official Terminal-Bench 2.1 slate takes a Harbor jobs directory and nothing else
+ * (`operations/run-import.ts`). A skeleton there would be a file whose filled copy is refused, so
+ * the template says so before the claimant fills anything in.
+ */
+describe("run import — the slate template on the official Terminal-Bench 2.1 slate", () => {
+  async function lockedSlateDraft(): Promise<void> {
+    const on = ["--workspace", workspaceDir, "--principal", "sponsor-1"];
+    const run = async (argv: readonly string[]): Promise<void> => {
+      const result = await runCli(argv, cliContext());
+      expect(result.exitCode, `${argv.join(" ")}: ${result.stdout}${result.stderr}`).toBe(0);
+    };
+    await run(["init", ...on]);
+    await run(["draft", "create", ...on, "--name", "slate", "--id", "draft-1"]);
+    await run(["method", "terminal-bench-2.1", ...on, "--draft", "draft-1", "--slice", "1"]);
+    await run(["arm", "add", ...on, "--draft", "draft-1", "--arm", "terminus-2", "--pinning",
+      JSON.stringify({ agent: { id: "terminus-2" }, model: { id: "provider/model-x" } })]);
+    await run(["arm", "add", ...on, "--draft", "draft-1", "--arm", "oracle", "--pinning", JSON.stringify({ agent: { id: "oracle" } })]);
+    await run(["quote", ...on, "--draft", "draft-1"]);
+    await run(["lock", ...on, "--draft", "draft-1", "--ack-sample-size"]);
+  }
+
+  test("is refused in both dialects, and the refusal names the Harbor reader", async () => {
+    await lockedSlateDraft();
+    for (const format of ["jsonl", "csv"] as const) {
+      const refused = await runCli(
+        ["run", "import", "--template", "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", "draft-1", "--format", format, "--json"],
+        cliContext(),
+      );
+      expect(refused.exitCode, format).toBe(1);
+      const envelope = JSON.parse(refused.stdout) as { ok: boolean; error?: { code: string; detail: string } };
+      expect(envelope.ok).toBe(false);
+      expect(envelope.error?.code).toBe("conflict");
+      expect(envelope.error?.detail).toContain("official Terminal-Bench 2.1 slate");
+      expect(envelope.error?.detail).toContain("`run import --from harbor <jobs-dir>`");
+      // Nothing that looks like a slot to fill in is printed beside the refusal.
+      expect(refused.stdout).not.toContain("cellKey");
+    }
+    // The human rendering is the same refusal, on stderr, with an empty stdout to redirect.
+    const human = await runCli(
+      ["run", "import", "--template", "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", "draft-1"],
+      cliContext(),
+    );
+    expect(human.exitCode).toBe(1);
+    expect(human.stdout).toBe("");
+    expect(human.stderr).toContain("run import --from harbor <jobs-dir>");
+  }, 120_000);
+});
+
 describe("run import — importing a dump", () => {
   test("a filled CSV template imports through the verb and closes the slate", async () => {
     await lockedDraft();
@@ -511,8 +560,13 @@ describe("run import --from harbor", () => {
     mkdirSync(join(trial, "verifier"), { recursive: true });
     writeFileSync(join(job, "config.json"), JSON.stringify({
       job_name: input.jobName,
-      harbor_version: "0.21.4",
       agents: [{ name: "baseline", model_name: "prediction-v1-baseline" }],
+    }));
+    // The reader takes the Harbor version and the retry setting from the job `lock.json`, and
+    // refuses a job that states neither.
+    writeFileSync(join(job, "lock.json"), JSON.stringify({
+      harbor: { version: "0.21.0" },
+      retry: { max_retries: 0 },
     }));
     writeFileSync(join(job, "result.json"), JSON.stringify({
       id: input.jobName,

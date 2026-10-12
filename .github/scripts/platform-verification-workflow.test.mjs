@@ -298,10 +298,10 @@ test('artifacts build and upload public/profile/pack outputs without OIDC', () =
   assert.match(artifacts, /--catalog-digest "\$\{CATALOG_DIGEST\}"/u);
   assert.match(artifacts, /--lane "\$\{LANE\}"/u);
   assert.doesNotMatch(artifacts, /id-token: write|attestations: write|uses: actions\/attest@/u);
-  assert.match(artifacts, /uses: actions\/upload-artifact@v4/u);
+  assert.match(artifacts, /uses: actions\/upload-artifact@v7/u);
   assert.match(
     artifacts,
-    /uses: actions\/upload-artifact@v4[\s\S]*?include-hidden-files: true/u,
+    /uses: actions\/upload-artifact@v7[\s\S]*?include-hidden-files: true/u,
     'the dot-directory artifact must opt in to hidden files',
   );
 });
@@ -389,10 +389,10 @@ test('the always-running receipt receives every exact job conclusion and is uplo
   }
   assert.match(receipt, /platform-verification-receipt\.mjs/u);
   assert.doesNotMatch(receipt, /id-token: write|attestations: write|uses: actions\/attest@/u);
-  assert.match(receipt, /uses: actions\/upload-artifact@v4/u);
+  assert.match(receipt, /uses: actions\/upload-artifact@v7/u);
   assert.match(
     receipt,
-    /uses: actions\/upload-artifact@v4[\s\S]*?include-hidden-files: true/u,
+    /uses: actions\/upload-artifact@v7[\s\S]*?include-hidden-files: true/u,
     'the dot-directory receipt must opt in to hidden files',
   );
   assert.equal((receipt.match(/if: success\(\)/gu) ?? []).length, 1);

@@ -247,16 +247,34 @@ describe("the name of the rate on a page whose claim carries the Terminal-Bench 
     expectNames(assets, { report: ACCURACY, claim: OVER_JUDGED });
   });
 
-  test("the name is all the section moves in these assets", async () => {
+  test("the name and the dataset coverage line are all the section moves in these assets", async () => {
     const plain = buildPublicAssets(await pageInput({ arms: ALL_JUDGED }));
     const declaring = buildPublicAssets(await pageInput({ arms: ALL_JUDGED, section: section(FULL) }));
-    for (const name of ["index.html", "README.md"]) {
-      expect(decode(declaring[name]).split(ACCURACY), name).toHaveLength(3);
-      expect(decode(declaring[name]).replaceAll(ACCURACY, PLAIN), name).toBe(decode(plain[name]));
+    // The coverage line has its own tests (`assets-dataset-coverage.test.ts`). Taken out, the
+    // name is the only thing left that differs.
+    const coverage = "Tasks: all 89 in Terminal-Bench 2.1.";
+    const withoutCoverage: Readonly<Record<string, string>> = {
+      "index.html": decode(declaring["index.html"]).replace(
+        '\n<dl class="facts"><div><dt>Tasks</dt><dd>all 89 in Terminal-Bench 2.1</dd></div></dl>',
+        "",
+      ),
+      "README.md": decode(declaring["README.md"]).replace(`\n\n${coverage}`, ""),
+      "share.txt": decode(declaring["share.txt"]).replace(` ${coverage}`, ""),
+    };
+    for (const name of ["index.html", "README.md", "share.txt"]) {
+      expect(withoutCoverage[name], name).not.toBe(decode(declaring[name]));
     }
-    // The badge, the social card and the share text carry no rate and no rate name.
-    for (const name of ["badge.svg", "social-card.svg", "share.txt"]) {
+    for (const name of ["index.html", "README.md"]) {
+      expect(withoutCoverage[name]!.split(ACCURACY), name).toHaveLength(3);
+      expect(withoutCoverage[name]!.replaceAll(ACCURACY, PLAIN), name).toBe(decode(plain[name]));
+    }
+    // The share text carries no rate and no rate name, and the badge and the social card carry
+    // neither those nor the coverage line.
+    expect(withoutCoverage["share.txt"]).toBe(decode(plain["share.txt"]));
+    for (const name of ["badge.svg", "social-card.svg"]) {
       expect(decode(declaring[name]), name).toBe(decode(plain[name]));
+    }
+    for (const name of ["badge.svg", "social-card.svg", "share.txt"]) {
       expect(decode(declaring[name]), name).not.toContain("accuracy");
     }
   });

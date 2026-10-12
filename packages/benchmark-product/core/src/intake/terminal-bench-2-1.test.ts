@@ -1,5 +1,15 @@
 import { describe, expect, test } from "vitest";
 import { parseBenchmark } from "@jinn-network/benchmarking-records";
+import {
+  EVALUATION_SPEC_FORMAT_URI,
+  EVAL_SEMANTICS_VERSION,
+  EXTERNAL_VERIFIER_FAMILY,
+  EXTERNAL_VERIFIER_SEMANTICS_VERSION,
+  evaluateVerdictRule,
+  parseEvaluationSpec,
+  parseTaskProfile,
+  sealEvaluationSpec,
+} from "@jinn-network/task-execution-profiles";
 import { TaskSpecificationSchema } from "@jinn-network/task-execution-protocol";
 import {
   OFFICIAL_SUITE_SLATE_EXTENSION,
@@ -14,12 +24,14 @@ import {
   TERMINAL_BENCH_21_ITEM_PROFILE_URI,
   TERMINAL_BENCH_21_OFFICIAL_SLATE_EXTENSION,
   TERMINAL_BENCH_21_OFFICIAL_TASK_COUNT,
+  buildTerminalBench21EvaluationSpec,
   buildTerminalBench21Tasks,
   officialTerminalBench21TaskNames,
   resolveTerminalBench21OfficialSlate,
   terminalBench21SlateDigest,
 } from "./terminal-bench-2-1.js";
 import {
+  TERMINAL_BENCH_21_OFFICIAL_TASKS,
   TERMINAL_BENCH_21_UPSTREAM_COMMIT,
   TERMINAL_BENCH_21_UPSTREAM_REPOSITORY,
 } from "./terminal-bench-2-1-slate.js";
@@ -116,6 +128,28 @@ describe("Terminal-Bench 2.1 official slate pin", () => {
     expect(customSlate.selectedTaskNames).toEqual(["write-compressor", "qemu-startup"]);
   });
 
+  test("the Benchmark description says what the upstream commit names, and what identifies a package", () => {
+    // The commit is where the task list was read. It is not what identifies a package's bytes:
+    // the published `sanitize-git-repo` package differs from the repository at that commit in one
+    // test file (PUBLIC-BUNDLE.md), and its package ref names the published one. So no Benchmark
+    // says its tasks are "at" the commit, whatever it selects.
+    const packages = "Each task package is identified by its sealed Harbor package ref, not by that commit.";
+    const described = (input: Parameters<typeof buildTerminalBench21Tasks>[0]): string =>
+      parseBenchmark(buildTerminalBench21Tasks(input).benchmark.bytes).description as string;
+    expect(described({ coverage: "full" })).toBe(
+      `Official Terminal-Bench 2.1 task list, read at the sealed upstream commit. ${packages}`,
+    );
+    expect(described({ coverage: "ten_task" })).toBe(
+      `Official Terminal-Bench 2.1 ten_task slice of the task list read at the sealed upstream commit. ${packages}`,
+    );
+    expect(described({ coverage: "one_task" })).toBe(
+      `Official Terminal-Bench 2.1 one_task slice of the task list read at the sealed upstream commit. ${packages}`,
+    );
+    expect(described({ taskNames: ["sanitize-git-repo", "qemu-startup"] })).toBe(
+      `Official Terminal-Bench 2.1 custom slice of the task list read at the sealed upstream commit. ${packages}`,
+    );
+  });
+
   test("refuses a name that is not on the official slate", () => {
     try {
       buildTerminalBench21Tasks(["not-a-terminal-bench-2-1-task"]);
@@ -125,6 +159,133 @@ describe("Terminal-Bench 2.1 official slate pin", () => {
       expect((error as BenchmarkProductError).code).toBe("validation");
       expect((error as BenchmarkProductError).message).toMatch(/not in the official slate/u);
     }
+  });
+});
+
+/**
+ * Each official Task binds one `external-verifier` EvaluationSpec (operator rulings of 2026-10-06,
+ * decision 1; the family is proposal 0002, `proposals/0002-external-verifier-grader-family.md`).
+ * The spec states what the task package states and nothing else: the package as the grader, its
+ * own `tests/` files by digest, the image reference and the verifier timeout it declares.
+ */
+describe("the EvaluationSpec of an official Terminal-Bench 2.1 task", () => {
+  test("the first task's spec is the ruled document, with the block's own semantics version", () => {
+    // Spelled out, not rebuilt from the constants: this is the JSON the operator ruled, and the
+    // one member the ruling left to the protocol proposal, `verifierSemanticsVersion`.
+    expect(buildTerminalBench21EvaluationSpec("adaptive-rejection-sampler")).toEqual({
+      protocol: "https://spec.jinn.network/profiles/evaluation-spec/v1",
+      semanticsVersion: "4",
+      family: "external-verifier",
+      grader: {
+        name: "terminal-bench/adaptive-rejection-sampler",
+        digest: { sha256: "bcaa2399985cd57666018025846289ab25e193ae0dd8fb7f0ffab2410c24d4de" },
+        accessClass: "public",
+      },
+      familyBlock: {
+        harness: "harbor",
+        verifierSemanticsVersion: "1",
+        testMaterial: [
+          {
+            name: "tests/test.sh",
+            digest: { sha256: "38b43560d173cc2b952c3a3e17b8a480216d84e33450515e047bcb0d806b1e0a" },
+            accessClass: "public",
+          },
+          {
+            name: "tests/test_outputs.py",
+            digest: { sha256: "547dc6e107f034f41703722aeceb6d0236e3fb69116fc3f2fbaba11884de352f" },
+            accessClass: "public",
+          },
+        ],
+        declaredImage: "alexgshaw/adaptive-rejection-sampler:20251031",
+        timeout: 900,
+      },
+      measurements: [{ name: "reward", type: "number", required: true }],
+      verdictRule: {
+        all: [
+          {
+            inconclusiveWhen: {
+              not: {
+                any: [
+                  { threshold: { measurement: "reward", op: "eq", value: 0 } },
+                  { threshold: { measurement: "reward", op: "eq", value: 1 } },
+                ],
+              },
+            },
+            class: "non-binary-reward",
+          },
+          { threshold: { measurement: "reward", op: "eq", value: 1 } },
+        ],
+      },
+      unscorable: [{ name: "non-binary-reward", disposition: "recorded-inconclusive" }],
+      evidenceConventions: { requiredRefs: ["trial-result.json"] },
+    });
+  });
+
+  test("takes the family name and both semantics versions from the profiles package", () => {
+    const spec = buildTerminalBench21EvaluationSpec("adaptive-rejection-sampler");
+    expect(spec.protocol).toBe(EVALUATION_SPEC_FORMAT_URI);
+    expect(spec.semanticsVersion).toBe(EVAL_SEMANTICS_VERSION);
+    expect(spec.family).toBe(EXTERNAL_VERIFIER_FAMILY);
+    expect((spec.familyBlock as { verifierSemanticsVersion: string }).verifierSemanticsVersion)
+      .toBe(EXTERNAL_VERIFIER_SEMANTICS_VERSION);
+  });
+
+  test("every official task seals its own spec, and names its own package as the grader", () => {
+    const built = buildTerminalBench21Tasks(officialTerminalBench21TaskNames());
+    expect(new Set(built.tasks.map((task) => task.evaluationSpec.sha256)).size).toBe(89);
+    for (const [index, task] of built.tasks.entries()) {
+      const pinned = TERMINAL_BENCH_21_OFFICIAL_TASKS[index]!;
+      // The stored bytes are the sealed spec, and they parse under the family's own rules.
+      expect(sealEvaluationSpec(buildTerminalBench21EvaluationSpec(task.taskName)).digest, task.taskName)
+        .toBe(`sha256:${task.evaluationSpec.sha256}`);
+      const spec = parseEvaluationSpec(task.evaluationSpec.bytes);
+      expect(spec.family, task.taskName).toBe("external-verifier");
+      // The grader digest is the slate's package ref: the value a Harbor trial records for the
+      // task, and the one the Harbor reader compares a trial against.
+      expect(spec.grader, task.taskName).toEqual({
+        name: `terminal-bench/${task.taskName}`,
+        digest: { sha256: pinned.ref.slice("sha256:".length) },
+        accessClass: "public",
+      });
+      expect(spec.measurements, task.taskName).toEqual([{ name: "reward", type: "number", required: true }]);
+    }
+  });
+
+  test("a reward of 1 passes, 0 fails, and any other value is inconclusive, never a fail", () => {
+    const { verdictRule } = buildTerminalBench21EvaluationSpec("adaptive-rejection-sampler");
+    const verdictAt = (reward: number | string) => evaluateVerdictRule(verdictRule, { reward });
+    expect(verdictAt(1)).toEqual({ verdict: "pass" });
+    expect(verdictAt(0)).toEqual({ verdict: "fail" });
+    // A decimal string is compared as an exact decimal, so a whole value written with a point
+    // is the same reward.
+    expect(verdictAt("1.0")).toEqual({ verdict: "pass" });
+    for (const reward of [2, -1, "0.5"]) {
+      expect(verdictAt(reward), String(reward)).toEqual({ verdict: "inconclusive", inconclusiveClass: "non-binary-reward" });
+    }
+  });
+
+  test("each sealed Task binds its spec by digest, and the item profile names the family", () => {
+    const built = buildTerminalBench21Tasks({ coverage: "ten_task" });
+    for (const task of built.tasks) {
+      expect(parseTask(task.bytes).evaluation, task.taskName).toEqual({ digest: { sha256: task.evaluationSpec.sha256 } });
+    }
+    expect(parseTaskProfile(built.profile.bytes).evaluationFamilies).toEqual(["external-verifier"]);
+  });
+
+  test("pins the digests the change that bound the specs moved", () => {
+    // Literal on purpose. Binding a spec moves the item profile, every Task, and every Benchmark
+    // built on them; a later change that moves any of these again must say so here, and must
+    // regenerate the checker's pin table in the same change (the parity tests below).
+    const built = buildTerminalBench21Tasks(officialTerminalBench21TaskNames());
+    expect(built.profile.sha256).toBe("be35444162406ef9b2720be2e49c30570a2b1bd49af2bd88855c867a14e2574b");
+    expect(built.tasks[0]!.evaluationSpec.sha256).toBe("f8a23fcec481a0bc9382b2e820a0dbbf574c324bd454d35f82ad0acc8eef1b59");
+    expect(built.tasks[0]!.sha256).toBe("8c5e35f7096a5c2e3b7f4a8c4fc3d9a2c9134c6980ca5a01789bfddadc6af916");
+    // The Benchmark alone moved once more, when its description stopped saying its tasks are "at"
+    // the upstream commit (it was 738b5bca...). No Task and no profile carries that text, so the
+    // three digests above and the checker's pin table stayed where they were.
+    expect(built.benchmark.sha256).toBe("4d78c13b27d937de0b929c0f02309e5a06b6d5fc584949877950a12c7f79cb08");
+    // The slate digest covers names and package refs only, so it does not move.
+    expect(built.slateDigest).toBe("sha256:0192806b9856af79819833c8cacd409a52f8ae56352936b0d392c3c463ec504d");
   });
 });
 

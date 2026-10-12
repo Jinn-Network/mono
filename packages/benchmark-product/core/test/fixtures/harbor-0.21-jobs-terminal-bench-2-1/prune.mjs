@@ -2,16 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Prunes a real Harbor 0.21 jobs directory down to the committed fixture in `./jobs`.
+ * Prunes a real Harbor 0.21 jobs directory down to one of the committed records beside this
+ * script.
  *
- *   node prune.mjs <source-jobs-dir> [<out-dir>]
+ *   node prune.mjs <record> <source-jobs-dir> [<out-dir>]
+ *
+ * `<record>` is a key of `RECORDS` below, and is also the directory the record is written to:
+ * `jobs` (one trial per task) or `jobs-two-attempts` (two trials per task).
  *
  * The source is a jobs directory Harbor wrote (`harbor run ... -o jobs`), holding one job
  * directory per arm. The output keeps, for each job, the job `config.json`, `lock.json` and
  * `result.json`, and for each kept task the trial `config.json`, `result.json` and
- * `verifier/reward.txt`. Everything else a trial directory holds is left behind: trajectories,
- * terminal recordings, agent logs and verifier output carry task instructions, reference
- * solutions and hidden test output.
+ * `verifier/reward.txt` of every trial directory it has. Everything else a trial directory holds
+ * is left behind: trajectories, terminal recordings, agent logs and verifier output carry task
+ * instructions, reference solutions and hidden test output.
  *
  * Two fields are removed from each trial `result.json`, by deleting their line and nothing else,
  * so every other byte is what Harbor wrote:
@@ -28,17 +32,33 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
 const JOBS = ["oracle", "terminus-2"];
-const TASKS = ["adaptive-rejection-sampler", "cancel-async-tasks", "chess-best-move"];
 const JOB_FILES = ["config.json", "lock.json", "result.json"];
+/**
+ * The committed records. Each is named for the directory it is written to, and states the tasks
+ * it keeps and how many trial directories each job must hold for each of them. A source job with
+ * any other count for a kept task is refused: Harbor does not number a task's trials, so the
+ * count is the only thing that says a record is the one-attempt or the two-attempt shape.
+ */
+const RECORDS = {
+  jobs: {
+    tasks: ["adaptive-rejection-sampler", "cancel-async-tasks", "chess-best-move"],
+    trialsPerTask: 1,
+  },
+  "jobs-two-attempts": {
+    tasks: ["adaptive-rejection-sampler", "cancel-async-tasks"],
+    trialsPerTask: 2,
+  },
+};
 
 const here = dirname(fileURLToPath(import.meta.url));
-const [sourceArg, outArg] = process.argv.slice(2);
-if (sourceArg === undefined) {
-  console.error("usage: node prune.mjs <source-jobs-dir> [<out-dir>]");
+const [recordArg, sourceArg, outArg] = process.argv.slice(2);
+if (recordArg === undefined || !Object.hasOwn(RECORDS, recordArg) || sourceArg === undefined) {
+  console.error(`usage: node prune.mjs <${Object.keys(RECORDS).join("|")}> <source-jobs-dir> [<out-dir>]`);
   process.exit(2);
 }
+const { tasks: TASKS, trialsPerTask: TRIALS_PER_TASK } = RECORDS[recordArg];
 const source = resolve(sourceArg);
-const out = resolve(outArg ?? join(here, "jobs"));
+const out = resolve(outArg ?? join(here, recordArg));
 
 function fail(message) {
   console.error(`prune: ${message}`);
@@ -134,13 +154,12 @@ for (const job of JOBS) {
   for (const file of JOB_FILES) {
     writeChecked(join(job, file), readFileSync(join(jobDir, file), "utf8"));
   }
-  const kept = new Set();
+  const kept = new Map(TASKS.map((task) => [task, 0]));
   for (const entry of readdirSync(jobDir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
     if (!entry.isDirectory()) continue;
     const task = taskOf(join(jobDir, entry.name));
     if (task === undefined || !TASKS.includes(task)) continue;
-    if (kept.has(task)) fail(`job ${job} has more than one trial for ${task}`);
-    kept.add(task);
+    kept.set(task, kept.get(task) + 1);
     const trial = join(job, entry.name);
     writeChecked(join(trial, "config.json"), readFileSync(join(jobDir, entry.name, "config.json"), "utf8"));
     writeChecked(join(trial, "result.json"), scrubTrialResult(readFileSync(join(jobDir, entry.name, "result.json"), "utf8")));
@@ -150,7 +169,11 @@ for (const job of JOBS) {
     );
     trials += 1;
   }
-  if (kept.size !== TASKS.length) fail(`job ${job} is missing a trial for one of ${TASKS.join(", ")}`);
+  for (const [task, count] of kept) {
+    if (count !== TRIALS_PER_TASK) {
+      fail(`job ${job} has ${count} trial directories for ${task}; the ${recordArg} record keeps exactly ${TRIALS_PER_TASK}`);
+    }
+  }
 }
 
 console.log(`pruned ${trials} trials across ${JOBS.length} jobs into ${out}`);

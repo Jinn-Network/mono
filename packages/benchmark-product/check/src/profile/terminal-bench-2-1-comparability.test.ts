@@ -11,6 +11,7 @@
  * in the signed Report limitations, and the claim section projected from the verified extension.
  */
 
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import {
   BENCHMARKING_METHOD_IDS,
@@ -21,6 +22,8 @@ import {
   type ReportRecord,
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
+import { sealEvaluationSpec, type EvaluationSpec } from "@jinn-network/task-execution-profiles";
+import { TASK_EXECUTION_PROTOCOL_URI, sealTask } from "@jinn-network/task-execution-protocol";
 import {
   CAPABILITY_REGISTRY,
   EXTERNAL_IMPORT_CAPABILITY,
@@ -384,6 +387,122 @@ describe("the pinned slate", () => {
     const offPin = slateBenchmark(TEN, { items: (digests) => digests.map((sha256, index) => index === 3 ? digest("5") : sha256) });
     expect(contradictionOf(offPin)).toContain(`"${TEN[3]}"`);
     expect(contradictionOf(offPin)).toMatch(/not the pinned official Task/u);
+  });
+
+  /**
+   * What the pinned Task digest holds still, beyond the Task's own words: the EvaluationSpec it
+   * binds. The reader parses a carried spec and does not compare its content with anything, so a
+   * spec that judges differently would pass that step. It does not pass this one: the spec's
+   * digest is inside the Task, the Task's digest is pinned, and one comparison per item settles
+   * both.
+   *
+   * The official Task of the first slate task is spelled out here, with the spec the operator
+   * ruled (2026-10-06, decision 1) and the block's own semantics version. The control shows that
+   * these literals seal to the pinned Task. Each tamper then changes one thing in the spec, stays
+   * a valid specification, and is refused as a Task off the pin.
+   */
+  describe("the pinned Task digest holds the EvaluationSpec it binds", () => {
+    const FIRST = PINNED_NAMES[0]!;
+    const PACKAGE_REF = "bcaa2399985cd57666018025846289ab25e193ae0dd8fb7f0ffab2410c24d4de";
+    const rewardIs = (value: number) => ({ threshold: { measurement: "reward", op: "eq" as const, value } });
+    const RULED_SPEC = {
+      protocol: "https://spec.jinn.network/profiles/evaluation-spec/v1",
+      semanticsVersion: "4",
+      family: "external-verifier",
+      grader: { name: `terminal-bench/${FIRST}`, digest: { sha256: PACKAGE_REF }, accessClass: "public" },
+      familyBlock: {
+        harness: "harbor",
+        verifierSemanticsVersion: "1",
+        testMaterial: [
+          { name: "tests/test.sh", digest: { sha256: "38b43560d173cc2b952c3a3e17b8a480216d84e33450515e047bcb0d806b1e0a" }, accessClass: "public" },
+          { name: "tests/test_outputs.py", digest: { sha256: "547dc6e107f034f41703722aeceb6d0236e3fb69116fc3f2fbaba11884de352f" }, accessClass: "public" },
+        ],
+        declaredImage: "alexgshaw/adaptive-rejection-sampler:20251031",
+        timeout: 900,
+      },
+      measurements: [{ name: "reward", type: "number", required: true }],
+      verdictRule: {
+        all: [
+          { inconclusiveWhen: { not: { any: [rewardIs(0), rewardIs(1)] } }, class: "non-binary-reward" },
+          rewardIs(1),
+        ],
+      },
+      unscorable: [{ name: "non-binary-reward", disposition: "recorded-inconclusive" }],
+      evidenceConventions: { requiredRefs: ["trial-result.json"] },
+    } as const;
+
+    /** The digest of the official Task of the first slate task, binding `spec`. Sealing the spec
+     * first proves each tampered spec is still a valid specification. */
+    function officialTaskBinding(spec: unknown): string {
+      const evaluationSpecSha256 = sealEvaluationSpec(spec as EvaluationSpec).digest.slice("sha256:".length);
+      return createHash("sha256").update(sealTask({
+        protocol: TASK_EXECUTION_PROTOCOL_URI,
+        profile: {
+          uri: "https://product.jinn.network/profiles/terminal-bench-2-1-item/1",
+          digest: { sha256: "be35444162406ef9b2720be2e49c30570a2b1bd49af2bd88855c867a14e2574b" },
+        },
+        instructions: `Terminal-Bench 2.1 task ${FIRST} at dataset ${PINS.datasetId}@${PINS.datasetRevision}.`,
+        payload: {
+          datasetId: PINS.datasetId,
+          datasetRevision: PINS.datasetRevision,
+          upstreamCommit: PINS.upstreamCommit,
+          taskName: FIRST,
+          packageRef: `sha256:${PACKAGE_REF}`,
+        },
+        outputs: [{ name: "result", mediaType: "application/json", required: false }],
+        evaluation: { digest: { sha256: evaluationSpecSha256 } },
+        author: "urn:jinn:benchmark-product:terminal-bench-2.1-official-slate",
+      })).digest("hex");
+    }
+
+    const offPin = (spec: unknown) =>
+      contradictionOf(slateBenchmark(ONE, { items: () => [officialTaskBinding(spec)] }));
+
+    test("control: the ruled spec seals into the pinned Task, and that Benchmark projects", () => {
+      expect(officialTaskBinding(RULED_SPEC)).toBe(pinOf(FIRST));
+      expect(offPin(RULED_SPEC)).toBeUndefined();
+    });
+
+    test("a rule that passes at a reward of 0 is a Task off the pin", () => {
+      const passAtZero = {
+        ...RULED_SPEC,
+        verdictRule: { all: [RULED_SPEC.verdictRule.all[0], rewardIs(0)] },
+      };
+      expect(offPin(passAtZero)).toContain(`"${FIRST}"`);
+      expect(offPin(passAtZero)).toMatch(/not the pinned official Task/u);
+    });
+
+    test("a grader digest that is not the slate's package ref is a Task off the pin", () => {
+      const otherPackage = { ...RULED_SPEC, grader: { ...RULED_SPEC.grader, digest: { sha256: digest("5") } } };
+      expect(offPin(otherPackage)).toContain(`"${FIRST}"`);
+      expect(offPin(otherPackage)).toMatch(/not the pinned official Task/u);
+    });
+
+    test("a deterministic-process spec for the same task is a Task off the pin", () => {
+      // The family the first design considered for these tasks. It seals, and it states an image,
+      // a platform and a parser that no task package states.
+      const deterministicProcess = {
+        protocol: RULED_SPEC.protocol,
+        semanticsVersion: RULED_SPEC.semanticsVersion,
+        family: "deterministic-process",
+        grader: RULED_SPEC.grader,
+        familyBlock: {
+          image: { uri: "docker://alexgshaw/adaptive-rejection-sampler:20251031" },
+          platform: "linux/amd64",
+          workspace: { root: "/app" },
+          testMaterial: RULED_SPEC.familyBlock.testMaterial,
+          parser: { id: "harbor-reward-file", version: "0.21.0", digest: `sha256:${digest("1")}` },
+          transitions: { failToPass: [], passToPass: [] },
+          timeout: 900,
+        },
+        measurements: RULED_SPEC.measurements,
+        verdictRule: rewardIs(1),
+        unscorable: [],
+        evidenceConventions: RULED_SPEC.evidenceConventions,
+      };
+      expect(offPin(deterministicProcess)).toContain(`"${FIRST}"`);
+      expect(offPin(deterministicProcess)).toMatch(/not the pinned official Task/u);
+    });
   });
 
   test("names that do not match the items are refused", () => {

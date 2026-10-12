@@ -467,6 +467,16 @@ exit 1 invalid; exit 2 usage. It opens no network connection and uploads
 nothing. Every bundle names its own compatible command in
 `claim-package.json` `verification.compatibleCommand`.
 
+Under `Format:` the reference verifier prints a `Run:` line, from its `0.2.1`
+release on. An earlier `verify` release, which a bundle sealed before the
+rename pins, prints no such line. You can compute
+the same value yourself: it is the SHA-256 of the bundle's `run.json`
+(`shasum -a 256 run.json`). It is also the digest `lock` printed when the
+run's method was sealed, so a claimant who made that digest public before the
+run has given you something to compare it with.
+[`CLAIMANT-WALKTHROUGH.md`](CLAIMANT-WALKTHROUGH.md) describes that step from
+the claimant's side.
+
 ## Evidence-native bundle v5
 
 A `benchmark-product-public-bundle/5` bundle's claim is

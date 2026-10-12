@@ -1,0 +1,10 @@
+{
+    "task": {
+        "name": "terminal-bench/adaptive-rejection-sampler",
+        "ref": "sha256:bcaa2399985cd57666018025846289ab25e193ae0dd8fb7f0ffab2410c24d4de",
+        "source": "terminal-bench/terminal-bench-2-1"
+    },
+    "trial_name": "adaptive-rejection-sampler__xRxLebm",
+    "trials_dir": "jobs/oracle",
+    "job_id": "69396c31-e819-4bb6-9534-4f63a4b88856"
+}

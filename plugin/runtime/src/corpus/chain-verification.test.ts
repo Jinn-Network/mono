@@ -6,7 +6,7 @@ import type { RuntimeLogger } from "../logger.js";
 import {
   SYNC_ABORTED_REASON,
   SYNC_TRUNCATED_REASON,
-  UNVERIFIED_CHAIN_ACKNOWLEDGEMENT,
+  UNVERIFIED_CHAIN_ACKNOWLEDGMENT,
   createDriverChainVerification,
   createRejectingChainVerification,
   createUnverifiedChainVerification,
@@ -73,8 +73,8 @@ describe("rejecting chain verification (the default)", () => {
 });
 
 describe("acknowledged unverified chain verification", () => {
-  test("admits only when the exact acknowledgement is supplied", async () => {
-    const verification = createUnverifiedChainVerification(UNVERIFIED_CHAIN_ACKNOWLEDGEMENT);
+  test("admits only when the exact acknowledgment is supplied", async () => {
+    const verification = createUnverifiedChainVerification(UNVERIFIED_CHAIN_ACKNOWLEDGMENT);
     expect(verification.mode).toBe("unverified");
     await expect(verification.verify(input)).resolves.toEqual({ status: "ok" });
     await expect(verification.revalidateHead(headInput)).resolves.toEqual({ status: "ok" });
@@ -297,7 +297,7 @@ describe("a walk the mirror itself truncated (#3252)", () => {
   });
 
   test("the unverified posture still admits it, so a capped mirror keeps making progress", async () => {
-    const verification = createUnverifiedChainVerification(UNVERIFIED_CHAIN_ACKNOWLEDGEMENT);
+    const verification = createUnverifiedChainVerification(UNVERIFIED_CHAIN_ACKNOWLEDGMENT);
     await expect(verification.verify(truncated)).resolves.toEqual({ status: "ok" });
   });
 });
@@ -327,7 +327,7 @@ describe("a walk the mirror abandoned because it was cancelled (#3672)", () => {
   });
 
   test("the unverified posture still admits it, exactly as it admits a bounded prefix", async () => {
-    const verification = createUnverifiedChainVerification(UNVERIFIED_CHAIN_ACKNOWLEDGEMENT);
+    const verification = createUnverifiedChainVerification(UNVERIFIED_CHAIN_ACKNOWLEDGMENT);
     await expect(verification.verify(aborted)).resolves.toEqual({ status: "ok" });
   });
 });

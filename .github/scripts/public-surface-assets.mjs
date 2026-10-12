@@ -167,6 +167,33 @@ export function jinnIdentifierServedPath(identifier, label = 'Jinn identifier') 
   return servedPath;
 }
 
+/**
+ * The path one enumerated schema, profile, or fixture document is served at, relative to
+ * `spec.jinn.network`: the identity the document declares when it declares one, otherwise
+ * its package-relative source, scoped by the package name for a fixture.
+ *
+ * A document that declares no identity is served exactly as publicly as one that does, so it
+ * answers to the same path law. The case that matters cannot reach the claimed branch at
+ * all: `declaredClaim` returns null for anything not ending in `.json`, so a `.gitignore`
+ * committed into a declared publicSurface directory -- an ordinary developer act, not an
+ * attack -- can never HAVE a claim. Unguarded it produced an attested, signed profile root
+ * serving `profiles/.gitignore`, and only the deploy bundle refused it: red on `next` after
+ * attestation, instead of in platform verification.
+ *
+ * Stated once, here, because the profile-root builder and the spec release sync both need
+ * it, and a restated rule is a rule that drifts.
+ */
+export function publicSurfaceServedPath(asset) {
+  if (asset.claim) return asset.claim.servedPath;
+  const fallbackPath = asset.kind === 'fixtures'
+    ? `${asset.package}/${asset.relativeSource}`
+    : asset.relativeSource;
+  return jinnIdentifierServedPath(
+    `${CANONICAL_IDENTIFIER_ORIGIN}${fallbackPath}`,
+    `${asset.package} public surface document ${asset.relativeSource}`,
+  );
+}
+
 /** The host `identifier` names, normalized for comparison, or `undefined` if it is not a URL. */
 function identifierHost(identifier) {
   try {

@@ -16,7 +16,7 @@
  * enforcement, it just drives the draft into a state those checks already treat as immutable.
  */
 
-import { taskSelectionContradiction } from "@colophon-claims/check";
+import { carriesOfficialTerminalBench21Slate, taskSelectionContradiction } from "@colophon-claims/check";
 import {
   RUN_RECORD_KIND,
   parseRun,
@@ -27,11 +27,14 @@ import {
   withRunPublicationExtension,
   withRunSampleSizeAdvisoryExtension,
   parseBenchmark,
+  type BenchmarkRecord,
 } from "@jinn-network/benchmarking-records";
 import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
+import { HARBOR_RUN_IMPORT_VERSIONS } from "../intake/harbor-run-records.js";
+import { TERMINAL_BENCH_21_OFFICIAL_SLATE_EXTENSION } from "../intake/terminal-bench-2-1.js";
 import { compileDraft } from "../run/compile.js";
 import { sampleSizeAdvisory, type DeclaredAnalysis, type SampleSizeAdvisory } from "../run/sample-size-advisory.js";
 import {
@@ -65,6 +68,34 @@ export interface RunLockInput {
   readonly acknowledgedSampleSizeAdvisory?: boolean;
 }
 
+/**
+ * The fewest trials of every task the Terminal-Bench 2.1 leaderboard asks for (DR-2026-08-17-b).
+ * A run that plans fewer is not leaderboard-comparable, and `lock` says so before it seals.
+ */
+export const TERMINAL_BENCH_21_LEADERBOARD_TRIALS_PER_TASK = 5;
+
+/**
+ * What `run import --from harbor` will hold the Harbor run of a draft on the official
+ * Terminal-Bench 2.1 slate to (operator rulings of 2026-10-06, decision 8).
+ *
+ * Each of these is refused at import, after the run has been paid for, so `lock` states them
+ * before the claimant starts Harbor. They are facts about the reader and the sealed plan, never
+ * about a run: nothing here is sealed, and a lock seals the same Run bytes with or without them.
+ */
+export interface HarborRunRequirements {
+  readonly harness: "harbor";
+  /** The Harbor versions the reader accepts (`HARBOR_RUN_IMPORT_VERSIONS`). */
+  readonly versions: readonly string[];
+  /** The only retry setting the reader accepts: `harbor run --max-retries 0`, Harbor's default. */
+  readonly maxRetries: 0;
+  /** `<datasetId>@<datasetRevision>`: the Harbor dataset argument that names the sealed revision. */
+  readonly dataset: string;
+  /** Trials of each task the reader has a slot for: the draft's replicate count, as
+   * `harbor run --n-attempts`. */
+  readonly attemptsPerTask: number;
+  readonly leaderboardTrialsPerTask: typeof TERMINAL_BENCH_21_LEADERBOARD_TRIALS_PER_TASK;
+}
+
 export interface RunLockResult {
   readonly draft: DraftDocument;
   readonly runSha256: string;
@@ -72,6 +103,42 @@ export interface RunLockResult {
   readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
   /** Present exactly when the caller acknowledged it, which is exactly when the seal carries it. */
   readonly sampleSizeAdvisory?: SampleSizeAdvisory;
+  /** Present exactly when the Benchmark is the official Terminal-Bench 2.1 slate. */
+  readonly harborRun?: HarborRunRequirements;
+}
+
+/** `undefined` for any Benchmark that is not the official slate, or whose slate extension does not
+ * name its dataset: a dataset argument is never guessed. */
+function harborRunRequirements(benchmark: BenchmarkRecord, replicates: number): HarborRunRequirements | undefined {
+  if (!carriesOfficialTerminalBench21Slate(benchmark)) return undefined;
+  const slate = (benchmark as unknown as Readonly<Record<string, Readonly<Record<string, unknown>>>>)[
+    TERMINAL_BENCH_21_OFFICIAL_SLATE_EXTENSION
+  ]!;
+  const { datasetId, datasetRevision } = slate;
+  if (typeof datasetId !== "string" || typeof datasetRevision !== "string") return undefined;
+  return {
+    harness: "harbor",
+    versions: HARBOR_RUN_IMPORT_VERSIONS,
+    maxRetries: 0,
+    dataset: `${datasetId}@${datasetRevision}`,
+    attemptsPerTask: replicates,
+    leaderboardTrialsPerTask: TERMINAL_BENCH_21_LEADERBOARD_TRIALS_PER_TASK,
+  };
+}
+
+/**
+ * The requirements a lock of this draft would return, so an operator surface can state the
+ * replicate count's consequence BEFORE the irreversible seal. `undefined` for a draft with no
+ * benchmark or one that is not on the official slate, on the same terms as
+ * `draftSampleSizeAdvisory` below: `runLock` stays the one place that says why a lock cannot happen.
+ */
+export function draftHarborRunRequirements(workspaceDir: string, draftId: string): HarborRunRequirements | undefined {
+  const document = readDraftDocument(workspaceDir, draftId);
+  if (document.spec.taskSet.kind !== "benchmark") return undefined;
+  return harborRunRequirements(
+    parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256)),
+    document.spec.replicates,
+  );
 }
 
 /**
@@ -340,6 +407,7 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
       const draft: DraftDocument = { ...document, state: transitioned.state, updatedAt: at };
       atomicWriteFileSync(draftPath(clockedContext.workspaceDir, input.draftId), JSON.stringify(draft, null, 2));
 
+      const harborRun = harborRunRequirements(compiled.benchmarkRecord, document.spec.replicates);
       return {
         draft,
         runSha256,
@@ -348,6 +416,7 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
         ...(input.acknowledgedSampleSizeAdvisory === true && advisory !== undefined
           ? { sampleSizeAdvisory: advisory }
           : {}),
+        ...(harborRun === undefined ? {} : { harborRun }),
       };
     },
   });

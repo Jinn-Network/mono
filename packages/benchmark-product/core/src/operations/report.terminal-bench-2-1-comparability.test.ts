@@ -11,8 +11,8 @@
  * assertion the checker runs, so a draft a reader would refuse is refused here, while the
  * operator can still read why.
  *
- * No Task on the slate binds an EvaluationSpec yet, so every imported cell here is `unrun` and the
- * bundle-level test of a judged slate run lands with the change that binds the specs.
+ * Every imported cell here is `unrun`, which is enough to reach `report`. A judged slate run,
+ * published and checked as a bundle, is in `bundle/v10-materialize.test.ts`.
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -212,6 +212,9 @@ describe("report on a run brought onto the official Terminal-Bench 2.1 slate", (
     const author = loadOrCreateReportSigningKey(workspaceDir).keyId;
     const at = clock();
     putSealedBytes(workspaceDir, built.profile.bytes);
+    // The re-authored Task keeps the official Task's EvaluationSpec digest, so the spec is stored
+    // as a bind stores it: `quote` and `lock` refuse a Task whose spec they cannot read.
+    putSealedBytes(workspaceDir, built.tasks[0]!.evaluationSpec.bytes);
     const authoredTask = deriveWorkspaceAuthoredTask({ sourceBytes: built.tasks[0]!.bytes, author, sourceKind: "terminal-bench-2-1" });
     const taskSha256 = putSealedBytes(workspaceDir, authoredTask.bytes);
     recordWorkspaceAuthorship({ workspaceDir, recordSha256: taskSha256, recordKind: RECORD_KINDS.task, authoredAt: at });

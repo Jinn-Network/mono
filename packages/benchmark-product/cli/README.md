@@ -47,6 +47,24 @@ npx @colophon-claims/cli@0.1 results --help
 
 `help --advanced` prints the full lifecycle library.
 
+## Bring a Terminal-Bench 2.1 run
+
+[`CLAIMANT-WALKTHROUGH.md`](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/CLAIMANT-WALKTHROUGH.md)
+lists every command of this path in order, from an empty directory to a bundle
+checked on a second machine, for a Terminal-Bench 2.1 run you make on Harbor. It
+gives the arm pinning for a Harbor agent and model and says how a Harbor trial
+is matched to an arm. It names the provider values `anchor` accepts, with one
+example endpoint. It gives the Harbor commands, says where the bundle can be
+hosted, and gives the checker command a reader runs.
+
+A draft needs at least two arms. A claimant with one agent adds Harbor's
+`oracle` agent as the second arm.
+
+`quote` is a required step, and it is known to run on Ubuntu x64 and
+Apple-silicon macOS arm64. So the claimant verbs need one of those two
+platforms, the same two the sample is qualified on. Checking a bundle needs only
+Node 22.
+
 ## Service venue verbs
 
 `launch`, `resume`, `preview`, and the other venue-orchestration verbs
@@ -66,9 +84,10 @@ npx @colophon-claims/cli@0.1
 The sample needs Node 22 or newer and is qualified on Ubuntu x64 and Apple-silicon macOS arm64. It needs no account, API key, funds, or Docker. It publishes only to a new local directory, verifies the copied bundle after deleting the source workspace, serves the report from a loopback-only viewer, and uploads nothing. Windows and Intel macOS are not yet qualified.
 
 To move from the sample to your own tasks, run `colophon open`. The local app uses
-`./colophon-workspace` unless you select another workspace on the command line. It binds only to
-loopback and does not send telemetry. SWE-bench is the supported import path for homemade
-instance rows.
+`./colophon-workspace` unless you select another workspace on the command line. It acts as a member
+of that workspace: the principal that `init --principal <id>` named, or the one you pass to `open`
+with `--principal <id>`. It binds only to loopback and does not send telemetry. SWE-bench is the
+supported import path for homemade instance rows.
 
 Claude Code and Codex arms use strict machine-local profiles. Add a profile by naming the adapter,
 exact model, effort, and optional executable; Colophon observes and hashes the executable itself.
@@ -89,7 +108,7 @@ publication gates. Colophon never copies an ordinary Claude or Codex home as a s
 doctor proves configuration, not provider acceptance.
 
 For this release, `@jinn-network/*` is pinned to the exact
-`0.1.0-canary.sha.1c023eb4c24201435e665ddae9d297f286a196bc` receipt.
+`0.1.0-canary.sha.272455add1170766f064181c105071519a6baf95` receipt.
 It is not a floating `@canary` dependency and is not a stable stack release.
 
 For a received bundle, the smaller reader surface is:

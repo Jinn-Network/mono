@@ -115,7 +115,7 @@ test('the final deterministic publication receipt is attested and uploaded', () 
   const block = workflow.slice(publishAt, refreshAt);
   assert.match(block, /uses: actions\/attest@v4/u);
   assert.ok(block.includes('subject-path: .platform-publication/${{ matrix.release_group }}/publication-receipt.json'));
-  assert.match(block, /uses: actions\/upload-artifact@v4/u);
+  assert.match(block, /uses: actions\/upload-artifact@v7/u);
   assert.ok(block.includes('name: platform-publication-receipt-${{ matrix.release_group }}'));
   assert.match(block, /if-no-files-found: error/u);
 });

@@ -107,3 +107,35 @@ itself; the published verify 0.2.0 and 0.2.1 are unchanged.
 This does not permit a floating `@canary`, a mixed SHA closure, another
 product or product version, an implicit future exception, or a stable-stack
 claim. `npm publish` remains a human act after the recording change merges.
+
+## Amendment (2026-10-12): the check, core and cli receipts move to 272455a
+
+Issue #4974. Decision 1 of DR-2026-10-06, the ruling on #4959, gives each
+task of the official Terminal-Bench 2.1 slate an EvaluationSpec in a new
+grader family, `external-verifier`, and names this step: one canary publish
+and re-pinned receipts for check, core and cli. #4979 added the family to
+`@jinn-network/task-execution-profiles` and merged to `next` as
+272455add1170766f064181c105071519a6baf95.
+
+Only `@colophon-claims/check@0.2.1`, `@colophon-claims/core@0.1.0` and
+`@colophon-claims/cli@0.1.0` MAY pin `@jinn-network/*` to the exact
+already-attested platform version
+`0.1.0-canary.sha.272455add1170766f064181c105071519a6baf95` (Stack npm
+Publish run 38246145514 attempt 1, push to `next`). This supersedes the
+1c023eb pin the 2026-10-01 amendment gave the three. None of the three
+versions has been published, so no package version changes. The three
+receipts still carry one sha, the decision each receipt names is unchanged,
+and the verify 0.2.0 and 0.2.1 receipts are unchanged.
+
+Why the pin is not 1c023eb: that canary predates #4979. Its
+`@jinn-network/task-execution-profiles` knows five grader families and
+refuses a spec of any other. core seals the official-slate specs with that
+package and the checker parses the spec a bundle carries with it, so a
+release against 1c023eb could neither seal nor check an official-slate
+bundle. 272455a is the merge of #4979, and its run published every
+`@jinn-network/*` package the three releases install: 15 for check, 36 for
+core, and cli adds none of its own.
+
+This does not permit a floating `@canary`, a mixed SHA closure, another
+product or product version, an implicit future exception, or a stable-stack
+claim. `npm publish` remains a human act after the recording change merges.

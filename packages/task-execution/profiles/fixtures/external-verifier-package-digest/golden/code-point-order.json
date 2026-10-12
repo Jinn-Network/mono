@@ -1,0 +1,18 @@
+{
+  "input": {
+    "harness": "harbor",
+    "files": [
+      {
+        "path": "tests/\ud801\udc00.txt",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "path": "tests/\uff21.txt",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ]
+  },
+  "expect": {
+    "contentHash": "7795edd9b618a0da13e57cc2471f9f1f299d1a804ad0ef1702cfbd9357fd17ab"
+  }
+}

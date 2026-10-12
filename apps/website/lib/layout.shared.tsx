@@ -12,9 +12,9 @@ export function baseOptions(): BaseLayoutProps {
     // Dark only (WEBSITE-APP-SPEC.md §3.3). The switcher is off, not hidden.
     themeSwitch: { enabled: false },
     links: [
-      { text: 'Build', url: '/docs/build', active: 'nested-url' },
-      { text: 'Operate', url: '/docs/operate', active: 'nested-url' },
-      { text: 'Explorer', url: links.explorer, external: true },
+      { text: 'Docs', url: '/docs', active: 'nested-url' },
+      { text: 'Protocol', url: links.spec, external: true },
+      { text: 'Colophon', url: links.colophon, external: true },
     ],
   };
 }

@@ -6,20 +6,29 @@
 > **What this doc is.** A model of *what* the site shows, *what* a visitor can do, and
 > *how* the site surfaces things that need attention. Spec, not implementation. It is the
 > sibling of [`../../packages/indexer/explorer/EXPLORER-APP-SPEC.md`](../../packages/indexer/explorer/EXPLORER-APP-SPEC.md)
-> and [`../../client/OPERATOR-APP-SPEC.md`](../../client/OPERATOR-APP-SPEC.md) and follows
+> and [`../operator-console/OPERATOR-APP-SPEC.md`](../operator-console/OPERATOR-APP-SPEC.md) and follows
 > the same modelling discipline. Changes go through CODEOWNERS review; see
 > [`../../spec/2026-04-28-canonical-docs.md`](../../spec/2026-04-28-canonical-docs.md).
 >
 > **What this doc is not.** It is not the copy itself, not the positioning, and not the
-> deploy runbook. Copy derives from the platform architecture
-> ([`../../docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md`](../../docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md) §11)
-> and the platform one-pager
-> ([`../../docs/positioning/2026-07-29-jinn-platform-one-pager.md`](../../docs/positioning/2026-07-29-jinn-platform-one-pager.md)).
-> The surface this site belongs to is designed in
+> deploy runbook. Copy derives from the canonical documents:
+> [`../../THESIS.md`](../../THESIS.md) §3 and §4 for what Jinn is, what exists today and
+> what is direction; [`../../GLOSSARY.md`](../../GLOSSARY.md) for record, holder, offer and
+> price; [`../../GROWTH.md`](../../GROWTH.md) §3 for the call to action; and the root
+> [`../../README.md`](../../README.md) for Colophon. The protocol is written only in
+> [Jinn-Network/spec](https://github.com/Jinn-Network/spec).
+> The web property this site belongs to is designed in
 > [`../../docs/superpowers/specs/2026-08-03-devx-surface-design.md`](../../docs/superpowers/specs/2026-08-03-devx-surface-design.md)
-> (§4 the web property, §5 the information architecture). Voice and posture are
-> [`../../BRAND.md`](../../BRAND.md); tokens are [`../../DESIGN.md`](../../DESIGN.md).
-> Deploy facts are [`README.md`](README.md).
+> (§4). That design's information architecture (§5) has two doors into the task
+> marketplace, which is parked; §2.2 and §2.3 below replace it for this site. Voice and
+> posture are [`../../BRAND.md`](../../BRAND.md); tokens are
+> [`../../DESIGN.md`](../../DESIGN.md). Deploy facts are [`README.md`](README.md).
+>
+> **The story the site tells (2026-10-12).** Jinn is an open protocol and network for work
+> and the data it produces. The protocol, the published checker and Colophon's sealed
+> benchmark claims exist today. Buying and selling records is the direction, not a working
+> market. The task marketplace is parked. The site says each of these as what it is, and
+> offers a visitor only what exists: no stub pages and no notice of something to come.
 
 ## 1. Modelling discipline
 
@@ -57,8 +66,10 @@ The persistent shell: the Fumadocs nav bar over both the landing page and the do
   - wordmark — the vessel sigil plus Instrument Serif italic "jinn"; transcribed from
     `docs/design/jinn-design-system/project/assets/logo-wordmark.svg`, not redrawn; links
     to `/`
-  - nav items — `Build` (`/docs/build`), `Operate` (`/docs/operate`), `Explorer`
-    (external); active-route detection is prefix-match
+  - nav items: `Docs` (`/docs`), `Protocol` (external, the specification repository),
+    `Colophon` (external); active-route detection is prefix-match. The explorer is not a
+    nav item: it is a record of the parked network, linked only where a page says so
+    (§2.2)
   - repository link — the GitHub icon link to `Jinn-Network/mono`
 - **Actions**
   - navigate — via nav item or wordmark
@@ -68,30 +79,42 @@ The persistent shell: the Fumadocs nav bar over both the landing page and the do
 
 ### 2.2 Landing router
 
-The apex page (`/`). Its job is to say what Jinn is and route the visitor to one of two
-doors. It persuades; it does not transact.
+The apex page (`/`). Its job is to say what Jinn is today and route the visitor to one of
+three doors. It persuades; it does not transact.
 
 - **Static**
-  - the identity paragraph — DR-2026-07-30 §11, the ratified newcomer paragraph
-  - the loop — five steps (Request, Execute, Evaluate, Deliver, Publish)
-  - the boundary — what the platform is responsible for, and what is a product built on it
-  - the caveats — the "what this does not yet prove" list, carried from §11 with its
-    source linked. This section is not optional and does not shrink: a milestone surface
-    that omits its own gap is less Legible, not more.
+  - the identity statement: the canonical noun, "an open protocol and network for work and
+    the data it produces", and what a record is (THESIS.md §3). It says a holder can offer
+    a record, free or priced. It does not say or imply that selling records works today
+  - where things stand: three lists, kept apart. *Exists today* (the protocol, the
+    published checker, Colophon's sealed claims), *Direction* (a market in records; the
+    next application's records) and *Parked* (the task marketplace)
+  - how a record moves: five steps (Record, Check, Offer, Find, Buy). The first four are in
+    the protocol today. The fifth is marked as direction
+  - the first application: Colophon, named and linked, with what it does and what it does
+    not yet offer
+  - the caveats: the "what this does not yet prove" list, each with its source linked. This
+    section is not optional and does not shrink: a surface that omits its own gap is less
+    Legible, not more.
 - **Collections**
-  - doors — exactly two: *Build on Jinn* (`/docs/build`) and *Run an operator*
-    (`/docs/operate`). Each carries a title, one sentence of scope, and one line of honest
-    status. They are **navigation**, not calls to action.
+  - doors: exactly three. *Check a claim* (`/docs/check-a-claim`), *Find a claim*
+    (external, Colophon's listing) and *Build on the protocol* (`/docs/protocol`). Each
+    carries a title, one sentence of scope, and one line of honest status. They are
+    **navigation**, not calls to action, and each leads to something that works today. A
+    door for something parked or not yet built is out of model.
 - **Actions**
-  - **join the community** — the single call to action, an outbound link to the Telegram
-    group. No lifecycle. GROWTH.md §3 binds every outward surface to one CTA until the v0
-    gate produces a result, so there is exactly one button element on this page. Adding a
-    second ask is a GROWTH.md amendment, not a UI change; the proposal that would license
-    it is
-    [`../../docs/proposals/2026-08-04-growth-cta-amendment-DRAFT.md`](../../docs/proposals/2026-08-04-growth-cta-amendment-DRAFT.md).
-  - enter a door — navigate to `/docs/build` or `/docs/operate`
-  - outbound links — explorer, repository, the source spec, `/llms.txt`. No lifecycle.
-- **State messages** — none. Nothing on this page can fail.
+  - **bring a claim**: the single call to action, an outbound link to the part of
+    Colophon's site that says how a claim is brought today. No lifecycle. GROWTH.md §3
+    names "Bring a claim" as the single call to action on every outward surface, so there
+    is exactly one button element on this page. A second ask is a GROWTH.md amendment, not
+    a UI change.
+  - enter a door: navigate to `/docs/check-a-claim` or `/docs/protocol`, or leave for
+    Colophon's listing
+  - outbound links: the specification repository, the published checker, Colophon, this
+    repository, `/llms.txt`, and the explorer. No lifecycle. Every explorer link is
+    labelled, in its own words, as the record of what ran on the parked network; it is
+    never offered as a live network.
+- **State messages**: none. Nothing on this page can fail.
 
 ### 2.3 Docs tree
 
@@ -99,14 +122,17 @@ The reading surface (`/docs/**`), rendered by Fumadocs over MDX in `content/docs
 
 - **Static**
   - current page — title, description, body, table of contents
-  - sidebar tree — derived from the file tree and the `meta.json` ordering files; the two
-    doors are top-level folders
+  - sidebar tree: derived from the file tree and the `meta.json` ordering files
   - search query
 - **Collections**
-  - pages — eleven at v1: `index`; `build/{index, quickstart, request-from-your-app,
-    custody, consume-evidence, implement-the-platform}`; `operate/index`; `machine/index`;
-    `reference/index`; `community`. Order within a folder comes from that folder's
-    `meta.json`, not from the filesystem.
+  - pages: six. `index` (what exists, what is direction, what is parked);
+    `check-a-claim` (the one thing a stranger can run today: the published checker over a
+    published claim); `protocol` (where the protocol is written and how to build on it);
+    `task-marketplace` (the parked marketplace, named as parked, with where its design and
+    its record live); `machine/index`; `community`. Order comes from the `meta.json`
+    files, not from the filesystem. A page exists only for something that exists: a page
+    that says its subject is not written yet is out of model, and so is a page that walks
+    a parked flow as if it were live.
   - search results — title, description, and heading matches, ranked by the search client
 - **Actions**
   - navigate — sidebar, in-page links, table of contents
@@ -115,9 +141,6 @@ The reading surface (`/docs/**`), rendered by Fumadocs over MDX in `content/docs
     search server.
   - copy — the prompt block's clipboard action (§2.4)
 - **State messages**
-  - not yet written — every page that is a stub carries a **dated** notice naming what it
-    will contain and what is accurate to read instead. This is honesty discipline, not
-    apology: the notice states the gap and points at the truth. It carries no action.
   - no search results — the dialog's empty state
   - unknown path — the 404 page
 
@@ -126,6 +149,12 @@ outside the repository. The site never renders or copies the repository's intern
 `docs/`, `spec/`, or `log/` trees; where the detail lives in-repo, a page links out to
 GitHub and says in one line what is there. A page that restates an internal document is a
 page that will rot against it.
+
+**Commands are checked, pinned and published.** A command on a docs page is one a stranger
+can run today, exactly as written. It names an exact published version, and no page tells a
+visitor to install or run a package that is not published. `test/content.test.mjs` asserts
+the pin and the package; the `check-a-claim` commands were run as written before they were
+committed.
 
 ### 2.4 Prompt block
 
@@ -179,10 +208,10 @@ reappear.
 | --- | --- |
 | `/` | Landing router (§2.2) |
 | `/docs` | Docs tree index (§2.3) |
-| `/docs/build/**` | Door 1 pages |
-| `/docs/operate/**` | Door 2 pages |
+| `/docs/check-a-claim` | Run the published checker over a published claim |
+| `/docs/protocol` | Where the protocol is written, and how to build on it |
+| `/docs/task-marketplace` | The parked task marketplace, named as parked |
 | `/docs/machine` | Machine-surface index |
-| `/docs/reference` | Generated reference (placeholder at v1) |
 | `/docs/community` | Community links |
 | `/llms.txt`, `/llms-full.txt` | Machine surfaces (§2.5) |
 | `/api/search` | Static search index (§2.5) |
@@ -247,9 +276,19 @@ fork may re-skin it. It is recorded here rather than left implicit.
   what the page already displays or to describe where a link goes. If a term needs
   explaining, it gets a tooltip; prose is reserved for empty states and error states,
   where plain words are the content.
-- **Verb discipline.** Operators *earn*; the protocol *escrows*, *settles*, *records*.
-  "Paid", "pays", "compensation", "proven", and "guaranteed" are asserted absent by
-  `test/content.test.mjs`.
+- **Verb discipline.** The verbs are `CLAUDE.md` "External Communication". The protocol
+  takes no fee and no part in payment, so it is never the subject of a payment verb:
+  payment for a priced record *goes straight to the holder, outside the protocol*. A
+  holder *offers* a record; anyone can *check* and *find* one. "Paid", "pays",
+  "compensation", "proven", "guaranteed", "co-founder", "team" and "executive" are
+  asserted absent by `test/content.test.mjs`.
+- **What exists and what is direction stay separate.** Wherever buying or selling records
+  appears, the same passage says it is the direction, not a working market. Nothing
+  presents posting a task, running an operator, staking, escrow or settlement as
+  something a visitor can do today. `test/content.test.mjs` asserts that no parked
+  command, package or route appears in the site's copy.
+- **No em dashes in copy.** Asserted over the copy sources by `test/content.test.mjs` and
+  over the rendered pages and machine surfaces by `test/build-output.test.mjs`.
 
 ### 3.5 Link integrity
 
@@ -263,16 +302,21 @@ single deleted path. Nothing on this surface is prose-only.
 Unresolved spec questions, not implementation work.
 
 - **Onboarding artifacts (DevX §6).** The pasteable prompts, the installable plugin, and
-  the MCP server are designed but not built. When the prompts ship they become a fourth
-  surface with their own digest-bound identity, and the two doors gain a copy block above
-  the prose. What that does to the single-CTA constraint is the subject of the growth
-  amendment draft, not of this spec.
-- **Generated reference (DevX §7.3).** `/docs/reference` is a placeholder. The generator —
-  Zod schemas to JSON Schema to pages, with golden fixtures as the examples — does not
-  exist. Whether the generated pages live in this tree or are emitted into it at build
-  time is open.
+  the MCP server were designed for the two doors this site no longer has. They are not
+  built and the site does not mention them. Whether any of them returns for the protocol
+  or for Colophon is open.
+- **Generated reference (DevX §7.3).** The site has no reference page. The schemas are
+  published by [Jinn-Network/spec](https://github.com/Jinn-Network/spec), and whether this
+  site should ever render them, or only link them, is open.
 - **Deploy.** Deploys are manual (`vercel deploy --prod`). Moving them into CI is a
   follow-up; the trade is between a green-CI gate on the apex domain and the current
   ability to ship without one.
-- **The two doors as CTAs.** Door polish is bounded by GROWTH.md §3 until the v0 gate.
-  See the proposal draft named in §2.2.
+- **The canonical line on a surface with no room for the qualifier.** `BRAND.md`'s
+  canonical line ends "sold straight by whoever holds it". The site's description says
+  "offered" there, and the hero says a holder can offer a record, because a link preview
+  cannot also say that selling records is the direction. Whether the canonical line itself
+  should carry the softer verb while the market is direction is a `BRAND.md` question,
+  raised in [Discussion #4903](https://github.com/Jinn-Network/mono/discussions/4903).
+- **Which explorer address.** The site links `explorer.jinn.network`; the root
+  [`../../README.md`](../../README.md) links the indexer's own address. Both resolve today.
+  Which one is the lasting address for the record of what ran is open.

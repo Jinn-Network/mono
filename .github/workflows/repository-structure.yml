@@ -67,6 +67,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
+    # This job runs the yarn-cache workflow guard, which parses every workflow on every
+    # pull request including from a fork. The bound caps any superlinear read in it (#4414).
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
@@ -77,6 +80,8 @@ jobs:
       - run: node --test .github/scripts/repository-gitlinks.test.mjs
       - name: Docs key guard
         run: node --test .github/scripts/docs-key-guard.test.mjs
+      - name: Reader-vocabulary tables match the spec
+        run: node --test .github/scripts/reader-vocabulary-tables.test.mjs
       - name: Demo-1 sealed pre-run artifacts
         run: node --test .github/scripts/demo1-historical-artifacts.test.mjs
       - name: Autopilot fail-closed resolution

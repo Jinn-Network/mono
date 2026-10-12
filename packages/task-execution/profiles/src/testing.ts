@@ -16,6 +16,12 @@ import {
   checkStatePredicateBlock,
   checkStatePredicateSpec,
 } from "./evaluation-spec/state-predicate/spec-checks.js";
+import { readExternalVerifierMeasurements } from "./evaluation-spec/external-verifier/measurements.js";
+import { harborPackageContentHash } from "./evaluation-spec/external-verifier/package-digest.js";
+import {
+  checkExternalVerifierBlock,
+  checkExternalVerifierSpec,
+} from "./evaluation-spec/external-verifier/spec-checks.js";
 
 // Re-exported conformance-kit surface (design §12, plan Task 15): the structural checks a
 // downstream consumer runs the fixture families of `FIXTURE_FAMILIES` against, all reachable
@@ -23,12 +29,16 @@ import {
 export {
   checkAdmissionReceipt,
   checkAllOfConstruction,
+  checkExternalVerifierBlock,
+  checkExternalVerifierSpec,
   checkMeasurementCoverage,
   checkStatePredicateBlock,
   checkStatePredicateSpec,
   checkVerdictConsistency,
   deriveEvaluationTask,
   evaluatePredicates,
+  harborPackageContentHash,
+  readExternalVerifierMeasurements,
   resolveFamilyUri,
 };
 
@@ -45,6 +55,9 @@ export const FIXTURE_FAMILIES: string[] = [
   "equivalence",
   "evaluation-spec",
   "evaluation-task-derivation",
+  "external-verifier-block",
+  "external-verifier-measurements",
+  "external-verifier-package-digest",
   "family-blocks",
   "measurements-coverage",
   "migration",

@@ -23,7 +23,7 @@ export {
 export {
   SYNC_ABORTED_REASON,
   SYNC_TRUNCATED_REASON,
-  UNVERIFIED_CHAIN_ACKNOWLEDGEMENT,
+  UNVERIFIED_CHAIN_ACKNOWLEDGMENT,
   createDriverChainVerification,
   createRejectingChainVerification,
   createUnverifiedChainVerification,
@@ -31,7 +31,7 @@ export {
   type ChainVerificationInput,
   type ChainVerificationOutcome,
   type HeadRevalidationInput,
-  type UnverifiedChainAcknowledgement,
+  type UnverifiedChainAcknowledgment,
   type WalkTruncation,
 } from "./chain-verification.js";
 export {

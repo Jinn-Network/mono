@@ -318,6 +318,51 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
     fetchSpy.mockRestore();
   });
 
+  it('does not refresh last_used_at on a corrupted row when the daemon cannot repair it', async () => {
+    // The fast path hashes the row before it bumps last_used_at (#4501), so a row about to be
+    // discarded does not look recently used. That order is invisible whenever the re-fetch
+    // succeeds, because the mirror then replaces the whole row, last_used_at included. It shows
+    // only when the daemon fails and the corrupt row survives -- which this case builds.
+    const sha256 = createHash('sha256').update(Buffer.from('the real bytes')).digest('hex');
+    const fetchedAt = '2026-04-30T00:00:00.000Z';
+    store.saveNetworkArtifact({
+      sha256,
+      artifactType: 'design_document',
+      content: Buffer.from('corrupted on disk'),
+      source: 'origin',
+      paidAmountUsdc: '0',
+      fetchedAt,
+    });
+    // saveNetworkArtifact seeds last_used_at from fetchedAt, so the row starts long before now.
+    expect(store.getNetworkArtifact(sha256)!.lastUsedAt).toBe(fetchedAt);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(
+        JSON.stringify({ ok: false, reason: 'not_found', error: 'artifact not found', retryable: false }),
+        { status: 404, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await handleAcquireArtifact('http://127.0.0.1:7331', store, {
+      sha256,
+      access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
+    });
+    const warnings = warn.mock.calls.map((call) => String(call[0]));
+    warn.mockRestore();
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    fetchSpy.mockRestore();
+    // The corrupt row was treated as a miss and the daemon's answer came back unchanged.
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(sha256);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('not_found');
+    // Nothing repaired the row, and nothing marked it as used.
+    const row = store.getNetworkArtifact(sha256)!;
+    expect(row.content.toString()).toBe('corrupted on disk');
+    expect(row.lastUsedAt).toBe(fetchedAt);
+  });
+
   it('leaves a row the daemon wrote during the proxied call alone', async () => {
     // The MCP subprocess and the daemon open the same SQLite file (main.ts hands
     // `config.dbPath` to buildHarnesses), so the daemon's own cache write lands

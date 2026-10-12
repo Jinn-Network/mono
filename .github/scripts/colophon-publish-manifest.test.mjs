@@ -40,9 +40,9 @@ const V2_PIN_VERSION = `0.1.0-canary.sha.${V2_PIN_SHA}`;
 const V21_PIN_SHA = '0533a224cf99f06d7facf0c23455f2781a5b9e62';
 const V21_PIN_VERSION = `0.1.0-canary.sha.${V21_PIN_SHA}`;
 // The platform canary check 0.2.1, core 0.1.0 and cli 0.1.0 release against (issues #4733, #4886).
-const CHECK_PIN_SHA = '1c023eb4c24201435e665ddae9d297f286a196bc';
+const CHECK_PIN_SHA = '272455add1170766f064181c105071519a6baf95';
 const CHECK_PIN_VERSION = `0.1.0-canary.sha.${CHECK_PIN_SHA}`;
-const CHECK_PIN_RUN_URL = 'https://github.com/Jinn-Network/mono/actions/runs/36838465494/attempts/1';
+const CHECK_PIN_RUN_URL = 'https://github.com/Jinn-Network/mono/actions/runs/38246145514/attempts/1';
 
 /** The checker, under the name it publishes as today. */
 function checkerManifest() {
@@ -179,6 +179,32 @@ test('the published CLI README names the claimant verbs and documents launch as 
   assert.match(readme, /Protocol identifiers[\s\S]{0,64}are names, not addresses/u);
   assert.match(readme, /What this does not yet prove/u);
   assert.doesNotMatch(readme, /spec\.jinn\.network/u);
+});
+
+// The walkthrough is the document a claimant follows from `init` to a checked bundle (issue #4942).
+// It ends on the reader's side, so it prints a reader line, and it is reached from the README a
+// claimant holds after an install.
+test('the claimant walkthrough is a reader instruction, and the published CLI README links it', () => {
+  const walkthrough = 'packages/benchmark-product/CLAIMANT-WALKTHROUGH.md';
+  assert.ok(READER_INSTRUCTION_DOCS.includes(walkthrough), 'the walkthrough must be scanned for reader lines');
+  // Every reader line it prints is the first checker release, the one a public-bundle/10 claim
+  // pins, and that line resolves against the checker's own ledger.
+  const pins = collectReaderInstructionPins(repoRoot, [walkthrough]);
+  assert.deepEqual(pins, { '@colophon-claims/check': ['0.2.1'] });
+  assert.deepEqual(assertReaderInstructionPinsResolve(pins), pins);
+
+  // The link is written on the branch ref, the one form the publish step pins to its commit.
+  const readme = readFileSync(join(repoRoot, 'packages/benchmark-product/cli/README.md'), 'utf8');
+  assert.ok(
+    readme.includes(`(https://github.com/Jinn-Network/mono/blob/next/${walkthrough})`),
+    'the CLI README must link the walkthrough on the next ref',
+  );
+  // Both anchor provider values are identifiers under that origin. The walkthrough names them,
+  // which is why it is its own document: the README names none (see the test above).
+  assert.match(readFileSync(join(repoRoot, walkthrough), 'utf8'), /spec\.jinn\.network\/trust\/anchor-profiles\//u);
+  assert.doesNotMatch(readme, /spec\.jinn\.network/u);
+  // The README states what a claimant must know before `quote`: the two-arm minimum (issue #4948).
+  assert.match(readme, /A draft needs at least two arms\./u);
 });
 
 // A README written against the `next` branch is right in the repository and wrong in a tarball: the

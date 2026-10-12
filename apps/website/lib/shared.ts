@@ -9,15 +9,28 @@ export const docsRoute = '/docs';
  */
 export const links = {
   /**
-   * The single call to action on every outward surface, per GROWTH.md §3,
-   * until the v0 gate produces a result. There is exactly one of these on
-   * the landing page; adding a second is a GROWTH.md amendment, not a UI
-   * change.
+   * The single call to action on every outward surface, per GROWTH.md §3:
+   * "Bring a claim". It points at the part of Colophon's site that says how a
+   * claim is brought today. There is exactly one of these on the landing
+   * page; a second ask is a GROWTH.md amendment, not a UI change.
    */
-  telegram: 'https://t.me/jinnNetwork',
+  bringAClaim: 'https://colophon.claims/#publish',
+  /** Colophon, the first application built on Jinn. */
+  colophon: 'https://colophon.claims/',
+  colophonFind: 'https://colophon.claims/find/',
+  colophonLimits: 'https://colophon.claims/docs/#limits',
+  /** The protocol. It is written only in this repository. */
+  spec: 'https://github.com/Jinn-Network/spec',
+  specRelease: 'https://github.com/Jinn-Network/spec/releases/tag/v0.1.0',
+  specOpenQuestions: 'https://github.com/Jinn-Network/spec#what-is-not-yet-proven',
+  /** The published checker. */
+  verifier: 'https://www.npmjs.com/package/@colophon-claims/verify',
+  /**
+   * The record of what ran on the parked Base Sepolia network. Every link to
+   * it says so in its own words; it is never offered as a live network.
+   */
   explorer: 'https://explorer.jinn.network',
   github: 'https://github.com/Jinn-Network/mono',
-  discussions: 'https://github.com/Jinn-Network/mono/discussions',
 } as const;
 
 export const gitConfig = {

@@ -6,19 +6,28 @@ import semver from 'semver';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   COMPILER_DEV_DEPENDENCY_NAMES,
+  DEFAULT_MIN_RELEASE_AGE_DAYS,
+  MIN_RELEASE_AGE_ENV,
+  MIN_RELEASE_AGE_EXCLUDE,
+  MIN_REFRESH_NPM_VERSION,
   STALE_LOCKFILE_MESSAGE,
+  assertNpmSupportsReleaseAge,
   buildConsumerThirdPartyDependencies,
   consumerManifest,
   discoverPackageRoots,
   firstPartyArchiveDependencies,
   fixtureLockfilePath,
+  formatHeldBack,
+  heldBackPackages,
   installPinnedGraph,
+  minReleaseAgeDaysFromEnv,
   packedClosurePackageNames,
   packedOverlayInstallArgs,
   pinnedInstallArgs,
   readPackageJson,
   refreshLockfileArgs,
   requirePackageRoot,
+  unconstrainedRefreshLockfileArgs,
   withoutLocalArchiveIntegrity,
 } from '../../scripts/lib/hermetic-packed-closure.mjs';
 
@@ -310,6 +319,8 @@ describe('packed-closure third-party pin', () => {
       '--ignore-scripts',
       '--no-audit',
       '--no-fund',
+      '--min-release-age=7',
+      '--min-release-age-exclude=',
     ]);
     const refresh = readFileSync(refreshPath, 'utf8');
     expect(refresh).toContain("from './lib/hermetic-packed-closure.mjs'");
@@ -418,5 +429,156 @@ describe('packed-closure third-party pin', () => {
     expect(readme).toContain('node scripts/refresh-hermetic-packed-closure-lockfile.mjs');
     expect(readme).toContain('npm ci');
     expect(readme).toContain('--package-lock-only');
+  });
+});
+
+describe('packed-closure lockfile refresh release-age floor (#4897)', () => {
+  it('states the floor explicitly: seven days, and an empty exception list that .npmrc cannot widen', () => {
+    expect(DEFAULT_MIN_RELEASE_AGE_DAYS).toBe(7);
+    expect(MIN_RELEASE_AGE_EXCLUDE).toEqual([]);
+    const args = refreshLockfileArgs();
+    expect(args).toContain('--min-release-age=7');
+    // An empty CLI value replaces a lower-precedence exclusion list (verified against
+    // npm 11.19.0), so a developer's own `.npmrc` cannot exempt a package silently.
+    expect(args).toContain('--min-release-age-exclude=');
+    expect(args.filter((arg) => arg.startsWith('--min-release-age'))).toHaveLength(2);
+  });
+
+  it('keeps the existing refresh flags and puts the floor after them', () => {
+    expect(refreshLockfileArgs().slice(0, 5)).toEqual([
+      'install',
+      '--package-lock-only',
+      '--ignore-scripts',
+      '--no-audit',
+      '--no-fund',
+    ]);
+  });
+
+  it('takes a configured age and per-package exceptions, one flag each', () => {
+    expect(refreshLockfileArgs({ minReleaseAgeDays: 14, exclude: ['left-pad', '@scope/*'] }).slice(5)).toEqual([
+      '--min-release-age=14',
+      '--min-release-age-exclude=left-pad',
+      '--min-release-age-exclude=@scope/*',
+    ]);
+    expect(refreshLockfileArgs({ minReleaseAgeDays: 0.5 }).slice(5, 6)).toEqual(['--min-release-age=0.5']);
+  });
+
+  it('refuses an age that would switch the floor off', () => {
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, '7', null]) {
+      expect(() => refreshLockfileArgs({ minReleaseAgeDays: bad as number }), String(bad)).toThrow(
+        /positive number of days/u,
+      );
+    }
+  });
+
+  it('reads the age from one environment variable and defaults to seven days', () => {
+    expect(MIN_RELEASE_AGE_ENV).toBe('JINN_HERMETIC_REFRESH_MIN_RELEASE_AGE_DAYS');
+    expect(minReleaseAgeDaysFromEnv({})).toBe(7);
+    expect(minReleaseAgeDaysFromEnv({ [MIN_RELEASE_AGE_ENV]: '' })).toBe(7);
+    expect(minReleaseAgeDaysFromEnv({ [MIN_RELEASE_AGE_ENV]: '14' })).toBe(14);
+    expect(minReleaseAgeDaysFromEnv({ [MIN_RELEASE_AGE_ENV]: ' 3.5 ' })).toBe(3.5);
+  });
+
+  it('rejects an unusable environment value instead of falling back to the default', () => {
+    for (const bad of ['0', '-2', 'abc', '7d', 'Infinity']) {
+      expect(() => minReleaseAgeDaysFromEnv({ [MIN_RELEASE_AGE_ENV]: bad }), bad).toThrow(MIN_RELEASE_AGE_ENV);
+    }
+  });
+
+  it('resolves without the floor only for the held-back comparison', () => {
+    expect(unconstrainedRefreshLockfileArgs()).toEqual([
+      'install',
+      '--package-lock-only',
+      '--ignore-scripts',
+      '--no-audit',
+      '--no-fund',
+      '--min-release-age=0',
+    ]);
+  });
+
+  it('refuses an npm that would ignore the floor with only a warning', () => {
+    expect(MIN_REFRESH_NPM_VERSION).toBe('11.19.0');
+    for (const ok of ['11.19.0', '11.19.1', '11.20.0', '12.0.0', '11.19.0\n']) {
+      expect(() => assertNpmSupportsReleaseAge(ok), ok).not.toThrow();
+    }
+    for (const old of ['11.18.9', '11.16.0', '11.3.0', '10.9.8']) {
+      expect(() => assertNpmSupportsReleaseAge(old), old).toThrow(/npm 11\.19\.0 or newer/u);
+    }
+    expect(() => assertNpmSupportsReleaseAge('not a version')).toThrow(/npm version/u);
+  });
+
+  it('reports every package that differs from an unconstrained resolve, and nothing when none does', () => {
+    const lock = (versions: Record<string, string>) => ({
+      lockfileVersion: 3,
+      packages: {
+        '': { name: 'jinn-hermetic-packed-closure' },
+        ...Object.fromEntries(Object.entries(versions).map(([path, version]) => [path, { version }])),
+      },
+    });
+    const unconstrained = lock({
+      'node_modules/viem': '2.57.4',
+      'node_modules/@types/node': '26.6.5',
+      'node_modules/viem/node_modules/ws': '8.19.0',
+      'node_modules/ws': '8.18.3',
+      'node_modules/semver': '7.7.2',
+    });
+    const constrained = lock({
+      'node_modules/viem': '2.57.0',
+      'node_modules/@types/node': '26.6.4',
+      'node_modules/viem/node_modules/ws': '8.19.0',
+      'node_modules/ws': '8.18.3',
+      'node_modules/semver': '7.7.2',
+    });
+    const held = heldBackPackages(unconstrained, constrained);
+    expect(held).toEqual([
+      { name: '@types/node', unconstrained: ['26.6.5'], constrained: ['26.6.4'] },
+      { name: 'viem', unconstrained: ['2.57.4'], constrained: ['2.57.0'] },
+    ]);
+    expect(formatHeldBack(held, 7)).toBe(
+      [
+        'release-age floor (7 days) held back 2 packages:',
+        '  @types/node: 26.6.5 -> 26.6.4',
+        '  viem: 2.57.4 -> 2.57.0',
+      ].join('\n'),
+    );
+    expect(heldBackPackages(unconstrained, unconstrained)).toEqual([]);
+    expect(formatHeldBack([], 7)).toBe('release-age floor (7 days) held nothing back');
+  });
+
+  it('counts a package that only the unconstrained resolve pulls in, and a changed set of nested copies', () => {
+    const lock = (versions: Record<string, string>) => ({
+      packages: Object.fromEntries(Object.entries(versions).map(([path, version]) => [path, { version }])),
+    });
+    const held = heldBackPackages(
+      lock({ 'node_modules/a': '2.0.0', 'node_modules/b': '1.1.0', 'node_modules/a/node_modules/b': '1.0.0' }),
+      lock({ 'node_modules/a': '1.9.0', 'node_modules/b': '1.0.0' }),
+    );
+    expect(held).toEqual([
+      { name: 'a', unconstrained: ['2.0.0'], constrained: ['1.9.0'] },
+      { name: 'b', unconstrained: ['1.0.0', '1.1.0'], constrained: ['1.0.0'] },
+    ]);
+    expect(formatHeldBack(held.slice(1), 7)).toContain('b: 1.0.0, 1.1.0 -> 1.0.0');
+    expect(formatHeldBack(heldBackPackages(lock({ 'node_modules/new': '1.0.0' }), lock({})), 7)).toContain(
+      'new: 1.0.0 -> (absent)',
+    );
+  });
+
+  it('wires the refresh script through the floor, the npm check, and the held-back report', () => {
+    const refresh = readFileSync(refreshPath, 'utf8');
+    expect(refresh).toMatch(/\bminReleaseAgeDaysFromEnv\s*\(\s*process\.env\s*\)/);
+    expect(refresh).toMatch(/\brefreshLockfileArgs\s*\(\s*\{\s*minReleaseAgeDays\b/);
+    expect(refresh).toMatch(/\bassertNpmSupportsReleaseAge\s*\(/);
+    expect(refresh).toMatch(/\bunconstrainedRefreshLockfileArgs\s*\(/);
+    expect(refresh).toMatch(/\bformatHeldBack\s*\(/);
+    // The npm version is read before any archive is packed or any registry call is made.
+    expect(refresh.indexOf('assertNpmSupportsReleaseAge(')).toBeLessThan(refresh.indexOf('discoverPackageRoots('));
+  });
+
+  it('documents the floor, its environment variable, the exception list, and the npm requirement', () => {
+    const readme = readFileSync(readmePath, 'utf8');
+    expect(readme).toContain('--min-release-age');
+    expect(readme).toContain(MIN_RELEASE_AGE_ENV);
+    expect(readme).toContain('MIN_RELEASE_AGE_EXCLUDE');
+    expect(readme).toContain(MIN_REFRESH_NPM_VERSION);
   });
 });

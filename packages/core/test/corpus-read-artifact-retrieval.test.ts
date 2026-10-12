@@ -258,6 +258,54 @@ describe('fetchVerifiedArtifact', () => {
     expect(result.retryable).toBe(true);
   });
 
+  it('reports malformed_payload as the top-level reason when IPFS is the only leg tried', async () => {
+    // No endpoint, so the origin leg is skipped and the donated mirror is the only
+    // attempt. Every attempted leg answered conclusively absent, so the reason is
+    // that leg's own, not a generic `not_found`: the mirror served bytes that are
+    // permanently not this artifact, which is a different fact from a 404.
+    const cases: [string, unknown][] = [
+      ['an unexpected encoding', { ...donation(BYTES), encoding: 'something.else' }],
+      ['a donation for a different artifact', { ...donation(BYTES), sha256: 'f'.repeat(64) }],
+      ['a missing data field', { schemaVersion: 'jinn.artifact.donation.v1', encoding: 'jinn.artifact.donation.v1', sha256: SHA }],
+      ['a payload that is not an object', ['not', 'a', 'donation']],
+    ];
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      for (const [label, payload] of cases) {
+        warn.mockClear();
+        const fetchArtifact = vi.fn();
+        const result = await fetchVerifiedArtifact(
+          { sha256: SHA },
+          { sources: ipfsSources(), ipfsGatewayUrl: GATEWAY },
+          { deps: { fetchArtifact, fetchFromIpfs: async () => payload } },
+        );
+
+        expect(result.ok, label).toBe(false);
+        if (result.ok) return;
+        expect(result.reason, label).toBe('malformed_payload');
+        expect(result.retryable, label).toBe(false);
+        expect(result.attempts, label).toEqual([
+          {
+            leg: 'ipfs',
+            sourceUri: 'ipfs://bafy-donated',
+            outcome: 'failed',
+            reason: 'malformed_payload',
+            message: expect.stringContaining('donation artifact'),
+          },
+          { leg: 'origin', sourceUri: '', outcome: 'skipped' },
+        ]);
+        expect(result.message, label).toContain('(malformed_payload)');
+        expect(fetchArtifact, label).not.toHaveBeenCalled();
+        // A broken donation still warns, and names the same fact as the reason.
+        expect(warn, label).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0]![0], label).toMatch(/malformed-payload/);
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('records an IPFS size refusal as too_large and still falls through (#3441)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fetchArtifact = vi.fn(

@@ -26,8 +26,7 @@ signature plus the pinned key decide whether those bytes count.
 
 The digest is taken over the key re-exported as SPKI PEM, not over this file's
 bytes, so line endings and trailing whitespace cannot change the pinned value.
-`canonicalPublicKeySha256` in `.github/scripts/verify-live-profile-host.mjs` is
-the sole definition.
+`canonicalPublicKeySha256` in `.github/scripts/dsse.mjs` is the sole definition.
 
 ## How the gate consumes it
 

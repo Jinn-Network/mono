@@ -61,6 +61,12 @@ async function loadStatePredicateSpecBytes(): Promise<Uint8Array> {
   );
 }
 
+async function loadExternalVerifierSpecBytes(): Promise<Uint8Array> {
+  return fixtureBytes(
+    "@jinn-network/task-execution-profiles/fixtures/evaluation-spec/golden/external-verifier-minimal.json",
+  );
+}
+
 async function loadSweRebenchEvaluationSpecBytes(): Promise<Uint8Array> {
   return fixtureBytes("@jinn-network/task-execution-profiles/fixtures/swe-rebench-golden/golden/evaluation-spec.sealed.json");
 }
@@ -291,6 +297,23 @@ describe("v2 recompute: the join edges v1 left out", () => {
     expect(facts).not.toHaveProperty("environmentRecordDigest");
     expect(facts).not.toHaveProperty("rubricDigest");
     expect(facts).not.toHaveProperty("abiRefDigests");
+  });
+
+  it("names an external-verifier spec's task package and test files, and no image or parser", async () => {
+    const bytes = await loadExternalVerifierSpecBytes();
+    expect(await evaluationSpecRecompute(bytes, noReferencedBytes)).toEqual({ family: "external-verifier" });
+    const facts = await evaluationSpecRecomputeV2(bytes, noReferencedBytes);
+    expect(facts).toEqual({
+      family: "external-verifier",
+      // The harness's content hash of the task package. It joins specs that name the same
+      // package; no bytes hash to it.
+      graderDigests: ["sha256:d9ab9cb898bc6518b5c3429a7bfd8bf0a6e420be644c8c0c1d2765c25627becf"],
+      testMaterialDigests: [`sha256:${"b".repeat(64)}`],
+    });
+    // The block carries `declaredImage`, a string that pins nothing, and no parser: neither is
+    // announced as an edge.
+    expect(facts).not.toHaveProperty("imageDigest");
+    expect(facts).not.toHaveProperty("parserDigest");
   });
 
   it("names the ABIs a state-predicate spec reads through, from both call sites, de-duplicated", async () => {

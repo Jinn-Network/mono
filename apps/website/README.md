@@ -86,12 +86,14 @@ is a static export with no data source; the numbers are the explorer's job.
 
 ## Copy provenance
 
-Every claim on the landing page traces to a ratified document: the identity paragraph and
-the caveats to
-[the platform architecture](../../docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md)
-§11, the loop and the boundary to
-[the platform one-pager](../../docs/positioning/2026-07-29-jinn-platform-one-pager.md).
+Every claim on the landing page and in the docs tree traces to a canonical document: what
+Jinn is, what exists today and what is direction to [`THESIS.md`](../../THESIS.md) §3 and
+§4; record, holder, offer and price to [`GLOSSARY.md`](../../GLOSSARY.md); Colophon to the
+root [`README.md`](../../README.md); voice to [`BRAND.md`](../../BRAND.md).
 
-The call to action is bound by [`GROWTH.md`](../../GROWTH.md) §3 — the Telegram group is
-the single ask on every outward surface until the v0 gate produces a result — so the two
-doors are navigation and there is exactly one button on the page. `yarn test` asserts it.
+The call to action is [`GROWTH.md`](../../GROWTH.md) §3: "Bring a claim" is the single ask
+on every outward surface, so the three doors are navigation and there is exactly one button
+on the page. `yarn test` asserts it.
+
+The site offers only what exists. A docs page exists only for something a visitor can read
+or run today, and every command on one was run as written before it was committed.

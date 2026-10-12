@@ -388,7 +388,9 @@ export { readAuditEntries } from "./audit/journal.js";
 export type { AuditEntry } from "./audit/journal.js";
 
 // Principals and authority v1 (spec §4.2): local-process policy enforcement, honestly scoped.
-export { GATED_OPERATIONS } from "./authority/policy.js";
+// `readAuthorityPolicy` is exported so a surface that must pick its acting principal (the local
+// app, issue #4957) can read a workspace's members without acting as one of them first.
+export { GATED_OPERATIONS, readAuthorityPolicy } from "./authority/policy.js";
 export type { AuthorityPolicy, GatedOperation, Principal } from "./authority/policy.js";
 
 // The operations facade (spec §5.1) — the boundary every surface calls.
@@ -604,6 +606,13 @@ export type { CliContext, CliResult } from "./cli/result.js";
 // own help and README are tested against the list `method --help` is rendered from (issue #4943).
 export { CLAIMANT_COMMAND_PATH, renderClaimantCommandPath } from "./cli/claimant-path.js";
 export type { ClaimantCommand } from "./cli/claimant-path.js";
+// The provider profile names `anchor --provider` accepts, as `anchor --help` lists them. Exported so
+// the claimant walkthrough, which is where a claimant reads them, is tested against this list
+// (issue #4951).
+export { PRODUCIBLE_ANCHOR_PROFILES } from "./anchor/profiles.js";
+// The Harbor versions `run import --from harbor` accepts. Exported so the claimant walkthrough, which
+// tells a claimant which Harbor to install, is tested against this list (issue #5021).
+export { HARBOR_RUN_IMPORT_VERSIONS } from "./intake/harbor-run-records.js";
 
 /** The product core's own version, mirrored from package.json. */
 export const PRODUCT_VERSION = "0.1.0";
