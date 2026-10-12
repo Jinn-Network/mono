@@ -19,7 +19,7 @@ import {
 import {
   SYNC_ABORTED_REASON,
   SYNC_TRUNCATED_REASON,
-  UNVERIFIED_CHAIN_ACKNOWLEDGEMENT,
+  UNVERIFIED_CHAIN_ACKNOWLEDGMENT,
   createDriverChainVerification,
   createRejectingChainVerification,
   createUnverifiedChainVerification,
@@ -318,7 +318,7 @@ export function createCorpusCapability(
    * Configuration names the posture; composition decides whether the runtime
    * can honor it. `verified` without a driver is NOT silently demoted to
    * unverified — that would be the exact accident
-   * `UNVERIFIED_CHAIN_ACKNOWLEDGEMENT` exists to make impossible — it fails
+   * `UNVERIFIED_CHAIN_ACKNOWLEDGMENT` exists to make impossible — it fails
    * closed to rejecting, and the health check says which of the two states
    * this install is in.
    */
@@ -328,7 +328,7 @@ export function createCorpusCapability(
     log: RuntimeLogger,
   ): { readonly verification: ChainVerification; readonly shortfall?: "driver-unavailable" } {
     if (mode === "unverified") {
-      return { verification: createUnverifiedChainVerification(UNVERIFIED_CHAIN_ACKNOWLEDGEMENT) };
+      return { verification: createUnverifiedChainVerification(UNVERIFIED_CHAIN_ACKNOWLEDGMENT) };
     }
     if (mode === "rejecting") {
       return { verification: createRejectingChainVerification() };

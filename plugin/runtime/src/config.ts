@@ -254,7 +254,7 @@ const CorpusConfigSchema = z.strictObject({
   /** Absent means `verified`, unless `acknowledgeUnverifiedChain` says otherwise. */
   chainVerification: CorpusChainVerificationSchema.optional(),
   /**
-   * Opt-in acknowledgement that this runtime mirrors without verifying
+   * Opt-in acknowledgment that this runtime mirrors without verifying
    * announcement-chain signatures (C5 Finding F1). It is the ONLY way to
    * reach the `unverified` posture: naming that posture without this flag is
    * a configuration error, so the unverified path stays impossible to acquire
@@ -342,7 +342,7 @@ function resolveCorpusConfig(file: unknown, homeDirectory: string): CorpusConfig
     byRepository.add(source.repositoryId);
   }
 
-  // The acknowledgement flag is the gate on the unverified posture, in both
+  // The acknowledgment flag is the gate on the unverified posture, in both
   // directions: naming `unverified` without it is an error, and setting it
   // alone (the pre-`chainVerification` spelling of the same intent) still
   // selects that posture rather than being silently overridden by the new
