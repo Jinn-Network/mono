@@ -64,7 +64,7 @@ describe("public surface", () => {
       "TRACE_BUILDER_VERSION",
       "TRACE_RECORD_IDENTIFIER_PROPERTY",
       "TRUNCATION_TAIL",
-      "UNVERIFIED_CHAIN_ACKNOWLEDGEMENT",
+      "UNVERIFIED_CHAIN_ACKNOWLEDGMENT",
       "adaptAnnouncementEntry",
       "assertSafeSessionId",
       "buildFinalizeInput",

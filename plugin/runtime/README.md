@@ -48,8 +48,8 @@ other way round — it takes an optional `VerifyDriver` and derives the posture 
 does not force the vocabulary on its caller.)
 
 The rest is public by decision rather than by construction, and the decision is the same
-one. `SYNC_TRUNCATED_REASON`, `SYNC_ABORTED_REASON`, `UNVERIFIED_CHAIN_ACKNOWLEDGEMENT`,
-`UnverifiedChainAcknowledgement`, and the three constructors —
+one. `SYNC_TRUNCATED_REASON`, `SYNC_ABORTED_REASON`, `UNVERIFIED_CHAIN_ACKNOWLEDGMENT`,
+`UnverifiedChainAcknowledgment`, and the three constructors —
 `createDriverChainVerification`, `createRejectingChainVerification`,
 `createUnverifiedChainVerification` — stay exported so a composition root able to name the
 interface can build the standard implementation, and branch on a refusal reason, instead of

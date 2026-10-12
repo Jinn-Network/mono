@@ -457,7 +457,7 @@ describe("chain-verification postures", () => {
     expect(chain.remedy).toBeNull();
   });
 
-  test("REJECTING is reported as itself even when the acknowledgement flag is also set", async () => {
+  test("REJECTING is reported as itself even when the acknowledgment flag is also set", async () => {
     // The two postures collapse to the same `mode` — rejecting verifies
     // nothing, so it calls itself `unverified` too. Reading that mode instead
     // of the configured posture rendered this install GREEN with a detail
