@@ -44,8 +44,12 @@ async function workspace(name = "recording"): Promise<string> {
 }
 
 afterEach(async () => {
+  // A case abandoned at its time limit may still be writing. Retry the removal so a late write
+  // cannot fail this teardown with ENOTEMPTY (#4982).
   await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+    roots.splice(0).map((root) =>
+      rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }),
+    ),
   );
 });
 
