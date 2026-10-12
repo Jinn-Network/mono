@@ -97,7 +97,7 @@ export default function HomePage() {
       </section>
 
       <section className="border-border mx-auto w-full max-w-5xl border-b px-6 py-16">
-        <div className="grid gap-5 sm:grid-cols-3">
+        <div className="grid gap-5 lg:grid-cols-3">
           {doors.map((door) => {
             const content = (
               <>
@@ -128,9 +128,9 @@ export default function HomePage() {
           Where things stand
         </p>
         <h2 className="font-serif mt-5 max-w-[24ch] text-4xl leading-tight sm:text-5xl">
-          The protocol and its checker exist. The market is the direction.
+          The protocol and the checker exist today. The market is the direction.
         </h2>
-        <div className="mt-12 grid gap-5 sm:grid-cols-3">
+        <div className="mt-12 grid gap-5 lg:grid-cols-3">
           <div className="border-border rounded-lg border p-8">
             <p className="text-muted-foreground text-xs tracking-[0.14em] uppercase">
               Exists today
@@ -158,8 +158,8 @@ export default function HomePage() {
                 working market.
               </li>
               <li>
-                Work records from the daemon that turns issues into pull requests, published
-                once they can be anonymized.
+                Work records from the daemon that turns issues into pull requests, to be
+                published once they can be anonymized.
               </li>
             </ul>
           </div>
