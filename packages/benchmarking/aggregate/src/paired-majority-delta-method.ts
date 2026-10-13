@@ -222,15 +222,10 @@ function parametersFrom(input: Readonly<Record<string, unknown>>): PairedMajorit
   // `seed`, `alpha` -- is a contract-shape failure and deliberately stays the aggregate
   // validator's untyped Error below; `validatePairedMajorityDeltaParameters` keeps its prose
   // issue-list contract because it backs `Method.validateParameters`.
-  //
-  // The integer test is `Number.isInteger`, the one the registry guards reach through
-  // `requireIntegerParam` (#4523), so an integer beyond 2^53 is typed here too. Acceptance is
-  // unchanged: every integer this refuses lies outside 1..MAX, which the validator below
-  // refuses as well.
   const resamples = input["resamples"];
   if (
     typeof resamples === "number"
-    && Number.isInteger(resamples)
+    && Number.isSafeInteger(resamples)
     && (resamples < 1 || resamples > MAX_NONINFERIORITY_RESAMPLES_V1)
   ) {
     throw new MethodInputError("method-parameter-out-of-range", "resamples", `resamples must be in 1..${MAX_NONINFERIORITY_RESAMPLES_V1}`);
