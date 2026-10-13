@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, rmSync, rmdirSync } from "node:fs";
 import { join } from "node:path";
 import { BUNDLE_V5_FORMAT } from "@colophon-claims/check";
 import type { DraftDocument } from "../domain/draft.js";
@@ -9,7 +9,7 @@ import { materializePublicBundle, type MaterializeBundleDeps } from "../bundle/m
 import { verifyPublicBundle, type PublicBundleVerificationCheck } from "../bundle/verify.js";
 import { acquirePublicationLock, type PublicationLock } from "../run/publication-lock.js";
 import { readRunState, requireRunState, writeRunState, type RunState } from "../run/state.js";
-import { draftPath, publicBundlePath } from "../workspace/layout.js";
+import { draftPath, publicBundlePath, publicBundlesDir } from "../workspace/layout.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
@@ -187,6 +187,28 @@ async function removeRefusedBundles(
     }
   } finally {
     acquired?.release();
+  }
+}
+
+/** Removes the `public-bundles` parent a refused publication leaves behind, when nothing is in it
+ * (issue #4941). `materializePublicBundle` creates the parent before anything can refuse, so a
+ * refusal at any point leaves it behind, and the cleanup above only ever removes the bundle
+ * directories this invocation renamed into place.
+ *
+ * The removal is a plain `rmdir`, which the filesystem refuses unless the directory is empty. That
+ * is the whole safety argument, and it does not need the publication lock: a parent holding a
+ * published bundle, an adopted bundle, or a concurrent publisher's `.stage-*` directory is not
+ * empty and stays. A concurrent publisher that has made the parent but not yet its stage directory
+ * is the one window an empty parent can be removed under it; `materializePublicBundle` creates the
+ * stage recursively and tries again if the parent vanishes mid-call, so that window costs the peer
+ * a retry rather than a failure. Failure to remove is swallowed for the same reason as in
+ * `removeRefusedBundles`: the caller has a refusal to return, and an empty directory is the
+ * harmless outcome. */
+function removeEmptyPublicBundlesDir(workspaceDir: string, draftId: string): void {
+  try {
+    rmdirSync(publicBundlesDir(workspaceDir, draftId));
+  } catch {
+    // Not empty, or already gone: leave it.
   }
 }
 
@@ -399,7 +421,10 @@ export function runPublish(
           };
         }
       } catch (cause) {
-        if (!durable) await removeRefusedBundles(clockedContext.workspaceDir, input.draftId, created, publication);
+        if (!durable) {
+          await removeRefusedBundles(clockedContext.workspaceDir, input.draftId, created, publication);
+          removeEmptyPublicBundlesDir(clockedContext.workspaceDir, input.draftId);
+        }
         throw cause;
       } finally {
         publication?.release();
