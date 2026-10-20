@@ -114,6 +114,10 @@ the exact line the producer named. The table in
 [Portable verification](#portable-verification) is the same mapping keyed by
 format, for a reader who has only `bundle.json`.
 
+Installing or running a Colophon package needs npm 11.6 or newer. On Node 22,
+which ships npm 10, run `npm install -g npm@11` first, or use Node 24.8 or
+newer, which ships it.
+
 Verify a version 2 bundle with:
 
 ```bash
@@ -899,6 +903,9 @@ rather than from the format.
 Every row but `.../10` runs as `npx @colophon-claims/verify<line> <bundle-dir>`. The `.../10` row
 states its package in full and runs as `npx <line> <bundle-dir>`. Append the anchor flags where
 the row lists them.
+
+Installing or running a Colophon package needs npm 11.6 or newer. On Node 22, which ships npm 10,
+run `npm install -g npm@11` first, or use Node 24.8 or newer, which ships it.
 
 From `@colophon-claims/check@0.2.1` on, the reader's report names the run it checked: under
 `Format:` it prints a `Run:` line, on every format but `.../5`. The `verify` releases the earlier

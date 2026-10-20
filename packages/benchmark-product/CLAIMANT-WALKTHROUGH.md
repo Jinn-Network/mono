@@ -23,7 +23,7 @@ The two `harbor run` commands were not run again for this document. Harbor 0.21.
 
 ## What you need
 
-- Node 22 or newer.
+- Node 22 or newer. Installing or running a Colophon package needs npm 11.6 or newer. On Node 22, which ships npm 10, run `npm install -g npm@11` first, or use Node 24.8 or newer, which ships it.
 - Linux x64 or Apple-silicon macOS. `quote` is a required step and is known to run on those two. On any other platform, Linux arm64 included, it stops before it reads or creates anything and names the platform it found and the two it supports.
 - Docker. Harbor runs each task in a container.
 - The Docker daemon running, and the `docker compose` command. Harbor stops at once if the daemon is down, and it starts each task with `docker compose`.
@@ -369,6 +369,8 @@ Next to the address, state the Run digest and the timestamp authority you used.
 ## Check it from a second machine
 
 The reader needs Node 22 and the address. No account, no workspace and no Harbor.
+
+Installing or running a Colophon package needs npm 11.6 or newer. On Node 22, which ships npm 10, run `npm install -g npm@11` first, or use Node 24.8 or newer, which ships it.
 
 `bundle.json` lists every file of the bundle. The reader fetches it, then each file it lists. Here the bundle is hosted at `https://example.org/tb21`.
 

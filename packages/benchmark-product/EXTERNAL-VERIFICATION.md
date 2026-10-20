@@ -16,6 +16,10 @@ own section, [Evidence-native bundle v5](#evidence-native-bundle-v5). For
 package pins, as [`PUBLIC-BUNDLE.md` §Portable verification](PUBLIC-BUNDLE.md#portable-verification)
 states; `external-verify.py` does not read those layouts.
 
+Installing or running a Colophon package needs npm 11.6 or newer. On Node 22,
+which ships npm 10, run `npm install -g npm@11` first, or use Node 24.8 or
+newer, which ships it.
+
 ## Reader vocabulary
 
 This document quotes contract spellings. The table maps each contract term to the
