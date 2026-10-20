@@ -251,6 +251,19 @@ test('an unselected changed list leaves the lane unselected', () => {
   }
 });
 
+// `ci.yml`'s operator lane runs `npm-publish-workflow.test.mjs`, which pins the npm that both
+// npm publish workflows install (#5094). A pull request confined to either workflow has to
+// select the lane, or the check never runs on the change that would break it.
+test('a diff confined to either npm publish workflow selects the operator lane', () => {
+  for (const path of ['.github/workflows/npm-publish.yml', '.github/workflows/sdk-npm-publish.yml']) {
+    assert.equal(
+      select('ci.yml', [path]).run,
+      'true',
+      `ci.yml: a diff of only ${path} must select the operator lane`,
+    );
+  }
+});
+
 test('the selection scripts read the changed list from a file, not a pipe', () => {
   for (const lane of LANES) {
     const script = selectScript(lane.workflow);

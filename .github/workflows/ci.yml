@@ -156,6 +156,7 @@ jobs:
             '^packages/.*/package\.json$'
             '^\.github/workflows/ci\.yml$'
             '^\.github/workflows/npm-publish\.yml$'
+            '^\.github/workflows/sdk-npm-publish\.yml$'
             '^\.github/workflows/docker\.yml$'
             '^\.github/workflows/operator-images\.yml$'
             '^DEPLOY\.md$'
