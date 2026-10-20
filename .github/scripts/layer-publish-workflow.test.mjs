@@ -352,6 +352,56 @@ test('OIDC is job-scoped to publish jobs and actions are immutable', () => {
   }
 });
 
+// The pack smoke installs the packed tarballs with whatever npm the job put on PATH. npm
+// releases before 11.19.0 crash on the conflicting optional peers of `vitest@4.1.12` with
+// `Cannot read properties of null (reading 'edgesOut')` (#5079), which stopped Layer CI's
+// smoke (#5085) and, until the publish workflow's pin moved, would have stopped the layer
+// canary at the same step before anything was published (#5088). 11.19.0 is the version
+// the other package lanes pin; trusted publishing needs 11.5.1 or newer.
+const MINIMUM_PACK_SMOKE_NPM = [11, 19, 0];
+
+function atLeast(version, minimum) {
+  const parts = version.split('.').map(Number);
+  for (let index = 0; index < minimum.length; index += 1) {
+    if (parts[index] !== minimum[index]) return parts[index] > minimum[index];
+  }
+  return true;
+}
+
+function npmPins(block) {
+  return [...block.matchAll(/npm install -g npm@(\d+\.\d+\.\d+)\b/gu)].map((match) => match[1]);
+}
+
+test('every publish job installs an npm that can install the packed packages', () => {
+  for (const job of ['plugin-canary', 'core-canary', 'layer-canary', 'stable-publish']) {
+    const pins = npmPins(jobBlock(job));
+    assert.equal(pins.length, 1, `${job} must install exactly one npm`);
+    assert.ok(
+      atLeast(pins[0], MINIMUM_PACK_SMOKE_NPM),
+      `${job} installs npm ${pins[0]}; it must install ${MINIMUM_PACK_SMOKE_NPM.join('.')} or newer`,
+    );
+  }
+});
+
+test('the npm install comes before the pack smoke in both jobs that run it', () => {
+  for (const job of ['layer-canary', 'stable-publish']) {
+    const block = jobBlock(job);
+    const install = block.indexOf('npm install -g npm@');
+    const smoke = block.indexOf('yarn pack:smoke');
+    assert.ok(install >= 0, `${job} must install npm`);
+    assert.ok(smoke > install, `${job} must install npm before it runs the pack smoke`);
+  }
+});
+
+test('the npm version comparison reads versions by number, not by text', () => {
+  assert.ok(atLeast('11.19.0', MINIMUM_PACK_SMOKE_NPM));
+  assert.ok(atLeast('11.19.1', MINIMUM_PACK_SMOKE_NPM));
+  assert.ok(atLeast('12.0.0', MINIMUM_PACK_SMOKE_NPM));
+  assert.ok(!atLeast('11.5.1', MINIMUM_PACK_SMOKE_NPM));
+  assert.ok(!atLeast('11.16.0', MINIMUM_PACK_SMOKE_NPM));
+  assert.ok(!atLeast('10.9.9', MINIMUM_PACK_SMOKE_NPM));
+});
+
 test('stable version verifier accepts only coherent package and runtime pins', () => {
   const fixture = releaseFixture();
   try {
