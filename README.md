@@ -10,7 +10,9 @@ Jinn is an open protocol and network for work and the data it produces: records 
 
 ## What you can do here
 
-- **Check a benchmark claim** — [Colophon](packages/benchmark-product/README.md) turns a preregistered comparison of agent configurations into a portable bundle anyone can check from its own bytes. The checker is published on npm as [`@colophon-claims/verify`](https://www.npmjs.com/package/@colophon-claims/verify), and checking a published claim is free:
+- **Check a benchmark claim** — [Colophon](packages/benchmark-product/README.md) turns a preregistered comparison of agent configurations into a portable bundle anyone can check from its own bytes. The checker is published on npm as [`@colophon-claims/verify`](https://www.npmjs.com/package/@colophon-claims/verify), and checking a published claim is free.
+
+  Installing or running a Colophon package needs npm 11.6 or newer. On Node 22, which ships npm 10, run `npm install -g npm@11` first, or use Node 24.8 or newer, which ships it.
 
   ```bash
   npx @colophon-claims/verify@0.2.1 ./bundle
