@@ -42,10 +42,11 @@ describe('deploy/Dockerfile CMD (issue #652)', () => {
     expect(cmd).toContain('--views-schema=jinn_indexer');
   });
 
-  // #1429: the CMD auto-derives DATABASE_SCHEMA from ponder.schema.ts at boot
-  // (shell form so the derive + export + exec run), rather than pinning a
-  // manual name. The assignment MUST be the standalone command-substitution
-  // form `DATABASE_SCHEMA="$(...)"` — NOT `export DATABASE_SCHEMA="$(...)"`.
+  // #1429: the CMD auto-derives DATABASE_SCHEMA at boot (from the Railway
+  // deployment id since #5063; shell form so the derive + export + exec run),
+  // rather than pinning a manual name. The assignment MUST be the standalone
+  // command-substitution form `DATABASE_SCHEMA="$(...)"` — NOT
+  // `export DATABASE_SCHEMA="$(...)"`.
   // In `export VAR="$(cmd)"` the statement's exit status is export's (always
   // 0), so a non-zero exit from derive-schema.mjs is swallowed and the real
   // process execs with an empty DATABASE_SCHEMA (silent mis-target). Pinning

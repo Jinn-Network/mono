@@ -139,14 +139,16 @@ EXPOSE 42069
 # /health and /ready endpoints). For HTTP-only replicas behind a proxy, use
 # `ponder serve` instead — see Ponder's "Horizontal scaling" docs.
 #
-# DATABASE_SCHEMA is auto-derived at boot from a content hash of
-# ponder.schema.ts (deploy/derive-schema.mjs, issue #1429): an unchanged schema
-# resumes in place, and any onchainTable change lands in a fresh
-# `jinn_indexer_<hash>` data schema automatically — no manual Railway bump.
+# DATABASE_SCHEMA is auto-derived at boot from the Railway deployment id
+# (deploy/derive-schema.mjs, issues #1429 and #5063): every new deployment
+# indexes into a fresh `jinn_indexer_<hash>` data schema while the old one keeps
+# serving, and a restart of the same deployment resumes its own schema. Ponder
+# refuses a schema held by a different build or by a still-running deployment,
+# so the name must change with every deployment, not only with ponder.schema.ts.
 # `--views-schema=jinn_indexer` swaps the public-facing `jinn_indexer` views
-# onto that data schema on /ready (Ponder's zero-downtime views pattern). A
-# hash-named data schema can never equal the literal `jinn_indexer` views
-# schema, so they cannot collide. Set JINN_INDEXER_SCHEMA_AUTO=false +
-# DATABASE_SCHEMA to pin a name (must match on the enrichment worker too).
-# See deploy/README.md.
+# onto that data schema on /ready (Ponder's zero-downtime views pattern); the
+# enrichment worker follows those views. A hash-named data schema can never
+# equal the literal `jinn_indexer` views schema, so they cannot collide. Set
+# JINN_INDEXER_SCHEMA_AUTO=false + DATABASE_SCHEMA to pin a name (outside
+# Railway, a new one for every deployment). See deploy/README.md.
 CMD DATABASE_SCHEMA="$(node deploy/derive-schema.mjs)" && export DATABASE_SCHEMA && exec node node_modules/ponder/dist/esm/bin/ponder.js start --views-schema=jinn_indexer

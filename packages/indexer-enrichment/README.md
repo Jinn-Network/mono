@@ -62,7 +62,7 @@ Shared with the indexer (the worker writes into the indexer's Ponder schema):
 | Env | Required | Default | Notes |
 |-----|----------|---------|-------|
 | `DATABASE_URL` | yes | — | Same Postgres as the indexer. |
-| `DATABASE_SCHEMA` | no | auto-derived | Auto-derived at boot from `sha256(ponder.schema.ts)[:8]`, identical to the indexer's (#1429). Set only when pinning (`JINN_INDEXER_SCHEMA_AUTO=false`) — then set the SAME value on the indexer. |
+| `DATABASE_SCHEMA` | no | follows the indexer | Unset by default: every indexer deployment indexes into a fresh data schema (#5063), so the worker follows the one behind the indexer's public `jinn_indexer` views, re-checked every tick, and moves with each cutover. Read only with `JINN_INDEXER_SCHEMA_AUTO=false`, which pins it. |
 | `JINN_IPFS_GATEWAY_URL` | no | autonolas gateway | Shared with the indexer. |
 
 Worker-specific knobs:
@@ -106,16 +106,14 @@ healthcheck, `ON_FAILURE` restart). The Dockerfile build context is `packages/`.
   column change breaks the build (and the `schema parity` DB test), not
   production. The worker writes only the application columns of
   `verdict_envelope_meta`, never Ponder's bookkeeping tables.
-- **O3 — `DATABASE_SCHEMA` repoint on a re-sync.** Adding the `retry_count` /
-  `next_attempt_at` columns to `verdict_envelope_meta` is an `onchainTable`
-  change, and Ponder does not online-migrate — the indexer's first deploy of the
-  #779 schema needs a `DATABASE_SCHEMA` bump + full re-sync. During a
-  views-pattern rolling cutover two schemas briefly coexist; the worker reads one
-  `DATABASE_SCHEMA` from env, so **repoint the worker's `DATABASE_SCHEMA` and
-  restart it together with the indexer** as part of the schema-bump procedure,
-  or newly-synced evaluations under the new schema won't be enriched. The worker
-  tolerates the schema not yet existing (`ready()` backs off rather than
-  crashing) so a worker started before its schema exists just waits.
+- **O3 — following the indexer across deployments.** Every indexer deployment
+  indexes into a fresh data schema (#5063), and during a rolling cutover two
+  schemas briefly coexist. The worker enriches the one the public
+  `jinn_indexer` views point at (the deployment that is serving), re-resolves it
+  every tick, and moves to the new schema once the new deployment reaches
+  `/ready` and swaps the views; it then drains that schema's backlog (O4). Until
+  the views exist the worker reports not ready and waits. With a pinned
+  `DATABASE_SCHEMA` it stays on that schema.
 - **O4 — backfill drain.** On first deploy the worker sees the full historical
   backlog of un-enriched evaluation envelopes. It drains at
   `JINN_ENRICHMENT_BATCH_SIZE` × `JINN_ENRICHMENT_POLL_INTERVAL_MS` — tune those
