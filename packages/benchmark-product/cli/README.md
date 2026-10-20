@@ -3,9 +3,7 @@
 The published `colophon` command. A stranger uses it to make a claim, not only to
 check one.
 
-Installing or running a Colophon package needs npm 11.6 or newer. On Node 22,
-which ships npm 10, run `npm install -g npm@11` first, or use Node 24.8 or
-newer, which ships it.
+Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
 
 ```sh
 npx @colophon-claims/cli@0.1 --help
@@ -67,7 +65,7 @@ A draft needs at least two arms. A claimant with one agent adds Harbor's
 `quote` is a required step, and it is known to run on Ubuntu x64 and
 Apple-silicon macOS arm64. So the claimant verbs need one of those two
 platforms, the same two the sample is qualified on. Checking a bundle needs only
-Node 22.
+Node 22 and the npm stated above.
 
 ## Service venue verbs
 
@@ -85,7 +83,7 @@ those lines describe that venue's inventory and do not block `lock`.
 npx @colophon-claims/cli@0.1
 ```
 
-The sample needs Node 22 or newer and is qualified on Ubuntu x64 and Apple-silicon macOS arm64. It needs no account, API key, funds, or Docker. It publishes only to a new local directory, verifies the copied bundle after deleting the source workspace, serves the report from a loopback-only viewer, and uploads nothing. Windows and Intel macOS are not yet qualified.
+The sample needs Node 22 or newer and the npm stated above, and is qualified on Ubuntu x64 and Apple-silicon macOS arm64. It needs no account, API key, funds, or Docker. It publishes only to a new local directory, verifies the copied bundle after deleting the source workspace, serves the report from a loopback-only viewer, and uploads nothing. Windows and Intel macOS are not yet qualified.
 
 To move from the sample to your own tasks, run `colophon open`. The local app uses
 `./colophon-workspace` unless you select another workspace on the command line. It acts as a member
