@@ -38,7 +38,7 @@ Install Harbor at that version before anything else.
 uv tool install harbor==0.21.0
 ```
 
-[uv](https://docs.astral.sh/uv/getting-started/installation/) installs Harbor into an environment of its own, on a Python 3.12 or newer that it finds on your machine. If your shell cannot find `harbor` afterward, uv has printed how to put its tool directory on your PATH. Without `==0.21.0` the installer takes Harbor's newest release. `pip install harbor==0.21.0` inside a virtual environment installs the same version.
+This needs [uv](https://docs.astral.sh/uv/getting-started/installation/). If `uv` is not on your machine, install it from that page first. uv installs Harbor into an environment of its own, on a Python 3.12 or newer that it finds on your machine. If your shell cannot find `harbor` afterward, uv has printed how to put its tool directory on your PATH. Without `==0.21.0` the installer takes Harbor's newest release. `pip install harbor==0.21.0` inside a virtual environment installs the same version.
 
 Then check it.
 
