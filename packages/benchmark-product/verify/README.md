@@ -10,6 +10,8 @@ they come from the checker rather than from this shim. The published JSON Schema
 dependency-free `scripts/external-verify.py` ship in the checker's tarball, not this one:
 `node_modules/@colophon-claims/check/` after installing either name.
 
+Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
+
 The name stays published permanently. Bundles sealed before the rename print their reader command
 with this name, and a sealed instruction that stops resolving is a broken claim, so:
 

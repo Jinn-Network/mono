@@ -14,8 +14,10 @@ Start at the [product overview](https://github.com/Jinn-Network/mono/blob/next/p
 [public-bundle guide](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/PUBLIC-BUNDLE.md), [Inspect runtime guide](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/INSPECT-RUNTIME.md),
 and [threat model](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/SECURITY.md).
 
-This package is the operations library the published CLI depends on, and requires Node 22. The complete
-portal dependency graph must be built from source before core. The exact
+This package is the operations library the published CLI depends on, and requires Node 22.
+Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
+
+The complete portal dependency graph must be built from source before core. The exact
 dependency order is maintained in
 [Benchmark Product CI](https://github.com/Jinn-Network/mono/blob/next/.github/workflows/benchmark-product-ci.yml);
 the old two-dependency build recipe is insufficient.
