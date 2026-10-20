@@ -569,3 +569,73 @@ for (const { lane, workflow, stepName } of [
     assert.match(step, /exit 1/);
   });
 }
+
+// The pack smoke installs the packed tarballs with whatever npm the job put on PATH. npm
+// releases before 11.19.0 crash on the conflicting optional peers of `vitest@4.1.12` with
+// `Cannot read properties of null (reading 'edgesOut')` (#5079). That stopped Layer CI's
+// smoke (#5085) and, until its pin moved, would have stopped the layer canary publish
+// (#5088). These two workflows were the remaining ones on 11.16.0 (#5094). 11.19.0 is the
+// version the other package lanes pin; trusted publishing needs 11.5.1 or newer.
+const MINIMUM_PACK_SMOKE_NPM = [11, 19, 0];
+
+function npmAtLeast(version, minimum) {
+  const parts = version.split('.').map(Number);
+  for (let index = 0; index < minimum.length; index += 1) {
+    if (parts[index] !== minimum[index]) return parts[index] > minimum[index];
+  }
+  return true;
+}
+
+// Whole-line comments are dropped so a pin that only appears in a comment is never counted.
+function withoutCommentLines(workflow) {
+  return workflow
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('#'))
+    .join('\n');
+}
+
+function npmPins(workflow) {
+  return [
+    ...withoutCommentLines(workflow).matchAll(/npm install (?:-g|--global) npm@(\d+\.\d+\.\d+)\b/gu),
+  ].map((match) => match[1]);
+}
+
+for (const { lane, workflow } of [
+  { lane: 'npm-publish.yml', workflow: publish },
+  { lane: 'sdk-npm-publish.yml', workflow: sdkPublish },
+]) {
+  test(`${lane} installs an npm that can install the packed packages`, () => {
+    const pins = npmPins(workflow);
+    assert.equal(pins.length, 1, `${lane} must install exactly one npm, pinned to an exact version`);
+    assert.ok(
+      npmAtLeast(pins[0], MINIMUM_PACK_SMOKE_NPM),
+      `${lane} installs npm ${pins[0]}; it must install ${MINIMUM_PACK_SMOKE_NPM.join('.')} or newer`,
+    );
+  });
+
+  test(`${lane} installs npm before the pack smoke and before it publishes`, () => {
+    const code = withoutCommentLines(workflow);
+    const install = code.search(/npm install (?:-g|--global) npm@/u);
+    const smoke = code.indexOf('yarn pack:smoke');
+    const publishAt = code.indexOf('npm publish');
+    assert.ok(install >= 0, `${lane} must install npm`);
+    assert.ok(smoke > install, `${lane} must install npm before it runs the pack smoke`);
+    assert.ok(publishAt > install, `${lane} must install npm before it publishes`);
+  });
+}
+
+test('the npm version comparison reads versions by number, not by text', () => {
+  assert.ok(npmAtLeast('11.19.0', MINIMUM_PACK_SMOKE_NPM));
+  assert.ok(npmAtLeast('11.19.1', MINIMUM_PACK_SMOKE_NPM));
+  assert.ok(npmAtLeast('12.0.0', MINIMUM_PACK_SMOKE_NPM));
+  assert.ok(!npmAtLeast('11.5.1', MINIMUM_PACK_SMOKE_NPM));
+  assert.ok(!npmAtLeast('11.16.0', MINIMUM_PACK_SMOKE_NPM));
+  assert.ok(!npmAtLeast('11.9.0', MINIMUM_PACK_SMOKE_NPM));
+  assert.ok(!npmAtLeast('10.9.9', MINIMUM_PACK_SMOKE_NPM));
+});
+
+test('a pin that only appears in a comment does not count as an npm install', () => {
+  const commentedOut = '      # - run: npm install -g npm@11.19.0\n      - run: yarn pack:smoke\n';
+  assert.deepEqual(npmPins(commentedOut), []);
+  assert.deepEqual(npmPins('      - run: npm install --global npm@11.19.0 --no-audit\n'), ['11.19.0']);
+});
