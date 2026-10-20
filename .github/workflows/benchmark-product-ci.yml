@@ -233,6 +233,12 @@ jobs:
             packages/benchmark-product/core/yarn.lock
             packages/benchmark-product/web/yarn.lock
             packages/benchmark-product/cli/yarn.lock
+      # The npm bundled with the runner's Node 22 (10.9.9) dies with "Cannot read properties of
+      # null (reading 'edgesOut')" on yarn-packed tarballs, in the core pack smoke's `npm install`
+      # (#5077; the same crash was first pinned away in #3014). Run the npm that
+      # colophon-npm-publish.yml publishes with, so the pack smoke checks what the publish does.
+      - name: Pin npm for packed-consumer smoke coverage
+        run: npm install --global npm@11.19.0 --no-audit --no-fund
       - id: inspect-python
         name: Install the pinned optional Inspect runtime
         uses: actions/setup-python@v7
@@ -445,6 +451,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+      - name: Pin npm for packed-consumer smoke coverage
+        run: npm install --global npm@11.19.0 --no-audit --no-fund
       - name: Require the declared macOS arm64 target
         run: |
           test "$(uname -s)" = "Darwin"
@@ -481,6 +489,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+      - name: Pin npm for packed-consumer smoke coverage
+        run: npm install --global npm@11.19.0 --no-audit --no-fund
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
