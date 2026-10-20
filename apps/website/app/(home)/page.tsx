@@ -234,7 +234,7 @@ export default function HomePage() {
         <ul className="mt-8 max-w-[68ch] space-y-4 text-sm leading-relaxed">
           <li>
             One implementation of the protocol exists. Until a second one passes the
-            conformance vectors, &ldquo;written from the specification alone&rdquo; is a
+            conformance vectors, &ldquo;written from the spec alone&rdquo; is a
             claim, not a result.
           </li>
           <li>Buying and selling records is the direction, not a working market.</li>

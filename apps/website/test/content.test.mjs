@@ -197,15 +197,20 @@ function copyFiles() {
   ];
 }
 
+// Matches over the whole file, so a pattern that allows `\s+` between words
+// still finds a phrase the source wraps across two lines.
 function scanCopy(re) {
+  const everywhere = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
   const violations = [];
   for (const file of copyFiles()) {
-    readFileSync(file, 'utf8')
-      .split('\n')
-      .forEach((line, i) => {
-        const match = line.match(re);
-        if (match) violations.push(`${relPath(file)}:${i + 1}: "${match[0]}": ${line.trim()}`);
-      });
+    const text = readFileSync(file, 'utf8');
+    const lines = text.split('\n');
+    for (const match of text.matchAll(everywhere)) {
+      const line = text.slice(0, match.index).split('\n').length;
+      violations.push(
+        `${relPath(file)}:${line}: "${match[0].replace(/\s+/g, ' ')}": ${lines[line - 1].trim()}`,
+      );
+    }
   }
   return violations;
 }
@@ -230,24 +235,110 @@ test('nothing walks the parked task marketplace as if it were live', () => {
   assert.deepEqual(scanCopy(PARKED_FLOW_RE), []);
 });
 
-// Copy the parked story used, and stub notices. None of it comes back.
+// Copy the parked story used, the old site's own headings (issue #4770
+// quotes them), and stub notices. None of it comes back. A space in a phrase
+// matches any run of whitespace, so a phrase wrapped across source lines is
+// still the phrase.
+const RETIRED_PHRASES = [
+  'not yet written',
+  'coming soon',
+  'open work that compounds',
+  'knowledge economy',
+  'evidence work creates',
+  'post a task',
+  'posts a task',
+  'run an operator',
+  'operators earn',
+  'join the telegram',
+  'bring us a task',
+  'run an agent',
+  'put your agent to work',
+  'market for work done by ai agents',
+  'watch the network live',
+];
 const RETIRED_COPY_RE = new RegExp(
-  [
-    'not yet written',
-    'coming soon',
-    'open work that compounds',
-    'knowledge economy',
-    'evidence work creates',
-    'post a task',
-    'run an operator',
-    'operators earn',
-    'join the telegram',
-  ].join('|'),
+  RETIRED_PHRASES.map((phrase) => phrase.replace(/ /g, '\\s+')).join('|'),
   'i',
 );
 
 test('no stub notices and no copy from the parked story', () => {
   assert.deepEqual(scanCopy(RETIRED_COPY_RE), []);
+});
+
+// Nothing on the site invites a visitor to earn, stake or fund. The parked
+// pages may tell a visitor not to, so a clause with a negation ahead of the
+// verb ("Do not fund an account", "no pool to fund") is not an invitation.
+// Clauses end at a sentence mark or a tag, and the check reads one line at a
+// time, so a negation on another line never excuses a verb.
+const INVITATION_VERB_RE = /\b(earn|earning|stake|staking|fund|funding)\b/gi;
+const NEGATION_RE = /\b(not|no|never|nothing|without)\b|n't\b/i;
+
+test('nothing invites a visitor to earn, stake or fund', () => {
+  const violations = [];
+  for (const file of copyFiles()) {
+    readFileSync(file, 'utf8')
+      .split('\n')
+      .forEach((line, i) => {
+        const plain = line.replace(/&rsquo;|\u2019/g, "'").replace(/&\w+;/g, ' ');
+        for (const clause of plain.split(/[.!?:;]|<[^>]*>/)) {
+          for (const match of clause.matchAll(INVITATION_VERB_RE)) {
+            if (!NEGATION_RE.test(clause.slice(0, match.index))) {
+              violations.push(`${relPath(file)}:${i + 1}: "${match[0]}": ${line.trim()}`);
+            }
+          }
+        }
+      });
+  }
+  assert.deepEqual(violations, []);
+});
+
+// The site title and description are a link preview, which has no room for
+// the sentence that says buying and selling records is the direction, not a
+// working market. So they may not use the words that present it as working.
+// BRAND.md's canonical line says "sold"; the site says "offered".
+// test/build-output.test.mjs holds the same list for the built page.
+const MARKET_WORDS_RE = /\b(sold|sells?|selling|buy|buys|buying|bought|markets?|marketplace)\b/i;
+
+function layoutConstant(name) {
+  const source = readFileSync(resolve(root, 'app/layout.tsx'), 'utf8');
+  const match = source.match(new RegExp(`const ${name} =\\s*(['\`])([\\s\\S]*?)\\1;`));
+  assert.ok(match, `could not find "const ${name} = ..." in app/layout.tsx; this test reads it`);
+  return match[2];
+}
+
+test('the site title and description do not present the market as working', () => {
+  for (const name of ['title', 'description']) {
+    const text = layoutConstant(name);
+    assert.doesNotMatch(
+      text,
+      MARKET_WORDS_RE,
+      `the site ${name} is "${text}". Buying and selling records is the direction, not a ` +
+        `working market (BRAND.md); the ${name} has no room to say so.`,
+    );
+  }
+});
+
+// The words the site puts in quotation marks are the words of a source a
+// reader can open. Each quotation is checked against its source before it is
+// listed here, so a paraphrase inside quotation marks fails.
+const VERIFIED_QUOTATIONS = new Map([
+  ['written from the spec alone', 'https://github.com/Jinn-Network/spec#what-is-not-yet-proven'],
+]);
+
+test('every quotation in the copy is verbatim from the source it names', () => {
+  const unverified = [];
+  for (const file of copyFiles()) {
+    const text = readFileSync(file, 'utf8');
+    for (const match of text.matchAll(/&ldquo;([\s\S]*?)&rdquo;|\u201C([\s\S]*?)\u201D/g)) {
+      const words = (match[1] ?? match[2]).replace(/\s+/g, ' ').trim();
+      if (!VERIFIED_QUOTATIONS.has(words)) unverified.push(`${relPath(file)}: "${words}"`);
+    }
+  }
+  assert.deepEqual(
+    unverified,
+    [],
+    'a quotation must match its source word for word; once checked, list it in VERIFIED_QUOTATIONS',
+  );
 });
 
 // Only `@colophon-claims/verify` is published. The other Colophon packages
