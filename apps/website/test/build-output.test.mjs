@@ -38,6 +38,13 @@ function anchors(html) {
   }));
 }
 
+// The title and description are a link preview, which has no room for the
+// sentence that says buying and selling records is the direction, not a
+// working market. So they may not use the words that present it as working.
+// BRAND.md's canonical line says "sold"; the site says "offered".
+// test/content.test.mjs holds the same list for the source.
+const MARKET_WORDS_RE = /\b(sold|sells?|selling|buy|buys|buying|bought|markets?|marketplace)\b/i;
+
 const PAGES = [
   'index.html',
   'docs/index.html',
@@ -114,6 +121,20 @@ test('static export output', async (t) => {
     assert.ok(description.includes(noun), `landing description is "${description}"`);
     const ogTitle = html.match(/<meta property="og:title" content="([^"]*)"/)?.[1] ?? '';
     assert.ok(ogTitle.includes(noun), `landing og:title is "${ogTitle}"`);
+    const ogDescription = html.match(/<meta property="og:description" content="([^"]*)"/)?.[1] ?? '';
+    for (const [name, text] of [
+      ['<title>', title],
+      ['description', description],
+      ['og:title', ogTitle],
+      ['og:description', ogDescription],
+    ]) {
+      assert.doesNotMatch(
+        text,
+        MARKET_WORDS_RE,
+        `landing ${name} is "${text}". Buying and selling records is the direction, not a ` +
+          'working market (BRAND.md); a link preview has no room to say so.',
+      );
+    }
 
     const links = anchors(markup('index.html'));
     assert.ok(
