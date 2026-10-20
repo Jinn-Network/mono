@@ -121,6 +121,7 @@ jobs:
     # DR-2026-08-04 moved the protocol identifier origin to spec.jinn.network. The re-seal
     # was lawful only because nothing had ever been published; once a document is served the
     # apex spelling can never come back. This gate is what keeps it from creeping back in.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
@@ -136,6 +137,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:

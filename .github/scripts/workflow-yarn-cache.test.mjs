@@ -2732,6 +2732,45 @@ test('the lane that runs this guard declares a job timeout (#4414)', () => {
   assert.match(guard, /node --test \.github\/scripts\/workflow-yarn-cache\.test\.mjs/u);
 });
 
+// Every job in Repository structure runs on every pull request, including one from a fork, and
+// a step that hangs holds its runner until GitHub's 360-minute ceiling. `identifier-origin` and
+// `evidence-architecture` were the two jobs that declared no bound (#5019).
+function jobsWithoutTimeout(source) {
+  return jobRanges(source)
+    .filter(({ lines }) => !lines.some((line) => /^ {4}timeout-minutes:\s*[1-9][0-9]*\s*(?:#.*)?$/u.test(line)))
+    .map(({ name }) => name);
+}
+
+test('every job in repository-structure.yml declares timeout-minutes (#5019)', () => {
+  const source = readFileSync(join(workflowsDir, 'repository-structure.yml'), 'utf8');
+  const names = jobRanges(source).map(({ name }) => name);
+  for (const expected of ['changes', 'gitlinks', 'identifier-origin', 'evidence-architecture', 'repo-structure-gate']) {
+    assert.ok(names.includes(expected), `repository-structure.yml has no ${expected} job; the scan is not reading it`);
+  }
+  assert.deepEqual(jobsWithoutTimeout(source), []);
+});
+
+test('the job timeout scan names a job whose timeout was removed', () => {
+  const workflow = (jobTimeout) => [
+    'jobs:',
+    '  bounded:',
+    '    runs-on: ubuntu-latest',
+    '    timeout-minutes: 5',
+    '    steps:',
+    '      - run: true',
+    '  other:',
+    '    runs-on: ubuntu-latest',
+    ...jobTimeout,
+    '    steps:',
+    '      - run: true',
+    // A bound on one step leaves the job unbounded.
+    '        timeout-minutes: 5',
+    '',
+  ].join('\n');
+  assert.deepEqual(jobsWithoutTimeout(workflow(['    timeout-minutes: 10'])), []);
+  assert.deepEqual(jobsWithoutTimeout(workflow([])), ['other']);
+});
+
 test('the directory walk stays bounded when every command multiplies the candidates', () => {
   withFixture(({ fixtureRoot, fixtureWorkflows }) => {
     // Each `cd $d` multiplied the candidate set by the loop width. Sixteen of them
