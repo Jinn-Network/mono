@@ -118,6 +118,11 @@ jobs:
       # on every run (#5020).
       - name: Every upload step that names a hidden path keeps it
         run: node --test .github/scripts/workflow-upload-hidden-files.test.mjs
+      # Repository-wide as well: a job that installs or packs packed packages on the npm bundled
+      # with the runner's Node 22 dies with "Cannot read properties of null (reading 'edgesOut')".
+      # Six lanes were pinned one failure at a time; this finds the next one before it runs (#5104).
+      - name: Every job that installs packed packages pins npm 11.19.0 or newer
+        run: node --test .github/scripts/workflow-npm-pin.test.mjs
   identifier-origin:
     name: Identifier origin tripwire
     needs: changes
