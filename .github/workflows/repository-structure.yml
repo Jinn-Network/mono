@@ -113,6 +113,11 @@ jobs:
       # be the one that goes red (#3126).
       - name: Every by-name-restore precedent citation is still true
         run: node --test .github/scripts/workflow-precedent-citations.test.mjs
+      # Repository-wide as well: an upload step that names a dot-directory without
+      # include-hidden-files finds no files, and the scheduled audit that did so failed
+      # on every run (#5020).
+      - name: Every upload step that names a hidden path keeps it
+        run: node --test .github/scripts/workflow-upload-hidden-files.test.mjs
   identifier-origin:
     name: Identifier origin tripwire
     needs: changes

@@ -430,6 +430,41 @@ test('scheduled/manual audit is read-only, summarizes, and uploads deterministic
   assert.doesNotMatch(source, /\b(?:POST|PUT|PATCH|DELETE)\b/u);
 });
 
+// The audit's three result files live in a dot-directory, and `actions/upload-artifact`
+// leaves dot-directories out unless `include-hidden-files: true` is set. Without it every
+// run found no files, `if-no-files-found: error` failed the upload step, and the drift
+// gate after it was skipped, so the run was red whether or not the policy had drifted
+// (#5020). The step has to keep the evidence on every outcome, and the run has to go red
+// only after that.
+test('the audit uploads its evidence on every outcome and reds the run only after the upload', () => {
+  const source = readFileSync(resolve(workflowRoot, 'architecture-policy-audit.yml'), 'utf8');
+  const step = (name) => {
+    const start = source.indexOf(`      - name: ${name}\n`);
+    assert.ok(start >= 0, `the audit workflow is missing the step '${name}'`);
+    const next = source.indexOf('\n      - ', start + 1);
+    return { start, text: source.slice(start, next === -1 ? undefined : next) };
+  };
+
+  const read = step('Read branch protection and owner state');
+  assert.match(read.text, /id: audit/u);
+  assert.match(read.text, /continue-on-error: true/u);
+  assert.match(read.text, /--out \.architecture-audit\/audit\.json/u);
+  assert.match(read.text, /--summary \.architecture-audit\/summary\.md/u);
+  assert.match(read.text, /2> \.architecture-audit\/error\.txt/u);
+
+  const upload = step('Upload read-only audit evidence');
+  assert.match(upload.text, /if: always\(\)/u);
+  assert.match(upload.text, /name: architecture-policy-audit\n/u);
+  assert.match(upload.text, /path: \.architecture-audit\n/u);
+  assert.match(upload.text, /include-hidden-files: true\n/u);
+  assert.match(upload.text, /if-no-files-found: error/u);
+
+  const gate = step('Fail on policy drift');
+  assert.match(gate.text, /if: steps\.audit\.outcome != 'success'/u);
+  assert.match(gate.text, /run: exit 1/u);
+  assert.ok(gate.start > upload.start, 'the drift gate must run after the evidence upload');
+});
+
 // A jq that succeeds with a non-boolean is the other half of the #2456 hole (#4060).
 // `set -e` cannot see these: both exit 0. An empty `selection` makes real jq print
 // nothing (`printf '' | jq -r '.run'`), and a `.run`-less object makes it print

@@ -56,6 +56,7 @@ jobs:
           name: platform-architecture-control-coverage
           path: .architecture-control/coverage.json
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 30
 
   # `platform-verification.yml` fans into six domain lanes through `workflow_call`,
