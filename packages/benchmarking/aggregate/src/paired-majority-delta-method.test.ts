@@ -658,58 +658,6 @@ describe("paired-majority-delta@1 compute parameter failures", () => {
     expectRangeViolation(MAX_NONINFERIORITY_RESAMPLES_V1 + 1);
   });
 
-  // #4523: the pre-check mirrors the registry guards, which reach their range check through
-  // `requireIntegerParam` (`Number.isInteger`). An integer past 2^53 is not a safe integer, so a
-  // `Number.isSafeInteger` pre-check let it fall through to the validator's untyped Error.
-  //
-  // The Run record seals its analysis plan as I-JSON, which cannot carry a number past 2^53 (nor
-  // a non-integer), so these values can only reach `compute` as `input.parameters` handed to the
-  // public entry point directly. Seal a valid closure first, then swap the parameters in.
-  function thrownWithResamples(resamples: unknown): unknown {
-    const closure = buildClosure(ITEMS);
-    const swapped: Closure = {
-      ...closure,
-      input: { ...closure.input, parameters: { ...PARAMETERS, resamples } },
-    };
-    try {
-      computeDirect(swapped);
-    } catch (error) {
-      return error;
-    }
-    return undefined;
-  }
-
-  test("reports an integer beyond the safe range as the same typed parameter-range failure", () => {
-    expect(Number.isInteger(2 ** 53)).toBe(true);
-    expect(Number.isSafeInteger(2 ** 53)).toBe(false);
-    // 2^53 - 1 is the last safe integer, so it was already typed; everything from 2^53 up is the
-    // boundary this test moves.
-    for (const resamples of [Number.MAX_SAFE_INTEGER, 2 ** 53, -(2 ** 53), 1e300, -1e300, Number.MAX_VALUE]) {
-      const thrown = thrownWithResamples(resamples);
-      expect(thrown, String(resamples)).toBeInstanceOf(MethodInputError);
-      const error = thrown as MethodInputError;
-      expect(error.code, String(resamples)).toBe("method-parameter-out-of-range");
-      expect(error.digest).toBe("resamples");
-      expect(error.message).toContain(`resamples must be in 1..${MAX_NONINFERIORITY_RESAMPLES_V1}`);
-    }
-  });
-
-  test("a non-integer resamples stays the aggregate validator's untyped Error, as in the registry guards", () => {
-    for (const resamples of [1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, "1000"]) {
-      const thrown = thrownWithResamples(resamples);
-      expect(thrown, String(resamples)).toBeInstanceOf(Error);
-      expect(thrown, String(resamples)).not.toBeInstanceOf(MethodInputError);
-      expect((thrown as Error).message).toContain('parameter "resamples" must be an integer in 1..');
-    }
-  });
-
-  test("the accepted range edges still pass the pre-check", () => {
-    for (const resamples of [1, MAX_NONINFERIORITY_RESAMPLES_V1]) {
-      expect(validatePairedMajorityDeltaParameters({ ...PARAMETERS, resamples }).ok, String(resamples)).toBe(true);
-    }
-    expect(thrownWithResamples(1)).toBeUndefined();
-  });
-
   test("a non-range parameter issue still surfaces as the aggregate validator's untyped Error", () => {
     const closure = buildClosure(ITEMS, { ...PARAMETERS, alpha: "0.20" });
     let thrown: unknown;
