@@ -670,7 +670,8 @@ describe('buildOperatorComposition', () => {
     // #4397: `buildOperatorComposition` awaits `reconcileNonterminalAtBoot` on the backend it just
     // constructed, so an attempt abandoned before any spawn intent — nothing in the operator
     // remembers it — is terminal before the first coordinator `recover()`. Deleting that call
-    // leaves this attempt nonterminal, holding a concurrency slot forever. The sibling
+    // leaves this attempt nonterminal on disk, with no recorded outcome and no pruning (since
+    // #3192 it no longer holds a concurrency slot). The sibling
     // compositions pin the same call (`native-solver-backend.test.ts`,
     // `native-evaluator-composition.test.ts`); this is the fleet daemon's equivalent.
     createBaseVenueMock.mockReset().mockImplementation(() => stubVenue());
