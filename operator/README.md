@@ -399,7 +399,7 @@ Operators with a paid Alchemy / Tenderly / QuickNode endpoint should
 }
 ```
 
-Or via env (comma-separated, same chain capped at 4 providers):
+Or via env (comma-separated, same chain capped at 6 providers):
 
 ```bash
 # Historical: an RPC override. Do not run it to start an operator.

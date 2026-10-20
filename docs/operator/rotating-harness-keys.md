@@ -35,7 +35,7 @@ SolverNet evaluator daemons must provide `CLAUDE_CODE_OAUTH_TOKEN` (preferred)
 or `ANTHROPIC_API_KEY` in the daemon environment. Readiness fails before a
 marketplace claim when neither explicit credential is present.
 
-In headless containers the host keychain is unavailable, so the OAuth token must be forwarded as `CLAUDE_CODE_OAUTH_TOKEN`. The Docker path for this is documented in [`operator/README.md`](../../client/README.md) (the "Docker" section) — note the distinction in the next section.
+In headless containers the host keychain is unavailable, so the OAuth token must be forwarded as `CLAUDE_CODE_OAUTH_TOKEN`. The Docker path for this is documented in [`operator/README.md`](../../operator/README.md) (the "Docker" section) — note the distinction in the next section.
 
 ### codex
 
@@ -63,7 +63,7 @@ Model / provider precedence: `JINN_HERMES_MODEL` / `JINN_HERMES_PROVIDER` in the
 
 `operator/.env` is loaded by `dotenv` in `operator/src/main.ts` **only** when `JINN_LOAD_DEV_ENV=1` or `NODE_ENV=development`, and it is resolved relative to the compiled module inside the repo checkout. The published global package (`npm install -g @jinn-network/operator`, then `jinn run`) sets neither of those, and ships no `operator/.env`, so the file is never read in a normal operator install. It exists for repo contributors iterating from source. Use each harness's own auth store / command (the table above) instead.
 
-**This is a different file from the docker-compose `.env`.** When you run the daemon under Docker Compose, [`operator/README.md`](../../client/README.md) tells you to create a `.env` next to `docker-compose.yml` holding `CLAUDE_CODE_OAUTH_TOKEN` (and `JINN_PASSWORD`). That one is read by `docker-compose` and injected into the container's `process.env`, where the adapter allowlist then picks it up — so it works. The warning here is only about the **repo `operator/.env`** that `main.ts` conditionally loads, not the docker-compose env-file.
+**This is a different file from the docker-compose `.env`.** When you run the daemon under Docker Compose, [`operator/README.md`](../../operator/README.md) tells you to create a `.env` next to `docker-compose.yml` holding `CLAUDE_CODE_OAUTH_TOKEN` (and `JINN_PASSWORD`). That one is read by `docker-compose` and injected into the container's `process.env`, where the adapter allowlist then picks it up — so it works. The warning here is only about the **repo `operator/.env`** that `main.ts` conditionally loads, not the docker-compose env-file.
 
 ## Why a wrong key fails
 
@@ -80,5 +80,5 @@ To confirm a key is actually loaded, use the operator console's **per-harness pr
 ## Links
 
 - Operator testnet runbook: [`docs/operator-testnet.md`](../operator-testnet.md)
-- Client README (Docker auth, SolverNet harness toggles): [`operator/README.md`](../../client/README.md)
+- Client README (Docker auth, SolverNet harness toggles): [`operator/README.md`](../../operator/README.md)
 - Operator app spec — §2.9 Harness Selection: [`apps/operator-console/OPERATOR-APP-SPEC.md`](../../apps/operator-console/OPERATOR-APP-SPEC.md)
