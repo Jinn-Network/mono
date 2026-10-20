@@ -280,17 +280,21 @@ function probeEnv(baseEnv) {
   };
 }
 
-function runRegistryYarnConsumerAcceptance(options, consumerRoot) {
-  const yarnConsumerRoot = join(consumerRoot, 'yarn-consumer');
+export function writeYarnConsumerProject(yarnConsumerRoot, manifest) {
   mkdirSync(yarnConsumerRoot, { recursive: true });
   writeFileSync(
     join(yarnConsumerRoot, 'package.json'),
-    `${JSON.stringify(yarnConsumerManifest(options), null, 2)}\n`,
+    `${JSON.stringify(manifest, null, 2)}\n`,
   );
   writeFileSync(
     join(yarnConsumerRoot, '.yarnrc.yml'),
     'nodeLinker: node-modules\n',
   );
+}
+
+function runRegistryYarnConsumerAcceptance(options, consumerRoot) {
+  const yarnConsumerRoot = join(consumerRoot, 'yarn-consumer');
+  writeYarnConsumerProject(yarnConsumerRoot, yarnConsumerManifest(options));
   const yarnEnv = isolatedConsumerEnv(yarnConsumerRoot);
   runOrThrow(
     'corepack', ['yarn', 'install', '--no-immutable'],
