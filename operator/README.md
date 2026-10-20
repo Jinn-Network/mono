@@ -371,12 +371,14 @@ JINN_PASSWORD=secret jinn run --config ./my-config.json
 
 #### RPC fallback chain
 
-Out of the box on testnet, `jinn run` uses a two-provider fallback chain —
-no key required, zero config:
+Out of the box on testnet, `jinn run` uses a five-provider fallback chain, with no key required and zero config:
 
 ```text
-slot 0  https://base-sepolia.publicnode.com   (no-auth, 50k-block getLogs cap)
-slot 1  https://sepolia.base.org              (free public Coinbase, 2k cap)
+slot 0  https://base-sepolia.publicnode.com       (no-auth, 50k-block getLogs cap)
+slot 1  https://base-sepolia-rpc.publicnode.com
+slot 2  https://base-sepolia.drpc.org
+slot 3  https://base-sepolia.gateway.tenderly.co
+slot 4  https://sepolia.base.org                  (free public Coinbase, 2k cap)
 ```
 
 If the primary returns a network error or HTTP 429 / 5xx, viem
@@ -423,8 +425,11 @@ summary line:
 
 ```text
 [rpc] L2 base-sepolia.publicnode.com ok latency=87ms
+[rpc] L2 base-sepolia-rpc.publicnode.com ok latency=95ms
+[rpc] L2 base-sepolia.drpc.org ok latency=112ms
+[rpc] L2 base-sepolia.gateway.tenderly.co ok latency=128ms
 [rpc] L2 sepolia.base.org ok latency=141ms
-[rpc] L2 transport: fallback chain (2 providers) — primary=base-sepolia.publicnode.com
+[rpc] L2 transport: fallback chain (5 providers) — primary=base-sepolia.publicnode.com
 ```
 
 The probe is **log-only** — secondary-slot 429s warn but never gate

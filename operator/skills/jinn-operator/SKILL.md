@@ -181,7 +181,7 @@ operator app that `jinn run` opened. `jinn run` then:
 4. Bootstrapped the fleet (Safe wallet, service registration, staking, mech deployment)
 5. Started the daemon
 
-The daemon is headless: its API answers `GET /` with `{ "error": "no_human_surface" }`. The human surface was the separate operator console (`apps/operator-console`), which `jinn ui` opens.
+While the marketplace ran, the daemon served its own dashboard and `jinn ui` opened it. Both changed after the last settled work: the daemon in this package is headless, its API answers `GET /` with `{ "error": "no_human_surface" }`, and `jinn ui` opens the separate operator console (`apps/operator-console`).
 
 ### Advanced / CI: explicit password
 
@@ -291,6 +291,7 @@ This re-encrypts the keystore and deletes the auto-generated password file. The 
 ### Stopping and Starting
 
 ```bash
+# Historical: stop and restart a daemon. Do not run it to start an operator.
 jinn stop       # stop the daemon
 jinn run        # start in foreground
 ```
@@ -312,11 +313,7 @@ Do not fund any account for the parked network.
 
 ### Daemon starts but no activity
 
-On the parked network no activity is expected: the marketplace is not running tasks. Otherwise, check `jinn status`. If `rpc.ok` is false, the RPC endpoint is down. The default (`https://sepolia.base.org`) is rate-limited. Consider using your own RPC via config:
-
-```bash
-echo '{"rpcUrl": "https://your-rpc.example.com"}' > ~/.jinn-client/config.json
-```
+On the parked network no activity is expected: the marketplace is not running tasks. While it ran, the first check was `jinn status`: if `rpc.ok` was false, the RPC endpoint was down. The default testnet RPC is a fallback chain of five free providers (`DEFAULT_TESTNET_RPC_URLS` in `operator/src/config.ts`). An operator with an RPC endpoint of their own put it first in the `rpcUrl` array of the existing config file, or in `JINN_RPC_URL`, as the operator README describes.
 
 ### "No service is ready" after bootstrap
 
@@ -342,6 +339,6 @@ How the two networks were configured while the marketplace ran. The marketplace 
 | | Testnet (default) | Mainnet |
 |---|---|---|
 | Chain | Base Sepolia | Base |
-| RPC default | `https://sepolia.base.org` | `https://mainnet.base.org` |
+| RPC default | Five-provider fallback chain headed by https://base-sepolia.publicnode.com | Five-provider fallback chain headed by https://mainnet.base.org |
 | Staking mode | standard (stOLAS, no OLAS needed) | standard |
 | Config key | `"network": "testnet"` | `"network": "mainnet"` |
