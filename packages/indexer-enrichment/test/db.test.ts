@@ -27,9 +27,10 @@ async function seedEnvelope(args: {
   publishedAtBlock: bigint;
   logIndex?: number;
   chainId?: number;
+  schema?: string;
 }): Promise<void> {
   await h.db.execute(
-    sql`INSERT INTO ${sql.raw(`"${h.schema}"."envelope"`)}
+    sql`INSERT INTO ${sql.raw(`"${args.schema ?? h.schema}"."envelope"`)}
       ("agent_id","metadata_key","chain_id","kind","manifest_cid","manifest_hash","evidence_tier","published_at_block","log_index")
       VALUES (${args.agentId}, ${`${args.kind}:${args.cid}`}, ${args.chainId ?? CHAIN_ID}, ${args.kind}, ${args.cid}, ${'0x'}, ${'committed'}, ${args.publishedAtBlock}, ${args.logIndex ?? 0})`,
   );
@@ -368,6 +369,65 @@ describe('upsertVerdict', () => {
 
     const due = await store.discoverDue(25, 1_000_001n);
     expect(due).toEqual([]);
+  });
+});
+
+// ── Following the indexer's views (#5063) ─────────────────────────────────────
+
+describe('following the indexer views (#5063)', () => {
+  const VIEWS = 'jinn_test_views';
+
+  /** What `ponder start --views-schema` does on /ready (ponder/src/database/actions.ts). */
+  async function pointViewsAt(schema: string): Promise<void> {
+    await h.db.execute(sql.raw(`CREATE SCHEMA IF NOT EXISTS "${VIEWS}"`));
+    for (const table of ['envelope', 'verdict_envelope_meta']) {
+      await h.db.execute(sql.raw(`DROP VIEW IF EXISTS "${VIEWS}"."${table}"`));
+      await h.db.execute(
+        sql.raw(`CREATE VIEW "${VIEWS}"."${table}" AS SELECT * FROM "${schema}"."${table}"`),
+      );
+    }
+  }
+
+  it('is not ready before the indexer has published its views', async () => {
+    const following = new EnrichmentStore(h.db, null, VIEWS);
+    expect(await following.ready()).toBe(false);
+    expect(following.currentSchema).toBeNull();
+  });
+
+  it('enriches the schema the views point at and moves with the next cutover', async () => {
+    await pointViewsAt(h.schema);
+    const following = new EnrichmentStore(h.db, null, VIEWS);
+    expect(await following.ready()).toBe(true);
+    expect(following.currentSchema).toBe(h.schema);
+
+    // The next indexer deployment indexes into a fresh schema of its own, then
+    // swaps the views onto it once it reaches /ready.
+    const nextSchema = `${h.schema}_next`;
+    await h.db.execute(sql.raw(`CREATE SCHEMA "${nextSchema}"`));
+    for (const table of ['envelope', 'verdict_envelope_meta']) {
+      await h.db.execute(
+        sql.raw(
+          `CREATE TABLE "${nextSchema}"."${table}" (LIKE "${h.schema}"."${table}" INCLUDING ALL)`,
+        ),
+      );
+    }
+    const cid = 'bafynext00000000000000000000000000000000000000000000000000000000000';
+    await seedEnvelope({
+      agentId: '1',
+      cid,
+      kind: 'evaluation',
+      publishedAtBlock: 100n,
+      schema: nextSchema,
+    });
+
+    expect(await following.ready()).toBe(true);
+    expect(following.currentSchema).toBe(h.schema); // views not swapped yet
+
+    await pointViewsAt(nextSchema);
+    expect(await following.ready()).toBe(true);
+    expect(following.currentSchema).toBe(nextSchema);
+    const due = await following.discoverDue(25, 0n);
+    expect(due.map((d) => d.manifestCid)).toEqual([cid]);
   });
 });
 

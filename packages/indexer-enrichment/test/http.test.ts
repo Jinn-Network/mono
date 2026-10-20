@@ -6,6 +6,7 @@ import type { EnrichmentRunner } from '../src/runner.js';
 
 const config = loadConfig({
   DATABASE_URL: 'postgres://user:secret@db.internal:5432/jinn',
+  JINN_INDEXER_SCHEMA_AUTO: 'false',
   DATABASE_SCHEMA: 'jinn_indexer_v1',
 });
 

@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { loadConfig, redactConfig } from '../src/config.js';
 
+// Pinned: DATABASE_SCHEMA counts only with JINN_INDEXER_SCHEMA_AUTO=false.
 const BASE_ENV = {
   DATABASE_URL: 'postgres://user:secret@db.internal:5432/jinn',
+  JINN_INDEXER_SCHEMA_AUTO: 'false',
   DATABASE_SCHEMA: 'jinn_indexer_v1',
 } satisfies NodeJS.ProcessEnv;
 
@@ -11,8 +13,25 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ DATABASE_SCHEMA: 'jinn_indexer_v1' })).toThrow(/DATABASE_URL/);
   });
 
-  it('throws when DATABASE_SCHEMA is missing', () => {
-    expect(() => loadConfig({ DATABASE_URL: BASE_ENV.DATABASE_URL })).toThrow(/DATABASE_SCHEMA/);
+  it('throws when pinned without DATABASE_SCHEMA', () => {
+    expect(() =>
+      loadConfig({ DATABASE_URL: BASE_ENV.DATABASE_URL, JINN_INDEXER_SCHEMA_AUTO: 'false' }),
+    ).toThrow(/DATABASE_SCHEMA/);
+  });
+
+  // #5063: every indexer deployment indexes into a fresh data schema, so by
+  // default the worker follows the indexer's views instead of a fixed name. A
+  // DATABASE_SCHEMA without the pin switch is ignored, as the old boot CMD
+  // overwrote it, so a stale service variable cannot pin the worker.
+  it('follows the indexer views by default and ignores an unpinned DATABASE_SCHEMA', () => {
+    expect(loadConfig({ DATABASE_URL: BASE_ENV.DATABASE_URL }).databaseSchema).toBeNull();
+    expect(
+      loadConfig({ DATABASE_URL: BASE_ENV.DATABASE_URL, DATABASE_SCHEMA: 'jinn_indexer_v1' })
+        .databaseSchema,
+    ).toBeNull();
+    expect(
+      redactConfig(loadConfig({ DATABASE_URL: BASE_ENV.DATABASE_URL })).databaseSchema,
+    ).toMatch(/jinn_indexer views/);
   });
 
   it('applies defaults for the optional worker knobs', () => {
