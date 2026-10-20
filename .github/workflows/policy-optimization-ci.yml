@@ -135,6 +135,12 @@ jobs:
             packages/task-execution/backend-local/assembly/yarn.lock
             packages/task-execution/testing/yarn.lock
             packages/policy-optimization/yarn.lock
+      # The npm bundled with the runner's Node 22 (10.9.9) dies with "Cannot read properties of
+      # null (reading 'edgesOut')" in the pack smoke's `npm install` of the packed tarballs
+      # (#5099, #5079). Pin npm 11.19.0, the version the other package lanes pin; it cleared the
+      # same crash in Benchmark Product CI (#5078).
+      - name: Pin npm for packed-consumer smoke coverage
+        run: npm install --global npm@11.19.0 --no-audit --no-fund
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
@@ -237,6 +243,12 @@ jobs:
             packages/benchmarking/local/yarn.lock
             packages/policy/identity/yarn.lock
             packages/policy/outcomes/yarn.lock
+      # The npm bundled with the runner's Node 22 (10.9.9) dies with "Cannot read properties of
+      # null (reading 'edgesOut')" in the packed consumer's `npm install` of the packed tarballs
+      # (#5099, #5079). Pin npm 11.19.0, the version the other package lanes pin; it cleared the
+      # same crash in Benchmark Product CI (#5078).
+      - name: Pin npm for packed-consumer smoke coverage
+        run: npm install --global npm@11.19.0 --no-audit --no-fund
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
