@@ -356,7 +356,7 @@ JINN_PASSWORD=secret jinn run --config ./my-config.json
 | Config key | Env override | Default |
 |---|---|---|
 | network | JINN_NETWORK | `testnet` (Base Sepolia). `mainnet` selects Base mainnet, where there is no operator flow. |
-| rpcUrl | BASE_RPC_URL / JINN_RPC_URL | testnet: two-provider fallback chain `[publicnode, sepolia.base.org]`; mainnet: single `mainnet.base.org`. Accepts string OR array; env values split on commas. See "RPC fallback chain" below. |
+| rpcUrl | BASE_RPC_URL / JINN_RPC_URL | testnet: five-provider fallback chain headed by `base-sepolia.publicnode.com` (`DEFAULT_TESTNET_RPC_URLS`); mainnet: five-provider fallback chain headed by `mainnet.base.org` (`DEFAULT_MAINNET_RPC_URLS`). Accepts string OR array; env values split on commas. See "RPC fallback chain" below. |
 | claudeModel | JINN_CLAUDE_MODEL | claude-haiku-4-5-20251001 |
 | claudePath | JINN_CLAUDE_PATH | claude |
 | pollIntervalMs | JINN_POLL_INTERVAL_MS | 5000 |
@@ -421,7 +421,7 @@ order is preserved (no latency-based reshuffling).
 | Every slot fails (rare)                     | Daemon errors silently         | `AllRpcsFailedError` thrown with masked host list — surfaces as a state message in the operator app |
 
 On boot the daemon emits one log line per slot followed by the canonical
-summary line:
+summary line. The latencies below are illustrative, not measured:
 
 ```text
 [rpc] L2 base-sepolia.publicnode.com ok latency=87ms
