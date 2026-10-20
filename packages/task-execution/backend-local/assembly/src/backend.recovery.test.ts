@@ -1081,10 +1081,11 @@ describe("restart reconstruction and §6.4 actions", () => {
   // `rebuildIndexes` swallows the throw and takes the opposite branch: the wedge would come back
   // silently, and in the shape that hides best. Be honest about the reach, though — this pins the
   // CODE-level regression by corrupting one Attempt's fingerprint. The environment-level one it
-  // cannot reach is a probe that throws for EVERY Attempt (`listProcessGroupPids` enumerates
-  // `/proc` unguarded on Linux, so a `/proc` this process may not read does exactly that), which
-  // restores the wedge wholesale. That one is caught by design and, since #4395, journaled as a
-  // `liveness-unverifiable` progress event — the next test pins both halves of it.
+  // cannot reach is a probe that throws for EVERY Attempt (`readProcessGroupTable`, which
+  // rehydration calls, enumerates `/proc` on Linux, so a `/proc` this process may not read does
+  // exactly that), which restores the wedge wholesale. That one is caught by design and, since
+  // #4395, journaled as a `liveness-unverifiable` progress event — the next test pins both
+  // halves of it.
   test("a rehydrated nonterminal attempt whose liveness cannot be determined keeps its slot", async () => {
     const root = await stateRoot("capacity-rehydration-unreadable");
     const first = fixture(root, { maxConcurrentAttempts: 1 });

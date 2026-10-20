@@ -5,7 +5,9 @@ description: Drive one cycle of Jinn's growth experiment loop — PLAN an attemp
 
 # growth-experiment
 
-Implements the cycle in [`GROWTH.md`](../../../GROWTH.md). See §4 for the model and Mayfield rungs, §5 for the eight knobs, §7 for the non-negotiables. This skill is their enforcement and the only sanctioned writer of new log entries.
+Implements the cycle in [`GROWTH.md`](../../../GROWTH.md). See §4 for the model and Mayfield rungs, §5 for the engine knobs, §7 for the non-negotiables. This skill is their enforcement and the only sanctioned writer of new log entries.
+
+Two sets of knobs appear in this skill and they are different things. The nine **loadout knobs** (pitch, audience, channel, format, proof, ask, cadence, voice, amplifiers) are what the loadout holds and what one attempt varies: "one knob" in PLAN, in the one-knob rule of `GROWTH.md` §7, and in a log entry's "Knob varied" always means one of these. The **engine knobs** in `GROWTH.md` §5 (Sensitivity, Scope, Resolution and Baseline for the instrument; Step size, Direction, Parallelism and Commit policy for the search rule) are the settings of the system that judges and revises the loadout. This skill does not vary them per attempt, and `GROWTH.md` §5 defines them. `GROWTH.md` §4 and §6 call the loadout "eight knobs"; the template below lists nine.
 
 ## When to invoke
 
@@ -20,7 +22,7 @@ Both are operator-private (gitignored). Create them on first PLAN call if absent
 
 ## Mode 1 — PLAN
 
-1. Ask the user which **rung** to move (default to lowest-volume), which single **knob** is varying (one of: pitch, audience, channel, format, proof, ask, cadence, voice, amplifiers), and **what would count as a hit**. Reject vague predictions ("good engagement") — push back for a concrete number, comparison, or binary. Refuse co-varied attempts unless the user explicitly overrides, logging the override in the entry.
+1. Ask the user which **rung** to move (default to lowest-volume), which single **loadout knob** is varying (one of: pitch, audience, channel, format, proof, ask, cadence, voice, amplifiers), and **what would count as a hit**. Reject vague predictions ("good engagement") — push back for a concrete number, comparison, or binary. Refuse co-varied attempts unless the user explicitly overrides, logging the override in the entry.
 2. Append a pending entry to the log: date, loadout version, rung, knob, audience slice, prediction. Leave actuals and verdict blank; mark status `pending`.
 
 ## Mode 2 — LOG
@@ -57,7 +59,7 @@ Enforces [`GROWTH.md`](../../../GROWTH.md) §7. Skill-specific specifics:
 **Version**: v0.1
 **Date**: YYYY-MM-DD
 
-## The eight knobs
+## The nine knobs
 
 **Pitch** — [framing]
 **Audience** — [cluster or slice]
@@ -111,6 +113,6 @@ Append-only. Newest first.
 
 - Invoke other skills.
 - Pull metrics automatically — actuals are user-supplied.
-- Pool across deployers — current Scope knob is local-only.
+- Pool across deployers — the engine's Scope knob (`GROWTH.md` §5) is local-only.
 - Draft content (the archive has skills that did; revive them via the loadout, not by reintroducing the skill).
 - Modify [`GROWTH.md`](../../../GROWTH.md). Canon changes go through the canonical-doc PR flow.

@@ -1,12 +1,16 @@
 ---
 name: jinn-operator
-description: Set up and operate a Jinn Network agent. Use when the user wants to install the jinn client, configure MCP tools, run `jinn run`, manage a running daemon, submit Tasks, or understand the Jinn protocol. Activates on mentions of "jinn", "jinn agent", "jinn network", "jinn run", "Task", "SolverNet", "restoration", or "SolverPlugin" in the context of operating an agent.
+description: Reference for how a Jinn Network operator ran. The operator network is parked and is not running tasks, so use this to explain the jinn CLI, the MCP tools, and the Jinn protocol, not to set up, fund, or start an operator. Activates on mentions of "jinn", "jinn agent", "jinn network", "jinn run", "Task", "SolverNet", "restoration", or "SolverPlugin" in the context of operating an agent.
 allowed-tools: Bash, Read, Edit, Write, Glob, Grep
 ---
 
 # Jinn Operator Skill
 
-Guides you through installing, configuring, and operating a Jinn Network agent.
+**Status: parked.** The operator network and the task marketplace it served are parked until there is demand for them. The marketplace on Base Sepolia is not running tasks. Its last settled work was on 13 August 2026. A daemon started today finds no work and earns nothing. There is no mainnet operator flow.
+
+This skill is kept as the record of how operators ran. It is not an invitation to run an operator, fund a wallet, stake OLAS, or move to mainnet. Do not fund any account because of it, and do not start a daemon to follow it. The [operator README](https://github.com/Jinn-Network/mono/blob/next/operator/README.md) describes the current state, and the [testnet runbook](https://github.com/Jinn-Network/mono/blob/next/docs/operator-testnet.md) is the runbook as it stood when the marketplace was parked.
+
+Everything below documents how an operator installed, configured, and ran a Jinn Network agent.
 
 ## What Is Jinn
 
@@ -23,9 +27,11 @@ Creation  -->  Execution  -->  Evaluation  -->  Knowledge
 3. **Evaluation** — an evaluator independently verifies whether the restoration succeeded
 4. **Knowledge** — artifacts (learnings, evidence) accumulate to improve future attempts
 
-Agents earn rewards by participating in this loop. The public testnet runs on Base Sepolia; Base mainnet is reserved for the later Phase 2 graduation.
+While the marketplace ran, operators took part in this loop on the public testnet, Base Sepolia.
 
 ## Phase 1: Installation
+
+How operators installed the CLI. Installing does not start an operator.
 
 Check if jinn is already installed:
 
@@ -47,6 +53,8 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 - **Claude Code CLI** — the daemon spawns Claude as a subprocess for restoration work. It must be installed; if auth or runtime setup is needed, `jinn run` opens the operator app and guides the user through it.
 
 ### CLI verb reference
+
+The package still ships this CLI. The commands that start the daemon (`jinn run`), bootstrap a fleet (`jinn bootstrap`), or act on tasks, rewards, and fleet wallets (`jinn tasks submit`, `jinn claim-rewards`, `jinn fleet scale`, `jinn withdraw`) belong to the marketplace as it ran. There is no work for a daemon to take on today.
 
 <!-- skill:cli-table:start -->
 | Verb | What it does |
@@ -125,7 +133,7 @@ If the user wants their agent (Claude Code, Cursor, etc.) to operate jinn progra
 }
 ```
 
-Once configured, these MCP tools become available:
+Once configured, these MCP tools become available. The mutating ones (`jinn_run`, `jinn_bootstrap`, `jinn_tasks_submit`, `jinn_claim_rewards`, `jinn_start_daemon`) belong to the marketplace as it ran: do not call them to get started, and do not fund any account because a tool reports a funding gap.
 
 <!-- skill:mcp-table:start -->
 | Tool | What it does |
@@ -154,45 +162,45 @@ Once configured, these MCP tools become available:
 | `daemon_restart` | Request a daemon restart. Requires confirm=true. The daemon will shut down gracefully and the process will exit; the supervising shell or systemd unit must restart it. |
 <!-- skill:mcp-table:end -->
 
-## Phase 3: Zero to Running
+## Phase 3: How a New Operator Started
 
-The canonical first-run path:
+On Base Sepolia, a new operator ran one command. Starting it today finds no work and earns nothing, so this describes the command; it is not a step to follow.
 
 ```bash
-# Zero-to-running: opens the app, auto-generates a keystore password,
-# then init → fund → bootstrap → run.
+# Historical: the one-shot first run. Opens the app, auto-generates a keystore
+# password, then init → funding check → bootstrap → run. Do not run it to start
+# an operator.
 jinn run
 ```
 
-If Claude Code authentication or runtime setup is needed, complete it in the
-operator app that `jinn run` opens. `jinn run` then:
-1. Generates a random keystore password (saved to `~/.jinn-client/keystore-password`, mode 0600)
-2. Creates the master wallet
-3. Funds via Coinbase CDP faucet (automatic on testnet)
-4. Bootstraps the fleet (Safe wallet, service registration, staking, mech deployment)
-5. Starts the daemon
+If Claude Code authentication or runtime setup was needed, it was completed in the
+operator app that `jinn run` opened. `jinn run` then:
+1. Generated a random keystore password (saved to `~/.jinn-client/keystore-password`, mode 0600)
+2. Created the master wallet
+3. Checked funding. On testnet a Coinbase CDP faucet request covered it automatically.
+4. Bootstrapped the fleet (Safe wallet, service registration, staking, mech deployment)
+5. Started the daemon
 
-When it finishes: **open `http://localhost:7331`** for the operator dashboard.
+While the marketplace ran, the daemon served its own dashboard and `jinn ui` opened it. Both changed after the last settled work: the daemon in this package is headless, its API answers `GET /` with `{ "error": "no_human_surface" }`, and `jinn ui` opens the separate operator console (`apps/operator-console`).
 
 ### Advanced / CI: explicit password
 
-If you want to manage the password yourself (recommended for production or CI pipelines), set `JINN_PASSWORD` before calling `jinn run`. No file will be written to disk:
+An operator who wanted to manage the password themselves (recommended for production or CI pipelines) set `JINN_PASSWORD` before calling `jinn run`, and no file was written to disk:
 
 ```bash
+# Historical: supply the keystore password yourself. Do not run it to start an operator.
 JINN_PASSWORD=their-password jinn run
 ```
 
-For CI, prefer reading the password from a file descriptor: `--password-fd N`.
+For CI, the password was read from a file descriptor: `--password-fd N`.
 
-### If `jinn run` stops at "funding required":
+### If `jinn run` stopped at "funding required":
 
-The automatic faucet may have rate-limited (1 claim per 24 hours per address). Options:
-- Wait 24 hours and re-run `jinn run`
-- Fund manually: go to https://portal.cdp.coinbase.com/products/faucet, send testnet ETH to the printed master address, then re-run
+The automatic faucet could rate-limit (1 claim per 24 hours per address). The operator then waited 24 hours and re-ran `jinn run`, or sent testnet ETH from a web faucet to the printed master address and re-ran. There is nothing to resolve on the parked network: do not fund any account.
 
 ## Phase 3.5: Opting In to SolverNets
 
-After `jinn run` brings the fleet up, the Prediction SolverNet is enabled by default. Other
+While the marketplace ran, the Prediction SolverNet was enabled by default after `jinn run` brought the fleet up. Other
 SolverNets are off by default because they may require operator-specific
 credentials, APIs, or Harness choices.
 
@@ -242,16 +250,17 @@ does not claim it.
 
 ### Monitoring
 
-- **Dashboard:** `http://localhost:7331` (when daemon is running)
+- **Operator console:** `jinn ui` opens it. The daemon itself has no human surface.
 - **CLI:** `jinn status` for a quick health check
 - **Fleet detail:** `jinn fleet` shows each service's step, Safe, mech, staking status
 - **Balances:** `jinn balance` shows master and service wallet balances
 
 ### Submitting Tasks
 
-To post a Task for the network to work on:
+This is how a Task was posted for the network to work on. The marketplace is not running tasks, so do not post one now.
 
 ```bash
+# Historical: posts a Task on-chain. Do not run it.
 jinn tasks submit --id my-task --description "The service publishes a daily summary" --solver-net prediction --yes
 ```
 
@@ -282,6 +291,7 @@ This re-encrypts the keystore and deletes the auto-generated password file. The 
 ### Stopping and Starting
 
 ```bash
+# Historical: stop and restart a daemon. Do not run it to start an operator.
 jinn stop       # stop the daemon
 jinn run        # start in foreground
 ```
@@ -294,18 +304,16 @@ Claude Code CLI is not installed or not on PATH. Install it separately — see h
 
 ### Bootstrap stuck at "awaiting funding"
 
-The master wallet needs testnet ETH. Either:
-- The CDP faucet rate-limited (wait 24h)
-- The faucet SDK isn't installed: `npm install @coinbase/cdp-sdk`
-- Fund manually via a web faucet
+The master wallet needed testnet ETH. The cause was one of:
+- The CDP faucet rate-limited (a 24 hour wait)
+- The faucet SDK (`@coinbase/cdp-sdk`) was not installed
+- The operator had to fund the wallet from a web faucet
+
+Do not fund any account for the parked network.
 
 ### Daemon starts but no activity
 
-Check `jinn status`. If `rpc.ok` is false, the RPC endpoint is down. The default (`https://sepolia.base.org`) is rate-limited. Consider using your own RPC via config:
-
-```bash
-echo '{"rpcUrl": "https://your-rpc.example.com"}' > ~/.jinn-client/config.json
-```
+On the parked network no activity is expected: the marketplace is not running tasks. While it ran, the first check was `jinn status`: if `rpc.ok` was false, the RPC endpoint was down. The default testnet RPC is a fallback chain of five free providers (`DEFAULT_TESTNET_RPC_URLS` in `operator/src/config.ts`). An operator with an RPC endpoint of their own put it first in the `rpcUrl` array of the existing config file, or in `JINN_RPC_URL`, as the operator README describes.
 
 ### "No service is ready" after bootstrap
 
@@ -321,14 +329,16 @@ When operating jinn tools, keep this mental model:
 - **`jinn solver-nets`** is how you choose which SolverNets this operator participates in and which Harness each SolverNet uses.
 - **`jinn fleet`** tells you about your staked services and their state.
 - **`jinn bootstrap`** is idempotent. If anything is stuck, re-running it is always safe.
-- **`funding_required`** means "the wallet needs ETH." On testnet, this should auto-resolve via faucet. If not, the user needs to fund manually.
+- **`funding_required`** meant "the wallet needs ETH." On testnet, this auto-resolved via faucet. Do not fund any account for the parked network.
 - The daemon runs three loops: creator (posts Tasks), Solver (claims and solves Tasks), delivery-watcher (evaluates results). All three run automatically once the daemon starts.
 
 ## Network Details
 
+How the two networks were configured while the marketplace ran. The marketplace is parked, and there is no mainnet operator flow ([`docs/operator-mainnet.md`](https://github.com/Jinn-Network/mono/blob/next/docs/operator-mainnet.md)).
+
 | | Testnet (default) | Mainnet |
 |---|---|---|
 | Chain | Base Sepolia | Base |
-| RPC default | `https://sepolia.base.org` | `https://mainnet.base.org` |
+| RPC default | Five-provider fallback chain headed by https://base-sepolia.publicnode.com | Five-provider fallback chain headed by https://mainnet.base.org |
 | Staking mode | standard (stOLAS, no OLAS needed) | standard |
 | Config key | `"network": "testnet"` | `"network": "mainnet"` |
