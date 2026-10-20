@@ -27,6 +27,7 @@ The two `harbor run` commands were not run again for this document. Harbor 0.21.
 - Linux x64 or Apple-silicon macOS. `quote` is a required step and is known to run on those two. On any other platform, Linux arm64 included, it stops before it reads or creates anything and names the platform it found and the two it supports.
 - Docker. Harbor runs each task in a container.
 - The Docker daemon running, and the `docker compose` command. Harbor stops at once if the daemon is down, and it starts each task with `docker compose`.
+- Docker with 4 CPUs, 4 GB of memory and 8 GB of free disk, for the ten tasks below. Harbor runs four trials at once by default. `caffe-cifar-10` asks for 4 CPUs and 8 GB, each other task for 1 CPU and 2 GB. On a smaller machine, add `--n-concurrent 1` to both `harbor run` commands to run one trial at a time.
 - Python 3.12 or newer, for Harbor. Harbor 0.21.0 declares `>=3.12`, so pip refuses it on an older Python.
 - Harbor, version 0.21.0 exactly. `run import` refuses a job that any other version wrote, and names the job.
 - A key for the model your agent calls, in the environment variable its provider names: `ANTHROPIC_API_KEY` for an `anthropic/` model, `OPENROUTER_API_KEY` for an `openrouter/` model. Harbor reads it from the environment you run `harbor run` in. No Colophon command asks for it.
@@ -38,7 +39,7 @@ Install Harbor at that version before anything else.
 uv tool install harbor==0.21.0
 ```
 
-This needs [uv](https://docs.astral.sh/uv/getting-started/installation/). If `uv` is not on your machine, install it from that page first. uv installs Harbor into an environment of its own, on a Python 3.12 or newer that it finds on your machine. If your shell cannot find `harbor` afterward, uv has printed how to put its tool directory on your PATH. Without `==0.21.0` the installer takes Harbor's newest release. `pip install harbor==0.21.0` inside a virtual environment installs the same version.
+This needs [uv](https://docs.astral.sh/uv/getting-started/installation/). `uv --version` prints a version if you have it. If you do not, install uv with the command that page gives for Linux and macOS, `curl -LsSf https://astral.sh/uv/install.sh | sh`, then open a new shell. uv installs Harbor into an environment of its own, on a Python 3.12 or newer that it finds on your machine. If your shell cannot find `harbor` afterward, uv has printed how to put its tool directory on your PATH. Without `==0.21.0` the installer takes Harbor's newest release. `pip install harbor==0.21.0` inside a virtual environment installs the same version.
 
 Then check it.
 
@@ -61,6 +62,8 @@ If `harbor --version` prints anything else, run the install command again, which
 Two rules of order hold for everything below. `lock` comes before the Harbor run. `anchor` comes before `run import`.
 
 ## 1. `init`: create the workspace
+
+Before each `npx` command runs, npm may name the package it will install and, in a terminal, ask `Ok to proceed?`. Answer `y`, or put `--yes` right after `npx`.
 
 ```sh
 npx @colophon-claims/cli@0.1 init --workspace ./ws --principal me
