@@ -212,9 +212,10 @@ function isSufficientNpmPin(npm) {
   });
 }
 
-// The scripts behind `pack:smoke` and the registry and pre-publication acceptance runs. Each installs
-// packed tarballs with whatever npm is on the PATH.
-const PACKED_CONSUMER_SCRIPT = /(?:^|\/)(?:smoke-test-pack|external-consumer-acceptance|prepublication-external-consumer)\.mjs$/u;
+// The scripts behind `pack:smoke`, the registry and pre-publication acceptance runs, and the jinn-agent
+// cold-stock journey (`cold-stock-e2e.sh`). Each installs packed tarballs with whatever npm is on the
+// PATH.
+const PACKED_CONSUMER_SCRIPT = /(?:^|\/)(?:(?:smoke-test-pack|external-consumer-acceptance|prepublication-external-consumer)\.mjs|cold-stock-e2e\.sh)$/u;
 
 // Programs that can run a package script or a Node script. A `pack:smoke` or packed-types word
 // after any other program (`echo`, `grep`) is text, not a run.
@@ -333,6 +334,7 @@ test('the scan finds the lanes that pin and the commands that need it', () => {
   assert.ok(usesAndPins('evidence-ci.yml').some((job) => job.pins && job.uses.includes('a pack:smoke script')));
   assert.ok(usesAndPins('layer-npm-publish.yml').some((job) => job.pins && job.uses.includes('npm pack')));
   assert.ok(usesAndPins('benchmark-product-ci.yml').some((job) => job.pins && job.uses.includes('a packed-types script')));
+  assert.ok(usesAndPins('jinn-agent-ci.yml').some((job) => job.job === 'cold-stock-e2e' && job.pins && job.uses.includes('a packed-consumer script')));
 
   const total = [...sources.keys()].flatMap((name) => usesAndPins(name)).filter((job) => job.pins).length;
   assert.ok(total >= 20, `expected the scan to find at least 20 pinning jobs, found ${total}`);
@@ -347,6 +349,7 @@ test('a pack smoke, a packed-types script, or an npm install, ci or pack without
   assert.deepEqual(flagged(wrap('      - run: node .github/scripts/policy-packed-types.test.mjs')), ['lane: a packed-types script']);
   assert.deepEqual(flagged(wrap('      - run: node scripts/smoke-test-pack.mjs --output x.tgz')), ['lane: a packed-consumer script']);
   assert.deepEqual(flagged(wrap('      - run: node scripts/external-consumer-acceptance.mjs --registry')), ['lane: a packed-consumer script']);
+  assert.deepEqual(flagged(wrap('      - run: bash plugin/scripts/cold-stock-e2e.sh')), ['lane: a packed-consumer script']);
   // The unit tests of those scripts do not install packed packages.
   assert.deepEqual(flagged(wrap('      - run: node --test .github/scripts/prepublication-external-consumer.test.mjs')), []);
   assert.deepEqual(flagged(wrap('      - run: npm install')), ['lane: npm install']);
