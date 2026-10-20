@@ -280,17 +280,28 @@ function probeEnv(baseEnv) {
   };
 }
 
-function runRegistryYarnConsumerAcceptance(options, consumerRoot) {
-  const yarnConsumerRoot = join(consumerRoot, 'yarn-consumer');
+export function writeYarnConsumerProject(yarnConsumerRoot, manifest) {
   mkdirSync(yarnConsumerRoot, { recursive: true });
   writeFileSync(
     join(yarnConsumerRoot, 'package.json'),
-    `${JSON.stringify(yarnConsumerManifest(options), null, 2)}\n`,
+    `${JSON.stringify(manifest, null, 2)}\n`,
   );
   writeFileSync(
     join(yarnConsumerRoot, '.yarnrc.yml'),
     'nodeLinker: node-modules\n',
   );
+  // Keep this empty lockfile. The Yarn consumer sits inside the npm consumer folder, which has a
+  // package.json of its own, so without a yarn.lock here Yarn 4 takes that folder as the project
+  // root and refuses this one ("The nearest package directory ... doesn't seem to be part of the
+  // project"). An empty yarn.lock makes this folder a project of its own. It was removed once, in
+  // 48c58281ac, and every npm Publish run that reached the registry acceptance after that failed
+  // on it (#5098).
+  writeFileSync(join(yarnConsumerRoot, 'yarn.lock'), '');
+}
+
+function runRegistryYarnConsumerAcceptance(options, consumerRoot) {
+  const yarnConsumerRoot = join(consumerRoot, 'yarn-consumer');
+  writeYarnConsumerProject(yarnConsumerRoot, yarnConsumerManifest(options));
   const yarnEnv = isolatedConsumerEnv(yarnConsumerRoot);
   runOrThrow(
     'corepack', ['yarn', 'install', '--no-immutable'],
