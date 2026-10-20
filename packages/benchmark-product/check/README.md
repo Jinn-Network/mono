@@ -1,6 +1,8 @@
 # @colophon-claims/check
 
-Check a public Colophon claim bundle without the Colophon app or any execution runtime:
+Check a public Colophon claim bundle without the Colophon app or any execution runtime.
+
+Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
 
 ```sh
 npx @colophon-claims/check@0.2 ./bundle

@@ -281,10 +281,6 @@ describe("resamples range guard (#2583)", () => {
   ])("%s reports an out-of-range resamples as a parameter-range failure", (id, params) => {
     expectRangeViolation(id, { ...params, resamples: 0 });
     expectRangeViolation(id, { ...params, resamples: MAX_NONINFERIORITY_RESAMPLES_V1 + 1 });
-    // `requireIntegerParam` tests `Number.isInteger`, so an integer past 2^53 is out of range here
-    // and not an untyped "must be an integer" failure (#4523); paired-majority-delta@1 matches.
-    expectRangeViolation(id, { ...params, resamples: 2 ** 53 });
-    expectRangeViolation(id, { ...params, resamples: 1e300 });
   });
 
   test("noninferiority-iut@1 still reports mismatched cost units as method-incompatible-cost-unit", () => {

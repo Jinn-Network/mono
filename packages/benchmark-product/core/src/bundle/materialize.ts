@@ -1206,14 +1206,37 @@ function recordClosure(input: MaterializeBundleInput): {
   };
 }
 
+/** How many times to try creating the stage directory when the parent keeps disappearing. */
+const STAGE_CREATE_ATTEMPTS = 5;
+
+/** Creates the stage directory, and the `public-bundles` parent with it when it is missing.
+ *
+ * Staging runs outside the publication lock, and a publisher that was refused removes an EMPTY
+ * `public-bundles` directory on its way out (`runPublish`, issue #4941). A concurrent stager can
+ * therefore find the parent gone. A recursive `mkdir` recreates it, but creating the parent and the
+ * stage are two filesystem calls, so a removal landing between them surfaces as `ENOENT`; that is
+ * the only outcome retried, because the parent exists again by the next attempt. Each retry is paid
+ * for by another publisher's completed refusal, and the bound keeps a path that stays missing for
+ * any other reason from looping. The stage name is a fresh UUID, so `recursive` cannot adopt a
+ * directory that belongs to anyone else. */
+function createStageDirectory(stage: string): void {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      mkdirSync(stage, { recursive: true });
+      return;
+    } catch (cause) {
+      if (nodeCode(cause) !== "ENOENT" || attempt >= STAGE_CREATE_ATTEMPTS) throw cause;
+    }
+  }
+}
+
 export function materializePublicBundle(
   input: MaterializeBundleInput,
   deps: MaterializeBundleDeps = {},
 ): MaterializedBundle {
   const parent = publicBundlesDir(input.workspaceDir, input.draftId);
-  mkdirSync(parent, { recursive: true });
   const stage = join(parent, `.stage-${randomUUID()}`);
-  mkdirSync(stage, { recursive: false });
+  createStageDirectory(stage);
   let renamed = false;
   try {
     const closure = recordClosure(input);

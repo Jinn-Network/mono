@@ -114,6 +114,8 @@ the exact line the producer named. The table in
 [Portable verification](#portable-verification) is the same mapping keyed by
 format, for a reader who has only `bundle.json`.
 
+Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
+
 Verify a version 2 bundle with:
 
 ```bash
@@ -875,6 +877,8 @@ as the compatible line. The producer named that line for this exact bundle, and 
 every closure. Use the table below when you cannot reach the claim package and have only
 `bundle.json`. Each section above states the same thing in place, with the anchored form spelled
 out where it applies.
+
+Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
 
 | `bundle.json` format | Pinned line | Compatible line | Checks | Anchor flags |
 | --- | --- | --- | --- | --- |

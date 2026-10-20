@@ -23,7 +23,7 @@ The two `harbor run` commands were not run again for this document. Harbor 0.21.
 
 ## What you need
 
-- Node 22 or newer.
+- Node 22 or newer. Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
 - Linux x64 or Apple-silicon macOS. `quote` is a required step and is known to run on those two. On any other platform, Linux arm64 included, it stops before it reads or creates anything and names the platform it found and the two it supports.
 - Docker. Harbor runs each task in a container.
 - The Docker daemon running, and the `docker compose` command. Harbor stops at once if the daemon is down, and it starts each task with `docker compose`.
@@ -38,7 +38,7 @@ Install Harbor at that version before anything else.
 uv tool install harbor==0.21.0
 ```
 
-[uv](https://docs.astral.sh/uv/getting-started/installation/) installs Harbor into an environment of its own, on a Python 3.12 or newer that it finds on your machine. If your shell cannot find `harbor` afterward, uv has printed how to put its tool directory on your PATH. Without `==0.21.0` the installer takes Harbor's newest release. `pip install harbor==0.21.0` inside a virtual environment installs the same version.
+This needs [uv](https://docs.astral.sh/uv/getting-started/installation/). If `uv` is not on your machine, install it from that page first. uv installs Harbor into an environment of its own, on a Python 3.12 or newer that it finds on your machine. If your shell cannot find `harbor` afterward, uv has printed how to put its tool directory on your PATH. Without `==0.21.0` the installer takes Harbor's newest release. `pip install harbor==0.21.0` inside a virtual environment installs the same version.
 
 Then check it.
 
@@ -368,7 +368,9 @@ Next to the address, state the Run digest and the timestamp authority you used.
 
 ## Check it from a second machine
 
-The reader needs Node 22 and the address. No account, no workspace and no Harbor.
+The reader needs Node 22, the npm stated below and the address. No account, no workspace and no Harbor.
+
+Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
 
 `bundle.json` lists every file of the bundle. The reader fetches it, then each file it lists. Here the bundle is hosted at `https://example.org/tb21`.
 
@@ -538,6 +540,6 @@ A slot that was not delivered carries no evidence file. The slot and its reason 
 - **Harbor 0.21.0 only, retries off.** A job from another version, or one that allowed retries, is refused by name.
 - **Evidence caps.** One evidence file may be at most 8 MiB. All evidence of a run together is capped at 4 MiB for each planned cell, or at 64 MiB when that is more. A run may have at most 10,000 cells.
 - **One rate for each arm.** A run on this slate reports each arm's pass rate with its interval. It states no comparison between the arms and no winner.
-- **Platforms.** The claimant commands need Linux x64 or Apple-silicon macOS, because `quote` does. The checker needs only Node 22.
+- **Platforms.** The claimant commands need Linux x64 or Apple-silicon macOS, because `quote` does. The checker needs only Node 22 and the npm stated above.
 
 [`EXTERNAL-RUN-IMPORT.md`](EXTERNAL-RUN-IMPORT.md) has the full rules of the Harbor reader. [`PUBLIC-BUNDLE.md`](PUBLIC-BUNDLE.md) describes the bundle format.

@@ -30,6 +30,12 @@
  *    that quietly drifted from its own cited records — the exact failure mode `../report/claim.ts`'s
  *    own header calls out as "worse than one that failed to build" — is caught here, after the
  *    fact, by a party other than whoever built it.
+ *
+ * These are not the reader's whole list. The reader (`@colophon-claims/check`) also authenticates
+ * the bundle manifest, closes the evidence the claim cites, and checks the trust material, and
+ * `publish` runs all of it on the bundle it materializes -- so `verify` can pass a run that
+ * `publish` then refuses (issue #4940). A reported run's result therefore carries
+ * `readerChecksNotRun`: the reader checks its own sealed claim names that this operation did not run.
  */
 
 import { readFileSync } from "node:fs";
@@ -145,6 +151,13 @@ export interface RunVerifyResult {
   /** N-1 additional sealed Reports this invocation also verified, in plan order. Absent when this
    * run's Report has no additional siblings (packet P5, spec §8.3 option 5). */
   readonly additionalReports?: readonly AdditionalRunVerifyResult[];
+  /** The reader checks the sealed claim package names that this operation did NOT run, in the
+   * claim's order: `publish` runs them on the bundle it materializes and refuses if one fails, so a
+   * pass here does not predict that `publish` will succeed (issue #4940). Read from the claim
+   * after `claim-consistency` has proved its check list is the one the reader runs; across the
+   * canonical Report and every additional one, each name once. Present only when a Report was
+   * verified: a run that has not reported has no claim package to name them. */
+  readonly readerChecksNotRun?: readonly string[];
   readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
 }
 
@@ -299,7 +312,7 @@ export async function verifyRunWorkspace(
         readonly reportSha256: string | undefined;
         readonly reportEnvelopeSha256: string;
         readonly claimPath: string;
-      }, label: string): Promise<void> {
+      }, label: string): Promise<readonly string[]> {
         const envelopeBytes = getSealedBytes(context.workspaceDir, entryIdentities.reportEnvelopeSha256);
         const verifiedReport = await verifyReport(
           { envelopeBytes, subjects: [matrixBytes], effectiveTime: runState.reportedAt! },
@@ -495,22 +508,25 @@ export async function verifyRunWorkspace(
                 },
               }),
         });
+        // Only reached once `assertClaimConsistency` has accepted the claim, which includes its
+        // check list: these are the names the reader runs on this Report's bundle.
+        return claim.verification.checks;
       }
 
-      await verifyOneReport(
+      const readerChecks = new Set(await verifyOneReport(
         { reportSha256: runState.reportSha256, reportEnvelopeSha256: runState.reportEnvelopeSha256, claimPath: claimPackageArtifactPath(context.workspaceDir, input.draftId) },
         "canonical",
-      );
+      ));
       const additionalReports: AdditionalRunVerifyResult[] = [];
       for (const entry of runState.additionalReports ?? []) {
-        await verifyOneReport(
+        for (const name of await verifyOneReport(
           {
             reportSha256: entry.reportSha256,
             reportEnvelopeSha256: entry.reportEnvelopeSha256,
             claimPath: additionalClaimPackagePath(context.workspaceDir, input.draftId, entry.method, entry.version),
           },
           `${entry.method}@${entry.version}`,
-        );
+        )) readerChecks.add(name);
         additionalReports.push({ method: entry.method, version: entry.version, reportEnvelopeSha256: entry.reportEnvelopeSha256 });
       }
 
@@ -518,6 +534,7 @@ export async function verifyRunWorkspace(
       checks.push("claim-consistency");
       if (sharedContext!.anchorCarriage.anchoredClosure) checks.push("integrity-anchors");
       if (sharedContext!.disclosureCarriage !== undefined) checks.push("disclosure-specification");
+      const readerChecksNotRun = [...readerChecks].filter((name) => !(checks as readonly string[]).includes(name));
 
       return {
         draftId: input.draftId,
@@ -526,6 +543,7 @@ export async function verifyRunWorkspace(
         reportEnvelopeSha256: runState.reportEnvelopeSha256,
         ...(anchorReport === undefined ? {} : { anchors: anchorReport }),
         ...(additionalReports.length === 0 ? {} : { additionalReports }),
+        ...(readerChecksNotRun.length === 0 ? {} : { readerChecksNotRun }),
         ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
       };
 }

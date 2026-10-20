@@ -29,12 +29,12 @@
     "@jinn-network/trust-core": "portal:../trust/core"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite": "^0.5.10",
     "@types/node": "^25.9.9",
     "@types/pg": "^8.23.1",
     "esbuild": "^0.28.2",
     "tsx": "^4.23.15",
     "typescript": "^5.4.0",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }

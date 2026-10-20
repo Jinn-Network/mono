@@ -346,6 +346,29 @@ describe("runVerify — happy path", () => {
   );
 
   test(
+    "a reported run names the reader checks it did not run, taken from its own claim package",
+    async () => {
+      const clock = makeClock();
+      await setUpReportedRun(clock);
+
+      const outcome = await runVerify(contextFor(clock), { draftId: "draft-1" });
+      expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+      if (!outcome.ok) return;
+
+      // The claim package lists the reader's checks and `claim-consistency` has just proved that
+      // list is the one this bundle's reader runs, so every name here is a check `publish` will run
+      // on the bundle and `verify` did not run itself (issue #4940).
+      const claim = JSON.parse(readFileSync(claimPackageArtifactPath(workspaceDir, "draft-1"), "utf8")) as {
+        verification: { checks: string[] };
+      };
+      expect(outcome.result.readerChecksNotRun).toEqual(["manifest", "evidence-closure", "trust"]);
+      expect(outcome.result.readerChecksNotRun).toEqual(
+        claim.verification.checks.filter((check) => !outcome.result.checks.includes(check as never)),
+      );
+    },
+  );
+
+  test(
     "green on a merely-closed run: only matrix-rederivation runs",
     async () => {
       const clock = makeClock();
@@ -357,6 +380,8 @@ describe("runVerify — happy path", () => {
 
       expect(outcome.result.checks).toEqual(["matrix-rederivation"]);
       expect(outcome.result.reportEnvelopeSha256).toBeUndefined();
+      // No claim package exists yet, so there are no reader checks to name.
+      expect(outcome.result.readerChecksNotRun).toBeUndefined();
     },
   );
 });
@@ -398,6 +423,9 @@ describe("runVerify — pre-report integrity anchors", () => {
       "claim-consistency",
       "integrity-anchors",
     ]);
+    // `integrity-anchors` is a reader check this run's claim names and `verify` ran, so it is not
+    // listed as unrun.
+    expect(afterReport.result.readerChecksNotRun).toEqual(["manifest", "evidence-closure", "trust"]);
   });
 
   test("does not trust producer bookkeeping to resolve a pending proof", async () => {
@@ -587,6 +615,24 @@ describe("runVerify — pre-report integrity anchors", () => {
     const parsed = JSON.parse(json.stdout) as { result: { anchors?: unknown; anchoringWindow?: unknown } };
     expect(parsed.result.anchors).toBeDefined();
     expect(parsed.result.anchoringWindow).toEqual({ closingOperation: "report" });
+  });
+
+  test("CLI human and JSON modes say which reader checks a reported run's verify did not run", async () => {
+    const clock = makeClock();
+    await setUpReportedRun(clock);
+
+    const human = await runCli(verifyArgs(), cliContext(clock));
+    expect(human.exitCode, human.stderr).toBe(0);
+    const lines = human.stdout.split("\n");
+    expect(lines[0]).toBe("verified draft draft-1: matrix-rederivation, report-verification, claim-consistency");
+    expect(lines[1]).toBe(
+      "not run here (publish runs them on the bundle and refuses if one fails): manifest, evidence-closure, trust",
+    );
+
+    const json = await runCli(verifyArgs(true), cliContext(clock));
+    expect(json.exitCode, json.stderr).toBe(0);
+    const parsed = JSON.parse(json.stdout) as { result: { readerChecksNotRun?: string[] } };
+    expect(parsed.result.readerChecksNotRun).toEqual(["manifest", "evidence-closure", "trust"]);
   });
 
   test("CLI human mode does not render terminal controls from malformed anchor metadata", async () => {

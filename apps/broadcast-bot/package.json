@@ -32,12 +32,12 @@
   "dependencies": {
     "smol-toml": "^1.9.1",
     "twitter-api-v2": "^1.29.1",
-    "viem": "^2.57.4",
+    "viem": "^2.57.7",
     "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",
     "typescript": "^5.4.0",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }

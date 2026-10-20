@@ -21,9 +21,10 @@
 # the ignore block on EVERY npm entry AND close out the migration tracking
 # issue for that package.
 #
-# The /operator and /packages/sdk entries carry directory-specific holds
-# after the shared block. Copy the shared block to a new entry, not those
-# holds. Each hold names the condition that lifts it.
+# The /operator, /packages/sdk and /packages/indexer-enrichment entries carry
+# directory-specific holds after the shared block, and /packages/indexer sets
+# a versioning-strategy of its own. Copy the shared block to a new entry, not
+# those holds. Each hold names the condition that lifts it.
 
 version: 2
 updates:
@@ -74,12 +75,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "jsdom"
         update-types: ["version-update:semver-major"]
-      # @types/node — policy: keep aligned with the Node runtime version
-      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
-      # declines on us; the right place to bump this is when we move to a
-      # newer Node major in CI + tooling.
+      # @types/node is never bumped here: it moves with the Node band, in one
+      # pull request (see "Toolchain bands" in architecture/README.md). No
+      # update-types, because a major-only rule let minors inside the 24, 25
+      # and 26 majors keep coming back.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
         update-types: ["version-update:semver-major"]
@@ -177,12 +179,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "jsdom"
         update-types: ["version-update:semver-major"]
-      # @types/node — policy: keep aligned with the Node runtime version
-      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
-      # declines on us; the right place to bump this is when we move to a
-      # newer Node major in CI + tooling.
+      # @types/node is never bumped here: it moves with the Node band, in one
+      # pull request (see "Toolchain bands" in architecture/README.md). No
+      # update-types, because a major-only rule let minors inside the 24, 25
+      # and 26 majors keep coming back.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
         update-types: ["version-update:semver-major"]
@@ -235,12 +238,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "jsdom"
         update-types: ["version-update:semver-major"]
-      # @types/node — policy: keep aligned with the Node runtime version
-      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
-      # declines on us; the right place to bump this is when we move to a
-      # newer Node major in CI + tooling.
+      # @types/node is never bumped here: it moves with the Node band, in one
+      # pull request (see "Toolchain bands" in architecture/README.md). No
+      # update-types, because a major-only rule let minors inside the 24, 25
+      # and 26 majors keep coming back.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
         update-types: ["version-update:semver-major"]
@@ -268,6 +272,20 @@ updates:
     directory: "/packages/indexer"
     schedule:
       interval: weekly
+    # packages/indexer-enrichment links this package by portal, so its
+    # lockfile records the ranges that this package.json declares under
+    # `dependencies`. Dependabot never refreshes that lockfile, so a range
+    # edited here makes `yarn install --immutable` fail there with YN0028
+    # (issue #5041). lockfile-only moves this lockfile and leaves
+    # package.json alone, so an update that needs a new range, such as Ponder
+    # 0.17 to 0.18 (issue #5042), is skipped and made by hand together with
+    # the enrichment lockfile. It also applies to security updates: one whose
+    # fix fits the declared range is opened (when Dependabot security updates
+    # are enabled for the repository); one that needs a new range shows as an
+    # alert and needs the same hand change.
+    # Lift: remove when packages/indexer-enrichment no longer links this
+    # package by portal.
+    versioning-strategy: lockfile-only
     groups:
       minor-and-patch:
         update-types:
@@ -293,12 +311,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "jsdom"
         update-types: ["version-update:semver-major"]
-      # @types/node — policy: keep aligned with the Node runtime version
-      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
-      # declines on us; the right place to bump this is when we move to a
-      # newer Node major in CI + tooling.
+      # @types/node is never bumped here: it moves with the Node band, in one
+      # pull request (see "Toolchain bands" in architecture/README.md). No
+      # update-types, because a major-only rule let minors inside the 24, 25
+      # and 26 majors keep coming back.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
         update-types: ["version-update:semver-major"]
@@ -350,12 +369,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "jsdom"
         update-types: ["version-update:semver-major"]
-      # @types/node — policy: keep aligned with the Node runtime version
-      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
-      # declines on us; the right place to bump this is when we move to a
-      # newer Node major in CI + tooling.
+      # @types/node is never bumped here: it moves with the Node band, in one
+      # pull request (see "Toolchain bands" in architecture/README.md). No
+      # update-types, because a major-only rule let minors inside the 24, 25
+      # and 26 majors keep coming back.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
         update-types: ["version-update:semver-major"]
@@ -407,12 +427,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "jsdom"
         update-types: ["version-update:semver-major"]
-      # @types/node — policy: keep aligned with the Node runtime version
-      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
-      # declines on us; the right place to bump this is when we move to a
-      # newer Node major in CI + tooling.
+      # @types/node is never bumped here: it moves with the Node band, in one
+      # pull request (see "Toolchain bands" in architecture/README.md). No
+      # update-types, because a major-only rule let minors inside the 24, 25
+      # and 26 majors keep coming back.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
         update-types: ["version-update:semver-major"]
@@ -488,12 +509,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "jsdom"
         update-types: ["version-update:semver-major"]
-      # @types/node — policy: keep aligned with the Node runtime version
-      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
-      # declines on us; the right place to bump this is when we move to a
-      # newer Node major in CI + tooling.
+      # @types/node is never bumped here: it moves with the Node band, in one
+      # pull request (see "Toolchain bands" in architecture/README.md). No
+      # update-types, because a major-only rule let minors inside the 24, 25
+      # and 26 majors keep coming back.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
         update-types: ["version-update:semver-major"]
@@ -515,6 +537,24 @@ updates:
       # (0.1.0 -> 0.0.0). These resolve from the workspace, never from the
       # registry, so no Dependabot update to them is ever correct.
       - dependency-name: "@jinn-network/*"
+      # Hold specific to /packages/indexer-enrichment. It sits after the shared
+      # block and is not copied to other entries. It uses update-types, which
+      # Dependabot does not apply to security updates, so it does not block
+      # one. A security update is only opened when Dependabot security updates
+      # are enabled for the repository; with them off, a drizzle-orm fix shows
+      # as an alert and needs a hand bump.
+      #
+      # This package links packages/indexer by portal, so its lockfile holds
+      # the indexer's declared drizzle-orm range next to this package's own
+      # exact pin, and the two have to resolve to one version. A bump of the
+      # pin alone leaves two versions and `yarn install --immutable` fails with
+      # YN0071 (issue #5041). The pin moves by hand, in one change with this
+      # lockfile (and with the indexer's range, when the new version falls
+      # outside it). This holds every update type.
+      # Lift: remove when this package no longer links packages/indexer by
+      # portal.
+      - dependency-name: "drizzle-orm"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor", "version-update:semver-major"]
 
   # Apps
   - package-ecosystem: npm
@@ -546,12 +586,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "jsdom"
         update-types: ["version-update:semver-major"]
-      # @types/node — policy: keep aligned with the Node runtime version
-      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
-      # declines on us; the right place to bump this is when we move to a
-      # newer Node major in CI + tooling.
+      # @types/node is never bumped here: it moves with the Node band, in one
+      # pull request (see "Toolchain bands" in architecture/README.md). No
+      # update-types, because a major-only rule let minors inside the 24, 25
+      # and 26 majors keep coming back.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
         update-types: ["version-update:semver-major"]
@@ -604,12 +645,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "jsdom"
         update-types: ["version-update:semver-major"]
-      # @types/node — policy: keep aligned with the Node runtime version
-      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
-      # declines on us; the right place to bump this is when we move to a
-      # newer Node major in CI + tooling.
+      # @types/node is never bumped here: it moves with the Node band, in one
+      # pull request (see "Toolchain bands" in architecture/README.md). No
+      # update-types, because a major-only rule let minors inside the 24, 25
+      # and 26 majors keep coming back.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
         update-types: ["version-update:semver-major"]
@@ -661,12 +703,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "jsdom"
         update-types: ["version-update:semver-major"]
-      # @types/node — policy: keep aligned with the Node runtime version
-      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
-      # declines on us; the right place to bump this is when we move to a
-      # newer Node major in CI + tooling.
+      # @types/node is never bumped here: it moves with the Node band, in one
+      # pull request (see "Toolchain bands" in architecture/README.md). No
+      # update-types, because a major-only rule let minors inside the 24, 25
+      # and 26 majors keep coming back.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
         update-types: ["version-update:semver-major"]
@@ -718,12 +761,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "jsdom"
         update-types: ["version-update:semver-major"]
-      # @types/node — policy: keep aligned with the Node runtime version
-      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
-      # declines on us; the right place to bump this is when we move to a
-      # newer Node major in CI + tooling.
+      # @types/node is never bumped here: it moves with the Node band, in one
+      # pull request (see "Toolchain bands" in architecture/README.md). No
+      # update-types, because a major-only rule let minors inside the 24, 25
+      # and 26 majors keep coming back.
+      # Lift: none. The rule stays when the band moves; that pull request
+      # changes the types by hand.
       - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
       # Hardhat ecosystem — tracked in #768 (couple-migration)
       - dependency-name: "hardhat"
         update-types: ["version-update:semver-major"]

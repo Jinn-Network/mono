@@ -253,6 +253,12 @@ jobs:
             packages/plugin/yarn.lock
             packages/core/yarn.lock
             packages/layer/yarn.lock
+      # The npm bundled with the runner's Node 22 (10.9.9) dies with "Cannot read properties of
+      # null (reading 'edgesOut')" in the journey's `npm install` of the packed tarballs
+      # (#5085, #5079). Pin npm 11.19.0, the version the other package lanes pin; it cleared the
+      # same crash in Benchmark Product CI (#5078).
+      - name: Pin npm for packed-consumer smoke coverage
+        run: npm install --global npm@11.19.0 --no-audit --no-fund
       - name: Enable Corepack
         working-directory: operator
         run: corepack enable
