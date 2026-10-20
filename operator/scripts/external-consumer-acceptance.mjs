@@ -293,8 +293,9 @@ export function writeYarnConsumerProject(yarnConsumerRoot, manifest) {
   // Keep this empty lockfile. The Yarn consumer sits inside the npm consumer folder, which has a
   // package.json of its own, so without a yarn.lock here Yarn 4 takes that folder as the project
   // root and refuses this one ("The nearest package directory ... doesn't seem to be part of the
-  // project"). An empty yarn.lock makes this folder a project of its own. It was dropped once by
-  // accident, and the registry acceptance of every npm Publish run failed on it (#5098).
+  // project"). An empty yarn.lock makes this folder a project of its own. It was removed once, in
+  // 48c58281ac, and every npm Publish run that reached the registry acceptance after that failed
+  // on it (#5098).
   writeFileSync(join(yarnConsumerRoot, 'yarn.lock'), '');
 }
 
