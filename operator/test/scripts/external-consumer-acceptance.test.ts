@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import * as acceptance from '../../scripts/external-consumer-acceptance.mjs';
@@ -110,9 +110,15 @@ describe('external consumer acceptance helpers', () => {
     expect(readFileSync(join(yarnConsumerRoot, 'yarn.lock'), 'utf8')).toBe('');
   });
 
-  // Runs the real Yarn 4.13.0 (through Corepack) with an empty dependency list, so it needs no
-  // registry access once Corepack has the pinned Yarn. Without the lockfile Yarn takes the npm
-  // consumer folder above as the project root and refuses the nested folder (#5098).
+  // Runs the real Yarn 4.13.0 (through Corepack) with an empty dependency list, offline. The suite
+  // points HOME at an empty folder (test/_support/isolate-home.ts), which hides the Yarn that
+  // `yarn install` prepared, so COREPACK_HOME names the real Corepack cache and
+  // COREPACK_ENABLE_NETWORK=0 stops Corepack from downloading anything. With no Yarn 4.13.0 in
+  // that cache the test fails at once with Corepack's "Network access disabled" message; it never
+  // downloads and never skips. The `yarn install` step before `yarn test` fills the cache in CI;
+  // elsewhere, run `corepack prepare yarn@4.13.0` once.
+  // Without the lockfile Yarn takes the npm consumer folder above as the project root and
+  // refuses the nested folder (#5098).
   it('lets Yarn 4 resolve the nested Yarn consumer as its own project root', () => {
     const { consumerRoot, yarnConsumerRoot } = nestedYarnConsumer({
       private: true,
@@ -128,6 +134,13 @@ describe('external consumer acceptance helpers', () => {
       timeout: 120_000,
       env: {
         ...process.env,
+        COREPACK_HOME: process.env['COREPACK_HOME']
+          ?? join(
+            process.env['XDG_CACHE_HOME'] ?? join(process.env['JINN_TEST_REAL_HOME'] ?? homedir(), '.cache'),
+            'node',
+            'corepack',
+          ),
+        COREPACK_ENABLE_NETWORK: '0',
         COREPACK_ENABLE_DOWNLOAD_PROMPT: '0',
         YARN_ENABLE_TELEMETRY: '0',
         YARN_GLOBAL_FOLDER: yarnGlobalFolder,
