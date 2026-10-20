@@ -10,7 +10,7 @@
  */
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { loadConfig } from './config.js';
+import { INDEXER_VIEWS_SCHEMA, loadConfig } from './config.js';
 import { EnrichmentStore, type DrizzleLike } from './db.js';
 import { EnrichmentRunner } from './runner.js';
 import type { EnrichDeps } from './enrich.js';
@@ -19,12 +19,14 @@ import { createStatusServer } from './http.js';
 async function main(): Promise<void> {
   const config = loadConfig();
 
-  // search_path set per-connection so every schema-unqualified identifier the
-  // driver might emit resolves into the indexer's DATABASE_SCHEMA. The store's
-  // own statements are explicitly schema-qualified regardless.
+  // search_path set per-connection (when pinned) so every schema-unqualified
+  // identifier the driver might emit resolves into the indexer's DATABASE_SCHEMA.
+  // The store's own statements are explicitly schema-qualified regardless, which
+  // is what lets it follow the indexer's views from one schema to the next.
   const pool = new Pool({
     connectionString: config.databaseUrl,
-    options: `-c search_path=${config.databaseSchema}`,
+    options:
+      config.databaseSchema === null ? undefined : `-c search_path=${config.databaseSchema}`,
   });
 
   // Fail loud at boot if the DB is unreachable — exit non-zero so Railway
@@ -44,8 +46,13 @@ async function main(): Promise<void> {
   }
 
   const db = drizzle(pool) as unknown as DrizzleLike;
-  const store = new EnrichmentStore(db, config.databaseSchema);
-  await store.ensureWorkerTables();
+  // Pinned: use DATABASE_SCHEMA. Otherwise follow the data schema behind the
+  // indexer's public views; store.ready() resolves it on every tick (#5063).
+  const store =
+    config.databaseSchema === null
+      ? new EnrichmentStore(db, null, INDEXER_VIEWS_SCHEMA)
+      : new EnrichmentStore(db, config.databaseSchema);
+  if (config.databaseSchema !== null) await store.ensureWorkerTables();
 
   const deps: EnrichDeps = {
     ipfsGateway: config.ipfsGateway,
@@ -64,7 +71,7 @@ async function main(): Promise<void> {
   });
 
   console.error(
-    `[indexer-enrichment] starting: schema=${config.databaseSchema} batchSize=${config.batchSize} pollIntervalMs=${config.pollIntervalMs} port=${config.port}`,
+    `[indexer-enrichment] starting: schema=${config.databaseSchema ?? `follows ${INDEXER_VIEWS_SCHEMA} views`} batchSize=${config.batchSize} pollIntervalMs=${config.pollIntervalMs} port=${config.port}`,
   );
 
   await runner.start();

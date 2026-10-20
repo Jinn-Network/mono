@@ -56,14 +56,48 @@ export interface UpsertVerdictArgs {
   chainId: number;
 }
 
+/**
+ * The data schema the indexer's public views currently read from, or null when
+ * there is none yet. `ponder start --views-schema` points every view in the
+ * views schema at the deployment that last reached `/ready`, so this is the
+ * schema of the deployment that is serving (#5063). `view_table_usage` lists
+ * only views owned by the connecting role, which holds because the worker uses
+ * the indexer's DATABASE_URL.
+ */
+export async function resolveViewsTarget(
+  db: DrizzleLike,
+  viewsSchema: string,
+): Promise<string | null> {
+  const res = await db.execute(sql`
+    SELECT DISTINCT "table_schema" AS schema
+    FROM information_schema.view_table_usage
+    WHERE "view_schema" = ${viewsSchema} AND "view_name" = 'verdict_envelope_meta'
+  `);
+  if (res.rows.length !== 1) return null;
+  const schema = String(res.rows[0]!.schema);
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(schema) ? schema : null;
+}
+
 export class EnrichmentStore {
+  /**
+   * @param schema the data schema to use, or null to follow `followViewsSchema`.
+   * @param followViewsSchema when set, every `ready()` re-resolves the data schema
+   *   behind these views, so the worker moves with the indexer's cutover.
+   */
   constructor(
     private readonly db: DrizzleLike,
-    private readonly schema: string,
+    private schema: string | null,
+    private readonly followViewsSchema?: string,
   ) {}
 
+  /** The data schema the store reads and writes, or null before it has resolved one. */
+  get currentSchema(): string | null {
+    return this.schema;
+  }
+
   private q(table: string): ReturnType<typeof sql.raw> {
-    // Schema is operator-supplied env, not user input; quote it defensively.
+    if (this.schema === null) throw new Error('no data schema resolved yet');
+    // Schema is operator-supplied env or a catalog-validated identifier; quote it defensively.
     return sql.raw(`"${this.schema}"."${table}"`);
   }
 
@@ -90,9 +124,26 @@ export class EnrichmentStore {
    * Tolerate the schema not yet existing (fresh deploy / O3 rolling cutover):
    * a read against a missing schema must surface as "not ready, back off",
    * never crash the process. Returns true once the worker's tables resolve.
+   * When following the indexer's views, first moves the store to the data
+   * schema they point at (creating the worker's own table there).
    */
   async ready(): Promise<boolean> {
     try {
+      if (this.followViewsSchema !== undefined) {
+        const target = await resolveViewsTarget(this.db, this.followViewsSchema);
+        if (target === null) return false;
+        if (target !== this.schema) {
+          const previous = this.schema;
+          this.schema = target;
+          try {
+            await this.ensureWorkerTables();
+          } catch (error) {
+            this.schema = previous; // retry the move on the next tick
+            throw error;
+          }
+          console.error(`[indexer-enrichment] following the indexer's views: schema=${target}`);
+        }
+      }
       await this.db.execute(sql`SELECT 1 FROM ${this.q('verdict_envelope_meta')} LIMIT 1`);
       await this.db.execute(sql`SELECT 1 FROM ${this.q('enrichment_attempt')} LIMIT 1`);
       return true;

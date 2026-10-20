@@ -6,11 +6,23 @@
  * knobs for the worker-specific poll/batch/retry behaviour.
  */
 
+/**
+ * The public-facing views schema the indexer swaps onto its live data schema on
+ * `/ready` (`ponder start --views-schema=jinn_indexer`, see
+ * packages/indexer/deploy/Dockerfile). The worker follows it by default.
+ */
+export const INDEXER_VIEWS_SCHEMA = 'jinn_indexer';
+
 export interface EnrichmentWorkerConfig {
   /** Shared with the indexer — the Postgres the Ponder schema lives in. */
   databaseUrl: string;
-  /** Shared with the indexer — the per-deploy schema (e.g. jinn_indexer_v1). */
-  databaseSchema: string;
+  /**
+   * The indexer's data schema when pinned with JINN_INDEXER_SCHEMA_AUTO=false +
+   * DATABASE_SCHEMA (the indexer's override pair). null by default: every
+   * indexer deployment indexes into a fresh schema (#5063), so the worker
+   * follows whichever data schema the INDEXER_VIEWS_SCHEMA views point at.
+   */
+  databaseSchema: string | null;
   /** Shared with the indexer. '' → fetchIpfsJson falls back to DEFAULT_IPFS_GATEWAY. */
   ipfsGateway: string;
   /** HTTP status server port (NOT 8737 — that's claim-relayer's). */
@@ -55,9 +67,15 @@ function parseNumber(
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnrichmentWorkerConfig {
+  // Same switch as the indexer's deploy/derive-schema.mjs: DATABASE_SCHEMA counts
+  // only with JINN_INDEXER_SCHEMA_AUTO=false, so a stale DATABASE_SCHEMA variable
+  // left on the service cannot pin the worker to an old schema.
+  const pinned = (env.JINN_INDEXER_SCHEMA_AUTO ?? 'true') === 'false';
   return {
     databaseUrl: requiredEnv(env, 'DATABASE_URL'),
-    databaseSchema: parseIdentifier(requiredEnv(env, 'DATABASE_SCHEMA'), 'DATABASE_SCHEMA'),
+    databaseSchema: pinned
+      ? parseIdentifier(requiredEnv(env, 'DATABASE_SCHEMA'), 'DATABASE_SCHEMA')
+      : null,
     ipfsGateway: env.JINN_IPFS_GATEWAY_URL ?? '',
     port: parseNumber(env.JINN_ENRICHMENT_PORT, 8738, 'JINN_ENRICHMENT_PORT'),
     pollIntervalMs: parseNumber(
@@ -94,7 +112,7 @@ export function maskDatabaseUrl(url: string): string {
 export function redactConfig(config: EnrichmentWorkerConfig): Record<string, unknown> {
   return {
     databaseUrl: maskDatabaseUrl(config.databaseUrl),
-    databaseSchema: config.databaseSchema,
+    databaseSchema: config.databaseSchema ?? `(follows the ${INDEXER_VIEWS_SCHEMA} views)`,
     ipfsGateway: config.ipfsGateway || '(default)',
     port: config.port,
     pollIntervalMs: config.pollIntervalMs,
