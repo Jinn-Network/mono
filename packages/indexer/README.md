@@ -73,12 +73,14 @@ See `deploy/README.md` for the full production deployment guide. The short versi
 
 ## Schema-version policy
 
-Production auto-derives `DATABASE_SCHEMA` from a content hash of
-`ponder.schema.ts`. Any content change — additive or breaking — therefore
-selects a fresh Postgres schema and re-syncs from genesis while the old version
-keeps serving. Ponder does not online-migrate these tables. See
-`deploy/README.md` §"Automated schema derivation" and §"Zero-downtime rolling
-deploys" for the derivation, replay, and cutover contract.
+Production auto-derives `DATABASE_SCHEMA` from the Railway deployment id, so
+every deployment, whether or not `ponder.schema.ts` changed, selects a fresh
+Postgres schema and re-indexes from each contract's start block (mostly from
+Ponder's RPC cache) while the old version keeps serving. Ponder does not
+online-migrate these tables, and it will not share a schema across builds or
+with a running deployment. See `deploy/README.md` §"Automated schema
+derivation" and §"Zero-downtime rolling deploys" for the derivation, replay,
+cutover, and cleanup contract.
 
 ## Known limitations (v0.1)
 
