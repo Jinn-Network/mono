@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 
@@ -305,6 +307,62 @@ test("file-issue has no unquoted placeholder in a runnable command", () => {
     }
   }
   assert.deepEqual(unquoted, []);
+});
+
+// BSD `mktemp`, the one macOS ships, replaces only the X characters at the END of the
+// template. `mktemp /tmp/pr-body-XXXXXX.md` prints that path back unchanged on macOS, so
+// the first run succeeds with a fixed name and the second fails with "File exists" (#5019).
+// GNU `mktemp` accepts the same template and randomizes it, which is why the recipe passed
+// on Linux. The portable shape keeps the X characters last, as the repository's other
+// recipes do (`stage-${N}-${NAME}.md.XXXXXX`).
+function fileIssueMktempTemplates(text) {
+  const templates = [];
+  for (const { line, command } of fileIssueRunnableLines(text)) {
+    for (const match of command.matchAll(/\bmktemp(?:\s+-[A-Za-z]+)*\s+(?!-)([^\s)"'`]+)/gu)) {
+      templates.push({ line, template: match[1] });
+    }
+  }
+  return templates;
+}
+
+test("the mktemp template scanner sees a non-portable template and passes a portable one", () => {
+  const probe = fileIssueMktempTemplates(
+    ["```bash", 'A=$(mktemp /tmp/a-XXXXXX.md)', 'B=$(mktemp /tmp/b.md.XXXXXX)', 'C=$(mktemp -d)', "```"].join("\n"),
+  );
+  assert.deepEqual(probe.map(({ template }) => template), ["/tmp/a-XXXXXX.md", "/tmp/b.md.XXXXXX"]);
+});
+
+test("file-issue mktemp templates end in their X characters", () => {
+  const found = fileIssueFiles.map(({ name, text }) => ({ name, templates: fileIssueMktempTemplates(text) }));
+  for (const { name, templates } of found) {
+    assert.ok(templates.length > 0, `${name} no longer carries a mktemp recipe; the scan would pass vacuously`);
+  }
+  const unportable = [];
+  for (const { name, templates } of found) {
+    for (const { line, template } of templates) {
+      if (!/XXXXXX$/u.test(template)) unportable.push(`${name}:${line}: ${template}`);
+    }
+  }
+  assert.deepEqual(unportable, []);
+});
+
+test("running each file-issue mktemp recipe twice gives two different files and no failure", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "jinn-file-issue-mktemp-"));
+  try {
+    for (const { name, text } of fileIssueFiles) {
+      for (const { template } of fileIssueMktempTemplates(text)) {
+        const local = template.replace(/^\/tmp\//u, `${scratch}/`);
+        assert.ok(local.startsWith(scratch), `${name}: expected a /tmp template, got ${template}`);
+        const run = () => execFileSync("mktemp", [local], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+        const first = run();
+        const second = run();
+        assert.notEqual(first, second, `${name}: ${template} gave the same file twice`);
+        assert.notEqual(first, local, `${name}: ${template} was not randomized`);
+      }
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 });
 
 test("file-issue appends to a PR body through a temp file, not a bare relative path", () => {

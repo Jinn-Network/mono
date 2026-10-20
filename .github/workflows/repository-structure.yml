@@ -113,6 +113,11 @@ jobs:
       # be the one that goes red (#3126).
       - name: Every by-name-restore precedent citation is still true
         run: node --test .github/scripts/workflow-precedent-citations.test.mjs
+      # Repository-wide as well: an upload step that names a dot-directory without
+      # include-hidden-files finds no files, and the scheduled audit that did so failed
+      # on every run (#5020).
+      - name: Every upload step that names a hidden path keeps it
+        run: node --test .github/scripts/workflow-upload-hidden-files.test.mjs
   identifier-origin:
     name: Identifier origin tripwire
     needs: changes
@@ -121,6 +126,7 @@ jobs:
     # DR-2026-08-04 moved the protocol identifier origin to spec.jinn.network. The re-seal
     # was lawful only because nothing had ever been published; once a document is served the
     # apex spelling can never come back. This gate is what keeps it from creeping back in.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
@@ -136,6 +142,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:

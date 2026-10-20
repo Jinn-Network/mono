@@ -387,7 +387,7 @@ function shellTokens(indentedRun) {
     } else if (character === '#' && (index === 0 || /\s/u.test(run[index - 1]))) {
       while (index < run.length && run[index] !== '\n') index += 1;
     } else if (character === '\n' || character === ';') {
-      tokens.push({ type: 'separator' });
+      tokens.push({ type: 'separator', kind: 'list' });
       index += 1;
       while (character === '\n' && pendingHeredoc < heredocs.length) {
         const pending = heredocs[pendingHeredoc];
@@ -399,9 +399,20 @@ function shellTokens(indentedRun) {
     } else if (character === '(' || character === ')') {
       tokens.push({ type: character });
       index += 1;
+    } else if (character === '&' && run[index + 1] === '>') {
+      // `&>` and `&>>` send both streams to a file. They are a redirection, not a
+      // background operator, so `cd app &> /dev/null` is a foreground `cd`.
+      index += run[index + 2] === '>' ? 3 : 2;
+      while (index < run.length && /[^\S\n]/u.test(run[index])) index += 1;
+      index = wordEnd(index);
     } else if (character === '&' || character === '|') {
-      tokens.push({ type: 'separator' });
-      index += run[index + 1] === character ? 2 : 1;
+      // `&&` and `||` join the commands of one list. A lone `|` (or `|&`, which pipes stderr
+      // too) joins the commands of one pipeline, each of which runs in a subshell. A lone `&`
+      // sends everything since the last `;` or newline to the background.
+      const doubled = run[index + 1] === character;
+      const kind = doubled ? 'and-or' : character === '|' ? 'pipe' : 'background';
+      tokens.push({ type: 'separator', kind });
+      index += doubled || (character === '|' && run[index + 1] === '&') ? 2 : 1;
     } else if (character === '<' && run[index + 1] === '<') {
       index += 2;
       const stripped = run[index] === '-';
@@ -444,6 +455,8 @@ function shellTokens(indentedRun) {
       // the file-descriptor number in `2>&1` is not one either.
       if (tokens.at(-1)?.type === 'word' && /^\d+$/u.test(tokens.at(-1).value)) tokens.pop();
       index += run[index + 1] === '>' ? 2 : 1;
+      // `>|` forces the redirection past `noclobber`; its `|` is not a pipe.
+      if (character === '>' && run[index] === '|' && run[index + 1] !== '|') index += 1;
       while (index < run.length && /[^\S\n]/u.test(run[index])) index += 1;
       if (run[index] === '&' && run[index + 1] !== '&') index += 1;
       index = wordEnd(index);
@@ -524,14 +537,11 @@ const prefixArgumentPattern = /^(?:-|\d)/u;
 //     canonical good form the guard must resolve is `cd app && yarn install`.
 //   - `for` is absent from this set on purpose, so that a `for` whose `do` sits on the
 //     next line leaves its body's `cd` unconditional as well.
-// Two more shapes fail the same way, and unlike the three above they are decidable: in
-// `cd app | cat` and `cd app &` the `cd` runs in a subshell, so the shell stays where it
-// was, while this walk follows it into `app` because `|` and `&` reach here as plain
-// separators. They could be scoped the way `( … )` is. They are not, because the tokenizer
-// shares those characters with `&>`, `>&` and `|&` (`cd app &> /dev/null` is a foreground
-// `cd`), so scoping them means teaching it to tell the spellings apart. That is a behavior
-// risk this guard has taken before and should take with its own regression suite, not in passing.
-// Tracked in #4414, together with the lane this guard runs in, which is now bounded.
+// A fourth is the group form of two shapes the walk does model. A `cd` on either side of a `|`,
+// or in a list ended by `&`, runs in a subshell and leaves the shell where it was; the walk
+// knows that for `cd app | cat` and `cd app &`. A brace group or loop piped or backgrounded as
+// a whole, `{ cd app; } | cat` or `for d in a; do cd $d; done &`, is not modeled: the `|` or
+// `&` lands on `}` or `done`, and the walk does not match that back to where the group began.
 const unmodeledKeywords = new Set([
   'if', 'elif', 'else', 'then', 'while', 'until', 'case',
   // `done` closes a loop whose last iteration decides where the shell ends up.
@@ -568,6 +578,15 @@ function yarnInvocation(rest) {
   return { isInstall, cwd, verbless: args.length === 0 };
 }
 
+// The same stack with every entry unknown, for a branch the walk does not model.
+function unknownEntries(stack) {
+  let depth = 0;
+  for (let node = stack; node !== null; node = node.rest) depth += 1;
+  let unknown = null;
+  for (let level = 0; level < depth; level += 1) unknown = { directories: null, rest: unknown };
+  return unknown;
+}
+
 // Walk the tokens the way the shell walks them, tracking the working directory across
 // `cd`/`pushd`/`popd` and scoping it to `( … )`. Each Yarn install contributes the
 // directory candidates in force where it appears, or `null` when the walk lost track —
@@ -577,7 +596,10 @@ function shellInstallDirectories(run, loopValues) {
   const scopes = [];
   let directories = ['.'];
   let previous = ['.'];
-  let pushdStack = [];
+  // The `pushd` stack is a linked list, `{ directories, rest }` or `null` when empty. The walk
+  // remembers it at the start of every list (see `listStart`), and a reference is all that
+  // takes; copying an array there made a run of `pushd` lines quadratic.
+  let pushdStack = null;
   let command = [];
 
   const join = (base, entry) => {
@@ -609,7 +631,10 @@ function shellInstallDirectories(run, loopValues) {
     directories = next.length > maxDirectoryCandidates ? null : next;
   };
 
-  const finish = () => {
+  // `detached` is a command that runs in a subshell of its own, because it sits on either side
+  // of a `|`. Its `cd`, `pushd` and `popd` move that subshell and leave the shell where it
+  // was; whatever else it does is read as usual.
+  const finish = (detached = false) => {
     const words = command;
     command = [];
     let at = 0;
@@ -637,24 +662,25 @@ function shellInstallDirectories(run, loopValues) {
       // own line answer with the root lockfile (#4612).
       directories = null;
       previous = null;
-      pushdStack = pushdStack.map(() => null);
+      pushdStack = unknownEntries(pushdStack);
       conditional = true;
       at += 1;
     }
     const [name, ...rest] = words.slice(at);
     if (name === undefined) return;
+    if (detached && (name === 'cd' || name === 'pushd' || name === 'popd')) return;
     if (conditional && (name === 'cd' || name === 'pushd' || name === 'popd')) {
       // A directory change that may or may not have run: `then popd` or `then cd -` must
       // not restore a known directory, and whatever `cd -` or a later `popd` would return
       // to now depends on the branch too.
       directories = null;
       previous = null;
-      pushdStack = pushdStack.map(() => null);
-      if (name === 'pushd') pushdStack.push(null);
+      pushdStack = unknownEntries(pushdStack);
+      if (name === 'pushd') pushdStack = { directories: null, rest: pushdStack };
       return;
     }
     if (name === 'cd' || name === 'pushd') {
-      if (name === 'pushd') pushdStack.push(directories);
+      if (name === 'pushd') pushdStack = { directories, rest: pushdStack };
       // `cd -P app` resolves symlinks physically; the option says how to get there, not
       // where. Taken as the target it named `-P/yarn.lock`.
       let targetAt = 0;
@@ -670,7 +696,8 @@ function shellInstallDirectories(run, loopValues) {
       return;
     }
     if (name === 'popd') {
-      directories = pushdStack.length > 0 ? pushdStack.pop() : null;
+      directories = pushdStack === null ? null : pushdStack.directories;
+      if (pushdStack !== null) pushdStack = pushdStack.rest;
       return;
     }
     const bareYarn = (word) => word.split('/').pop() === 'yarn';
@@ -713,22 +740,40 @@ function shellInstallDirectories(run, loopValues) {
     installs.push(resolved.length > maxDirectoryCandidates ? null : resolved);
   };
 
+  // Where the shell was when the current list began: after the last `;`, newline, `&`, or
+  // parenthesis. A list ended by `&` runs in the background, in a subshell, so nothing it
+  // changed reaches the shell that goes on to the next line.
+  let listStart = { directories, previous, pushdStack };
+  const startList = () => {
+    listStart = { directories, previous, pushdStack };
+  };
+  let afterPipe = false;
+
   for (const token of shellTokens(run)) {
     if (token.type === 'word') {
       command.push(token.value);
     } else if (token.type === '(') {
       finish();
       scopes.push({ directories, previous, pushdStack });
-      pushdStack = [];
+      pushdStack = null;
+      afterPipe = false;
+      startList();
     } else if (token.type === ')') {
       finish();
       const scope = scopes.pop();
       if (scope !== undefined) ({ directories, previous, pushdStack } = scope);
+      afterPipe = false;
+      startList();
     } else {
-      finish();
+      // A newline after `|` continues the pipeline, so the next command is still part of it.
+      const continuesPipeline = afterPipe && command.length === 0 && token.kind === 'list';
+      finish(afterPipe || token.kind === 'pipe');
+      afterPipe = token.kind === 'pipe' || continuesPipeline;
+      if (token.kind === 'background') ({ directories, previous, pushdStack } = listStart);
+      if (token.kind === 'list' || token.kind === 'background') startList();
     }
   }
-  finish();
+  finish(afterPipe);
   return installs;
 }
 
@@ -1530,6 +1575,94 @@ jobs:
     ]);
   });
 });
+
+// In a pipeline, and in a command ended by `&`, the `cd` runs in a subshell: the shell stays
+// where it was, so the install on the next line resolves to the directory the shell is in,
+// not to `app` (#5019). Only `app/yarn.lock` is declared, so a violation naming
+// `yarn.lock` proves the install resolved to the root while the walk was told otherwise.
+for (const [label, run] of [
+  ['a cd piped into another command', 'cd app | cat\n          yarn install --immutable'],
+  ['a cd piped with its stderr', 'cd app |& cat\n          yarn install --immutable'],
+  ['a cd at the end of a pipeline', 'echo app | cd app\n          yarn install --immutable'],
+  ['a cd after a pipe continued on the next line', 'echo app |\n          cd app\n          yarn install --immutable'],
+  ['a pushd piped into another command', 'pushd app | cat\n          yarn install --immutable'],
+  ['a backgrounded cd', 'cd app &\n          yarn install --immutable'],
+  ['a backgrounded cd with the install on the same line', 'cd app & yarn install --immutable'],
+  ['a backgrounded pushd', 'pushd app &\n          yarn install --immutable'],
+  ['a backgrounded cd and install', 'cd app && yarn install --immutable &\n          yarn install --immutable'],
+  ['a cd in a backgrounded pipeline', 'cd app | cat &\n          yarn install --immutable'],
+]) {
+  test(`guard keeps the working directory across ${label}`, () => {
+    withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+      writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+      writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: app/yarn.lock
+      - run: |
+          ${run}
+`);
+      const violations = yarnCacheViolations(fixtureWorkflows, fixtureRoot);
+      assert.ok(
+        violations.includes('fixture.yml job verify: setup-node must cache yarn.lock'),
+        `expected the root install to be required, got ${JSON.stringify(violations)}`,
+      );
+      assert.ok(
+        !violations.some((violation) => /could not derive/u.test(violation)),
+        `the directory is known here, got ${JSON.stringify(violations)}`,
+      );
+    });
+  });
+}
+
+// The same characters spell redirections, which leave the `cd` in the foreground: `&>` and
+// `&>>` send both streams to a file, `>&` and `2>&1` duplicate a descriptor, `>|` clobbers.
+// None of them is a pipe or a background operator, so the install behind them still lands
+// in `app`.
+for (const [label, run] of [
+  ['&> to a file', 'cd app &> /dev/null\n          yarn install --immutable'],
+  ['&>> to a file', 'cd app &>> /dev/null\n          yarn install --immutable'],
+  ['&> without a space', 'cd app &>/dev/null\n          yarn install --immutable'],
+  ['>& to a file', 'cd app >& /dev/null\n          yarn install --immutable'],
+  ['2>&1', 'cd app 2>&1\n          yarn install --immutable'],
+  ['>|', 'cd app >| /dev/null\n          yarn install --immutable'],
+  ['&> before an and-list', 'cd app &> /dev/null && yarn install --immutable'],
+  ['a cd in the foreground of a backgrounded install', 'cd app\n          yarn install --immutable &'],
+  ['a backgrounded popd', 'pushd app\n          popd &\n          yarn install --immutable'],
+  ['a piped install', 'cd app\n          yarn install --immutable | cat'],
+  ['a piped install with its stderr', 'cd app\n          yarn install --immutable |& cat'],
+  ['an or-list', 'cd app || exit 1\n          yarn install --immutable'],
+]) {
+  test(`guard still follows a cd written with ${label}`, () => {
+    withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+      writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+          ${run}
+`);
+      assert.match(
+        yarnCacheViolations(fixtureWorkflows, fixtureRoot).join('\n'),
+        /must cache app\/yarn\.lock/u,
+      );
+    });
+  });
+}
 
 test('guard fails closed when it loses track of the working directory', () => {
   withFixture(({ fixtureRoot, fixtureWorkflows }) => {
@@ -2499,6 +2632,37 @@ ${blank}
   });
 });
 
+test('a long run of pushd lines does not make list scoping quadratic (#5019)', () => {
+  withFixture(({ fixtureRoot, fixtureWorkflows }) => {
+    writeFileSync(join(fixtureRoot, 'yarn.lock'), 'root lockfile\n');
+    // The walk remembers the directory state at the start of every list so that a list ended
+    // by `&` can be undone. Copying the `pushd` stack there cost one pass per line: 80,000
+    // lines took 2.4 s and each doubling quadrupled it. The stack is a linked list now, and
+    // this block of 120,000 lines (about 1 MB) takes a fraction of a second.
+    const pushes = Array.from({ length: 120000 }, () => '          pushd .').join('\n');
+    writeFileSync(join(fixtureWorkflows, 'fixture.yml'), `name: cache fixture
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - run: |
+${pushes}
+          yarn install --immutable
+`);
+    const startedAt = process.hrtime.bigint();
+    const violations = yarnCacheViolations(fixtureWorkflows, fixtureRoot);
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+    assert.ok(elapsedMs < 1500, `walk took ${elapsedMs.toFixed(0)}ms`);
+    assert.deepEqual(violations, []);
+  });
+});
+
 // The loop-header pattern as it stood before #4414 narrowed its leading `\s*`. Kept here
 // as the reference the narrowed pattern is compared against, not as a second copy to keep
 // in step: it exists so that "behavior-preserving" is a checked claim.
@@ -2566,6 +2730,45 @@ test('the lane that runs this guard declares a job timeout (#4414)', () => {
   );
   const guard = job.lines.join('\n');
   assert.match(guard, /node --test \.github\/scripts\/workflow-yarn-cache\.test\.mjs/u);
+});
+
+// Every job in Repository structure runs on every pull request, including one from a fork, and
+// a step that hangs holds its runner until GitHub's 360-minute ceiling. `identifier-origin` and
+// `evidence-architecture` were the two jobs that declared no bound (#5019).
+function jobsWithoutTimeout(source) {
+  return jobRanges(source)
+    .filter(({ lines }) => !lines.some((line) => /^ {4}timeout-minutes:\s*[1-9][0-9]*\s*(?:#.*)?$/u.test(line)))
+    .map(({ name }) => name);
+}
+
+test('every job in repository-structure.yml declares timeout-minutes (#5019)', () => {
+  const source = readFileSync(join(workflowsDir, 'repository-structure.yml'), 'utf8');
+  const names = jobRanges(source).map(({ name }) => name);
+  for (const expected of ['changes', 'gitlinks', 'identifier-origin', 'evidence-architecture', 'repo-structure-gate']) {
+    assert.ok(names.includes(expected), `repository-structure.yml has no ${expected} job; the scan is not reading it`);
+  }
+  assert.deepEqual(jobsWithoutTimeout(source), []);
+});
+
+test('the job timeout scan names a job whose timeout was removed', () => {
+  const workflow = (jobTimeout) => [
+    'jobs:',
+    '  bounded:',
+    '    runs-on: ubuntu-latest',
+    '    timeout-minutes: 5',
+    '    steps:',
+    '      - run: true',
+    '  other:',
+    '    runs-on: ubuntu-latest',
+    ...jobTimeout,
+    '    steps:',
+    '      - run: true',
+    // A bound on one step leaves the job unbounded.
+    '        timeout-minutes: 5',
+    '',
+  ].join('\n');
+  assert.deepEqual(jobsWithoutTimeout(workflow(['    timeout-minutes: 10'])), []);
+  assert.deepEqual(jobsWithoutTimeout(workflow([])), ['other']);
 });
 
 test('the directory walk stays bounded when every command multiplies the candidates', () => {

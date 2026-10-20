@@ -48,6 +48,8 @@ jobs:
           name: architecture-policy-audit
           path: .architecture-audit
           if-no-files-found: error
+          # upload-artifact leaves out dot-directories unless this is set (#5020).
+          include-hidden-files: true
           retention-days: 90
       - name: Fail on policy drift
         if: steps.audit.outcome != 'success'

@@ -74,7 +74,7 @@ The nine types and their node ids as of 2026-05-21:
 
 ```bash
 # Write body to a temp file
-BODY_FILE=$(mktemp /tmp/issue-body-XXXXXX.md)
+BODY_FILE=$(mktemp /tmp/issue-body.md.XXXXXX)
 cat > "$BODY_FILE" << 'BODY'
 **Context.** ...
 
