@@ -190,7 +190,6 @@ test('monitor state is train-specific and rejects stale completion events', () =
   assert.match(monitor, /const targetRun = latestObserved/);
   assert.match(monitor, /job\.conclusion !== 'skipped'/);
   assert.match(monitor, /cancel-in-progress: false/);
-  assert.match(monitor, /github\.event\.workflow_run\.event == 'push' && 'canary' \|\| 'stable'/);
   assert.match(
     monitor,
     /group: npm-publish-monitor-\$\{\{ matrix\.train \}\}/,
@@ -497,6 +496,275 @@ test('a forced watchdog/completion race leaves one current train alert', async (
   assert.ok(
     issues.filter((issue) => issue.state === 'closed').length >= 1,
     'the duplicate must not remain as an orphan open issue',
+  );
+});
+
+// Since c7ffd69fa2 the operator canary run of npm-publish.yml is started by the
+// SDK npm Publish completion, so its event is `workflow_run`. `push` is how
+// canary runs started before that, and both are the canary train (#5103).
+function canaryRun(id, overrides = {}) {
+  return {
+    id,
+    run_number: id,
+    workflow_id: 7,
+    event: 'workflow_run',
+    status: 'completed',
+    conclusion: 'failure',
+    head_sha: String(id % 10).repeat(40),
+    html_url: `https://example.test/runs/${id}`,
+    ...overrides,
+  };
+}
+
+function canaryAlert(overrides = {}) {
+  return {
+    number: 700,
+    title: '[npm-publish-canary-failure] failure at 00000000',
+    body: 'previous run',
+    state: 'open',
+    labels: ['automated:npm-publish-canary-failure'],
+    ...overrides,
+  };
+}
+
+const openCanaryAlerts = (issues) => issues.filter(
+  (issue) => issue.state === 'open'
+    && issue.labels.includes('automated:npm-publish-canary-failure'),
+);
+
+test('the completion reconciler shares the canary concurrency group for every canary event', () => {
+  const expression = monitor.match(
+    /group: npm-publish-monitor-\$\{\{ ([^}]*github\.event\.workflow_run\.event[^}]*?) \}\}/,
+  )?.[1];
+  assert.ok(expression, 'the completion reconciler must derive its concurrency group from the monitored run event');
+  const groupFor = (event) => new Function(
+    'github',
+    `return ${expression};`,
+  )({ event: { workflow_run: { event } } });
+
+  assert.equal(groupFor('push'), 'canary');
+  assert.equal(groupFor('workflow_run'), 'canary');
+  assert.equal(groupFor('release'), 'stable');
+  assert.equal(groupFor('workflow_dispatch'), 'stable');
+});
+
+test('a failed workflow_run canary run opens one canary alert, shown once', async () => {
+  const failed = canaryRun(60, { head_sha: 'a'.repeat(40) });
+  const issues = [];
+  const harness = monitorHarness({
+    triggerRun: failed,
+    runs: [failed],
+    jobsByRun: { 60: [{ name: 'Publish package', conclusion: 'failure' }] },
+    issues,
+  });
+
+  await runCompletedMonitor(harness);
+
+  const created = harness.calls.filter((call) => call.method === 'create');
+  assert.equal(created.length, 1, 'a workflow_run canary failure must not be ignored');
+  assert.deepEqual(created[0].args.labels, ['automated:npm-publish-canary-failure']);
+  assert.match(created[0].args.title, /^\[npm-publish-canary-failure\] failure at aaaaaaaa$/);
+  assert.match(created[0].args.body, /npm-publish-monitor-run:60/);
+  assert.match(created[0].args.body, /\| Event \| `workflow_run` \|/);
+
+  // The next reconciliation of the same failure must neither open a second
+  // issue nor rewrite the first.
+  const again = monitorHarness({
+    triggerRun: failed,
+    runs: [failed],
+    jobsByRun: { 60: [{ name: 'Publish package', conclusion: 'failure' }] },
+    issues,
+  });
+  await runCompletedMonitor(again);
+
+  assert.equal(openCanaryAlerts(issues).length, 1);
+  assert.deepEqual(
+    again.calls.filter((call) => ['create', 'createComment', 'update'].includes(call.method)),
+    [],
+  );
+});
+
+test('a push canary failure still opens the canary alert', async () => {
+  const failed = canaryRun(61, { event: 'push' });
+  const harness = monitorHarness({
+    triggerRun: failed,
+    runs: [failed],
+    jobsByRun: { 61: [{ name: 'Publish package', conclusion: 'failure' }] },
+  });
+
+  await runCompletedMonitor(harness);
+
+  const created = harness.calls.find((call) => call.method === 'create');
+  assert.equal(created.args.labels[0], 'automated:npm-publish-canary-failure');
+  assert.match(created.args.body, /\| Event \| `push` \|/);
+});
+
+test('canary history across push and workflow_run runs resolves to the newest run', async () => {
+  const oldPushFailure = canaryRun(70, { event: 'push' });
+  const newerSuccess = canaryRun(71, { conclusion: 'success' });
+  const alert = canaryAlert({ number: 701 });
+  const recovered = monitorHarness({
+    triggerRun: newerSuccess,
+    runs: [oldPushFailure, newerSuccess],
+    jobsByRun: {
+      70: [{ name: 'Publish package', conclusion: 'failure' }],
+      71: [{ name: 'Publish package', conclusion: 'success' }],
+    },
+    issues: [alert],
+  });
+
+  await runCompletedMonitor(recovered);
+
+  assert.equal(alert.state, 'closed', 'a workflow_run success must close a push-era canary alert');
+
+  const olderPushSuccess = canaryRun(72, { event: 'push', conclusion: 'success' });
+  const newerFailure = canaryRun(73);
+  const openAlert = canaryAlert({ number: 702 });
+  const failing = monitorHarness({
+    triggerRun: olderPushSuccess,
+    runs: [olderPushSuccess, newerFailure],
+    jobsByRun: {
+      72: [{ name: 'Publish package', conclusion: 'success' }],
+      73: [{ name: 'Publish package', conclusion: 'failure' }],
+    },
+    issues: [openAlert],
+  });
+
+  await runCompletedMonitor(failing);
+
+  assert.equal(openAlert.state, 'open', 'an older push success must not close a newer workflow_run failure');
+  assert.match(openAlert.body, /npm-publish-monitor-run:73/);
+});
+
+test('a skipped workflow_run canary run does not hide the previous real failure', async () => {
+  const failed = canaryRun(80);
+  const skipped = canaryRun(81, { conclusion: 'success' });
+  const harness = monitorHarness({
+    triggerRun: skipped,
+    runs: [failed, skipped],
+    jobsByRun: {
+      80: [{ name: 'Publish package', conclusion: 'failure' }],
+      81: [{ name: 'Publish package', conclusion: 'skipped' }],
+    },
+  });
+
+  await runCompletedMonitor(harness);
+
+  const created = harness.calls.find((call) => call.method === 'create');
+  assert.equal(created.args.labels[0], 'automated:npm-publish-canary-failure');
+  assert.match(created.args.body, /npm-publish-monitor-run:80/);
+});
+
+test('events outside the canary and stable trains are still ignored', async () => {
+  const other = canaryRun(82, { event: 'pull_request' });
+  const harness = monitorHarness({
+    triggerRun: other,
+    runs: [other],
+    jobsByRun: { 82: [{ name: 'Publish package', conclusion: 'failure' }] },
+  });
+
+  await runCompletedMonitor(harness);
+
+  assert.deepEqual(harness.calls, []);
+});
+
+test('the watchdog alerts on a workflow_run canary run beyond the publish timeout', async () => {
+  const hung = canaryRun(90, {
+    status: 'in_progress',
+    conclusion: null,
+    created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+  });
+  const harness = monitorHarness({ triggerRun: hung, runs: [hung], jobsByRun: {} });
+
+  await runHungMonitor(harness);
+
+  const created = harness.calls.find((call) => call.method === 'create');
+  assert.ok(created, 'a hung workflow_run canary run must not be ignored');
+  assert.equal(created.args.labels[0], 'automated:npm-publish-canary-failure');
+  assert.match(created.args.body, /appears hung/);
+  assert.match(created.args.body, /npm-publish-monitor-run:90/);
+});
+
+test('the watchdog leaves a workflow_run canary run that is still within the publish timeout', async () => {
+  const young = canaryRun(91, {
+    status: 'in_progress',
+    conclusion: null,
+    created_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+  });
+  const harness = monitorHarness({ triggerRun: young, runs: [young], jobsByRun: {} });
+
+  await runHungMonitor(harness);
+
+  assert.deepEqual(harness.calls, []);
+});
+
+test('the watchdog repairs a dropped workflow_run canary completion, failure and recovery', async () => {
+  const failed = canaryRun(92);
+  const failing = monitorHarness({
+    triggerRun: failed,
+    runs: [failed],
+    jobsByRun: { 92: [{ name: 'Publish package', conclusion: 'failure' }] },
+  });
+
+  await runHungMonitor(failing);
+
+  const created = failing.calls.find((call) => call.method === 'create');
+  assert.ok(created, 'the surviving watchdog must reconcile the failed workflow_run completion');
+  assert.equal(created.args.labels[0], 'automated:npm-publish-canary-failure');
+  assert.match(created.args.body, /npm-publish-monitor-run:92/);
+  assert.doesNotMatch(created.args.body, /appears hung/);
+
+  const success = canaryRun(93, { conclusion: 'success' });
+  const alert = canaryAlert({ number: 703 });
+  const recovering = monitorHarness({
+    triggerRun: success,
+    runs: [failed, success],
+    jobsByRun: {
+      92: [{ name: 'Publish package', conclusion: 'failure' }],
+      93: [{ name: 'Publish package', conclusion: 'success' }],
+    },
+    issues: [alert],
+  });
+
+  await runHungMonitor(recovering);
+
+  assert.equal(alert.state, 'closed');
+});
+
+test('workflow_run canary runs never move the stable train', async () => {
+  const failed = canaryRun(94);
+  const stableWatchdog = monitorHarness({
+    triggerRun: failed,
+    runs: [failed],
+    jobsByRun: { 94: [{ name: 'Publish package', conclusion: 'failure' }] },
+  });
+
+  await runHungMonitor(stableWatchdog, 'stable');
+
+  assert.deepEqual(stableWatchdog.calls, []);
+
+  const release = canaryRun(95, { event: 'release', conclusion: 'success' });
+  const stableAlert = canaryAlert({
+    number: 704,
+    title: '[npm-publish-stable-failure] failure at 00000000',
+    labels: ['automated:npm-publish-stable-failure'],
+  });
+  const completed = monitorHarness({
+    triggerRun: release,
+    runs: [release, failed],
+    jobsByRun: {
+      94: [{ name: 'Publish package', conclusion: 'failure' }],
+      95: [{ name: 'Publish package', conclusion: 'success' }],
+    },
+    issues: [stableAlert],
+  });
+
+  await runCompletedMonitor(completed);
+
+  assert.equal(stableAlert.state, 'closed');
+  assert.ok(
+    !completed.calls.some((call) => call.method === 'create'),
+    'a canary failure must not open an alert while reconciling the stable train',
   );
 });
 
