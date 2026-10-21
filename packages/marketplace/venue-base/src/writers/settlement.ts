@@ -29,8 +29,12 @@ import {
 import type { BaseVenueSafeBroadcaster } from "../broadcast/safe-broadcaster.js";
 import type { ChainLogSource } from "../log-source/chain-log-source.js";
 
-/** Gnosis Safe `MultiSend` v1.3.0 canonical singleton (identical address across EVM chains). */
-export const DEFAULT_MULTISEND_ADDRESS = "0x40A2aCCbd92BCA938b02010E17A5b8929b49130" as Address;
+/**
+ * Safe `MultiSendCallOnly` v1.3.0 canonical singleton (identical address across EVM chains; the
+ * same one `contracts/scripts/deploy-stolas-l2.ts` uses). It is entered by DELEGATECALL and
+ * refuses nested DELEGATECALL legs.
+ */
+export const DEFAULT_MULTISEND_ADDRESS = "0x40A2aCCbd92BCA938b02010E17A5b8929b49130D" as Address;
 
 /** 50k blocks: generous enough to cover a delivery that lands between our own poll cycles. */
 export const DEFAULT_MECH_DELIVER_LOOKBACK_BLOCKS = 50_000n;
