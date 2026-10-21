@@ -24,7 +24,7 @@ jobs:
     if: github.event_name == 'workflow_run'
     runs-on: ubuntu-latest
     concurrency:
-      group: npm-publish-monitor-${{ github.event.workflow_run.event == 'push' && 'canary' || 'stable' }}
+      group: npm-publish-monitor-${{ (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_run') && 'canary' || 'stable' }}
       cancel-in-progress: false
     steps:
       - name: Reconcile train-specific alert
@@ -32,7 +32,9 @@ jobs:
         with:
           script: |
             const run = context.payload.workflow_run;
-            const trainFor = (event) => event === 'push'
+            // Canary runs start from the SDK npm Publish completion, so their
+            // event is workflow_run; push is how they started before that.
+            const trainFor = (event) => (event === 'push' || event === 'workflow_run')
               ? 'canary'
               : (event === 'release' || event === 'workflow_dispatch' ? 'stable' : null);
             const train = trainFor(run.event);
@@ -61,7 +63,9 @@ jobs:
             // trains' event-specific run streams and only let the newest
             // relevant observed run mutate its own train's issue. Active newer
             // runs also block an older success from erasing a later failure.
-            const events = train === 'canary' ? ['push'] : ['release', 'workflow_dispatch'];
+            const events = train === 'canary'
+              ? ['push', 'workflow_run']
+              : ['release', 'workflow_dispatch'];
             const candidates = [];
             for (const event of events) {
               candidates.push(...await github.paginate(
@@ -258,7 +262,9 @@ jobs:
               ...repo,
               workflow_id: 'npm-publish.yml',
             });
-            const trainFor = (event) => event === 'push'
+            // Canary runs start from the SDK npm Publish completion, so their
+            // event is workflow_run; push is how they started before that.
+            const trainFor = (event) => (event === 'push' || event === 'workflow_run')
               ? 'canary'
               : (event === 'release' || event === 'workflow_dispatch' ? 'stable' : null);
             const train = process.env.TRAIN;
@@ -299,7 +305,9 @@ jobs:
             // concurrency group. A later watchdog can therefore replace a
             // pending workflow_run consumer. Include completed runs here so
             // every surviving scheduled job repairs a dropped completion.
-            const events = train === 'canary' ? ['push'] : ['release', 'workflow_dispatch'];
+            const events = train === 'canary'
+              ? ['push', 'workflow_run']
+              : ['release', 'workflow_dispatch'];
             const candidates = active.filter((run) => trainFor(run.event) === train);
             const completedCandidates = [];
             for (const event of events) {
