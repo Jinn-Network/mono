@@ -10,6 +10,7 @@ import { REVISED_COMMON_PROJECTOR_EVENTS_ABI } from "@jinn-network/marketplace-p
 import {
   encodeAbiParameters,
   encodeEventTopics,
+  isAddress,
   parseAbiParameters,
   toHex,
   type Address,
@@ -20,7 +21,7 @@ import {
 import { describe, expect, test, vi } from "vitest";
 import type { BaseVenueSafeBroadcaster, SafeBroadcastReceipt } from "../broadcast/safe-broadcaster.js";
 import type { ChainLogSource } from "../log-source/chain-log-source.js";
-import { createSettlementPorts, type SettlementWriterInput } from "./settlement.js";
+import { DEFAULT_MULTISEND_ADDRESS, createSettlementPorts, type SettlementWriterInput } from "./settlement.js";
 
 const REVISED_CONFIG = { ...BASE_SEPOLIA_TODAY, generation: "revised" as const };
 const SAFE_ADDRESS = "0x2222222222222222222222222222222222222222" as Address;
@@ -423,5 +424,12 @@ describe("pin and verifySettlementGrade pass-through", () => {
 
     expect(ports.pin).toBe(input.pin);
     expect(ports.verifySettlementGrade).toBe(input.verifySettlementGrade);
+  });
+});
+
+describe("DEFAULT_MULTISEND_ADDRESS", () => {
+  test("is a whole address: Safe MultiSendCallOnly v1.3.0", () => {
+    expect(isAddress(DEFAULT_MULTISEND_ADDRESS)).toBe(true);
+    expect(DEFAULT_MULTISEND_ADDRESS).toBe("0x40A2aCCbd92BCA938b02010E17A5b8929b49130D");
   });
 });
