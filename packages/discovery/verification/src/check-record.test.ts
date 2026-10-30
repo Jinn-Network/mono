@@ -233,6 +233,25 @@ describe("unknown kinds", () => {
     }
   });
 
+  test("a signed Statement of a predicate nobody registered names that predicate", async () => {
+    const predicateType = "https://spec.jinn.network/attestations/not-registered/v1";
+    const bytes = sealDsseEnvelope({
+      payloadBytes: canonicalJsonBytes({ _type: "https://in-toto.io/Statement/v1", predicateType }),
+      signatures: [{ signature: Uint8Array.of(1), keyid: "did:key:z" }],
+    });
+    expect(await checkRecord(bytes)).toMatchObject({ kind: "unknown", names: predicateType, outcome: "unknown-kind" });
+  });
+
+  test("a signed payload of a Jinn media type with no type field names the media type", async () => {
+    const payloadType = "application/vnd.jinn.not-registered.v1+json";
+    const bytes = sealDsseEnvelope({
+      payloadType,
+      payloadBytes: canonicalJsonBytes({}),
+      signatures: [{ signature: Uint8Array.of(1), keyid: "did:key:z" }],
+    });
+    expect(await checkRecord(bytes)).toMatchObject({ kind: "unknown", names: payloadType });
+  });
+
   test("a record naming a type is held to the encoding rule", async () => {
     const report = await checkRecord(encoder.encode(JSON.stringify({ protocol: APPLICATION_TYPE }, null, 2)));
     expect(check(report, "encoding").status).toBe("failed");

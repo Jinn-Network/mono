@@ -148,6 +148,25 @@ describe("references", () => {
     expect(references).toMatchObject({ opaque: 1, dangling: 0 });
   });
 
+  test("a kind whose references throw is opaque, not a thrown error", async () => {
+    const TYPE = "https://example.test/records/note/v1";
+    const note = canonicalJsonBytes({ protocol: TYPE });
+    const report = await checkRecordSet({
+      records: [{ bytes: note }],
+      roots: [recordDigest(note)],
+      kinds: {
+        [TYPE]: {
+          family: "example",
+          identify: () => true,
+          validate: () => [],
+          unsignedBecause: "notes are not signed",
+          references: () => { throw new Error("references bug"); },
+        },
+      },
+    });
+    expect(report.checks[0]).toMatchObject({ status: "passed", opaque: 1 });
+  });
+
   test("a claimed digest resolves nothing: only the bytes' own digest does", async () => {
     const report = await checkRecordSet({
       records: [{ bytes: task, digest: `sha256:${"8".repeat(64)}` }],
@@ -199,6 +218,18 @@ describe("lifecycle", () => {
   test("a recorded Delivery the set does not hold fails", async () => {
     const { lifecycle } = await set([], ...log);
     expect(lifecycle.findings).toEqual([expect.objectContaining({ code: "recorded-delivery-missing", subject: ATTEMPT })]);
+  });
+
+  test("a recorded digest that is not a Delivery fails like one not held", async () => {
+    const { lifecycle } = await set([], task, observation("attempt-engaged", "evt-1", 1, ENGAGED),
+      observation("delivery-recorded", "evt-3", 3, { digest: taskDigest }));
+    expect(lifecycle.findings).toEqual([expect.objectContaining({ code: "recorded-delivery-missing", subject: ATTEMPT })]);
+  });
+
+  test("a submission-scoped observation opens no Attempt", async () => {
+    const accepted = observation("submission-accepted", "evt-0", 1, { submission: ENGAGED.submission, task: taskDigest }, { subject: ENGAGED.submission });
+    const { lifecycle } = await set([], accepted, closing, task, ...log);
+    expect(lifecycle.attempts.map(({ attempt }) => attempt)).toEqual([ATTEMPT]);
   });
 
   test("a recorded Delivery of another Attempt fails", async () => {

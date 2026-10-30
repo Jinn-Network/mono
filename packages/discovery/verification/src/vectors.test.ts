@@ -212,9 +212,9 @@ describe("task-execution golden-task-execution-v1", () => {
     });
   });
 
-  test("the vector does not carry its Task's profile document, and that is the only thing missing", async () => {
-    const expected = report.scenarios["local"]!;
-    const [references] = (await checkRecordSet({ records: scenario("local"), roots: [expected.deliveryDigest] })).checks;
+  test.each(["local", "marketplace"])("the %s scenario does not carry its Task's profile document, and that is all it lacks", async (name) => {
+    const expected = report.scenarios[name]!;
+    const [references] = (await checkRecordSet({ records: scenario(name), roots: [expected.deliveryDigest] })).checks;
     expect(references).toMatchObject({ status: "failed", dangling: 1 });
     expect(references.findings.filter(({ code }) => code === "dangling-reference")).toEqual([
       expect.objectContaining({ path: "/profile/digest/sha256" }),
