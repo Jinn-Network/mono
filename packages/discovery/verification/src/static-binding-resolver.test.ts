@@ -244,6 +244,17 @@ describe("createStaticBindingResolver", () => {
       },
     );
 
+    test("a binding whose ceremony cannot be run stands as nobody's incumbent, even for its own voucher", async () => {
+      const founding = ed25519();
+      const later = ed25519();
+      const resolver = await resolverOver(
+        await sealedBinding(founding, { ceremonyType: "github-human" }),
+        await sealedBinding(later, { validFrom: "2026-02-01T00:00:00Z" }),
+      );
+      const report = await checkRecord(await signedEvaluation(later), { trust: { bindingResolver: resolver } });
+      expect(binding(report)).toMatchObject({ status: "failed", findings: [{ code: "consent-chain-violation" }] });
+    });
+
     test("an earlier binding that does not control is no incumbent, so a later voucher needs consent", async () => {
       const first = ed25519();
       const second = ed25519();

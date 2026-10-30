@@ -420,6 +420,19 @@ describe("evidence golden-execution-evidence-v1", () => {
   });
 });
 
+describe("the published prediction-forecast/1.0 profile", () => {
+  test("fails the §6.4 check its own package applies, and the report says which pattern", async () => {
+    const bytes = new Uint8Array(readFileSync(require.resolve(
+      "@jinn-network/task-execution-profiles/profiles/task-profiles/prediction-forecast/1.0/profile.json",
+    )));
+    const report = await checkRecord(bytes);
+    expect(check(report, "schema")).toMatchObject({
+      status: "failed",
+      findings: [{ code: "invalid-document", path: "payloadSchema", detail: expect.stringContaining("consensusProbabilityYes") }],
+    });
+  });
+});
+
 describe("evidence-offer offer", () => {
   test.each(["free", "priced", "superseding"])("the %s offer is a conforming signed record", async (name) => {
     const report = await checkRecord(offers.bytes(`offer/${name}.json`));

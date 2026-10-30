@@ -31,17 +31,17 @@ finding is `{ code, subject?, path?, detail }`. A check that did not run says `s
 | Check | What it does |
 | --- | --- |
 | `digest` | Compares the claimed digest with the hash of the exact bytes. Skipped when none is claimed. The report's `digest` field is always the hash. |
-| `encoding` | Compares the bytes with RFC 8785 of their own raw parse. Never re-canonicalizes a record it was handed. |
+| `encoding` | Asks whether the bytes are the RFC 8785 encoding of their own raw parse. The answer is a comparison: a digest is always of the bytes received, never of a canonical form. |
 | `schema` | The schema of the type the record names, with the family's structural rules. |
 | `signature` | Each DSSE signature, over the pre-authentication encoding of the exact payload bytes. |
-| `trust-binding` | Whether a trust record binds a verified key to the identity the record claims, through `verifyEnvelopeBinding`. |
+| `trust-binding` | Whether a trust record binds a verified key to the identity the record claims, through `verifyEnvelopeBinding`, at the time the record states about itself unless `atTime` is passed. That time is the signer's claim. |
 
 `checkRecordSet` adds three:
 
 | Check | What it does |
 | --- | --- |
-| `references` | Walks from `roots` and follows every digest a known record cites. A record that must be held and is not is `dangling`. Bytes the family lets a reader lack are `unavailable`, not a failure. |
-| `lifecycle` | Folds each Attempt's observations with `foldObservations`, holds the log against the Deliveries in the set, and applies §11.3 rule 1 to `supersedes`. |
+| `references` | Walks from `roots` and follows every digest a known record cites. A record that must be held and is not is `dangling`. Bytes the family lets a reader lack are `unavailable`, not a failure. If every record reached was opaque it says `skipped`. |
+| `lifecycle` | Folds each Attempt's observations with `foldObservations`, holds the log against the Deliveries in the set, and applies §11.3 rule 1 to `supersedes`. An Attempt with no `attempt-engaged` has no authoritative source, so it is reported, and a set of only those says `skipped`. It reads no clock, so the provisional `expired` of §10.4 rule 5 is not derived. |
 | `anchors` | Evaluates each AnchorEvidence record over the record it names. |
 
 `outcome` is deliberately not a verdict. `checked` means the kind is known and nothing failed, and
@@ -56,26 +56,36 @@ Add a kind by spreading it into the `kinds` option.
 | Family | Kinds | Encoding | Signature |
 | --- | --- | --- | --- |
 | Task execution | Task, Submission, Delivery | RFC 8785 | Unsigned in core. An envelope is verified and held to the sealed bytes. |
-| Task execution | Lifecycle Observation | Not required: §6.1 seals only the three above | Unsigned in core |
+| Task execution | Lifecycle Observation | I-JSON (§21.1), not RFC 8785: §6.1 seals only the three above | Unsigned in core |
 | Execution evidence | Execution Evidence | Not required | Unsigned |
 | Execution evidence | Result Evaluation, Execution Verification | Not required; any JSON spelling of the envelope | Keys from the caller, or from a `did:key` keyid |
 | Execution evidence | Offer | Sealed envelope and payload | Required |
 | Trust | Key binding, Revocation, Authorization, Trust policy | Sealed envelope and payload | Required. A key binding must be signed by the key it binds. |
 | Trust | Anchor evidence | RFC 8785 | Sealed, not signed: the proof is the authority's signature |
-| Task profiles | Evaluation specification, Profile document | RFC 8785 | Unsigned |
+| Task profiles | Evaluation specification, Profile document | RFC 8785 | Unsigned. An envelope states the kind's media type. A profile's payload schema must be safe to load (§6.4). |
+| Record discovery | Facts profile | Not required: a published document, pinned by the release manifest | Unsigned |
 
 The Execution Evidence Profile applies conformance "to the exact bytes supplied to a validator" and
 asks for no canonical form, and its golden vector is pretty-printed. So the `encoding` check says
 `skipped` for that family and gives that reason, and a claim's envelope is read in any spelling.
 
+A facts profile is a document the specification publishes, not a sealed record. Its `kind` member
+names the record kind it describes, not what it is.
+
 Record discovery's entries and heads are not registered. A feed is verified as a chain, by
 `@jinn-network/record-discovery-client`. They report as unknown, as do the environment and trace
 records and any application's own kinds.
 
+`task-profiles/prediction-forecast/1.0`, which the specification publishes, fails `schema` here: its
+`consensusProbabilityYes` pattern does not pass the `safe-regex` check that
+`@jinn-network/task-execution-profiles` applies under §6.4. That check is a static star-height test,
+so the pattern may be harmless, but it is the check that package uses, and it refuses the document too.
+
 A record no kind claims is reported as `unknown`, with only `digest` and `encoding` checked. If it
 names a type under `https://spec.jinn.network/`, it is held to RFC 8785, because application records
 follow the same disciplines. If it names no type it may be an artifact, so failing the comparison
-is `skipped`, not `failed`.
+is `skipped`, not `failed`. The exception is bytes with DSSE's three members and no readable envelope:
+they claim to be signed, so they fail.
 
 ## What passing does not show
 
@@ -96,9 +106,11 @@ is `skipped`, not `failed`.
   [What is not yet proven](https://github.com/Jinn-Network/spec#what-is-not-yet-proven).
 
 `createStaticBindingResolver` resolves key bindings a caller holds, for checking a set offline. It
-sees no anchors, so a backdated `validFrom` is believed, and no revocations, so leave a revoked
-binding out of the list. `agentId`, `oidc-machine` and `github-human` bindings do not resolve, because
-trust-core leaves those ceremonies to the resolver and a list of bytes cannot run them.
+sees no anchors, so a backdated `validFrom` is believed, and the earliest binding of an Agent is its
+genesis, so a backdated binding becomes the genesis: pass only bindings you have reason to accept. It
+sees no revocations, so leave a revoked binding out of the list. `agentId`, `oidc-machine` and
+`github-human` bindings do not resolve, because trust-core leaves those ceremonies to the resolver and
+a list of bytes cannot run them. They still count as earlier bindings of their Agent.
 
 Trust policy chains are not walked here. `verifyPolicyChain` in `@jinn-network/trust-core` does that.
 
