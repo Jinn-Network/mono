@@ -789,6 +789,172 @@
       "stderr": "colophon-check: Report author/keyId/didKey are not derived from the bundled Report SPKI\n"
     }
   },
+  "trust/report-did-key-alone-differs-from-the-derived-did-key": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI",
+        "issues": [
+          {
+            "path": "trust",
+            "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: Report author/keyId/didKey are not derived from the bundled Report SPKI\n"
+    }
+  },
+  "trust/report-author-alone-differs-from-the-report": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI",
+        "issues": [
+          {
+            "path": "trust",
+            "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: Report author/keyId/didKey are not derived from the bundled Report SPKI\n"
+    }
+  },
+  "trust/report-key-spelled-url-safe-is-accepted": {
+    "library": {
+      "returned": {
+        "format": "benchmark-product-public-bundle/2",
+        "identity": "aa8603b4f3fa37e74edc7fb45b4ebea3f88ee22fde02d198168837a112af49e8",
+        "checks": [
+          "manifest",
+          "evidence-closure",
+          "trust",
+          "matrix-rederivation",
+          "report-verification",
+          "claim-consistency"
+        ],
+        "signers": [
+          {
+            "role": "publisher",
+            "identity": "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
+            "keyId": "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
+            "custody": "same-operator",
+            "keyFingerprint": "sha256:d0aa1595b43cf61e9dfafa456d0b81b92a5aaf53de3627139ca1ab016a9ccda4"
+          },
+          {
+            "role": "automated-grader",
+            "identity": "urn:jinn:benchmark-product:local-venue:evaluator-1",
+            "keyId": "benchmark-product-verdict-dc8dbb6d84571890",
+            "custody": "same-operator"
+          }
+        ],
+        "benchmarkSha256": "c21f9eab990dabd54c08987c87f38f25e2a18ff86686e3c13131425c10b497ec",
+        "runSha256": "5a640cbf3b60afee34b360cd1120823424d22e2c673c0db1c3bb58b557c11cbf",
+        "matrixSha256": "546ed4c8bc349db998dabe34ffd5f452d85009423aff5a621a24ee6ed08d43b7",
+        "reportSha256": "1a72e2614af474c4728c211f702d7bd7e3615f44c6ac7520f5874549207d2ebb",
+        "reportEnvelopeSha256": "5d4cbd890f885f39e1be9bdaa50c9d4dad02e5ebefc5f9f22dbd1f20f7cd7450"
+      }
+    },
+    "json": {
+      "exitCode": 0,
+      "stdout": {
+        "ok": true,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "format": "benchmark-product-public-bundle/2",
+        "identity": "aa8603b4f3fa37e74edc7fb45b4ebea3f88ee22fde02d198168837a112af49e8",
+        "checks": [
+          "manifest",
+          "evidence-closure",
+          "trust",
+          "matrix-rederivation",
+          "report-verification",
+          "claim-consistency"
+        ],
+        "signers": [
+          {
+            "role": "publisher",
+            "identity": "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
+            "keyId": "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
+            "custody": "same-operator",
+            "keyFingerprint": "sha256:d0aa1595b43cf61e9dfafa456d0b81b92a5aaf53de3627139ca1ab016a9ccda4"
+          },
+          {
+            "role": "automated-grader",
+            "identity": "urn:jinn:benchmark-product:local-venue:evaluator-1",
+            "keyId": "benchmark-product-verdict-dc8dbb6d84571890",
+            "custody": "same-operator"
+          }
+        ],
+        "benchmarkSha256": "c21f9eab990dabd54c08987c87f38f25e2a18ff86686e3c13131425c10b497ec",
+        "runSha256": "5a640cbf3b60afee34b360cd1120823424d22e2c673c0db1c3bb58b557c11cbf",
+        "matrixSha256": "546ed4c8bc349db998dabe34ffd5f452d85009423aff5a621a24ee6ed08d43b7",
+        "reportSha256": "1a72e2614af474c4728c211f702d7bd7e3615f44c6ac7520f5874549207d2ebb",
+        "reportEnvelopeSha256": "5d4cbd890f885f39e1be9bdaa50c9d4dad02e5ebefc5f9f22dbd1f20f7cd7450"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 0,
+      "stdout": "Recomputed: 6 of 6 checks passed\nBundle: sha256:aa8603b4f3fa37e74edc7fb45b4ebea3f88ee22fde02d198168837a112af49e8\nFormat: benchmark-product-public-bundle/2\nRun: 5a640cbf3b60afee34b360cd1120823424d22e2c673c0db1c3bb58b557c11cbf\n\nNot checked by this tool: whether the machine that produced this bundle was\nhonest, and whether the compared identities are independent parties. What is\nrecomputed is the bundle's integrity, evidence closure, signing trust,\ncalculations, the report, and claim consistency — against the bytes the\nbundle carries, nothing else.\n\nmanifest                  passed       every listed file is here, unaltered\nevidence-closure          passed       every run's evidence is carried here\ntrust                     passed       the signing keys match the identities\nmatrix-rederivation       passed       the run tally follows from the evidence\nreport-verification       passed       the result follows from the runs\nclaim-consistency         passed       the claim agrees with the records here\n\nSigned by\n  publisher · 1 key\n    key sha256:d0aa1595b43cf61e9dfafa456d0b81b92a5aaf53de3627139ca1ab016a9ccda4 — no domain bound\n  automated grader — same operator · 1 key\n\nNo files were uploaded.\nProtocol identifiers are names, not addresses — this verifier fetches nothing\nfrom them. Checks run against the exact platform bytes installed from npm.\n",
+      "stderr": ""
+    }
+  },
   "trust/evaluator-key-is-not-spki": {
     "library": {
       "threw": {
@@ -904,6 +1070,45 @@
       "exitCode": 1,
       "stdout": "",
       "stderr": "colophon-check: evaluator <identifier: see --json> keyId is not derived from its SPKI\n"
+    }
+  },
+  "trust/evaluator-named-twice": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "trust.evaluators.evaluator contains duplicate identities",
+        "issues": [
+          {
+            "path": "trust.evaluators.evaluator",
+            "message": "trust.evaluators.evaluator contains duplicate identities"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "trust.evaluators.evaluator contains duplicate identities"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: trust.evaluators.evaluator contains duplicate identities\n"
     }
   },
   "trust/evaluator-set-names-one-the-matrix-does-not": {
@@ -1023,6 +1228,84 @@
       "stderr": "colophon-check: verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 keyId cross-validation failed\n"
     }
   },
+  "evidence-closure/verdict-names-another-evaluator": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 evaluator mismatch",
+        "issues": [
+          {
+            "path": "verdicts.json",
+            "message": "verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 evaluator mismatch"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 evaluator mismatch"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 evaluator mismatch\n"
+    }
+  },
+  "evidence-closure/verdict-catalog-is-one-short": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "verdict catalog does not match Matrix verdict closure",
+        "issues": [
+          {
+            "path": "verdicts.json",
+            "message": "verdict catalog does not match Matrix verdict closure"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "verdict catalog does not match Matrix verdict closure"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: verdict catalog does not match Matrix verdict closure\n"
+    }
+  },
   "anchored-bundle/dangling-anchor": {
     "library": {
       "threw": {
@@ -1060,6 +1343,84 @@
       "exitCode": 1,
       "stdout": "",
       "stderr": "colophon-check: carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix\n"
+    }
+  },
+  "anchored-bundle/two-dangling-anchors": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix",
+        "issues": [
+          {
+            "path": "anchors/05d56b22a066fe82fe08d2b26a27767d51e94eebffd4e34560551e403b64dae0.bin",
+            "message": "carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix\n"
+    }
+  },
+  "anchored-bundle/anchor-file-is-not-named-by-its-digest": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "anchor record digest mismatch",
+        "issues": [
+          {
+            "path": "anchors/5555555555555555555555555555555555555555555555555555555555555555.bin",
+            "message": "anchor record digest mismatch"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "anchor record digest mismatch"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: anchor record digest mismatch\n"
     }
   },
   "anchored-bundle/anchor-over-the-sealed-run": {
@@ -1981,6 +2342,19 @@
   "evaluator-claim/url-safe-signature-is-accepted": "urn:evaluator:characterization",
   "evaluator-claim/digest-has-another-prefix": "unresolved",
   "evaluator-claim/p256-key-with-a-signature-it-verifies": "urn:evaluator:characterization",
+  "verdict-envelope/payload-type-is-not-the-verdict-type": {
+    "threw": {
+      "name": "BenchmarkProductError",
+      "code": "execution",
+      "message": "verdict envelope payloadType is not the verdict DSSE payload type",
+      "issues": [
+        {
+          "path": "payloadType",
+          "message": "verdict envelope payloadType is not the verdict DSSE payload type"
+        }
+      ]
+    }
+  },
   "did-key-derivation/golden-report-key": {
     "returned": "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX"
   },
@@ -2013,6 +2387,11 @@
     "fingerprint": null
   },
   "did-key-decoding/another-did-method": {
+    "publicKeyHex": null,
+    "spkiDerBase64": null,
+    "fingerprint": null
+  },
+  "did-key-decoding/another-did-method-on-a-real-key": {
     "publicKeyHex": null,
     "spkiDerBase64": null,
     "fingerprint": null
@@ -2272,6 +2651,41 @@
       {
         "subject": "lock",
         "outcome": "absent"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": [
+      {
+        "recordSha256": "50ab1e300fb817aa1fcd99c6a4821019423f62398f15b3a1cce12209a4a60c14",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "invalid",
+        "reason": "messageImprint.hashedMessage is not the subject digest (§6.1 rule 12)."
+      }
+    ]
+  },
+  "anchors/rfc3161-lock/invalid-anchor-does-not-satisfy-declared-intent": {
+    "anchors": [
+      {
+        "recordSha256": "50ab1e300fb817aa1fcd99c6a4821019423f62398f15b3a1cce12209a4a60c14",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "invalid",
+        "reason": "messageImprint.hashedMessage is not the subject digest (§6.1 rule 12)."
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "declared-but-absent",
+        "declaredProfiles": [
+          "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1"
+        ]
       },
       {
         "subject": "matrix",

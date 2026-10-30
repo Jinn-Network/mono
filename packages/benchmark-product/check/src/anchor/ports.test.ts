@@ -530,6 +530,20 @@ describe("the node:crypto chain verifier", () => {
     expect(verifyChain([unit, expired], [root])).toBe(false);
   });
 
+  test("a root expired at the instant does not verify a unit it issued", () => {
+    const expiredRoot = mintCertificate({
+      commonName: "P4 expired root",
+      ca: true,
+      notAfter: "260101000000Z",
+    });
+    const unit = mintCertificate({
+      commonName: "P4 unit under an expired root",
+      issuer: expiredRoot,
+      extendedKeyUsageOids: [OID_ID_KP_TIME_STAMPING],
+    });
+    expect(verifyChain([unit], [expiredRoot])).toBe(false);
+  });
+
   test("a chain that never reaches a supplied root does not verify", () => {
     const stranger = mintCertificate({ commonName: "P4 unrelated root", ca: true });
     expect(verifyChain([leaf, intermediate], [stranger])).toBe(false);

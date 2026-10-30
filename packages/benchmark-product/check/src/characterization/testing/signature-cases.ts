@@ -28,6 +28,7 @@ import {
   type AssemblyPublicKeyRecord,
 } from "../../profile/assembly-ports.js";
 import { didKeyFromEd25519PublicKey, verifyReportEnvelopeSignatures } from "../../profile/signing.js";
+import { readVerdictEnvelope } from "../../profile/verdict.js";
 import { GOLDEN_BUNDLE_DIR } from "../../testing/golden-asset-input.js";
 import { settled } from "./observe.js";
 import {
@@ -120,6 +121,18 @@ function resolvedAgent(input: ResolveInput): Case {
   );
 }
 
+// ── profile/verdict.ts `readVerdictEnvelope` ─────────────────────────────────────────────────────
+
+/** A statement the reader accepts, so the payload type is the only thing wrong with the envelope. */
+const readableVerdict = encoder.encode(JSON.stringify({
+  predicate: {
+    evaluator: { id: EVALUATOR },
+    verdict: "pass",
+    evaluationSpecification: { digest: { sha256: "0".repeat(64) } },
+    evaluatedAt: "2026-08-16T11:00:01.000Z",
+  },
+}));
+
 // ── did:key, derivation and decoding ─────────────────────────────────────────────────────────────
 
 const GOLDEN_DID_KEY = "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX";
@@ -185,6 +198,10 @@ export const SIGNATURE_CASES: Readonly<Record<string, Case>> = {
     keys: new Map([[EVALUATOR, { keyId: evaluatorKey.keyId, publicKey: evaluatorKeyIdP256.publicKey }]]),
   }),
 
+  "verdict-envelope/payload-type-is-not-the-verdict-type": () => settled(() => readVerdictEnvelope(
+    sealSigned("application/json", readableVerdict, signedBy(evaluatorKey)),
+  )),
+
   "did-key-derivation/golden-report-key": derivedDidKey(readGoldenReportSpki()),
   "did-key-derivation/label-derived-key": derivedDidKey(evaluatorKey.spkiDerBase64),
   "did-key-derivation/p256-key-is-not-refused": derivedDidKey(FOREIGN_SPKI_BASE64.p256),
@@ -194,6 +211,8 @@ export const SIGNATURE_CASES: Readonly<Record<string, Case>> = {
   "did-key-decoding/golden-report-key": decodedDidKey(GOLDEN_DID_KEY),
   "did-key-decoding/not-a-did": decodedDidKey("not-a-did"),
   "did-key-decoding/another-did-method": decodedDidKey("did:web:example.com"),
+  // A real key's payload, so only the method test can refuse it.
+  "did-key-decoding/another-did-method-on-a-real-key": decodedDidKey(GOLDEN_DID_KEY.replace("did:key:", "did:web:")),
   "did-key-decoding/empty-payload": decodedDidKey("did:key:z"),
   "did-key-decoding/character-outside-the-alphabet": decodedDidKey("did:key:z0OIl"),
   // A real key's length, so only the alphabet test can refuse it.

@@ -123,6 +123,10 @@ export const ANCHOR_CASES: Readonly<Record<string, () => unknown>> = {
     trust: { rfc3161: { trustAnchorsDer: [otherAuthority.certificateDer] } },
   }),
   "rfc3161-lock/token-covers-another-digest": report([rfc3161Lock({ tokenSubjectSha256: UNRELATED_SHA256 })]),
+  "rfc3161-lock/invalid-anchor-does-not-satisfy-declared-intent": report(
+    [rfc3161Lock({ tokenSubjectSha256: UNRELATED_SHA256 })],
+    { declaredProfiles: [RFC3161_TSA_ANCHOR_PROFILE] },
+  ),
   "rfc3161-lock/after-the-close-instant": report([rfc3161Lock({ genTimeDer: LATER_GEN_TIME_DER })]),
   "rfc3161-lock/close-instant-is-not-comparable": report([rfc3161Lock()], { closeAt: "not an instant" }),
   "rfc3161-matrix/after-the-close-instant": report([carried(buildRfc3161AnchorEvidenceRecord({

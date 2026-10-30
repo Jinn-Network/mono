@@ -63,12 +63,17 @@ export function goldenWithReportSignatures(signatures: DsseSignatures): string {
   return bundleDir;
 }
 
-/** A `/6` copy of the golden bundle carrying this anchor record. */
-export function goldenAnchoredBy(record: { readonly recordSha256: string; readonly bytes: Uint8Array }): string {
+/** A `/6` copy of the golden bundle carrying these anchor records. */
+export function goldenAnchoredBy(
+  ...records: readonly { readonly recordSha256: string; readonly bytes: Uint8Array }[]
+): string {
   const bundleDir = copyGolden();
-  const path = `anchors/${record.recordSha256}.bin`;
   mkdirSync(join(bundleDir, "anchors"));
-  writeFileSync(join(bundleDir, path), record.bytes);
-  reseal(bundleDir, BUNDLE_V6_FORMAT, [...memberPaths(bundleDir), path]);
+  const paths = records.map(({ recordSha256, bytes }) => {
+    const path = `anchors/${recordSha256}.bin`;
+    writeFileSync(join(bundleDir, path), bytes);
+    return path;
+  });
+  reseal(bundleDir, BUNDLE_V6_FORMAT, [...memberPaths(bundleDir), ...paths]);
   return bundleDir;
 }

@@ -37,6 +37,13 @@ const TRUST = "trust/public-keys.json";
 const anchorAuthority = createFixtureAuthority("checker-characterization");
 const GOLDEN_RUN_SHA256 = createHash("sha256").update(readFileSync(join(GOLDEN_BUNDLE_DIR, "run.json"))).digest("hex");
 
+function urlSafe(base64: string): string {
+  const spelled = base64.replaceAll("+", "-").replaceAll("/", "_");
+  // A value with neither character reads the same in both alphabets and would prove nothing.
+  if (spelled === base64) throw new Error("value has no URL-unsafe character");
+  return spelled;
+}
+
 function carriedAnchorOver(subjectSha256: string, genTime = "20260101000000Z") {
   const built = buildRfc3161AnchorEvidenceRecord({
     subjectKind: RUN_RECORD_KIND,
@@ -60,6 +67,16 @@ export const BUNDLE_CASES: Readonly<Record<string, () => string>> = {
   "trust/report-key-id-differs-from-the-derived-did-key": () => goldenWith(TRUST, (trust) => {
     trust["report"].keyId = "did:key:zDifferent";
   }),
+  "trust/report-did-key-alone-differs-from-the-derived-did-key": () => goldenWith(TRUST, (trust) => {
+    trust["report"].didKey = "did:key:zDifferent";
+  }),
+  "trust/report-author-alone-differs-from-the-report": () => goldenWith(TRUST, (trust) => {
+    trust["report"].author = "did:key:zDifferent";
+  }),
+  // The other two decoders of this value read it the same way, so the check still passes.
+  "trust/report-key-spelled-url-safe-is-accepted": () => goldenWith(TRUST, (trust) => {
+    trust["report"].spkiDerBase64 = urlSafe(trust["report"].spkiDerBase64 as string);
+  }),
   "trust/evaluator-key-is-not-spki": () => goldenWith(TRUST, (trust) => {
     trust["evaluators"][0].spkiDerBase64 = notAKey;
   }),
@@ -68,6 +85,9 @@ export const BUNDLE_CASES: Readonly<Record<string, () => string>> = {
   }),
   "trust/evaluator-key-id-is-not-derived-from-its-spki": () => goldenWith(TRUST, (trust) => {
     trust["evaluators"][0].keyId = "benchmark-product-verdict-0000000000000000";
+  }),
+  "trust/evaluator-named-twice": () => goldenWith(TRUST, (trust) => {
+    trust["evaluators"].push({ ...trust["evaluators"][0] });
   }),
   "trust/evaluator-set-names-one-the-matrix-does-not": () => goldenWith(TRUST, (trust) => {
     trust["evaluators"].push({
@@ -84,9 +104,24 @@ export const BUNDLE_CASES: Readonly<Record<string, () => string>> = {
   "trust/verdict-key-id-disagrees-with-its-evaluator": () => goldenWith("verdicts.json", (catalog) => {
     catalog["verdicts"][0].keyId = "benchmark-product-verdict-0000000000000000";
   }),
+  "evidence-closure/verdict-names-another-evaluator": () => goldenWith("verdicts.json", (catalog) => {
+    catalog["verdicts"][0].evaluator = "urn:evaluator:stranger";
+  }),
+  "evidence-closure/verdict-catalog-is-one-short": () => goldenWith("verdicts.json", (catalog) => {
+    catalog["verdicts"].pop();
+  }),
 
   // ── verify.ts around `anchor/check.ts`, through a /6 bundle ───────────────────────────────────
   "anchored-bundle/dangling-anchor": () => goldenAnchoredBy(carriedAnchorOver("3".repeat(64))),
+  // Two invalid anchors, so the refusal must name the first in digest order.
+  "anchored-bundle/two-dangling-anchors": () => goldenAnchoredBy(
+    carriedAnchorOver("3".repeat(64)),
+    carriedAnchorOver("4".repeat(64)),
+  ),
+  "anchored-bundle/anchor-file-is-not-named-by-its-digest": () => goldenAnchoredBy({
+    ...carriedAnchorOver("3".repeat(64)),
+    recordSha256: "5".repeat(64),
+  }),
   "anchored-bundle/anchor-over-the-sealed-run": () => goldenAnchoredBy(carriedAnchorOver(GOLDEN_RUN_SHA256)),
 
   // ── profile/signing.ts, through `report-verification` ──────────────────────────────────────────
