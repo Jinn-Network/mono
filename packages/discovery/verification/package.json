@@ -1,0 +1,55 @@
+{
+  "name": "@jinn-network/verify",
+  "version": "0.1.0",
+  "description": "Experimental. General checks for Jinn records: digests, did:key identifiers, DSSE signatures, and RFC 3161 anchor ports.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/discovery/verification"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.scripts.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/trust-core": "0.1.0"
+  },
+  "devDependencies": {
+    "@jinn-network/evidence-protocol": "0.1.0",
+    "@jinn-network/trust-resolve": "0.1.0",
+    "@jinn-network/trust-testing": "0.1.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
+    "@jinn-network/trust-core": "portal:../../trust/core",
+    "@jinn-network/trust-resolve": "portal:../../trust/resolve",
+    "@jinn-network/trust-testing": "portal:../../trust/testing"
+  }
+}
