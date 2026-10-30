@@ -135,6 +135,11 @@ describe.each(["execution-verification", "result-evaluation"])("the golden %s cl
       .toEqual([key.keyId]);
   });
 
+  test("names its key by the SHA-256 of the SPKI, not by a did:key", () => {
+    const spki = key.publicKey.export({ format: "der", type: "spki" });
+    expect(key.keyId).toBe(recordDigest(spki).slice("sha256:".length));
+  });
+
   test("is not in the exact sealed encoding, so the strict default refuses it", () => {
     expect(verifyDsseSignatures(envelopeBytes, [key]).validSignerKeyids).toEqual([]);
   });
