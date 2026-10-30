@@ -298,7 +298,7 @@ function checkAnchors(records: readonly InspectedRecord[], held: Held, trust: An
   return { ...(refusals.length > 0 ? failed("anchors", [...refusals, ...notes]) : passed("anchors", notes)), report };
 }
 
-function summarize(reports: readonly RecordReport[]): RecordSetSummary {
+export function summarizeRecords(reports: readonly RecordReport[]): RecordSetSummary {
   const kinds: Record<string, number> = {};
   const unknownTypes: Record<string, number> = {};
   let namingNoType = 0;
@@ -346,7 +346,7 @@ export async function checkRecordSet(input: CheckRecordSetInput): Promise<Record
   const held: Held = new Map(records.map((entry) => [entry.report.digest, entry]));
   const reports = records.map(({ report }) => report);
   return {
-    summary: summarize(reports),
+    summary: summarizeRecords(reports),
     records: reports,
     checks: [
       checkReferences(input.roots, held, new Set((input.published ?? []).map((bytes) => recordDigest(bytes)))),
