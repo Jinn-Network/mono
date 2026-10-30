@@ -6,3 +6,9 @@ export {
   ed25519PublicKeyBytesFromDidKey,
   ed25519PublicKeyFromDidKey,
 } from "./did-key.js";
+export {
+  createDidKeyDsseVerifier,
+  verifyDsseSignatures,
+  verifyEd25519Signature,
+} from "./dsse.js";
+export type { DsseVerificationKey, VerifyDsseSignaturesOptions } from "./dsse.js";
