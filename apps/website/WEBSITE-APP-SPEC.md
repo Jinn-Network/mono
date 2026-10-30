@@ -83,16 +83,17 @@ The apex page (`/`). Its job is to say what Jinn is today, to a visitor who has 
 heard of it, and route them to one of three doors. It persuades; it does not transact.
 
 It shows one line per idea and leaves the detail to the docs. A release date, a runtime
-version, a test network or a conformance vector belongs on a docs page, not here. Where
+version or a test network's history belongs on a docs page, not in a visible line here. Where
 the page needs more than a line, the line stays visible and the detail opens beneath it.
 
 - **Static**
   - the hero: one headline that leads from the gap (BRAND.md "Lead from structure, not
     from fear") and one sentence with the canonical noun, "an open protocol and network
-    for work and the data it produces", and what anyone can do with a record: check it
-    from its own bytes, with their own tools
+    for work and the data it produces", what anyone can do with a record (check it from
+    its own bytes, with their own tools), and that the protocol takes no fee and there is no
+    Jinn token
   - the checker run: the passing output the published checker prints for the public claim
-    that `/docs/check-a-claim` checks, copied from that page, with the claim named. It is
+    that `/docs/check-a-claim` checks, abridged from that page, with the claim named. It is
     the page's one picture of a record being checked. When the docs page changes its
     claim or its pinned checker version, this changes with it
   - how a record moves: five steps (Record, Check, Offer, Find, Buy), one line and one
@@ -105,8 +106,9 @@ the page needs more than a line, the line stays visible and the detail opens ben
     Colophon's checker, Colophon's sealed claims), *Direction* (a market in records; the
     next application's records) and *Parked* (the task marketplace)
   - the caveats: the "what this does not yet prove" list. Every caveat is always visible
-    as a one-line statement; its explanation and its linked source open beneath it. The
-    section is not optional and no caveat is dropped: a surface that omits its own gap is
+    as a one-line statement; its explanation and its linked source open beneath it. One
+    always-visible line under the list links every source, so the page carries them
+    without script. The section is not optional and no caveat is dropped: a surface that omits its own gap is
     less Legible, not more.
 - **Collections**
   - doors: exactly three. *Check a claim* (`/docs/check-a-claim`), *Find a claim*
@@ -327,7 +329,7 @@ Unresolved spec questions, not implementation work.
   ability to ship without one.
 - **The canonical line on a surface with no room for the qualifier.** `BRAND.md`'s
   canonical line ends "sold straight by whoever holds it". The site's description says
-  "offered" there, and the hero says a holder can offer a record, because a link preview
+  "offered" there, and the landing page says a holder offers a record, because a link preview
   cannot also say that selling records is the direction. Whether the canonical line itself
   should carry the softer verb while the market is direction is a `BRAND.md` question,
   raised in [Discussion #4903](https://github.com/Jinn-Network/mono/discussions/4903).

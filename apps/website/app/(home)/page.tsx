@@ -74,7 +74,7 @@ const doors = [
     title: 'Find a claim',
     href: links.colophonFind,
     body: 'Browse the public claims listed on Colophon.',
-    status: 'On Colophon',
+    status: 'Newest first',
   },
   {
     title: 'Build on the protocol',
@@ -85,6 +85,9 @@ const doors = [
 ];
 
 const eyebrow = 'text-muted-foreground text-xs tracking-[0.14em] uppercase';
+// An eyebrow that heads its section is an <h2> in the outline; this resets the
+// design system's display style for h2.
+const eyebrowHeading = `${eyebrow} font-sans font-normal leading-normal`;
 const sectionClassName = 'mx-auto w-full max-w-6xl px-6';
 
 const doorClassName =
@@ -102,7 +105,7 @@ function CheckRun() {
           <span className="text-dim select-none">$ </span>npx @colophon-claims/verify@0.2.1 ./bundle
         </p>
         <p className="text-vow mt-4">Verified: 7 of 7 checks passed</p>
-        <p className="text-dim truncate">sha256:de169c04a24bbb4d9d5b52e398b8bfe92e939ba4d8a8c9e6e3e551cf10aa3774</p>
+        <p className="text-dim truncate">Bundle: sha256:de169c04a24bbb4d9d5b52e398b8bfe92e939ba4d8a8c9e6e3e551cf10aa3774</p>
         <ul className="mt-4">
           {checks.map((check, i) => (
             <li
@@ -132,7 +135,8 @@ export default function HomePage() {
           </h1>
           <p className="text-muted-foreground mt-8 max-w-[46ch] text-[15px] leading-relaxed text-pretty">
             Jinn is an open protocol and network for work and the data it produces. Anyone can
-            check a record from its own bytes, with their own tools.
+            check a record from its own bytes, with their own tools. The protocol takes no fee,
+            and there is no Jinn token.
           </p>
           <div className="mt-10 flex flex-wrap items-center gap-x-8 gap-y-4">
             <Button asChild size="lg">
@@ -156,11 +160,12 @@ export default function HomePage() {
       <section className="border-border border-t">
         <div className={`${sectionClassName} py-24`}>
           <h2 className="font-serif text-4xl leading-tight sm:text-5xl">How a record moves</h2>
-          <ol className="relative mt-14 grid gap-7 sm:grid-cols-2 lg:grid-cols-5 lg:gap-6">
+          <div className="relative mt-14">
             <div
               aria-hidden="true"
               className="bg-border absolute top-6 right-[10%] left-[10%] hidden h-px lg:block"
             />
+            <ol className="grid gap-7 sm:grid-cols-2 lg:grid-cols-5 lg:gap-6">
             {steps.map(({ name, icon: Icon, body, direction }) => (
               <li
                 key={name}
@@ -190,13 +195,14 @@ export default function HomePage() {
                 </div>
               </li>
             ))}
-          </ol>
+            </ol>
+          </div>
         </div>
       </section>
 
       <section className="border-border bg-sunken border-y">
         <div className={`${sectionClassName} py-24`}>
-          <p className={eyebrow}>Start here</p>
+          <h2 className={eyebrowHeading}>Start here</h2>
           <div className="mt-8 grid gap-5 lg:grid-cols-3">
             {doors.map((door) => {
               const content = (
@@ -233,8 +239,8 @@ export default function HomePage() {
         </div>
         <div className="lg:pt-10">
           <p className="text-[15px] leading-relaxed text-pretty">
-            Turns a comparison of AI agent setups, planned in advance, into a sealed claim anyone
-            can check. Its claims are Jinn records.
+            Colophon turns a comparison of AI agent setups, planned in advance, into a sealed claim
+            anyone can check. Its claims are Jinn records.
           </p>
           <p className="text-muted-foreground mt-4 text-sm leading-relaxed text-pretty">
             Checking is free. Sealing runs on your own machine, with no hosted service, account or
@@ -289,21 +295,21 @@ export default function HomePage() {
           </div>
 
           <div className="mt-20 max-w-3xl">
-            <p className={eyebrow}>What this does not yet prove</p>
+            <h2 className={eyebrowHeading}>What this does not yet prove</h2>
             <Accordion type="multiple" className="border-border mt-4 border-t">
               <AccordionItem value="implementations" className="border-border">
                 <AccordionTrigger>One implementation of the protocol exists.</AccordionTrigger>
                 <AccordionContent className="text-muted-foreground leading-relaxed">
                   Until a second one passes the conformance vectors, &ldquo;written from the spec
-                  alone&rdquo; is a claim, not a result.{' '}
-                  <a href={links.specOpenQuestions}>The specification</a>
+                  alone&rdquo; is a claim, not a result. Source:{' '}
+                  <a href={links.specOpenQuestions}>the specification</a>.
                 </AccordionContent>
               </AccordionItem>
               <AccordionItem value="market" className="border-border">
                 <AccordionTrigger>There is no working market in records.</AccordionTrigger>
                 <AccordionContent className="text-muted-foreground leading-relaxed">
                   A holder can offer a record today. Buying and selling records is the direction,
-                  not a working market. <a href={repoFile('THESIS.md')}>The thesis</a>
+                  not a working market. Source: <a href={repoFile('THESIS.md')}>the thesis</a>.
                 </AccordionContent>
               </AccordionItem>
               <AccordionItem value="check" className="border-border">
@@ -311,19 +317,25 @@ export default function HomePage() {
                 <AccordionContent className="text-muted-foreground leading-relaxed">
                   A passing check covers a bundle&rsquo;s integrity, evidence, calculations and
                   report. It does not show that the machine that produced the bundle was honest,
-                  or that distinct signing keys belong to distinct parties.{' '}
-                  <a href={links.colophonLimits}>The limits of a Colophon report</a>
+                  or that distinct signing keys belong to distinct parties. Source:{' '}
+                  <a href={links.colophonLimits}>the limits of a Colophon report</a>.
                 </AccordionContent>
               </AccordionItem>
               <AccordionItem value="parked" className="border-border">
                 <AccordionTrigger>The task marketplace is parked.</AccordionTrigger>
                 <AccordionContent className="text-muted-foreground leading-relaxed">
                   It stays parked until demand for it exists. Its network on Base Sepolia has
-                  recorded no attempt or verdict since 13 August 2026.{' '}
-                  <a href={links.explorer}>The record of what ran</a>
+                  recorded no attempt or verdict since 13 August 2026. Source:{' '}
+                  <a href={links.explorer}>the record of what ran</a>.
                 </AccordionContent>
               </AccordionItem>
             </Accordion>
+            <p className="text-dim mt-6 text-xs leading-relaxed">
+              Sources: <a href={links.specOpenQuestions}>the specification</a>,{' '}
+              <a href={repoFile('THESIS.md')}>the thesis</a>,{' '}
+              <a href={links.colophonLimits}>the limits of a Colophon report</a> and{' '}
+              <a href={links.explorer}>the record of what ran</a>.
+            </p>
           </div>
         </div>
       </section>
