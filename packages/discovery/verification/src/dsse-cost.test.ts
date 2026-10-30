@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Signature checks counted rather than timed. An envelope is something a publisher hands a reader,
- * so its size must not buy quadratic work, and a count fails at once where a slow run of the same
- * regression would hold a test worker for minutes.
+ * Signature checks counted rather than timed: one per signature, however its key ids repeat.
  */
 
 import { generateKeyPairSync, sign, verify } from "node:crypto";
@@ -62,4 +60,19 @@ describe("one signature check per signature", () => {
     expect(verifyDsseSignatures(envelope, [signer]).validSignerKeyids).toEqual([]);
     expect(verify).toHaveBeenCalledTimes(SIGNATURES);
   });
+});
+
+test("verifyDsseSignatures reads each listed key once, not once per signature", () => {
+  const signers = Array.from({ length: SIGNATURES }, key);
+  let reads = 0;
+  const keys = signers.map(({ keyId, publicKey }) => ({
+    get keyId() {
+      reads += 1;
+      return keyId;
+    },
+    publicKey,
+  }));
+  const envelope = sealed(signers.map((by) => wrongSignature(by)));
+  expect(verifyDsseSignatures(envelope, keys).validSignerKeyids).toEqual([]);
+  expect(reads).toBe(SIGNATURES);
 });
