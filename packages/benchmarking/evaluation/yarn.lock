@@ -40,11 +40,6 @@ __metadata:
     "@types/node": "npm:22.20.1"
     typescript: "npm:5.9.3"
     vitest: "npm:4.1.10"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: unknown
   linkType: soft
 
@@ -55,11 +50,6 @@ __metadata:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@noble/hashes": "npm:^2.2.0"
     zod: "npm:4.4.3"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 

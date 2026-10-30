@@ -96,11 +96,6 @@ __metadata:
   resolution: "@jinn-network/execution-evidence-builder@portal:../../evidence/execution-evidence-builder::locator=%40jinn-network%2Fmarketplace-testing%40workspace%3A."
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 

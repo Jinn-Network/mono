@@ -105,7 +105,7 @@ const CHAIN_VERIFICATION_ALLOWED_DEV_DEPENDENCIES = [
   'typescript',
   'vitest',
 ];
-const CHAIN_VERIFICATION_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const CHAIN_VERIFICATION_ALLOWED_PEER_DEPENDENCIES = [];
 const CHAIN_VERIFICATION_FOREIGN_PACKAGES = [
   ...ENVIRONMENTS_FOREIGN_PACKAGES.filter((entry) => entry !== '@jinn-network/trust-*'),
   '@jinn-network/trust-resolve',
@@ -129,7 +129,7 @@ const CHAIN_EXTRACTION_ALLOWED_DEV_DEPENDENCIES = [
   'typescript',
   'vitest',
 ];
-const CHAIN_EXTRACTION_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const CHAIN_EXTRACTION_ALLOWED_PEER_DEPENDENCIES = [];
 const CHAIN_EXTRACTION_FOREIGN_PACKAGES = [
   ...ENVIRONMENTS_FOREIGN_PACKAGES.filter((entry) => entry !== '@jinn-network/trust-*'),
   '@jinn-network/trust-resolve',
@@ -181,7 +181,7 @@ const VERIFICATION_ALLOWED_DEV_DEPENDENCIES = [
   'typescript',
   'vitest',
 ];
-const VERIFICATION_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const VERIFICATION_ALLOWED_PEER_DEPENDENCIES = [];
 // Only `trust-core` (production) and `trust-testing` (testing region) are admitted; the rest
 // of the trust family stays foreign for this tree.
 const VERIFICATION_FOREIGN_PACKAGES = [
@@ -947,7 +947,7 @@ test('environment-verification takes exactly its two approved package edges', ()
   assert.deepEqual(Object.keys(manifest.dependencies ?? {}).sort(), VERIFICATION_ALLOWED_DEPENDENCIES);
   assert.deepEqual(Object.keys(manifest.devDependencies ?? {}).sort(), VERIFICATION_ALLOWED_DEV_DEPENDENCIES);
   assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).sort(), VERIFICATION_ALLOWED_PEER_DEPENDENCIES);
-  assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+  assert.equal(manifest.peerDependenciesMeta, undefined);
 
   // Every non-relative specifier in production source is one of the approved externals.
   const externals = productionFiles.flatMap((file) => specifiers(readFileSync(file, 'utf8'))
@@ -1150,7 +1150,7 @@ test('chain-environment-verification takes exactly its two approved package edge
   assert.deepEqual(Object.keys(manifest.dependencies ?? {}).sort(), CHAIN_VERIFICATION_ALLOWED_DEPENDENCIES);
   assert.deepEqual(Object.keys(manifest.devDependencies ?? {}).sort(), CHAIN_VERIFICATION_ALLOWED_DEV_DEPENDENCIES);
   assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).sort(), CHAIN_VERIFICATION_ALLOWED_PEER_DEPENDENCIES);
-  assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+  assert.equal(manifest.peerDependenciesMeta, undefined);
 
   const externals = productionFiles.flatMap((file) => specifiers(readFileSync(file, 'utf8'))
     .filter((specifier) => !specifier.startsWith('.') && !specifier.startsWith('node:')))
@@ -1221,7 +1221,7 @@ test('chain-state-extraction takes exactly its three approved package edges', ()
   assert.deepEqual(Object.keys(manifest.dependencies ?? {}).sort(), CHAIN_EXTRACTION_ALLOWED_DEPENDENCIES);
   assert.deepEqual(Object.keys(manifest.devDependencies ?? {}).sort(), CHAIN_EXTRACTION_ALLOWED_DEV_DEPENDENCIES);
   assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).sort(), CHAIN_EXTRACTION_ALLOWED_PEER_DEPENDENCIES);
-  assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+  assert.equal(manifest.peerDependenciesMeta, undefined);
 
   const externals = productionFiles.flatMap((file) => specifiers(readFileSync(file, 'utf8'))
     .filter((specifier) => !specifier.startsWith('.') && !specifier.startsWith('node:')))

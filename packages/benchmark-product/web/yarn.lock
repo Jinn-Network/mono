@@ -836,11 +836,6 @@ __metadata:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
@@ -852,11 +847,6 @@ __metadata:
     "@jinn-network/benchmarking-protocol": "npm:0.1.0"
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
@@ -886,11 +876,6 @@ __metadata:
     "@jinn-network/benchmarking-protocol": "npm:0.1.0"
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/execution-evidence-builder": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
@@ -901,11 +886,6 @@ __metadata:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@noble/hashes": "npm:^2.2.0"
     zod: "npm:4.4.3"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
@@ -995,11 +975,6 @@ __metadata:
   resolution: "@jinn-network/execution-evidence-builder@portal:../../evidence/execution-evidence-builder::locator=%40colophon-claims%2Fweb%40workspace%3A."
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 

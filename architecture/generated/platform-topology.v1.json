@@ -2563,9 +2563,7 @@
       "classification": "product",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/attestation-issuer",
           "@jinn-network/benchmarking-protocol",
@@ -2605,9 +2603,7 @@
       "classification": "product",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/benchmarking-aggregate",
           "@jinn-network/benchmarking-protocol",
@@ -2723,9 +2719,7 @@
       "classification": "product",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/benchmarking-protocol",
           "@jinn-network/evidence-protocol",
@@ -2763,9 +2757,7 @@
       "classification": "product",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/evidence-protocol",
           "@noble/hashes",
@@ -3000,9 +2992,7 @@
       "classification": "legacy",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@huggingface/transformers",
           "@jinn-network/plugin",
@@ -3603,9 +3593,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/chain-environment-record",
           "@jinn-network/chain-environment-verification",
@@ -3694,9 +3682,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/chain-environment-record",
           "@jinn-network/trust-core",
@@ -3829,9 +3815,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/environment-record",
           "@jinn-network/trust-core",
@@ -4084,9 +4068,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/evidence-protocol"
         ]
