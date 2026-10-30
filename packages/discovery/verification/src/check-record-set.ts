@@ -209,8 +209,14 @@ function attemptLogs(records: readonly InspectedRecord[]): ReadonlyMap<string, r
   return logs;
 }
 
+/** §10.4: the first engagement in `sequence` order is the engagement, wherever it sits in the input. */
 function engagedTask(log: readonly ProtocolObservation[]): string | undefined {
-  const engaged = log.find(({ type }) => type === "network.jinn.task-execution.attempt-engaged.v1");
+  const engaged = log
+    .filter(({ type }) => type === "network.jinn.task-execution.attempt-engaged.v1")
+    .reduce<ProtocolObservation | undefined>(
+      (earliest, candidate) => (earliest === undefined || candidate.sequence < earliest.sequence ? candidate : earliest),
+      undefined,
+    );
   return (engaged?.data as { readonly task?: string } | undefined)?.task;
 }
 
@@ -278,7 +284,9 @@ function checkLifecycle(records: readonly InspectedRecord[], held: Held): Lifecy
     code: "deliveries-without-observations",
     detail: `${deliveriesWithoutObservations} Deliveries belong to Attempts with no observation in the set, so no lifecycle covers them.`,
   }])];
-  if (refusals.length === 0 && attempts.length > 0 && attempts.every(({ engaged }) => !engaged)) {
+  // With no log, the only thing to compare is a supersession both of whose records are held.
+  const supersessionCompared = superseding.some((entry) => held.has(documentOf(entry)["supersedes"] as string));
+  if (refusals.length === 0 && attempts.every(({ engaged }) => !engaged) && (attempts.length > 0 || !supersessionCompared)) {
     return { id: "lifecycle", status: "skipped", findings: notes, attempts, deliveriesWithoutObservations };
   }
   const result = refusals.length > 0 ? failed("lifecycle", [...refusals, ...notes]) : passed("lifecycle", notes);

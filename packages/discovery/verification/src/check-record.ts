@@ -22,7 +22,10 @@ import type { CheckResult, Finding, RecordCheckId, RecordOutcome, RecordReport, 
 export interface RecordTrustOptions {
   /** Keys for signatures whose `keyid` does not carry its own key. Consulted before the `keyid`. */
   readonly keys?: readonly DsseVerificationKey[];
-  /** Without one, `trust-binding` is skipped. See `createStaticBindingResolver` for offline sets. */
+  /**
+   * Without one, `trust-binding` is skipped. Its soundness is the caller's responsibility:
+   * `trust-binding: passed` means only what this resolver decided.
+   */
   readonly bindingResolver?: BindingResolver;
   /** Needed only for a `safe` ceremony. Without one, such a binding fails its ceremony. */
   readonly witnessVerifier?: WitnessVerifier;
@@ -105,7 +108,7 @@ function exactEnvelopeFinding(bytes: Uint8Array): Finding | undefined {
 
 function checkEncoding(view: RecordView, kind: RecordKind | undefined, named: string | undefined): CheckResult<"encoding"> {
   // The three DSSE members and no readable envelope: it claims to be signed, so it is no artifact.
-  if (kind === undefined && view.payloadType !== undefined && view.signatures === undefined) {
+  if (kind === undefined && view.malformedEnvelope === true) {
     return failed("encoding", [{ code: "malformed-envelope", detail: "These bytes have the three DSSE members and are not a well-formed envelope, so what they claim to be could not be read." }]);
   }
   if (kind?.encodingExemption !== undefined) {

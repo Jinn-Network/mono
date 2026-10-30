@@ -56,6 +56,49 @@ function evaluate(records: readonly CarriedAnchorRecord[], trust?: AnchorTrustMa
 }
 
 describe("evaluateAnchors", () => {
+  test("looks a subject up by digest rather than searching: reads stay linear in anchors and subjects", () => {
+    const COUNT = 64;
+    let reads = 0;
+    const subjects = Array.from({ length: COUNT }, (_unused, index) => {
+      const sha256 = index.toString(16).padStart(64, "0");
+      return { id: `subject-${index}`, get sha256() { reads += 1; return sha256; } };
+    });
+    const records = Array.from({ length: COUNT }, (_unused, index) => rfc3161({ subjectSha256: index.toString(16).padStart(64, "0") }));
+    const report = evaluateAnchors({ records, subjects });
+    expect(report.invalid).toEqual([]);
+    expect(report.subjects.map(({ outcome }) => outcome)).toEqual(new Array(COUNT).fill("anchored"));
+    expect(reads).toBeLessThanOrEqual(2 * COUNT);
+  });
+
+  test("two subjects under one digest answer to the first, as a search did", () => {
+    const report = evaluateAnchors({
+      records: [rfc3161()],
+      subjects: [{ id: "first", sha256: TASK_SHA256 }, { id: "second", sha256: TASK_SHA256 }],
+    });
+    expect(report.anchors[0]).toMatchObject({ subject: "first" });
+    expect(report.subjects).toEqual([{ subject: "first", outcome: "anchored" }, { subject: "second", outcome: "absent" }]);
+  });
+
+  test("a subject's declared profiles are met only by its own valid anchors", () => {
+    const report = evaluateAnchors({
+      records: [
+        rfc3161(),
+        rfc3161({ subjectSha256: DELIVERY_SHA256, subjectKind: DELIVERY_KIND }),
+        rfc3161({ subjectSha256: DELIVERY_SHA256, subjectKind: TASK_KIND }),
+      ],
+      subjects: [
+        { id: "task", sha256: TASK_SHA256, kind: TASK_KIND, declaredProfiles: [RFC3161_TSA_ANCHOR_PROFILE, OPENTIMESTAMPS_ANCHOR_PROFILE] },
+        { id: "delivery", sha256: DELIVERY_SHA256, kind: DELIVERY_KIND, declaredProfiles: [RFC3161_TSA_ANCHOR_PROFILE] },
+        { id: "unanchored", sha256: UNRELATED_SHA256 },
+      ],
+    });
+    expect(report.subjects).toEqual([
+      { subject: "task", outcome: "declared-but-absent", declaredProfiles: [OPENTIMESTAMPS_ANCHOR_PROFILE] },
+      { subject: "delivery", outcome: "anchored" },
+      { subject: "unanchored", outcome: "absent" },
+    ]);
+  });
+
   test("a complete anchor is present without trust material and verified with it", () => {
     const record = rfc3161();
     expect(evaluate([record]).anchors).toEqual([expect.objectContaining({

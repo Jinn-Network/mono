@@ -223,16 +223,20 @@ finding is `{ code, subject?, path?, detail }`. A check that did not run says `s
 | `digest` | Compares the claimed digest with the hash of the exact bytes. Skipped when none is claimed. The report's `digest` field is always the hash. |
 | `encoding` | Asks whether the bytes are the RFC 8785 encoding of their own raw parse. The answer is a comparison: a digest is always of the bytes received, never of a canonical form. |
 | `schema` | The schema of the type the record names, with the family's structural rules. |
-| `signature` | Each DSSE signature, over the pre-authentication encoding of the exact payload bytes. |
-| `trust-binding` | Whether a trust record binds a verified key to the identity the record claims, through `verifyEnvelopeBinding`, at the time the record states about itself unless `atTime` is passed. That time is the signer's claim. |
+| `signature` | Each DSSE signature, over the pre-authentication encoding of the exact payload bytes. Verified whenever its key is known, whatever the kind, and counted per signature. |
+| `trust-binding` | Whether a trust record binds a verified key to the identity the record claims, through `verifyEnvelopeBinding` and a `bindingResolver` the caller injects, at the time the record states about itself unless `atTime` is passed. That time is the signer's claim. Skipped without a resolver. |
 
 `checkRecordSet` adds three:
 
 | Check | What it does |
 | --- | --- |
 | `references` | Walks from `roots` and follows every digest a known record cites. A record that must be held and is not is `dangling`. Bytes the family lets a reader lack are `unavailable`, not a failure. If every record reached was opaque it says `skipped`. |
-| `lifecycle` | Folds each Attempt's observations with `foldObservations`, holds the log against the Deliveries in the set, and applies §11.3 rule 1 to `supersedes`. An Attempt with no `attempt-engaged` has no authoritative source, so it is reported, and a set of only those says `skipped`. It reads no clock, so the provisional `expired` of §10.4 rule 5 is not derived. |
+| `lifecycle` | Folds each Attempt's observations with `foldObservations`, holds the log against the Deliveries in the set, and applies §11.3 rule 1 to `supersedes`. An Attempt with no `attempt-engaged` has no authoritative source, so it is reported, and a set of only those says `skipped`, as does a set whose only lifecycle record is a superseding Delivery with its target not held. It reads no clock, so the provisional `expired` of §10.4 rule 5 is not derived. |
 | `anchors` | Evaluates each AnchorEvidence record over the record it names. |
+
+`report.signatures` counts each signature a record carries: `total`, `verified`,
+`verifiedWithSuppliedKey`, `invalid` and `unverified`. One valid signature does not vouch for another
+under the same `keyid`.
 
 `outcome` is deliberately not a verdict. `checked` means the kind is known and nothing failed, and
 `summary` counts what ran instead of rolling it up. A report of all `skipped` signatures and no
@@ -250,26 +254,28 @@ Add a kind by spreading it into the `kinds` option.
 | Execution evidence | Execution Evidence | Not required | Unsigned |
 | Execution evidence | Result Evaluation, Execution Verification | Not required; any JSON spelling of the envelope | Keys from the caller, or from a `did:key` keyid |
 | Execution evidence | Offer | Sealed envelope and payload | Required |
-| Trust | Key binding, Revocation, Authorization, Trust policy | Sealed envelope and payload | Required. A key binding must be signed by the key it binds. |
+| Trust | Key binding, Revocation, Authorization, Trust policy | Sealed envelope and payload | Required. A key binding must be signed by the key it binds, and a Revocation by its `revokedBy`. A `did:pkh` is no key this can verify, so that signature says `skipped`. |
 | Trust | Anchor evidence | RFC 8785 | Sealed, not signed: the proof is the authority's signature |
-| Task profiles | Evaluation specification, Profile document | RFC 8785 | Unsigned. An envelope states the kind's media type. A profile's payload schema must be safe to load (§6.4). |
-| Record discovery | Facts profile | Not required: a published document, pinned by the release manifest | Unsigned |
+| Task profiles | Evaluation specification, Profile document | RFC 8785 | Unsigned. An envelope states the kind's media type. A profile's payload schema and any schema carried inline in an output slot must be safe to load (§6.4). |
+| Record discovery | Facts profile | Not required: see below | Unsigned |
 
 The Execution Evidence Profile applies conformance "to the exact bytes supplied to a validator" and
 asks for no canonical form, and its golden vector is pretty-printed. So the `encoding` check says
 `skipped` for that family and gives that reason, and a claim's envelope is read in any spelling.
 
-A facts profile is a document the specification publishes, not a sealed record. Its `kind` member
-names the record kind it describes, not what it is.
+The published facts profiles are not RFC 8785 bytes; the specification's signed release manifest pins
+them. A facts profile's `kind` member names the record kind it describes, not what it is.
 
 Record discovery's entries and heads are not registered. A feed is verified as a chain, by
 `@jinn-network/record-discovery-client`. They report as unknown, as do the environment and trace
 records and any application's own kinds.
 
-`task-profiles/prediction-forecast/1.0`, which the specification publishes, fails `schema` here: its
-`consensusProbabilityYes` pattern does not pass the `safe-regex` check that
-`@jinn-network/task-execution-profiles` applies under §6.4. That check is a static star-height test,
-so the pattern may be harmless, but it is the check that package uses, and it refuses the document too.
+`task-profiles/prediction-forecast/1.0`, which the specification publishes, fails `schema` here: one
+pattern, in its payload schema and again in its inline output slot schema, does not pass the
+`safe-regex` check that `@jinn-network/task-execution-profiles` applies under §6.4. This refusal is a
+known false positive: the pattern finishes a 20,000,000-character attack string in under 50 ms. It
+stays reported, with no exemption, because it is the check that package uses and that package refuses
+the document too.
 
 A record no kind claims is reported as `unknown`, with `digest` and `encoding` checked, and any DSSE
 signature whose key is known verified, so a signed record cannot fall out of its kind to escape. If it
@@ -293,10 +299,17 @@ they claim to be signed, so they fail.
   trust.
 - **A schema shows the record is interpretable.** It does not show its claims are true, or that the
   work was good. The Execution Evidence Profile says the same of its own conformance.
-- **A signature shows a key signed.** Only `trust-binding` ties a key to an identity, and only as far
-  as its resolver can see. A `did:key` is the key, not who holds it, and a key you supplied is only
-  the key you supplied. A keys file that came with the records shows nothing against whoever handed
-  you both. Under a root you trust, it shows these are the keys that were published, not whose they are.
+- **`schema: passed` does not prove a pattern is safe to run.** `safe-regex` is a static heuristic
+  with false positives and false negatives: `^(a|a)*$` passes it and takes seconds on 27 characters.
+  Running a stranger's patterns needs a bounded regex engine.
+- **A signature shows a key signed.** Only `trust-binding` ties a key to an identity. A `did:key` is
+  the key, not who holds it, and a key you supplied is only the key you supplied. A keys file that
+  came with the records shows nothing against whoever handed you both. Under a root you trust, it
+  shows these are the keys that were published, not whose they are.
+- **`trust-binding: passed` means only what the resolver decided.** This package ships no resolver,
+  so the check says `skipped` until a caller injects a `bindingResolver`. A refusal from it fails, and
+  an outage says `skipped`. Its soundness is the caller's responsibility, including what it treats as
+  a genesis, which ceremonies it ran, and which revocations it sees.
 - **Distinct keys are distinct keys.** Nothing here shows they belong to distinct parties.
 - **An anchor that is `present` was not evaluated.** Without trust material its time is unchecked.
   One `pending` has no attestation yet.
@@ -311,13 +324,6 @@ they claim to be signed, so they fail.
 - **Passing these vectors here is not interoperability.** One implementation exists, and some
   expectations still live in its tests rather than in the vector corpus. See
   [What is not yet proven](https://github.com/Jinn-Network/spec#what-is-not-yet-proven).
-
-`createStaticBindingResolver` resolves key bindings a caller holds, for checking a set offline. It
-sees no anchors, so a backdated `validFrom` is believed, and the earliest binding of an Agent is its
-genesis, so a backdated binding becomes the genesis: pass only bindings you have reason to accept. It
-sees no revocations, so leave a revoked binding out of the list. `agentId`, `oidc-machine` and
-`github-human` bindings do not resolve, because trust-core leaves those ceremonies to the resolver and
-a list of bytes cannot run them. They still count as earlier bindings of their Agent.
 
 Trust policy chains are not walked here. `verifyPolicyChain` in `@jinn-network/trust-core` does that.
 

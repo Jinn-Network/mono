@@ -248,9 +248,60 @@ describe("a signed record's envelope states its media type (§21.2)", () => {
   test.each([
     ["remote-ref", { $ref: "https://evil.example/schema.json" }],
     ["redos-pattern", { type: "string", pattern: "(a+)+$" }],
+    ["remote-dynamic-ref", { $dynamicRef: "https://evil.example/schema.json#node" }],
+    ["remote-recursive-ref", { $recursiveRef: "https://evil.example/schema.json" }],
   ])("§6.4 %s: a profile whose payload schema is unsafe to load is invalid", async (_name, payloadSchema) => {
     const report = await checkRecord(canonicalJsonBytes({ ...PROFILE, payloadSchema }));
     expect(check(report, "schema")).toMatchObject({ status: "failed", findings: [{ code: "invalid-document", path: "payloadSchema" }] });
+  });
+
+  describe("§6.4 holds for a schema carried inline in an output slot", () => {
+    const withSlotSchema = (schema: unknown) => canonicalJsonBytes({
+      ...PROFILE,
+      outputConventions: { slots: [
+        { name: "first", required: true },
+        { name: "out", required: true, mediaType: "application/json", schema },
+      ] },
+    });
+    const SLOT_PATH = "outputConventions.slots.1.schema.content";
+    const base64 = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64");
+
+    test.each([
+      ["a remote $ref, as plain JSON", JSON.stringify({ $ref: "https://evil.example/x.json" })],
+      ["a remote $dynamicRef, as plain JSON", JSON.stringify({ $dynamicRef: "https://evil.example/x.json#node" })],
+      ["an unsafe pattern, as plain JSON", JSON.stringify({ type: "string", pattern: "(a+)+$" })],
+      ["a remote $ref, as base64", base64({ $ref: "https://evil.example/x.json" })],
+      ["an unsafe pattern, as base64", base64({ type: "string", pattern: "(a+)+$" })],
+    ])("%s is invalid", async (_name, content) => {
+      const report = await checkRecord(withSlotSchema({ name: "out.schema.json", content }));
+      expect(check(report, "schema")).toMatchObject({ status: "failed", findings: [{ code: "invalid-document", path: SLOT_PATH }] });
+    });
+
+    test("content that reads as no schema at all cannot be shown safe, so it is invalid", async () => {
+      const report = await checkRecord(withSlotSchema({ name: "out.schema.json", content: "<<not a schema>>" }));
+      expect(check(report, "schema")).toMatchObject({ status: "failed", findings: [{ code: "invalid-document", path: SLOT_PATH }] });
+    });
+
+    test.each([
+      ["plain JSON", JSON.stringify({ type: "object" })],
+      ["base64", base64({ type: "object" })],
+    ])("a safe schema as %s passes", async (_name, content) => {
+      expect(check(await checkRecord(withSlotSchema({ name: "out.schema.json", content })), "schema").status).toBe("passed");
+    });
+
+    test("a slot that pins its schema by digest carries nothing to read here", async () => {
+      const report = await checkRecord(withSlotSchema({ name: "out.schema.json", digest: { sha256: "4".repeat(64) } }));
+      expect(check(report, "schema").status).toBe("passed");
+    });
+
+    test("both the payload schema and a slot are reported", async () => {
+      const report = await checkRecord(canonicalJsonBytes({
+        ...PROFILE,
+        payloadSchema: { $ref: "https://evil.example/schema.json" },
+        outputConventions: { slots: [{ name: "out", required: true, schema: { name: "s", content: JSON.stringify({ $ref: "https://evil.example/x.json" }) } }] },
+      }));
+      expect(check(report, "schema").findings.map(({ path }) => path)).toEqual(["payloadSchema", "outputConventions.slots.0.schema.content"]);
+    });
   });
 });
 
@@ -314,7 +365,7 @@ describe("§21.3: an extension that contradicts a core field", () => {
   });
 });
 
-describe("a published facts profile is a document, not a sealed record", () => {
+describe("a published facts profile is pinned by the release manifest, not a canonical form", () => {
   const facts = {
     protocol: "https://spec.jinn.network/record-discovery/v1",
     kind: "https://spec.jinn.network/records/task/v1",
@@ -604,11 +655,36 @@ describe("signature", () => {
       expect(check(await checkRecord(envelopeBytes), "signature").status).toBe("passed");
     });
 
-    test("a voucher account signs by a ceremony, so its did:pkh is not looked for among the keys", async () => {
-      const key = ed25519();
+    describe("under a voucher account's did:pkh", () => {
       const account = "did:pkh:eip155:8453:0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed";
-      const { envelopeBytes } = await signedRecord(key, revocation(account), payloadType);
-      expect(check(await checkRecord(envelopeBytes), "signature").status).toBe("passed");
+      const payloadBytes = canonicalJsonBytes(revocation(account));
+      const stranger = ed25519();
+      const strangerSignature = {
+        keyid: stranger.keyid,
+        signature: new Uint8Array(sign(null, dssePreAuthEncoding(payloadType, payloadBytes), stranger.privateKey)),
+      };
+
+      test("a stranger's signature does not stand in for it", async () => {
+        const report = await checkRecord(sealDsseEnvelope({ payloadType, payloadBytes, signatures: [strangerSignature] }));
+        expect(check(report, "signature")).toMatchObject({
+          status: "failed",
+          findings: [{ code: "required-signer-missing", subject: account }],
+        });
+      });
+
+      test("a signature naming it is no key this can verify, so it says skipped", async () => {
+        const report = await checkRecord(sealDsseEnvelope({ payloadType, payloadBytes, signatures: [{ keyid: account, signature: Uint8Array.of(1) }] }));
+        expect(check(report, "signature").status).toBe("skipped");
+      });
+
+      test("a stranger's valid signature beside it does not make that passed", async () => {
+        const report = await checkRecord(sealDsseEnvelope({
+          payloadType,
+          payloadBytes,
+          signatures: [{ keyid: account, signature: Uint8Array.of(1) }, strangerSignature],
+        }));
+        expect(check(report, "signature").status).toBe("skipped");
+      });
     });
   });
 
@@ -758,10 +834,18 @@ describe("a corrupted signed record", () => {
     ["a signature that is not base64", { signatures: [{ keyid: key.keyid, sig: "not base64!!" }] }],
     ["no signatures", { signatures: [] }],
     ["a payload that is not base64", { payload: "not base64!!" }],
+    ["signatures that are not a list", { signatures: {} }],
+    ["a payload that is not a string", { payload: 5 }],
+    ["a payloadType that is not a string", { payloadType: 5 }],
   ])("%s fails: it claims to be signed, so it is not an artifact of unknown kind", async (_name, damage) => {
     const report = await checkRecord(encoder.encode(JSON.stringify({ ...envelope, ...damage })));
     expect(report.outcome).toBe("failed");
     expect(check(report, "encoding")).toMatchObject({ status: "failed", findings: [{ code: "malformed-envelope" }] });
+  });
+
+  test.each(["payload", "payloadType", "signatures"] as const)("with no %s it is not an envelope, so nothing claims to be signed", async (member) => {
+    const { [member]: _dropped, ...partial } = envelope;
+    expect((await checkRecord(encoder.encode(JSON.stringify(partial)))).outcome).toBe("unknown-kind");
   });
 
   test("the same bytes unbroken read as the claim they are", async () => {
@@ -862,6 +946,43 @@ describe("trust binding", () => {
       code: "binding-dependency-failed",
       detail: expect.stringContaining("no route to host"),
     });
+  });
+
+  test("a resolver decides: a refusal from it fails, and its outage skips", async () => {
+    const refusing: BindingResolver = { resolveBinding: async () => null };
+    const refused = await checkRecord(signedEvaluation(ed25519()), { trust: { bindingResolver: refusing } });
+    expect(check(refused, "trust-binding")).toMatchObject({ status: "failed", findings: [{ code: "binding-not-resolved" }] });
+    expect(refused.outcome).toBe("failed");
+
+    const down: BindingResolver = { resolveBinding: async () => { throw new Error("no route to host"); } };
+    const unreached = await checkRecord(signedEvaluation(ed25519()), { trust: { bindingResolver: down } });
+    expect(check(unreached, "trust-binding")).toMatchObject({ status: "skipped", findings: [{ code: "binding-dependency-failed" }] });
+    expect(unreached.outcome).toBe("checked");
+  });
+
+  test("a key binding record is attributed to its own agent, scope and start", async () => {
+    const working = ed25519();
+    const { envelopeBytes } = await signedRecord(working, {
+      protocol: "https://spec.jinn.network/trust/key-binding/v1",
+      agent: AGENT,
+      key: { publicKey: working.keyid, keyid: working.keyid, algorithm: "ed25519", didKey: working.keyid },
+      voucher: { kind: "account", did: "did:pkh:eip155:8453:0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed", contractAccount: false },
+      relationship: "controls",
+      scope: ["verdicts"],
+      validFrom: "2026-07-28T00:00:00Z",
+      ceremony: { type: "agentId", digest: `sha256:${"a".repeat(64)}` },
+      strength: "strong",
+      anchors: [],
+    }, "application/vnd.jinn.trust.key-binding.v1+json");
+    const seen: unknown[] = [];
+    const bindingResolver: BindingResolver = {
+      resolveBinding: async (query, atTime) => {
+        seen.push([query.agent, atTime]);
+        return resolving({}).resolveBinding(query, atTime);
+      },
+    };
+    expect(check(await checkRecord(envelopeBytes, { trust: { bindingResolver } }), "trust-binding").status).toBe("passed");
+    expect(seen[0]).toEqual([AGENT, "2026-07-28T00:00:00Z"]);
   });
 
   test("a kind that names no agent is skipped and says why", async () => {
