@@ -197,9 +197,9 @@ describe("a directory of records", () => {
     const keyId = "evaluator-key-1";
     const keys = directory({ "keys.json": keysFile([{ keyId, publicKey }]) });
     const { stdout } = await run(directory({
-      "one.bin": Uint8Array.of(0xff),
-      "two.bin": Uint8Array.of(0xfe),
-      "signed.json": evaluation(privateKey, keyId),
+      "a-signed.json": evaluation(privateKey, keyId),
+      "b-one.bin": Uint8Array.of(0xff),
+      "c-two.bin": Uint8Array.of(0xfe),
     }), "--keys", join(keys, "keys.json"));
     expect(stdout).toContain("Encoding       3 skipped (2 not records, 1 not required by family)");
   });
@@ -245,6 +245,16 @@ describe("signatures", () => {
     const { code, stdout } = await run(evaluated("evaluator-key-1"), "--keys", join(keys, "keys.json"));
     expect(code).toBe(1);
     expect(stdout).toContain("Signatures     1 failed");
+  });
+
+  test("a signed record of unknown kind is counted unverified, with that reason", async () => {
+    const receipt = sealDsseEnvelope({
+      payloadType: "application/vnd.jinn.not-registered.v1+json",
+      payloadBytes: canonicalJsonBytes({}),
+      signatures: [{ keyid: "evaluator-key-1", signature: Uint8Array.of(1) }],
+    });
+    const { stdout } = await run(directory({ "receipt.json": receipt }));
+    expect(stdout).toContain("Signatures     1 not verified (kind unknown)");
   });
 
   test("a did:key carries its own key, which is not called supplied", async () => {
@@ -311,5 +321,6 @@ describe("failures are listed briefly", () => {
     const { stdout, code } = await run(directory(files));
     expect(code).toBe(1);
     expect(stdout).toContain("and 11 more; --json has them all");
+    expect(stdout.split("\n").filter((text) => text.startsWith("  "))).toHaveLength(6);
   });
 });
