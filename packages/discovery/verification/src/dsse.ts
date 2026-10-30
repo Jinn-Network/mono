@@ -119,9 +119,11 @@ export function createDidKeyDsseVerifier(): DsseChainVerifier {
   return (envelopeBytes) => {
     const envelope = readEnvelope(envelopeBytes, false);
     if (envelope === undefined) return { validSignerKeyids: [] };
-    const keys = envelope.signatures.flatMap(({ keyid }) => {
-      const publicKey = keyid === undefined ? undefined : ed25519PublicKeyFromDidKey(keyid);
-      return publicKey === undefined ? [] : [{ keyId: keyid!, publicKey }];
+    // One entry per distinct keyid: a repeat would make the cost quadratic in a publisher's signatures.
+    const keyids = new Set(envelope.signatures.flatMap(({ keyid }) => keyid === undefined ? [] : [keyid]));
+    const keys = [...keyids].flatMap((keyid) => {
+      const publicKey = ed25519PublicKeyFromDidKey(keyid);
+      return publicKey === undefined ? [] : [{ keyId: keyid, publicKey }];
     });
     return { validSignerKeyids: validSigners(envelope, keys, {}) };
   };
