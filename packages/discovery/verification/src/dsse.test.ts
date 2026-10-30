@@ -72,10 +72,10 @@ function signatureWithBothSpecialCharacters(): { readonly payload: Uint8Array; r
   }
 }
 
-function spelled(payload: string, sig: string): Uint8Array {
+function spelled(payload: string, sig: string, payloadType: string = PAYLOAD_TYPE): Uint8Array {
   return new TextEncoder().encode(JSON.stringify({
     payload,
-    payloadType: PAYLOAD_TYPE,
+    payloadType,
     signatures: [{ keyid: signer.keyId, sig }],
   }));
 }
@@ -229,9 +229,18 @@ describe("verifyDsseSignatures", () => {
       ["an unknown envelope member", (exact: string) => exact.replace('{"payload"', '{"note":"added","payload"')],
       ["an unknown signature member", (exact: string) => exact.replace('"sig"', '"note":"added","sig"')],
       ["a repeated member", (exact: string) => exact.replace('{"payload"', '{"payload":"AAAA","payload"')],
+      ["a string escape", (exact: string) => exact.replace('"application', '"\\u0061pplication')],
     ])("reads %s only when asked by name", (_name, spell) => {
       const exact = new TextDecoder().decode(sealed(signatureBy(signer)));
       expectReadOnlyWhenAsked(new TextEncoder().encode(spell(exact)));
+    });
+
+    test("reads a lone surrogate in payloadType only when asked by name", () => {
+      // The pre-authentication encoding replaces the surrogate with U+FFFD, so that is what is signed.
+      const preAuth = dssePreAuthEncoding("type\ud800", PAYLOAD);
+      expect(preAuth).toEqual(dssePreAuthEncoding("type\ufffd", PAYLOAD));
+      const sig = sign(null, preAuth, signer.privateKey).toString("base64");
+      expectReadOnlyWhenAsked(spelled(Buffer.from(PAYLOAD).toString("base64"), sig, "type\ud800"));
     });
   });
 

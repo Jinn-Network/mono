@@ -20,10 +20,10 @@ export interface DsseVerificationKey {
 export interface VerifyDsseSignaturesOptions {
   /**
    * Accept anything `parseDsseEnvelope` reads, not only the exact bytes `sealDsseEnvelope` writes:
-   * other JSON whitespace and member order, unknown and repeated members, a byte order mark, and
-   * URL-safe, unpadded, or non-canonical base64 in `payload` and `sig`. Two spellings of one
-   * envelope are two record digests, so this is for callers holding envelopes that were never
-   * sealed by that encoder.
+   * other JSON whitespace, member order and string escapes, unknown and repeated members, a byte
+   * order mark, and URL-safe, unpadded, or non-canonical base64 in `payload` and `sig`. Two
+   * spellings of one envelope are two record digests, so this is for callers holding envelopes
+   * that were never sealed by that encoder.
    */
   readonly allowRespelledEnvelope?: boolean;
   /**
