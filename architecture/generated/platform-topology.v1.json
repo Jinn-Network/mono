@@ -2,10 +2,10 @@
   "counts": {
     "adjacentEntries": 6,
     "experimentalPolicy": 2,
-    "implementationsV1": 53,
-    "inventory": 99,
+    "implementationsV1": 54,
+    "inventory": 100,
     "otherPackagesRootEntries": 27,
-    "packagesRootEntries": 93,
+    "packagesRootEntries": 94,
     "sealedPlatformV1": 11
   },
   "graph": {
@@ -1564,6 +1564,11 @@
         "from": "@jinn-network/trust-testing",
         "kind": "runtime",
         "to": "@jinn-network/trust-resolve"
+      },
+      {
+        "from": "@jinn-network/verify",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-core"
       }
     ],
     "nodes": [
@@ -1665,6 +1670,7 @@
       "@jinn-network/trust-observation",
       "@jinn-network/trust-resolve",
       "@jinn-network/trust-testing",
+      "@jinn-network/verify",
       "@jinn-network/website"
     ],
     "stackPublished": {
@@ -1872,7 +1878,8 @@
           "@jinn-network/trust-resolve": [],
           "@jinn-network/trust-testing": [
             "@jinn-network/trust-resolve"
-          ]
+          ],
+          "@jinn-network/verify": []
         },
         "waves": [
           [
@@ -1895,7 +1902,8 @@
             "@jinn-network/task-execution-backend",
             "@jinn-network/task-execution-workspace",
             "@jinn-network/trust-observation",
-            "@jinn-network/trust-resolve"
+            "@jinn-network/trust-resolve",
+            "@jinn-network/verify"
           ],
           [
             "@jinn-network/attestation-issuer",
@@ -3546,6 +3554,42 @@
       ],
       "role": "HTTP discovery transport",
       "stability": "candidate",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
+          "@jinn-network/trust-core"
+        ]
+      },
+      "domain": "discovery",
+      "name": "@jinn-network/verify",
+      "ownerGroup": "architecture-control",
+      "path": "packages/discovery/verification",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "implementations-v1",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "role": "general checking primitives for Jinn records",
+      "stability": "experimental",
       "supersedes": [],
       "tier": 3,
       "transition": null,
@@ -16464,6 +16508,15 @@
         "schemas": []
       },
       {
+        "conformance": [],
+        "fixtures": [],
+        "name": "@jinn-network/verify",
+        "path": "packages/discovery/verification",
+        "profiles": [],
+        "releaseGroup": "implementations-v1",
+        "schemas": []
+      },
+      {
         "conformance": [
           "./testing"
         ],
@@ -17680,7 +17733,8 @@
             "@jinn-network/task-posting",
             "@jinn-network/trust-observation",
             "@jinn-network/trust-resolve",
-            "@jinn-network/trust-testing"
+            "@jinn-network/trust-testing",
+            "@jinn-network/verify"
           ],
           "policy": {
             "canary": true,
@@ -17781,7 +17835,8 @@
         "@jinn-network/trust-core",
         "@jinn-network/trust-observation",
         "@jinn-network/trust-resolve",
-        "@jinn-network/trust-testing"
+        "@jinn-network/trust-testing",
+        "@jinn-network/verify"
       ],
       "trustedPublishers": [
         {
@@ -18608,6 +18663,17 @@
           "provider": "GitHub Actions",
           "repository": "mono",
           "workflow": "stack-npm-publish.yml"
+        },
+        {
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
+          "organization": "Jinn-Network",
+          "package": "@jinn-network/verify",
+          "provider": "GitHub Actions",
+          "repository": "mono",
+          "workflow": "stack-npm-publish.yml"
         }
       ]
     }
@@ -18753,7 +18819,7 @@
         "sealed-platform-v1"
       ],
       "canary": true,
-      "expectedPackageCount": 53,
+      "expectedPackageCount": 54,
       "packages": [
         "@jinn-network/attestation-issuer",
         "@jinn-network/chain-environment-verification",
@@ -18807,7 +18873,8 @@
         "@jinn-network/task-posting",
         "@jinn-network/trust-observation",
         "@jinn-network/trust-resolve",
-        "@jinn-network/trust-testing"
+        "@jinn-network/trust-testing",
+        "@jinn-network/verify"
       ],
       "publishPolicies": [
         "canary-and-stable"
