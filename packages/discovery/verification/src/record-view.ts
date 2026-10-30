@@ -16,10 +16,12 @@ export interface RecordView {
   readonly document: unknown;
   /** The bytes `document` was parsed from. */
   readonly documentBytes: Uint8Array;
-  /** Present when `parsed` has the three DSSE members, even if the envelope turns out malformed. */
+  /** The envelope's `payloadType`, or a string one beside the other two members of a malformed one. */
   readonly payloadType?: string;
   /** Present when the envelope parsed. */
   readonly signatures?: readonly DsseEnvelopeSignature[];
+  /** The three DSSE members are here, of whatever type, and they do not make a well-formed envelope. */
+  readonly malformedEnvelope?: true;
 }
 
 function parseJson(bytes: Uint8Array): unknown {
@@ -30,10 +32,8 @@ function parseJson(bytes: Uint8Array): unknown {
   }
 }
 
-function isDsseShaped(value: unknown): value is { readonly payloadType: string } {
-  if (typeof value !== "object" || value === null) return false;
-  const { payload, payloadType, signatures } = value as Record<string, unknown>;
-  return typeof payloadType === "string" && typeof payload === "string" && Array.isArray(signatures);
+function isDsseShaped(value: unknown): value is { readonly payloadType: unknown } {
+  return isRecordObject(value) && "payload" in value && "payloadType" in value && "signatures" in value;
 }
 
 export function readRecord(bytes: Uint8Array): RecordView {
@@ -50,7 +50,7 @@ export function readRecord(bytes: Uint8Array): RecordView {
       signatures: envelope.signatures,
     };
   } catch {
-    return { ...view, payloadType: parsed.payloadType };
+    return { ...view, malformedEnvelope: true, ...(typeof parsed.payloadType === "string" ? { payloadType: parsed.payloadType } : {}) };
   }
 }
 

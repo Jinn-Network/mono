@@ -145,6 +145,7 @@ function invalidEntry<Id extends string>(
 function evaluateRecord<Id extends string>(
   carried: CarriedAnchorRecord,
   input: EvaluateAnchorsInput<Id>,
+  subjectsByDigest: ReadonlyMap<string, AnchorSubject<Id>>,
 ): AnchorVerificationEntry<Id> {
   const reasonFor = (refusal: AnchorRefusal<Id>): string => input.renderReason?.(refusal) ?? defaultReason(refusal);
 
@@ -159,7 +160,7 @@ function evaluateRecord<Id extends string>(
 
   const provider = record.provider;
   const subjectDigest = record.subject.digest.sha256;
-  const resolved = input.subjects.find(({ sha256 }) => sha256 === subjectDigest);
+  const resolved = subjectsByDigest.get(subjectDigest);
   if (resolved === undefined) {
     return invalidEntry(carried.recordSha256, reasonFor({ code: "unknown-subject", digest: subjectDigest }), { provider });
   }
@@ -210,12 +211,25 @@ function evaluateRecord<Id extends string>(
 
 /** Reports every carried anchor record and every subject. Never throws on what a record contains. */
 export function evaluateAnchors<Id extends string = string>(input: EvaluateAnchorsInput<Id>): AnchorsReport<Id> {
+  const subjectsByDigest = new Map<string, AnchorSubject<Id>>();
+  for (const subject of input.subjects) {
+    const { sha256 } = subject;
+    if (!subjectsByDigest.has(sha256)) subjectsByDigest.set(sha256, subject);
+  }
   const anchors = [...input.records]
     .sort((left, right) => compareCodeUnitStrings(left.recordSha256, right.recordSha256))
-    .map((carried) => evaluateRecord(carried, input));
+    .map((carried) => evaluateRecord(carried, input, subjectsByDigest));
+
+  const validBySubject = new Map<Id, AnchorVerificationEntry<Id>[]>();
+  for (const entry of anchors) {
+    if (entry.subject === undefined || entry.status === "invalid") continue;
+    const held = validBySubject.get(entry.subject);
+    if (held === undefined) validBySubject.set(entry.subject, [entry]);
+    else held.push(entry);
+  }
 
   const subjects = input.subjects.map(({ id, declaredProfiles = [] }): AnchorSubjectReport<Id> => {
-    const carried = anchors.filter((entry) => entry.subject === id && entry.status !== "invalid");
+    const carried = validBySubject.get(id) ?? [];
     const missing = declaredProfiles.filter((profile) => !carried.some((entry) => entry.provider === profile));
     if (missing.length > 0) {
       return { subject: id, outcome: "declared-but-absent", declaredProfiles: [...missing].sort(compareCodeUnitStrings) };

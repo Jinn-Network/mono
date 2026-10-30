@@ -51,7 +51,6 @@ import {
   checkRecord,
   checkRecordSet,
   createDidKeyDsseVerifier,
-  createStaticBindingResolver,
   defaultRecordKinds,
   didKeyFromEd25519PublicKey,
   ed25519PublicKeyBytesFromDidKey,
@@ -81,14 +80,12 @@ const taskDigest = recordDigest(task);
 const taskReport = await checkRecord(task, { digest: taskDigest });
 const setReport = await checkRecordSet({ records: [{ bytes: task }], roots: [taskDigest] });
 const anchors = evaluateAnchors({ records: [], subjects: [{ id: "task", sha256: taskDigest.slice("sha256:".length) }] });
-const nobody = await createStaticBindingResolver([]).resolveBinding({ key: keyId, agent: "urn:example:agent" }, "2026-01-01T00:00:00Z");
 
 const results = [
   taskReport.outcome === "checked",
   taskReport.kind in defaultRecordKinds,
   setReport.summary.records === 1,
   anchors.subjects[0].outcome === "absent",
-  nobody === null,
   recordDigest(new Uint8Array(0)) === "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   ed25519PublicKeyBytesFromDidKey(keyId)?.length === 32,
   ed25519PublicKeyFromDidKey(keyId)?.asymmetricKeyType === "ed25519",

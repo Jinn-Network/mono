@@ -49,6 +49,19 @@ export const UNKNOWN_KIND = "unknown";
  */
 export type RecordOutcome = "failed" | "unknown-kind" | "checked";
 
+/** The DSSE signatures a record carries, and what became of each. */
+export interface SignatureCounts {
+  readonly total: number;
+  /** Verified, under any key. */
+  readonly verified: number;
+  /** Of `verified`, those under a key the caller supplied. That shows a key signed, not whose it is. */
+  readonly verifiedWithSuppliedKey: number;
+  /** Under a key that is known, and did not verify. */
+  readonly invalid: number;
+  /** Not verified at all: no key was known, or the record's kind is unknown. */
+  readonly unverified: number;
+}
+
 export interface RecordReport {
   /** `sha256:` of the exact bytes received, whether or not a digest was claimed for them. */
   readonly digest: `sha256:${string}`;
@@ -60,6 +73,7 @@ export interface RecordReport {
   readonly outcome: RecordOutcome;
   /** All five, in order, with `skipped` where a check did not run. */
   readonly checks: readonly CheckResult<RecordCheckId>[];
+  readonly signatures: SignatureCounts;
 }
 
 export function describeError(cause: unknown): string {

@@ -90,11 +90,11 @@ export const TRUST_KINDS: Readonly<Record<string, RecordKind>> = {
     family: "trust",
     identify: (view) => isFormat(view, TRUST_REVOCATION_MEDIA_TYPE, TRUST_REVOCATION_FORMAT),
     validate: ({ bytes }) => findings(validateRevocation(bytes).diagnostics),
-    // §7.4b: a working key signs as itself. A voucher account signs by a fresh ceremony, whose
-    // did:pkh is no DSSE key this can look for.
+    // §7.4b: `revokedBy` signs, as `isRevocationAuthorized` requires. A did:pkh is no key this can
+    // verify, so that signature says `skipped`, and a stranger's beside it does not stand in for it.
     requiredSigners: (view) => {
       const revokedBy = documentField(view, "revokedBy");
-      return typeof revokedBy === "string" && revokedBy.startsWith("did:key:") ? [revokedBy] : [];
+      return typeof revokedBy === "string" ? [revokedBy] : [];
     },
     references: (view) => [
       ...digestReference(documentField(view, "target"), "target", "/target", false),

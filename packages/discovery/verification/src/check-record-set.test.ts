@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { generateKeyPairSync, sign } from "node:crypto";
 import { describe, expect, test } from "vitest";
-import { canonicalJsonBytes } from "@jinn-network/trust-core";
+import { canonicalJsonBytes, dssePreAuthEncoding, sealDsseEnvelope } from "@jinn-network/trust-core";
 import { TASK_EXECUTION_PROTOCOL_URI, sealDelivery, sealSubmission, sealTask } from "@jinn-network/task-execution-protocol";
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import {
@@ -9,7 +10,7 @@ import {
   createFixtureAuthority,
 } from "@jinn-network/trust-testing";
 
-import { checkRecordSet, recordDigest } from "./index.js";
+import { checkRecordSet, didKeyFromEd25519PublicKey, recordDigest } from "./index.js";
 import type { RecordSetInputRecord } from "./index.js";
 
 const PROFILE = canonicalJsonBytes({ note: "a held profile document" });
@@ -268,6 +269,19 @@ describe("lifecycle", () => {
     expect(lifecycle.findings).toEqual(expect.arrayContaining([expect.objectContaining({ code: "delivery-task-mismatch", subject: ATTEMPT })]));
   });
 
+  test("§10.4: the first engagement in sequence is the engagement, wherever it sits in the input", async () => {
+    const foreign = delivery({ task: `sha256:${"9".repeat(64)}` });
+    const genuine = observation("attempt-engaged", "evt-1", 1, ENGAGED);
+    const forged = observation("attempt-engaged", "evt-9", 9, { ...ENGAGED, task: `sha256:${"9".repeat(64)}` });
+    const recorded = observation("delivery-recorded", "evt-3", 3, { digest: recordDigest(foreign) });
+    for (const input of [[forged, genuine, recorded], [genuine, forged, recorded], [recorded, forged, genuine]]) {
+      // eslint-disable-next-line no-await-in-loop -- each order is its own set.
+      const { lifecycle } = await set([], foreign, ...input);
+      expect(lifecycle.status).toBe("failed");
+      expect(lifecycle.findings).toEqual(expect.arrayContaining([expect.objectContaining({ code: "delivery-task-mismatch" })]));
+    }
+  });
+
   test("a Delivery with no log is counted, not assumed", async () => {
     const stray = delivery({ attempt: OTHER_ATTEMPT });
     const { lifecycle } = await set([], stray, closing, ...log);
@@ -295,6 +309,20 @@ describe("lifecycle", () => {
 
     const correction = delivery({ supersedes: recordDigest(first), createdAt: "2026-07-28T00:06:00Z" });
     expect((await set([], first, correction)).lifecycle.status).toBe("passed");
+  });
+
+  test("a superseding Delivery whose target is not held compares nothing, so it does not read as passed", async () => {
+    const correction = delivery({ supersedes: `sha256:${"7".repeat(64)}`, createdAt: "2026-07-28T00:06:00Z" });
+    const { lifecycle } = await set([], correction);
+    expect(lifecycle).toMatchObject({ status: "skipped", attempts: [], deliveriesWithoutObservations: 1 });
+    expect(lifecycle.findings).toEqual([expect.objectContaining({ code: "deliveries-without-observations" })]);
+  });
+
+  test("one supersession compared is a check that ran, beside one that could not be", async () => {
+    const first = delivery();
+    const compared = delivery({ supersedes: recordDigest(first), createdAt: "2026-07-28T00:06:00Z" });
+    const unheld = delivery({ supersedes: `sha256:${"7".repeat(64)}`, createdAt: "2026-07-28T00:07:00Z" });
+    expect((await set([], first, compared, unheld)).lifecycle.status).toBe("passed");
   });
 });
 
@@ -373,6 +401,7 @@ describe("the summary", () => {
       kinds: { [RECORD_KINDS.delivery]: 1, [RECORD_KINDS.task]: 1, unknown: 4 },
       unknownTypes: { [APPLICATION_TYPE]: 2 },
       namingNoType: 2,
+      signatures: { total: 0, verified: 0, verifiedWithSuppliedKey: 0, invalid: 0, unverified: 0 },
       checks: {
         digest: { passed: 0, failed: 0, skipped: 6 },
         encoding: { passed: 4, failed: 1, skipped: 1 },
@@ -381,6 +410,18 @@ describe("the summary", () => {
         "trust-binding": { passed: 0, failed: 0, skipped: 6 },
       },
     });
+  });
+
+  test("adds up the signatures of every record", async () => {
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const signed = (signature: Uint8Array) => sealDsseEnvelope({
+      payloadType: "application/vnd.jinn.not-registered.v1+json",
+      payloadBytes: canonicalJsonBytes({}),
+      signatures: [{ keyid: didKeyFromEd25519PublicKey(publicKey), signature }],
+    });
+    const good = new Uint8Array(sign(null, dssePreAuthEncoding("application/vnd.jinn.not-registered.v1+json", canonicalJsonBytes({})), privateKey));
+    const { report } = await set([], signed(good), signed(new Uint8Array(64)), task);
+    expect(report.summary.signatures).toEqual({ total: 2, verified: 1, verifiedWithSuppliedKey: 0, invalid: 1, unverified: 0 });
   });
 
   test("an empty set is empty", async () => {

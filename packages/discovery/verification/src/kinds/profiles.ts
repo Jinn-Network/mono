@@ -83,17 +83,49 @@ function profileDocumentReferences(view: RecordView): readonly RecordReference[]
   ];
 }
 
+function unsafeSchema(schema: unknown, path: string): readonly Finding[] {
+  try {
+    assertSafeSchema(schema, new TextEncoder().encode(JSON.stringify(schema)));
+    return [];
+  } catch (cause) {
+    return [{ code: "invalid-document", path, detail: describeError(cause) }];
+  }
+}
+
+/** A descriptor's `content` is base64 elsewhere in the protocol, and the published profiles carry plain JSON. */
+function parseInlineSchema(content: string): { readonly schema: unknown } | undefined {
+  for (const text of [content, Buffer.from(content, "base64").toString("utf8")]) {
+    try {
+      return { schema: JSON.parse(text) };
+    } catch {
+      // Not this spelling.
+    }
+  }
+  return undefined;
+}
+
+/** A slot may pin its schema by digest, which is bytes this does not hold, or carry it inline. */
+function inlineSlotSchemaFindings(view: RecordView): readonly Finding[] {
+  const conventions = documentField(view, "outputConventions");
+  const slots = isRecordObject(conventions) && Array.isArray(conventions["slots"])
+    ? conventions["slots"] as readonly Record<string, unknown>[]
+    : [];
+  return slots.flatMap((slot, index) => {
+    const descriptor = slot["schema"];
+    if (!isRecordObject(descriptor) || typeof descriptor["content"] !== "string") return [];
+    const path = `outputConventions.slots.${index}.schema.content`;
+    const inline = parseInlineSchema(descriptor["content"]);
+    return inline === undefined
+      ? [{ code: "invalid-document", path, detail: "This inline schema is neither JSON nor base64 JSON, so it cannot be shown safe to load." }]
+      : unsafeSchema(inline.schema, path);
+  });
+}
+
 /** Profiles design §6.4: anyone may publish a profile, so a schema unsafe to load is `invalid-document`. */
 function profileFindings(view: RecordView): readonly Finding[] {
   const shaped = findings(TaskProfileDocumentSchema.safeParse(view.document));
   if (shaped.length > 0) return shaped;
-  const payloadSchema = documentField(view, "payloadSchema");
-  try {
-    assertSafeSchema(payloadSchema, new TextEncoder().encode(JSON.stringify(payloadSchema)));
-    return [];
-  } catch (cause) {
-    return [{ code: "invalid-document", path: "payloadSchema", detail: describeError(cause) }];
-  }
+  return [...unsafeSchema(documentField(view, "payloadSchema"), "payloadSchema"), ...inlineSlotSchemaFindings(view)];
 }
 
 export const PROFILE_KINDS: Readonly<Record<string, RecordKind>> = {

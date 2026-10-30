@@ -18,6 +18,7 @@ import type {
   Finding,
   RecordCheckId,
   RecordReport,
+  SignatureCounts,
 } from "./results.js";
 
 export interface RecordSetInputRecord {
@@ -89,6 +90,7 @@ export interface RecordSetSummary {
   readonly namingNoType: number;
   /** What actually ran across the records. A kind's count is not a claim that all of these passed. */
   readonly checks: Readonly<Record<RecordCheckId, Readonly<Record<CheckStatus, number>>>>;
+  readonly signatures: SignatureCounts;
 }
 
 export interface RecordSetReport {
@@ -198,8 +200,14 @@ function attemptLogs(records: readonly InspectedRecord[]): ReadonlyMap<string, r
   return logs;
 }
 
+/** §10.4: the first engagement in `sequence` order is the engagement, wherever it sits in the input. */
 function engagedTask(log: readonly ProtocolObservation[]): string | undefined {
-  const engaged = log.find(({ type }) => type === "network.jinn.task-execution.attempt-engaged.v1");
+  const engaged = log
+    .filter(({ type }) => type === "network.jinn.task-execution.attempt-engaged.v1")
+    .reduce<ProtocolObservation | undefined>(
+      (earliest, candidate) => (earliest === undefined || candidate.sequence < earliest.sequence ? candidate : earliest),
+      undefined,
+    );
   return (engaged?.data as { readonly task?: string } | undefined)?.task;
 }
 
@@ -267,7 +275,9 @@ function checkLifecycle(records: readonly InspectedRecord[], held: Held): Lifecy
     code: "deliveries-without-observations",
     detail: `${deliveriesWithoutObservations} Deliveries belong to Attempts with no observation in the set, so no lifecycle covers them.`,
   }])];
-  if (refusals.length === 0 && attempts.length > 0 && attempts.every(({ engaged }) => !engaged)) {
+  // With no log, the only thing to compare is a supersession both of whose records are held.
+  const supersessionCompared = superseding.some((entry) => held.has(documentOf(entry)["supersedes"] as string));
+  if (refusals.length === 0 && attempts.every(({ engaged }) => !engaged) && (attempts.length > 0 || !supersessionCompared)) {
     return { id: "lifecycle", status: "skipped", findings: notes, attempts, deliveriesWithoutObservations };
   }
   const result = refusals.length > 0 ? failed("lifecycle", [...refusals, ...notes]) : passed("lifecycle", notes);
@@ -309,13 +319,15 @@ function checkAnchors(records: readonly InspectedRecord[], held: Held, trust: An
   return { ...(refusals.length > 0 ? failed("anchors", [...refusals, ...notes]) : passed("anchors", notes)), report };
 }
 
-function summarize(reports: readonly RecordReport[]): RecordSetSummary {
+export function summarizeRecords(reports: readonly RecordReport[]): RecordSetSummary {
   const kinds: Record<string, number> = {};
   const unknownTypes: Record<string, number> = {};
   let namingNoType = 0;
   const checks = Object.fromEntries((["digest", "encoding", "schema", "signature", "trust-binding"] as const)
     .map((id) => [id, { passed: 0, failed: 0, skipped: 0 }])) as Record<RecordCheckId, Record<CheckStatus, number>>;
+  const signatures = { total: 0, verified: 0, verifiedWithSuppliedKey: 0, invalid: 0, unverified: 0 };
   for (const report of reports) {
+    for (const key of Object.keys(signatures) as (keyof SignatureCounts)[]) signatures[key] += report.signatures[key];
     kinds[report.kind] = (kinds[report.kind] ?? 0) + 1;
     if (report.kind === UNKNOWN_KIND) {
       if (report.names === undefined) namingNoType += 1;
@@ -330,6 +342,7 @@ function summarize(reports: readonly RecordReport[]): RecordSetSummary {
     unknownTypes,
     namingNoType,
     checks,
+    signatures,
   };
 }
 
@@ -354,7 +367,7 @@ export async function checkRecordSet(input: CheckRecordSetInput): Promise<Record
   const held: Held = new Map(records.map((entry) => [entry.report.digest, entry]));
   const reports = records.map(({ report }) => report);
   return {
-    summary: summarize(reports),
+    summary: summarizeRecords(reports),
     records: reports,
     checks: [
       checkReferences(input.roots, held),

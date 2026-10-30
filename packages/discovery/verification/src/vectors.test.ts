@@ -72,7 +72,8 @@ describe("trust-core sealing-v1", () => {
   test.each<[string, string, (document: never) => Promise<SealedRecord>, string]>([
     // Sealed by a placeholder rather than the key it binds. The vector pins a digest, and this says so.
     ["key-binding", RECORD_KINDS.keyBinding, (document) => sealKeyBinding(document, placeholder(WORKING_KEY, 1, 2, 3)), "failed"],
-    ["revocation", "https://spec.jinn.network/trust/revocation/v1", (document) => sealRevocation(document, placeholder(WORKING_KEY, 4, 5, 6)), "skipped"],
+    // Sealed by a placeholder too. Its revokedBy is a did:pkh, and this signature names another key.
+    ["revocation", "https://spec.jinn.network/trust/revocation/v1", (document) => sealRevocation(document, placeholder(WORKING_KEY, 4, 5, 6)), "failed"],
     ["authorization", RECORD_KINDS.authorization, (document) => sealAuthorization(document, placeholder(WORKING_KEY, 7, 8, 9)), "skipped"],
     // This keyid is a real Ed25519 did:key, so its placeholder signature can be checked, and fails.
     ["policy", RECORD_KINDS.trustPolicy, (document) => sealTrustPolicy(document, placeholder(POLICY_KEY, 1)), "failed"],
@@ -93,6 +94,14 @@ describe("trust-core sealing-v1", () => {
     const { envelopeBytes } = await sealKeyBinding(trust.json<never>("sealing-v1/key-binding.json"), placeholder(WORKING_KEY, 1, 2, 3));
     expect(check(await checkRecord(envelopeBytes), "signature").findings).toEqual(
       expect.arrayContaining([expect.objectContaining({ code: "required-signer-missing", subject: POLICY_KEY })]),
+    );
+  });
+
+  test("the revocation vector's signature names a key other than its revokedBy", async () => {
+    const document = trust.json<{ readonly revokedBy: string }>("sealing-v1/revocation.json");
+    const { envelopeBytes } = await sealRevocation(document as never, placeholder(WORKING_KEY, 4, 5, 6));
+    expect(check(await checkRecord(envelopeBytes), "signature").findings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "required-signer-missing", subject: document.revokedBy })]),
     );
   });
 
@@ -421,14 +430,17 @@ describe("evidence golden-execution-evidence-v1", () => {
 });
 
 describe("the published prediction-forecast/1.0 profile", () => {
-  test("fails the §6.4 check its own package applies, and the report says which pattern", async () => {
+  test("fails the §6.4 check its own package applies, in both schemas, and the report says which", async () => {
     const bytes = new Uint8Array(readFileSync(require.resolve(
       "@jinn-network/task-execution-profiles/profiles/task-profiles/prediction-forecast/1.0/profile.json",
     )));
     const report = await checkRecord(bytes);
     expect(check(report, "schema")).toMatchObject({
       status: "failed",
-      findings: [{ code: "invalid-document", path: "payloadSchema", detail: expect.stringContaining("consensusProbabilityYes") }],
+      findings: [
+        { code: "invalid-document", path: "payloadSchema", detail: expect.stringContaining("consensusProbabilityYes") },
+        { code: "invalid-document", path: "outputConventions.slots.0.schema.content", detail: expect.stringContaining("probabilityYes") },
+      ],
     });
   });
 });

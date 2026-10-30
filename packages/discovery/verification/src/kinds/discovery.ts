@@ -9,16 +9,14 @@ import type { Finding } from "../results.js";
 import type { RecordKind } from "./kind.js";
 
 /**
- * A facts profile is a document the specification publishes, not a sealed record. The README lists
- * facts profiles "alongside the families", and record discovery's §12 makes one declarative field
- * labeling for a record kind. Its `kind` member names the kind it describes, not what it is, and its
- * own name is `profile`. Its bytes are pinned by the release manifest of the set it is served in, so
- * it has no canonical form and no signature of its own, and a spelling of one is not a failure.
+ * The specification's README lists facts profiles "alongside the families", and record discovery's
+ * §12 makes one declarative field labeling for a record kind. Its `kind` member names the kind it
+ * describes, not what it is, and its own name is `profile`.
  *
  * It has no type URL either, because `protocol` is shared with entries and heads, so the media type
  * keys it, the way a schema's served URL keys an observation.
  */
-const PUBLISHED_DOCUMENT = "Record discovery §12: a facts profile is a published document, not a sealed record. The specification's signed release manifest pins its bytes.";
+const PUBLISHED_DOCUMENT = "The published facts profiles are not RFC 8785 bytes; the specification's signed release manifest pins them.";
 
 const FACTS_PROFILE_PREFIX = "https://spec.jinn.network/facts/";
 

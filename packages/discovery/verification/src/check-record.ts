@@ -17,12 +17,15 @@ import type { RecordKind, RecordKinds } from "./kinds/index.js";
 import { documentField, readRecord } from "./record-view.js";
 import type { RecordView } from "./record-view.js";
 import { UNKNOWN_KIND, describeError, failed, passed, skipped } from "./results.js";
-import type { CheckResult, Finding, RecordCheckId, RecordOutcome, RecordReport } from "./results.js";
+import type { CheckResult, Finding, RecordCheckId, RecordOutcome, RecordReport, SignatureCounts } from "./results.js";
 
 export interface RecordTrustOptions {
   /** Keys for signatures whose `keyid` does not carry its own key. Consulted before the `keyid`. */
   readonly keys?: readonly DsseVerificationKey[];
-  /** Without one, `trust-binding` is skipped. See `createStaticBindingResolver` for offline sets. */
+  /**
+   * Without one, `trust-binding` is skipped. Its soundness is the caller's responsibility:
+   * `trust-binding: passed` means only what this resolver decided.
+   */
   readonly bindingResolver?: BindingResolver;
   /** Needed only for a `safe` ceremony. Without one, such a binding fails its ceremony. */
   readonly witnessVerifier?: WitnessVerifier;
@@ -105,7 +108,7 @@ function exactEnvelopeFinding(bytes: Uint8Array): Finding | undefined {
 
 function checkEncoding(view: RecordView, kind: RecordKind | undefined, named: string | undefined): CheckResult<"encoding"> {
   // The three DSSE members and no readable envelope: it claims to be signed, so it is no artifact.
-  if (kind === undefined && view.payloadType !== undefined && view.signatures === undefined) {
+  if (kind === undefined && view.malformedEnvelope === true) {
     return failed("encoding", [{ code: "malformed-envelope", detail: "These bytes have the three DSSE members and are not a well-formed envelope, so what they claim to be could not be read." }]);
   }
   if (kind?.encodingExemption !== undefined) {
@@ -135,33 +138,46 @@ function checkSchema(view: RecordView, kind: RecordKind | undefined, ambiguous: 
   return findings.length === 0 ? passed("schema") : failed("schema", findings);
 }
 
-function usableKey(keyid: string, supplied: readonly DsseVerificationKey[]): DsseVerificationKey | undefined {
-  const given = supplied.find(({ keyId }) => keyId === keyid);
-  if (given !== undefined) return given.publicKey.asymmetricKeyType === "ed25519" ? given : undefined;
-  const publicKey = ed25519PublicKeyFromDidKey(keyid);
-  return publicKey === undefined ? undefined : { keyId: keyid, publicKey };
+interface UsableKey extends DsseVerificationKey {
+  readonly supplied: boolean;
 }
+
+function usableKey(keyid: string, supplied: readonly DsseVerificationKey[]): UsableKey | undefined {
+  const given = supplied.find(({ keyId }) => keyId === keyid);
+  if (given !== undefined) return given.publicKey.asymmetricKeyType === "ed25519" ? { ...given, supplied: true } : undefined;
+  const publicKey = ed25519PublicKeyFromDidKey(keyid);
+  return publicKey === undefined ? undefined : { keyId: keyid, publicKey, supplied: false };
+}
+
+/** One entry per keyid: a repeat would make the cost quadratic in a publisher's signatures. */
+function distinctKeys<Key extends DsseVerificationKey>(keys: readonly Key[]): readonly Key[] {
+  return [...new Map(keys.map((key) => [key.keyId, key])).values()];
+}
+
+const NO_SIGNATURES: SignatureCounts = { total: 0, verified: 0, verifiedWithSuppliedKey: 0, invalid: 0, unverified: 0 };
 
 interface SignatureOutcome {
   readonly result: CheckResult<"signature">;
   readonly verifiedSigners: readonly string[];
+  readonly counts: SignatureCounts;
 }
 
 function checkSignature(view: RecordView, kind: RecordKind | undefined, trust: RecordTrustOptions | undefined): SignatureOutcome {
-  const outcome = (result: CheckResult<"signature">, verifiedSigners: readonly string[] = []) => ({ result, verifiedSigners });
-  if (kind === undefined) return outcome(skipped("signature", "unknown-kind", "No registered kind says who signs this record, so no signature was verified."));
   if (view.signatures === undefined) {
-    return outcome(kind.unsignedBecause === undefined
-      ? failed("signature", [{ code: "not-signed", detail: "This kind is a DSSE envelope, and these bytes are not a well-formed one." }])
-      : skipped("signature", "unsigned-record", kind.unsignedBecause));
+    const result = kind === undefined
+      ? skipped("signature", "unknown-kind", "No registered kind says who signs this record, so no signature was verified.")
+      : kind.unsignedBecause === undefined
+        ? failed("signature", [{ code: "not-signed", detail: "This kind is a DSSE envelope, and these bytes are not a well-formed one." }])
+        : skipped("signature", "unsigned-record", kind.unsignedBecause);
+    return { result, verifiedSigners: [], counts: NO_SIGNATURES };
   }
 
-  // One entry per keyid: a repeat would make the cost quadratic in a publisher's signatures.
-  const keysById = new Map<string, DsseVerificationKey>();
+  const total = view.signatures.length;
+  const usable: UsableKey[] = [];
   const unverifiable: Finding[] = [];
   for (const { keyid } of view.signatures) {
     const key = keyid === undefined ? undefined : usableKey(keyid, trust?.keys ?? []);
-    if (key !== undefined) keysById.set(key.keyId, key);
+    if (key !== undefined) usable.push(key);
     else {
       unverifiable.push({
         code: "no-verification-key",
@@ -172,29 +188,71 @@ function checkSignature(view: RecordView, kind: RecordKind | undefined, trust: R
       });
     }
   }
-  const usable = [...keysById.values()];
-  const required = kind.requiredSigners?.(view) ?? [];
+  const required = kind?.requiredSigners?.(view) ?? [];
   const missing = required
     .filter((signer) => !view.signatures!.some(({ keyid }) => keyid === signer))
     .map((signer): Finding => ({ code: "required-signer-missing", subject: signer, detail: `This kind must be signed by ${signer}, and no signature names it.` }));
   if (usable.length === 0) {
-    return outcome(missing.length > 0
-      ? failed("signature", [...missing, ...unverifiable])
-      : { id: "signature", status: "skipped", findings: unverifiable });
+    const counts = { ...NO_SIGNATURES, total, unverified: total };
+    if (kind === undefined) {
+      const carried = `These bytes carry ${total} signature${total === 1 ? "" : "s"}, and no key for ${total === 1 ? "it" : "them"} is known, so none was verified.`;
+      return { result: skipped("signature", "unknown-kind", carried), verifiedSigners: [], counts };
+    }
+    return {
+      result: missing.length > 0
+        ? failed("signature", [...missing, ...unverifiable])
+        : { id: "signature", status: "skipped", findings: unverifiable },
+      verifiedSigners: [],
+      counts,
+    };
   }
 
-  const { validSignerKeyids } = verifyDsseSignatures(view.bytes, usable, {
-    allowRespelledEnvelope: kind.anyEnvelopeSpelling === true,
+  // A signature is a fact whatever the record is, so an unknown kind cannot hide a bad one. Its
+  // family's envelope rule is not known, so any spelling is read.
+  const { validSignerKeyids } = verifyDsseSignatures(view.bytes, distinctKeys(usable), {
+    allowRespelledEnvelope: kind === undefined || kind.anyEnvelopeSpelling === true,
+    keepRepeatedSigners: true,
   });
-  const valid = new Set(validSignerKeyids);
-  const invalid = usable
-    .filter(({ keyId }) => !valid.has(keyId))
-    .map(({ keyId }): Finding => ({ code: "signature-invalid", subject: keyId, detail: `The signature under ${keyId} does not verify.` }));
+  // Counted per signature: a key that signed once does not vouch for a second signature under its id.
+  const validUnder = new Map<string, number>();
+  for (const keyId of validSignerKeyids) validUnder.set(keyId, (validUnder.get(keyId) ?? 0) + 1);
+  const invalid: Finding[] = [];
+  const suppliedAndVerified: Finding[] = [];
+  for (const { keyId, supplied } of usable) {
+    const left = validUnder.get(keyId) ?? 0;
+    if (left === 0) {
+      invalid.push({ code: "signature-invalid", subject: keyId, detail: `The signature under ${keyId} does not verify.` });
+      continue;
+    }
+    validUnder.set(keyId, left - 1);
+    if (supplied) {
+      suppliedAndVerified.push({
+        code: "verified-with-supplied-key",
+        subject: keyId,
+        detail: "Verified against a key the caller supplied. That shows this key signed, not whose key it is.",
+      });
+    }
+  }
+  const verifiedSigners = [...new Set(validSignerKeyids)];
   const refused = [...invalid, ...missing];
-  if (refused.length > 0) return outcome(failed("signature", [...refused, ...unverifiable]), validSignerKeyids);
+  const counts = {
+    total,
+    verified: usable.length - invalid.length,
+    verifiedWithSuppliedKey: suppliedAndVerified.length,
+    invalid: invalid.length,
+    unverified: unverifiable.length,
+  };
+  if (refused.length > 0) {
+    return { result: failed("signature", [...refused, ...unverifiable]), verifiedSigners, counts };
+  }
+  const notes = [...suppliedAndVerified, ...unverifiable];
   // Naming a required signer is not being signed by it: one no key was known for did not verify.
-  const signed = required.every((signer) => valid.has(signer));
-  return outcome(signed ? passed("signature", unverifiable) : { id: "signature", status: "skipped", findings: unverifiable }, validSignerKeyids);
+  const signed = required.every((signer) => verifiedSigners.includes(signer));
+  return {
+    result: signed ? passed("signature", notes) : { id: "signature", status: "skipped", findings: notes },
+    verifiedSigners,
+    counts,
+  };
 }
 
 /** A verifier for `verifyEnvelopeBinding`, which also calls it on consent and revocation envelopes. */
@@ -210,7 +268,7 @@ function bindingDsseVerifier(kind: RecordKind, trust: RecordTrustOptions): DsseC
       const key = keyid === undefined ? undefined : usableKey(keyid, trust.keys ?? []);
       return key === undefined ? [] : [key];
     });
-    return verifyDsseSignatures(envelopeBytes, keys, { allowRespelledEnvelope: kind.anyEnvelopeSpelling === true });
+    return verifyDsseSignatures(envelopeBytes, distinctKeys(keys), { allowRespelledEnvelope: kind.anyEnvelopeSpelling === true });
   };
 }
 
@@ -307,7 +365,7 @@ export async function inspectRecord(bytes: Uint8Array, options: CheckRecordOptio
   try {
     signature = checkSignature(view, kind, options.trust);
   } catch (cause) {
-    signature = { result: failed("signature", [{ code: "check-threw", detail: describeError(cause) }]), verifiedSigners: [] };
+    signature = { result: failed("signature", [{ code: "check-threw", detail: describeError(cause) }]), verifiedSigners: [], counts: NO_SIGNATURES };
   }
   let trustBinding: CheckResult<"trust-binding">;
   try {
@@ -324,6 +382,7 @@ export async function inspectRecord(bytes: Uint8Array, options: CheckRecordOptio
     ...(names === undefined ? {} : { names }),
     outcome: outcomeOf(checks, kind),
     checks,
+    signatures: signature.counts,
   };
   return { report, view, ...(kind === undefined ? {} : { kind }) };
 }

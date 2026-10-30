@@ -45,8 +45,6 @@ export type {
   RecordSetTrustOptions,
   ReferencesResult,
 } from "./check-record-set.js";
-export { createStaticBindingResolver } from "./static-binding-resolver.js";
-export type { StaticKeyBinding } from "./static-binding-resolver.js";
 export { OBSERVATION_KIND, defaultRecordKinds } from "./kinds/index.js";
 export type { RecordAttribution, RecordKind, RecordKinds, RecordReference } from "./kinds/index.js";
 export type { RecordView } from "./record-view.js";
@@ -60,4 +58,5 @@ export type {
   RecordOutcome,
   RecordReport,
   SetCheckId,
+  SignatureCounts,
 } from "./results.js";

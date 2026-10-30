@@ -248,9 +248,60 @@ describe("a signed record's envelope states its media type (§21.2)", () => {
   test.each([
     ["remote-ref", { $ref: "https://evil.example/schema.json" }],
     ["redos-pattern", { type: "string", pattern: "(a+)+$" }],
+    ["remote-dynamic-ref", { $dynamicRef: "https://evil.example/schema.json#node" }],
+    ["remote-recursive-ref", { $recursiveRef: "https://evil.example/schema.json" }],
   ])("§6.4 %s: a profile whose payload schema is unsafe to load is invalid", async (_name, payloadSchema) => {
     const report = await checkRecord(canonicalJsonBytes({ ...PROFILE, payloadSchema }));
     expect(check(report, "schema")).toMatchObject({ status: "failed", findings: [{ code: "invalid-document", path: "payloadSchema" }] });
+  });
+
+  describe("§6.4 holds for a schema carried inline in an output slot", () => {
+    const withSlotSchema = (schema: unknown) => canonicalJsonBytes({
+      ...PROFILE,
+      outputConventions: { slots: [
+        { name: "first", required: true },
+        { name: "out", required: true, mediaType: "application/json", schema },
+      ] },
+    });
+    const SLOT_PATH = "outputConventions.slots.1.schema.content";
+    const base64 = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64");
+
+    test.each([
+      ["a remote $ref, as plain JSON", JSON.stringify({ $ref: "https://evil.example/x.json" })],
+      ["a remote $dynamicRef, as plain JSON", JSON.stringify({ $dynamicRef: "https://evil.example/x.json#node" })],
+      ["an unsafe pattern, as plain JSON", JSON.stringify({ type: "string", pattern: "(a+)+$" })],
+      ["a remote $ref, as base64", base64({ $ref: "https://evil.example/x.json" })],
+      ["an unsafe pattern, as base64", base64({ type: "string", pattern: "(a+)+$" })],
+    ])("%s is invalid", async (_name, content) => {
+      const report = await checkRecord(withSlotSchema({ name: "out.schema.json", content }));
+      expect(check(report, "schema")).toMatchObject({ status: "failed", findings: [{ code: "invalid-document", path: SLOT_PATH }] });
+    });
+
+    test("content that reads as no schema at all cannot be shown safe, so it is invalid", async () => {
+      const report = await checkRecord(withSlotSchema({ name: "out.schema.json", content: "<<not a schema>>" }));
+      expect(check(report, "schema")).toMatchObject({ status: "failed", findings: [{ code: "invalid-document", path: SLOT_PATH }] });
+    });
+
+    test.each([
+      ["plain JSON", JSON.stringify({ type: "object" })],
+      ["base64", base64({ type: "object" })],
+    ])("a safe schema as %s passes", async (_name, content) => {
+      expect(check(await checkRecord(withSlotSchema({ name: "out.schema.json", content })), "schema").status).toBe("passed");
+    });
+
+    test("a slot that pins its schema by digest carries nothing to read here", async () => {
+      const report = await checkRecord(withSlotSchema({ name: "out.schema.json", digest: { sha256: "4".repeat(64) } }));
+      expect(check(report, "schema").status).toBe("passed");
+    });
+
+    test("both the payload schema and a slot are reported", async () => {
+      const report = await checkRecord(canonicalJsonBytes({
+        ...PROFILE,
+        payloadSchema: { $ref: "https://evil.example/schema.json" },
+        outputConventions: { slots: [{ name: "out", required: true, schema: { name: "s", content: JSON.stringify({ $ref: "https://evil.example/x.json" }) } }] },
+      }));
+      expect(check(report, "schema").findings.map(({ path }) => path)).toEqual(["payloadSchema", "outputConventions.slots.0.schema.content"]);
+    });
   });
 });
 
@@ -314,7 +365,7 @@ describe("§21.3: an extension that contradicts a core field", () => {
   });
 });
 
-describe("a published facts profile is a document, not a sealed record", () => {
+describe("a published facts profile is pinned by the release manifest, not a canonical form", () => {
   const facts = {
     protocol: "https://spec.jinn.network/record-discovery/v1",
     kind: "https://spec.jinn.network/records/task/v1",
@@ -604,11 +655,36 @@ describe("signature", () => {
       expect(check(await checkRecord(envelopeBytes), "signature").status).toBe("passed");
     });
 
-    test("a voucher account signs by a ceremony, so its did:pkh is not looked for among the keys", async () => {
-      const key = ed25519();
+    describe("under a voucher account's did:pkh", () => {
       const account = "did:pkh:eip155:8453:0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed";
-      const { envelopeBytes } = await signedRecord(key, revocation(account), payloadType);
-      expect(check(await checkRecord(envelopeBytes), "signature").status).toBe("passed");
+      const payloadBytes = canonicalJsonBytes(revocation(account));
+      const stranger = ed25519();
+      const strangerSignature = {
+        keyid: stranger.keyid,
+        signature: new Uint8Array(sign(null, dssePreAuthEncoding(payloadType, payloadBytes), stranger.privateKey)),
+      };
+
+      test("a stranger's signature does not stand in for it", async () => {
+        const report = await checkRecord(sealDsseEnvelope({ payloadType, payloadBytes, signatures: [strangerSignature] }));
+        expect(check(report, "signature")).toMatchObject({
+          status: "failed",
+          findings: [{ code: "required-signer-missing", subject: account }],
+        });
+      });
+
+      test("a signature naming it is no key this can verify, so it says skipped", async () => {
+        const report = await checkRecord(sealDsseEnvelope({ payloadType, payloadBytes, signatures: [{ keyid: account, signature: Uint8Array.of(1) }] }));
+        expect(check(report, "signature").status).toBe("skipped");
+      });
+
+      test("a stranger's valid signature beside it does not make that passed", async () => {
+        const report = await checkRecord(sealDsseEnvelope({
+          payloadType,
+          payloadBytes,
+          signatures: [{ keyid: account, signature: Uint8Array.of(1) }, strangerSignature],
+        }));
+        expect(check(report, "signature").status).toBe("skipped");
+      });
     });
   });
 
@@ -638,6 +714,113 @@ describe("signature", () => {
   });
 });
 
+describe("what a report counts about signatures", () => {
+  const unsigned = { total: 0, verified: 0, verifiedWithSuppliedKey: 0, invalid: 0, unverified: 0 };
+
+  test("an unsigned record has none", async () => {
+    expect((await checkRecord(sealTask(TASK))).signatures).toEqual(unsigned);
+  });
+
+  test("a signature verified from the key in its own keyid is not a supplied key", async () => {
+    const report = await checkRecord(signedEvaluation(ed25519()));
+    expect(report.signatures).toEqual({ ...unsigned, total: 1, verified: 1 });
+    expect(check(report, "signature").findings).toEqual([]);
+  });
+
+  test("a signature verified against a supplied key says exactly that, and trust binding stays skipped", async () => {
+    const key = ed25519();
+    const envelope = JSON.parse(new TextDecoder().decode(signedEvaluation(key))) as { signatures: { keyid: string }[] };
+    envelope.signatures[0]!.keyid = "evaluator-key-1";
+    const report = await checkRecord(encoder.encode(JSON.stringify(envelope)), {
+      trust: { keys: [{ keyId: "evaluator-key-1", publicKey: key.publicKey }] },
+    });
+    expect(report.signatures).toEqual({ ...unsigned, total: 1, verified: 1, verifiedWithSuppliedKey: 1 });
+    expect(check(report, "signature")).toMatchObject({
+      status: "passed",
+      findings: [{ code: "verified-with-supplied-key", subject: "evaluator-key-1", detail: expect.stringContaining("not whose key it is") }],
+    });
+    expect(check(report, "trust-binding")).toMatchObject({ status: "skipped", findings: [{ code: "no-binding-resolver" }] });
+  });
+
+  test("a signature with no key is unverified", async () => {
+    const key = ed25519();
+    const envelope = JSON.parse(new TextDecoder().decode(signedEvaluation(key))) as { signatures: { keyid: string }[] };
+    envelope.signatures[0]!.keyid = "unknown-key";
+    expect((await checkRecord(encoder.encode(JSON.stringify(envelope)))).signatures).toEqual({ ...unsigned, total: 1, unverified: 1 });
+  });
+
+  test("a signature that does not verify is invalid", async () => {
+    const key = ed25519();
+    const envelope = JSON.parse(new TextDecoder().decode(signedEvaluation(ed25519()))) as { signatures: { keyid: string }[] };
+    envelope.signatures[0]!.keyid = key.keyid;
+    expect((await checkRecord(encoder.encode(JSON.stringify(envelope)))).signatures).toEqual({ ...unsigned, total: 1, invalid: 1 });
+  });
+
+  test("one valid signature does not vouch for others under its keyid", async () => {
+    const key = ed25519();
+    const payloadBytes = canonicalJsonBytes(evaluationStatement());
+    const good = new Uint8Array(sign(null, dssePreAuthEncoding(DSSE_PAYLOAD_TYPE, payloadBytes), key.privateKey));
+    const bytes = sealDsseEnvelope({
+      payloadBytes,
+      signatures: [{ keyid: key.keyid, signature: good }, ...new Array(3).fill({ keyid: key.keyid, signature: new Uint8Array(64) })],
+    });
+    const report = await checkRecord(bytes);
+    expect(report.signatures).toEqual({ ...unsigned, total: 4, verified: 1, invalid: 3 });
+    expect(check(report, "signature").status).toBe("failed");
+  });
+
+  test("one key signing twice is two signatures", async () => {
+    const key = ed25519();
+    const payloadBytes = canonicalJsonBytes(evaluationStatement());
+    const signature = new Uint8Array(sign(null, dssePreAuthEncoding(DSSE_PAYLOAD_TYPE, payloadBytes), key.privateKey));
+    const report = await checkRecord(sealDsseEnvelope({ payloadBytes, signatures: [{ keyid: key.keyid, signature }, { keyid: key.keyid, signature }] }));
+    expect(report.signatures).toEqual({ ...unsigned, total: 2, verified: 2 });
+  });
+
+  test("a record of unknown kind has no envelope rule, so a respelled envelope still verifies", async () => {
+    const key = ed25519();
+    const payloadType = "application/vnd.jinn.not-registered.v1+json";
+    const payloadBytes = canonicalJsonBytes({});
+    const signature = new Uint8Array(sign(null, dssePreAuthEncoding(payloadType, payloadBytes), key.privateKey));
+    const sealed = sealDsseEnvelope({ payloadType, payloadBytes, signatures: [{ signature, keyid: key.keyid }] });
+    const respelled = encoder.encode(JSON.stringify(JSON.parse(new TextDecoder().decode(sealed)), null, 2));
+    expect((await checkRecord(respelled)).signatures).toEqual({ ...unsigned, total: 1, verified: 1 });
+  });
+
+  test("a bad signature on a record of unknown kind fails, whatever the record is", async () => {
+    const key = ed25519();
+    const bytes = sealDsseEnvelope({
+      payloadType: "application/vnd.jinn.not-registered.v1+json",
+      payloadBytes: canonicalJsonBytes({}),
+      signatures: [{ signature: new Uint8Array(64), keyid: key.keyid }],
+    });
+    const report = await checkRecord(bytes);
+    expect(report).toMatchObject({ kind: "unknown", outcome: "failed", signatures: { ...unsigned, total: 1, invalid: 1 } });
+  });
+
+  test("a good signature on a record of unknown kind verifies, and does not make the kind known", async () => {
+    const key = ed25519();
+    const payloadType = "application/vnd.jinn.not-registered.v1+json";
+    const payloadBytes = canonicalJsonBytes({});
+    const signature = new Uint8Array(sign(null, dssePreAuthEncoding(payloadType, payloadBytes), key.privateKey));
+    const report = await checkRecord(sealDsseEnvelope({ payloadType, payloadBytes, signatures: [{ signature, keyid: key.keyid }] }));
+    expect(report).toMatchObject({ kind: "unknown", outcome: "unknown-kind", signatures: { ...unsigned, total: 1, verified: 1 } });
+    expect(check(report, "signature").status).toBe("passed");
+    expect(check(report, "schema").status).toBe("skipped");
+  });
+
+  test("a signed record of unknown kind is counted unverified and says it is signed", async () => {
+    const bytes = sealDsseEnvelope({
+      payloadType: "application/vnd.jinn.not-registered.v1+json",
+      payloadBytes: canonicalJsonBytes({}),
+      signatures: [{ signature: Uint8Array.of(1), keyid: "did:key:z" }],
+    });
+    const report = await checkRecord(bytes);
+    expect(report.signatures).toEqual({ ...unsigned, total: 1, unverified: 1 });
+    expect(check(report, "signature")).toMatchObject({ status: "skipped", findings: [{ code: "unknown-kind", detail: expect.stringContaining("1 signature") }] });
+  });
+});
+
 describe("a corrupted signed record", () => {
   const key = ed25519();
   const payloadBytes = encoder.encode(JSON.stringify(evaluationStatement()));
@@ -651,10 +834,18 @@ describe("a corrupted signed record", () => {
     ["a signature that is not base64", { signatures: [{ keyid: key.keyid, sig: "not base64!!" }] }],
     ["no signatures", { signatures: [] }],
     ["a payload that is not base64", { payload: "not base64!!" }],
+    ["signatures that are not a list", { signatures: {} }],
+    ["a payload that is not a string", { payload: 5 }],
+    ["a payloadType that is not a string", { payloadType: 5 }],
   ])("%s fails: it claims to be signed, so it is not an artifact of unknown kind", async (_name, damage) => {
     const report = await checkRecord(encoder.encode(JSON.stringify({ ...envelope, ...damage })));
     expect(report.outcome).toBe("failed");
     expect(check(report, "encoding")).toMatchObject({ status: "failed", findings: [{ code: "malformed-envelope" }] });
+  });
+
+  test.each(["payload", "payloadType", "signatures"] as const)("with no %s it is not an envelope, so nothing claims to be signed", async (member) => {
+    const { [member]: _dropped, ...partial } = envelope;
+    expect((await checkRecord(encoder.encode(JSON.stringify(partial)))).outcome).toBe("unknown-kind");
   });
 
   test("the same bytes unbroken read as the claim they are", async () => {
@@ -755,6 +946,43 @@ describe("trust binding", () => {
       code: "binding-dependency-failed",
       detail: expect.stringContaining("no route to host"),
     });
+  });
+
+  test("a resolver decides: a refusal from it fails, and its outage skips", async () => {
+    const refusing: BindingResolver = { resolveBinding: async () => null };
+    const refused = await checkRecord(signedEvaluation(ed25519()), { trust: { bindingResolver: refusing } });
+    expect(check(refused, "trust-binding")).toMatchObject({ status: "failed", findings: [{ code: "binding-not-resolved" }] });
+    expect(refused.outcome).toBe("failed");
+
+    const down: BindingResolver = { resolveBinding: async () => { throw new Error("no route to host"); } };
+    const unreached = await checkRecord(signedEvaluation(ed25519()), { trust: { bindingResolver: down } });
+    expect(check(unreached, "trust-binding")).toMatchObject({ status: "skipped", findings: [{ code: "binding-dependency-failed" }] });
+    expect(unreached.outcome).toBe("checked");
+  });
+
+  test("a key binding record is attributed to its own agent, scope and start", async () => {
+    const working = ed25519();
+    const { envelopeBytes } = await signedRecord(working, {
+      protocol: "https://spec.jinn.network/trust/key-binding/v1",
+      agent: AGENT,
+      key: { publicKey: working.keyid, keyid: working.keyid, algorithm: "ed25519", didKey: working.keyid },
+      voucher: { kind: "account", did: "did:pkh:eip155:8453:0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed", contractAccount: false },
+      relationship: "controls",
+      scope: ["verdicts"],
+      validFrom: "2026-07-28T00:00:00Z",
+      ceremony: { type: "agentId", digest: `sha256:${"a".repeat(64)}` },
+      strength: "strong",
+      anchors: [],
+    }, "application/vnd.jinn.trust.key-binding.v1+json");
+    const seen: unknown[] = [];
+    const bindingResolver: BindingResolver = {
+      resolveBinding: async (query, atTime) => {
+        seen.push([query.agent, atTime]);
+        return resolving({}).resolveBinding(query, atTime);
+      },
+    };
+    expect(check(await checkRecord(envelopeBytes, { trust: { bindingResolver } }), "trust-binding").status).toBe("passed");
+    expect(seen[0]).toEqual([AGENT, "2026-07-28T00:00:00Z"]);
   });
 
   test("a kind that names no agent is skipped and says why", async () => {
