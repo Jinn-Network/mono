@@ -89,11 +89,21 @@ function validSigners(
 ): readonly string[] {
   if (options.requireSingleSignature === true && envelope.signatures.length !== 1) return [];
   const preAuthEncoding = dssePreAuthEncoding(envelope.payloadType, envelope.payloadBytes);
+  // Indexed, so a signature meets only the keys its own keyid names, not every key in the list.
+  const keysById = new Map<string, KeyObject[]>();
+  for (const { keyId, publicKey } of keys) {
+    const sameId = keysById.get(keyId);
+    if (sameId === undefined) keysById.set(keyId, [publicKey]);
+    else sameId.push(publicKey);
+  }
   const signers = envelope.signatures.flatMap(({ keyid, sig }) => {
+    if (keyid === undefined) return [];
+    const candidates = keysById.get(keyid);
+    if (candidates === undefined) return [];
     const signature = Buffer.from(sig, "base64");
-    const verified = keys.some(({ keyId, publicKey }) =>
-      keyId === keyid && verifiesUnder(publicKey, preAuthEncoding, signature, options.allowNonEd25519Keys === true));
-    return verified ? [keyid!] : [];
+    const verified = candidates.some((publicKey) =>
+      verifiesUnder(publicKey, preAuthEncoding, signature, options.allowNonEd25519Keys === true));
+    return verified ? [keyid] : [];
   });
   return options.keepRepeatedSigners === true ? signers : [...new Set(signers)];
 }

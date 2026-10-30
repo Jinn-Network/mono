@@ -168,8 +168,9 @@ describe("verifyDsseSignatures", () => {
 
   test("tries each key listed under a key id", () => {
     const rotated = { keyId: signer.keyId, publicKey: stranger.publicKey };
-    expect(verifyDsseSignatures(sealed(signatureBy(signer)), [rotated, signer]).validSignerKeyids)
-      .toEqual([signer.keyId]);
+    for (const keys of [[rotated, signer], [signer, rotated]]) {
+      expect(verifyDsseSignatures(sealed(signatureBy(signer)), keys).validSignerKeyids).toEqual([signer.keyId]);
+    }
   });
 
   describe("allowRespelledEnvelope", () => {
