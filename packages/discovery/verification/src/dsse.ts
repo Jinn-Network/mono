@@ -19,9 +19,11 @@ export interface DsseVerificationKey {
 /** Every option defaults to the strict behavior. */
 export interface VerifyDsseSignaturesOptions {
   /**
-   * Accept any JSON spelling of the envelope that `parseDsseEnvelope` can read, not only the exact
-   * bytes `sealDsseEnvelope` writes. Two spellings of one envelope are two record digests, so this
-   * is for callers holding envelopes that were never sealed by that encoder.
+   * Accept anything `parseDsseEnvelope` reads, not only the exact bytes `sealDsseEnvelope` writes:
+   * other JSON whitespace and member order, unknown and repeated members, a byte order mark, and
+   * URL-safe, unpadded, or non-canonical base64 in `payload` and `sig`. Two spellings of one
+   * envelope are two record digests, so this is for callers holding envelopes that were never
+   * sealed by that encoder.
    */
   readonly allowRespelledEnvelope?: boolean;
   /**
@@ -31,7 +33,8 @@ export interface VerifyDsseSignaturesOptions {
   readonly allowNonEd25519Keys?: boolean;
   /**
    * Report a key once per signature it made. Off by default because a caller counting signers
-   * against a threshold must not count one key twice.
+   * against a threshold must not count one key twice. The count is of distinct `keyid`s, not of
+   * key material: a caller that lists one public key under two ids gets two.
    */
   readonly keepRepeatedSigners?: boolean;
   /**
