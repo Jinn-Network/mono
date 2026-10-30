@@ -1,14 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AnchorsResult, LifecycleResult, RecordSetReport, RecordSetSummary, ReferencesResult } from "./check-record-set.js";
-import { UNKNOWN_KIND } from "./results.js";
+import { UNKNOWN_KIND, printable } from "./results.js";
 import type { CheckStatus, RecordCheckId, RecordReport, SignatureCounts } from "./results.js";
+
+/** A file left unread because of its size. It counts as a failure. */
+export interface UnreadFile {
+  readonly file: string;
+  readonly bytes: number;
+}
 
 /** Everything the command read and decided, printed one way for a person and one for `--json`. */
 export interface CommandReport {
   readonly target: string;
   /** Directory entries that are not files, and so were not read. */
   readonly notRead: number;
+  readonly tooLarge: readonly UnreadFile[];
   readonly suppliedKeys: number;
   /** One per record, in the same order. */
   readonly files: readonly string[];
@@ -19,6 +26,7 @@ export interface CommandReport {
 }
 
 const LABEL_WIDTH = 15;
+const NOT_A_SET = "not checked: one file is not a set";
 const LISTED_FAILURES = 5;
 
 const SKIP_PHRASES: Readonly<Record<string, string>> = {
@@ -68,33 +76,24 @@ function skipReasons(records: readonly RecordReport[], id: RecordCheckId): strin
     .join(", ");
 }
 
-function checkLine(label: string, id: RecordCheckId, report: CommandReport): string {
+function checkLine(label: string, id: RecordCheckId, report: CommandReport, passedAs = "passed"): string {
   const counts: Readonly<Record<CheckStatus, number>> = report.summary.checks[id];
   const parts = [
-    ...(counts.passed > 0 ? [`${number(counts.passed)} passed`] : []),
+    ...(counts.passed > 0 ? [`${number(counts.passed)} ${passedAs}`] : []),
     ...(counts.failed > 0 ? [`${number(counts.failed)} failed`] : []),
     ...(counts.skipped > 0 ? [`${number(counts.skipped)} skipped (${skipReasons(report.records, id)})`] : []),
   ];
-  return line(label, parts.join(", "));
+  return line(label, parts.length === 0 ? "nothing read" : parts.join(", "));
 }
 
-function signaturesLine(signatures: SignatureCounts, records: readonly RecordReport[]): string {
+function signaturesLine(signatures: SignatureCounts): string {
   if (signatures.total === 0) return line("Signatures", "none in these files");
   const ownKey = signatures.verified - signatures.verifiedWithSuppliedKey;
-  const ofUnknownKind = records
-    .filter(({ kind }) => kind === UNKNOWN_KIND)
-    .reduce((total, record) => total + record.signatures.unverified, 0);
-  const noKey = signatures.unverified - ofUnknownKind;
-  const why = [
-    ...(noKey > 0 ? [{ times: noKey, phrase: "no key" }] : []),
-    ...(ofUnknownKind > 0 ? [{ times: ofUnknownKind, phrase: "kind unknown" }] : []),
-  ];
-  const reason = why.length === 1 ? why[0]!.phrase : why.map(({ times, phrase }) => `${number(times)} ${phrase}`).join(", ");
   return line("Signatures", [
     ...(ownKey > 0 ? [`${number(ownKey)} verified by the key in their own id`] : []),
     ...(signatures.verifiedWithSuppliedKey > 0 ? [`${number(signatures.verifiedWithSuppliedKey)} verified against keys you supplied`] : []),
     ...(signatures.invalid > 0 ? [`${number(signatures.invalid)} failed`] : []),
-    signatures.unverified === 0 ? "none unverified" : `${number(signatures.unverified)} not verified (${reason})`,
+    signatures.unverified === 0 ? "none unverified" : `${number(signatures.unverified)} not verified (no key)`,
   ].join(", "));
 }
 
@@ -102,14 +101,17 @@ function referencesLine(result: ReferencesResult): string {
   const resolved = number(result.resolved + result.resolvedPublished);
   const published = result.resolvedPublished === 0
     ? ""
-    : `, ${count(result.resolvedPublished, "by a published document", "by published documents")}`;
+    : `, ${count(result.resolvedPublished, "by a published document", "of them by published documents")}`;
   const unavailable = result.unavailable === 0 ? "" : `, ${number(result.unavailable)} unavailable`;
+  if (result.status === "skipped") return line("References", "skipped: no record here has references to read");
   if (result.status === "failed") return line("References", `failed: ${number(result.dangling)} dangling, ${resolved} resolved${published}${unavailable}`);
   return line("References", `${result.opaque > 0 ? "passed for known kinds" : "passed"}: ${resolved} resolved${published}${unavailable}`);
 }
 
 function lifecycleLine(result: LifecycleResult): string {
-  if (result.status === "skipped") return line("Lifecycle", "skipped: no observations here");
+  if (result.status === "skipped") {
+    return line("Lifecycle", result.attempts.length === 0 ? "skipped: no observations here" : "skipped: no attempt-engaged here, so no source is authoritative");
+  }
   const uncovered = result.deliveriesWithoutObservations === 0
     ? ""
     : `, ${count(result.deliveriesWithoutObservations, "Delivery", "Deliveries")} with no log`;
@@ -129,17 +131,19 @@ function anchorsLine(result: AnchorsResult): string {
 }
 
 function failureLines(report: CommandReport): readonly string[] {
+  const unread = report.tooLarge.map(({ file, bytes }) =>
+    `  ${printable(`${file}: too-large: ${number(bytes)} bytes is over the limit, so it was not read.`)}`);
   const fromRecords = report.records.flatMap((record, index) => record.checks
     .filter(({ status }) => status === "failed")
     .flatMap(({ id, findings }) => findings
       .filter(({ code }) => !NOTES.has(code))
-      .map(({ path, detail }) => `  ${report.files[index]!}: ${id}:${path === undefined ? "" : ` ${path}:`} ${detail}`)));
+      .map(({ path, detail }) => `  ${printable(`${report.files[index]!}: ${id}:${path === undefined ? "" : ` ${path}:`} ${detail}`)}`)));
   const fromSet = (report.checks ?? [])
     .filter(({ status }) => status === "failed")
     .flatMap(({ id, findings }) => findings
       .filter(({ code }) => !NOTES.has(code))
-      .map(({ subject, path, detail }) => `  ${id}:${subject === undefined ? "" : ` ${subject}`}${path === undefined ? "" : ` ${path}`}: ${detail}`));
-  const failures = [...fromRecords, ...fromSet];
+      .map(({ subject, path, detail }) => `  ${printable(`${id}:${subject === undefined ? "" : ` ${subject}`}${path === undefined ? "" : ` ${path}`}: ${detail}`)}`));
+  const failures = [...unread, ...fromRecords, ...fromSet];
   return [
     ...failures.slice(0, LISTED_FAILURES),
     ...(failures.length > LISTED_FAILURES ? [`  and ${number(failures.length - LISTED_FAILURES)} more; --json has them all`] : []),
@@ -148,13 +152,24 @@ function failureLines(report: CommandReport): readonly string[] {
 
 function conclusion(report: CommandReport): string {
   const failedChecks = (report.checks ?? []).filter(({ status }) => status === "failed").map(({ id }) => `${id} failed`);
-  const failures = [...(report.summary.recordsFailed > 0 ? [`${count(report.summary.recordsFailed, "record")} failed`] : []), ...failedChecks];
+  const failures = [
+    ...(report.tooLarge.length > 0 ? [`${count(report.tooLarge.length, "file")} too large to read`] : []),
+    ...(report.summary.recordsFailed > 0 ? [`${count(report.summary.recordsFailed, "record")} failed`] : []),
+    ...failedChecks,
+  ];
   return `${failures.length === 0 ? "Nothing failed" : failures.join(", ")}. Skipped and unknown are not passes.`;
 }
 
 /** Whether anything failed, which is what the exit code answers. */
 export function reportFailed(report: CommandReport): boolean {
-  return report.summary.recordsFailed > 0 || (report.checks ?? []).some(({ status }) => status === "failed");
+  return report.tooLarge.length > 0
+    || report.summary.recordsFailed > 0
+    || (report.checks ?? []).some(({ status }) => status === "failed");
+}
+
+/** What the report can say about which files should exist. */
+function completenessLine(report: CommandReport): string {
+  return line("Completeness", report.checks === undefined ? NOT_A_SET : "not checked: nothing here says which files should exist");
 }
 
 /**
@@ -165,21 +180,24 @@ export function reportFailed(report: CommandReport): boolean {
 export function renderReport(report: CommandReport): string {
   const { summary } = report;
   const unknown = summary.kinds[UNKNOWN_KIND] ?? 0;
-  const unread = report.notRead === 0 ? "" : `, and did not read ${count(report.notRead, "entry that is not a file", "entries that are not files")}`;
-  const NOT_A_SET = "not checked: one file is not a set";
+  const unread = [
+    ...(report.notRead === 0 ? [] : [count(report.notRead, "entry that is not a file", "entries that are not files")]),
+    ...(report.tooLarge.length === 0 ? [] : [count(report.tooLarge.length, "file over the size limit", "files over the size limit")]),
+  ];
   const failures = failureLines(report);
   return [
-    `Read ${count(summary.records, "file")} from ${report.target}${unread}.`,
+    `Read ${count(summary.records, "file")} from ${printable(report.target)}${unread.length === 0 ? "" : `, and did not read ${unread.join(" or ")}`}.`,
     "",
     line("Kinds", `${number(summary.records - unknown)} known, ${number(unknown - summary.namingNoType)} unknown naming a type, ${number(summary.namingNoType)} naming no type`),
-    checkLine("Digest", "digest", report),
+    checkLine("Digest", "digest", report, "passed, compared with each file's own name"),
     checkLine("Encoding", "encoding", report),
     checkLine("Schema", "schema", report),
-    signaturesLine(summary.signatures, report.records),
+    signaturesLine(summary.signatures),
     line("Trust binding", "skipped: no key was tied to an identity"),
     report.checks === undefined ? line("References", NOT_A_SET) : referencesLine(report.checks[0]),
     report.checks === undefined ? line("Lifecycle", NOT_A_SET) : lifecycleLine(report.checks[1]),
     report.checks === undefined ? line("Anchors", NOT_A_SET) : anchorsLine(report.checks[2]),
+    completenessLine(report),
     "",
     ...(failures.length === 0 ? [] : [...failures, ""]),
     conclusion(report),

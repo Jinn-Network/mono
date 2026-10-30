@@ -79,3 +79,13 @@ export interface RecordReport {
 export function describeError(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
+
+/** What a file name or a record field could use to end a line, move the cursor, or reorder text. */
+const UNPRINTABLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+const LONGEST_PRINTED = 500;
+
+/** Text that came from a file name or a record, made safe for a terminal. It stays one plain line. */
+export function printable(text: string): string {
+  const escaped = text.replace(UNPRINTABLE, (character) => `\\u{${character.codePointAt(0)!.toString(16)}}`);
+  return escaped.length > LONGEST_PRINTED ? `${escaped.slice(0, LONGEST_PRINTED)}...` : escaped;
+}

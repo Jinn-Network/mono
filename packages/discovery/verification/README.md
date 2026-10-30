@@ -13,22 +13,34 @@ npx @jinn-network/verify <path> [--keys <file>] [--json]
 ```
 
 `<path>` is one record file or a directory of records. A directory is not walked into its
-subdirectories, and the report says how many entries it did not read. The command reads only what
-it is pointed at and opens no network.
+subdirectories, and the report says how many entries it did not read. It reads what it is pointed
+at and the documents below from its own install, and opens no network.
 
 | Flag | What it does |
 | --- | --- |
 | `--keys <file>` | Verifies signatures against the keys in the file. |
-| `--json` | Prints the structured report instead. |
+| `--json` | Prints the structured report instead, with `formatVersion` and a top-level `failed`. |
+| `--help` | Prints usage and exits 0. |
 
 | Exit code | Meaning |
 | --- | --- |
 | `0` | Nothing failed. |
-| `1` | A record failed a check, or a set check failed. |
+| `1` | A record failed a check, a set check failed, or a file was over the size limit. |
 | `2` | The command was misused, or could not read what it was pointed at. Nothing was checked. |
 
 A file named by its digest, as `<64 hex>` or `<64 hex>.<extension>`, claims that digest, and the
 `digest` check compares it. Any other name claims nothing, and `digest` is skipped.
+
+The command reads at most 2,097,152 bytes of any one file. A record's worst case is quadratic in its
+size, because each signature hashes the whole payload: about 3 s for a hostile file at this limit,
+and 12 s at twice it. The largest record in the public claim below is 436,248 bytes, and this is also
+the one limit the specification states for a stored object, in the IPFS repository profile. A larger
+file is not read. It is named in the report and fails the run, and anything citing it dangles. A
+keys file over the limit is exit code 2. The limit is per file, so a directory of many such files
+still takes as long as it takes.
+
+File names, `keyid` values and details printed from a record have control and formatting characters
+escaped, so a record cannot add a line to the report or move the cursor.
 
 Every record in a directory is a root of the reference walk. A reference to a document the
 specification publishes resolves against the documents below even when the directory does not hold
@@ -42,14 +54,15 @@ The report prints `passed` only for what ran. This is the output on the public c
 Read 41,678 files from ./bundle/records.
 
 Kinds          26,401 known, 4,814 unknown naming a type, 10,463 naming no type
-Digest         41,678 passed
+Digest         41,678 passed, compared with each file's own name
 Encoding       31,882 passed, 9,796 skipped (5,476 not records, 4,320 not required by family)
 Schema         26,401 passed, 15,277 skipped (kind unknown)
-Signatures     4,320 verified against keys you supplied, 2 not verified (kind unknown)
+Signatures     4,322 verified against keys you supplied, none unverified
 Trust binding  skipped: no key was tied to an identity
-References     passed for known kinds: 92,162 resolved, 9,600 by published documents
+References     passed for known kinds: 92,162 resolved, 9,600 of them by published documents
 Lifecycle      skipped: no observations here
 Anchors        not checked: no anchor records here
+Completeness   not checked: nothing here says which files should exist
 
 Nothing failed. Skipped and unknown are not passes.
 ```
@@ -171,7 +184,8 @@ records and any application's own kinds.
 `@jinn-network/task-execution-profiles` applies under §6.4. That check is a static star-height test,
 so the pattern may be harmless, but it is the check that package uses, and it refuses the document too.
 
-A record no kind claims is reported as `unknown`, with only `digest` and `encoding` checked. If it
+A record no kind claims is reported as `unknown`, with `digest` and `encoding` checked, and any DSSE
+signature whose key is known verified, so a signed record cannot fall out of its kind to escape. If it
 names a type under `https://spec.jinn.network/`, it is held to RFC 8785, because application records
 follow the same disciplines. If it names no type it may be an artifact, so failing the comparison
 is `skipped`, not `failed`. The exception is bytes with DSSE's three members and no readable envelope:
@@ -179,18 +193,27 @@ they claim to be signed, so they fail.
 
 ## What passing does not show
 
-- **A digest shows the bytes are the ones asked for.** It does not show who wrote them.
+- **A digest shows the bytes are the ones asked for.** It does not show who wrote them. The command
+  compares a file with its own name, which sits beside it: whoever changes the bytes can change the
+  name, so `digest` shows a file was not damaged, not that it is the file that was published.
+- **The command does not know which files should exist.** Every file is its own root, so a record
+  added, or a record nothing known cites, removed or replaced, changes a count and fails nothing.
+  To tie a directory to a published claim, compare the claim's own digest by another route.
 - **A schema shows the record is interpretable.** It does not show its claims are true, or that the
   work was good. The Execution Evidence Profile says the same of its own conformance.
 - **A signature shows a key signed.** Only `trust-binding` ties a key to an identity, and only as far
   as its resolver can see. A `did:key` is the key, not who holds it, and a key you supplied is only
-  the key you supplied.
+  the key you supplied. A keys file that came with the records shows nothing against whoever handed
+  you both.
 - **Distinct keys are distinct keys.** Nothing here shows they belong to distinct parties.
 - **An anchor that is `present` was not evaluated.** Without trust material its time is unchecked.
   One `pending` has no attestation yet.
 - **A closed reference walk covers known kinds.** Records of unknown kind are opaque to it, and
-  anything `unavailable` was not looked at. A reference met by a published document shows the bytes
-  exist, not that the record used them correctly.
+  anything `unavailable` was not looked at, which includes what a signed evaluation cites and the
+  evaluation a Delivery lists as an output. A digest in a profile's `payload` is not followed. A
+  reference met by a published document shows the bytes exist, not that the record used them correctly.
+- **A signed manifest shows which key signed it.** The pins here match the signed `v0.1.0` manifest,
+  and no published record yet says whose key that is.
 - **A lifecycle folds the log it is given.** Between implementations with no venue, nothing yet says
   who mints an attempt number, so a fold cannot show that two operators did not collide.
 - **Passing these vectors here is not interoperability.** One implementation exists, and some

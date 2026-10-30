@@ -31,6 +31,11 @@ describe("parseKeysFile", () => {
     expect(parseKeysFile(JSON.stringify([{ keyId: "one", spkiDerBase64: key }, { keyId: "one", spkiDerBase64: key }]))).toHaveLength(1);
   });
 
+  test("a key that is not Ed25519 is refused, because no signature could be verified under it", () => {
+    const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 }).publicKey.export({ format: "der", type: "spki" }).toString("base64");
+    expect(() => parseKeysFile(JSON.stringify([{ keyId: "one", spkiDerBase64: rsa }]))).toThrow(/Ed25519/u);
+  });
+
   test.each([
     ["text that is not JSON", "not json", /not JSON/u],
     ["a file with no keys", "{}", /no keys/u],

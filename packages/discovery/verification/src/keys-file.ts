@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createPublicKey } from "node:crypto";
+import type { KeyObject } from "node:crypto";
 
 import type { DsseVerificationKey } from "./dsse.js";
 import { isRecordObject } from "./record-view.js";
@@ -48,10 +49,15 @@ export function parseKeysFile(text: string): readonly DsseVerificationKey[] {
     throw new KeysFileError("the keys file holds no keys: it needs objects with keyId and spkiDerBase64");
   }
   return [...byKeyId].map(([keyId, spkiDerBase64]) => {
+    let publicKey: KeyObject;
     try {
-      return { keyId, publicKey: createPublicKey({ key: Buffer.from(spkiDerBase64, "base64"), format: "der", type: "spki" }) };
+      publicKey = createPublicKey({ key: Buffer.from(spkiDerBase64, "base64"), format: "der", type: "spki" });
     } catch (cause) {
       throw new KeysFileError(`key ${keyId} is not an SPKI DER public key: ${describeError(cause)}`);
     }
+    if (publicKey.asymmetricKeyType !== "ed25519") {
+      throw new KeysFileError(`key ${keyId} is ${String(publicKey.asymmetricKeyType)}, and signatures are verified under Ed25519 keys only`);
+    }
+    return { keyId, publicKey };
   });
 }

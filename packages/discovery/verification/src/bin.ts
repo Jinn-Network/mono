@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { runCommand } from "./command.js";
+import { printable } from "./results.js";
 
 // A reader closing the pipe early, as `head` does, is not an error in the command.
 process.stdout.on("error", (error: NodeJS.ErrnoException) => {
@@ -14,6 +15,6 @@ try {
     stderr: (text) => process.stderr.write(text),
   });
 } catch (cause) {
-  process.stderr.write(`${cause instanceof Error ? cause.message : String(cause)}\n`);
+  process.stderr.write(`${printable(cause instanceof Error ? cause.message : String(cause))}\n`);
   process.exitCode = 2;
 }
