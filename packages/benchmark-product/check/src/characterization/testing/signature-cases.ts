@@ -6,8 +6,10 @@
  * `profile/assembly-ports.ts` answer every failure with the same empty result, and did:key derivation
  * sits in front of a check that only ever feeds it Ed25519.
  *
- * The two envelope readers here are the lenient `parseDsseEnvelope`; the admission ports in
- * `verify.ts` use the exact one. That difference is behavior, so both are pinned.
+ * Both sites read envelopes with the lenient `parseDsseEnvelope`, and that is pinned here. The
+ * admission ports in `verify.ts` use the exact parser, but `admission/verification.ts` has parsed
+ * each envelope and counted its signatures before they run, so their own copy changes no output
+ * and no pin can see it.
  */
 
 import { createPublicKey } from "node:crypto";
@@ -54,6 +56,16 @@ function goldenBytes(path: string): Uint8Array {
 
 function respelled(envelope: Uint8Array): Uint8Array {
   return encoder.encode(JSON.stringify(JSON.parse(new TextDecoder().decode(envelope)), null, 2));
+}
+
+function urlSafeSignature(envelope: Uint8Array): Uint8Array {
+  const parsed = JSON.parse(new TextDecoder().decode(envelope)) as { signatures: { sig: string }[] };
+  for (const signature of parsed.signatures) {
+    // A signature with neither character reads the same in both alphabets and would prove nothing.
+    if (!/[+/]/u.test(signature.sig)) throw new Error("signature has no URL-unsafe character");
+    signature.sig = signature.sig.replaceAll("+", "-").replaceAll("/", "_");
+  }
+  return encoder.encode(JSON.stringify(parsed));
 }
 
 // ── profile/signing.ts `verifyReportEnvelopeSignatures` ──────────────────────────────────────────
@@ -139,6 +151,7 @@ export const SIGNATURE_CASES: Readonly<Record<string, Case>> = {
   "report-envelope-signatures/a-stranger-signs-first": reportSigners(reportEnvelope(allOf(signedBy(stranger), signedBy(reportKey)))),
   "report-envelope-signatures/the-report-key-signs-twice": reportSigners(reportEnvelope(allOf(signedBy(reportKey), signedBy(reportKey)))),
   "report-envelope-signatures/respelled-envelope-is-accepted": reportSigners(respelled(goldenEnvelope)),
+  "report-envelope-signatures/url-safe-signature-is-accepted": reportSigners(urlSafeSignature(goldenEnvelope)),
   "report-envelope-signatures/not-an-envelope": reportSigners(encoder.encode("not an envelope")),
   "report-envelope-signatures/verifying-key-is-not-ed25519": reportSigners(goldenEnvelope, {
     keyId: reportKey.keyId,
@@ -162,7 +175,11 @@ export const SIGNATURE_CASES: Readonly<Record<string, Case>> = {
   "evaluator-claim/key-id-is-not-the-evaluator-key": resolvedAgent({ envelope: verdict(signedBy(evaluatorKey, stranger.keyId)) }),
   "evaluator-claim/a-stranger-signs-first": resolvedAgent({ envelope: verdict(allOf(signedBy(stranger), signedBy(evaluatorKey))) }),
   "evaluator-claim/respelled-envelope-is-accepted": resolvedAgent({ envelope: respelled(verdict(signedBy(evaluatorKey))) }),
-
+  "evaluator-claim/url-safe-signature-is-accepted": resolvedAgent({ envelope: urlSafeSignature(verdict(signedBy(evaluatorKey))) }),
+  // The same length as `sha256:`, so the digest still resolves and only the prefix test can refuse.
+  "evaluator-claim/digest-has-another-prefix": resolvedAgent({
+    evidence: { role: "evaluator", claim: EVALUATOR, verdictDigest: `sha512:${sha256Hex(verdict(signedBy(evaluatorKey)))}` },
+  }),
   "evaluator-claim/p256-key-with-a-signature-it-verifies": resolvedAgent({
     envelope: verdict(evaluatorKeyIdP256.signatures),
     keys: new Map([[EVALUATOR, { keyId: evaluatorKey.keyId, publicKey: evaluatorKeyIdP256.publicKey }]]),
@@ -179,6 +196,10 @@ export const SIGNATURE_CASES: Readonly<Record<string, Case>> = {
   "did-key-decoding/another-did-method": decodedDidKey("did:web:example.com"),
   "did-key-decoding/empty-payload": decodedDidKey("did:key:z"),
   "did-key-decoding/character-outside-the-alphabet": decodedDidKey("did:key:z0OIl"),
+  // A real key's length, so only the alphabet test can refuse it.
+  "did-key-decoding/character-outside-the-alphabet-at-key-length": decodedDidKey(`${GOLDEN_DID_KEY.slice(0, -1)}0`),
+  // The Ed25519 multicodec on a 31-byte body, so only the length test can refuse it.
+  "did-key-decoding/ed25519-prefix-on-a-short-key": decodedDidKey("did:key:z2DQUz8nFdBkV4MKdqWGtQB9BsNUCioEPREBUjj3hFW95f6"),
   "did-key-decoding/payload-one-digit-too-long": decodedDidKey(`did:key:z${"1".repeat(48)}`),
   "did-key-decoding/too-short-for-a-key": decodedDidKey("did:key:z6Mk"),
   "did-key-decoding/secp256k1-key": decodedDidKey("did:key:zQ3shokFTS3brHcDQrn82RUDfCZESWL1ZdCEJwekUDPQiYBme"),

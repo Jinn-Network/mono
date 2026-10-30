@@ -15,7 +15,10 @@ import { verifyPublicBundle } from "../../verify.js";
 
 export const VERIFIER_VERSION_PLACEHOLDER = "<verifier-version>";
 
-/** Round-trips through JSON, so a value that does not survive serialization fails loudly here. */
+/**
+ * Round-trips through JSON, so a pin compares what a JSON reader gets. None of these outputs
+ * carries a Map, Set, undefined or non-finite number, which JSON would alter silently.
+ */
 export function normalize(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value, (key, entry: unknown) => (
     key === "verifierVersion" ? VERIFIER_VERSION_PLACEHOLDER : entry

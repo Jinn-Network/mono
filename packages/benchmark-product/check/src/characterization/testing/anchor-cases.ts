@@ -2,9 +2,9 @@
 
 /**
  * The `integrity-anchors` reports, in full. The golden bundle carries no anchors, so nothing else
- * in this suite reaches the check. These are the records `anchor/integrity-anchors.test.ts` builds,
- * plus the three outcomes it leaves unbuilt; that suite asserts what each one means and this one
- * pins every byte of what each one says, reason strings included.
+ * in this suite reaches the check's reports. These are the records
+ * `anchor/integrity-anchors.test.ts` builds, plus the outcomes it leaves unbuilt; that suite asserts
+ * what each one means and this one pins every byte of what each one says, reason strings included.
  */
 
 import { readFileSync } from "node:fs";
@@ -163,6 +163,19 @@ export const ANCHOR_CASES: Readonly<Record<string, () => unknown>> = {
     subjectSha256: MATRIX_SHA256,
     proofBytes: matrixOts.completeProof,
   }))]),
+
+  "chain-lock/records-given-out-of-digest-order": report([chainLock(lockOts.completeProof), chainLock(lockOts.pendingProof)]),
+  "chain-lock/pending-only": report([chainLock(lockOts.pendingProof)]),
+  "two-declared-none-carried": report([], {
+    declaredProfiles: [RFC3161_TSA_ANCHOR_PROFILE, OPENTIMESTAMPS_ANCHOR_PROFILE],
+  }),
+  "rfc3161-lock/at-the-close-instant": report([rfc3161Lock({ genTimeDer: "20260601000000Z" })]),
+  "rfc3161-lock/after-the-close-instant-with-trust-material": report([rfc3161Lock({ genTimeDer: LATER_GEN_TIME_DER })], {
+    trust: { rfc3161: { trustAnchorsDer: [authority.certificateDer] } },
+  }),
+  "rfc3161-lock/trust-material-for-the-other-provider": report([rfc3161Lock()], {
+    trust: { opentimestamps: { blockHeaders } },
+  }),
 
   "captured/digicert-token": capturedReport("token-digicert.der", "2026-08-18T00:00:00Z"),
   "captured/sslcom-token": capturedReport("token-sslcom.der", "2026-08-18T00:00:00Z"),

@@ -1023,6 +1023,84 @@
       "stderr": "colophon-check: verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 keyId cross-validation failed\n"
     }
   },
+  "anchored-bundle/dangling-anchor": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix",
+        "issues": [
+          {
+            "path": "anchors/05d56b22a066fe82fe08d2b26a27767d51e94eebffd4e34560551e403b64dae0.bin",
+            "message": "carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix\n"
+    }
+  },
+  "anchored-bundle/anchor-over-the-sealed-run": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "claim package anchors is not the exact projection of verified facts",
+        "issues": [
+          {
+            "path": "claim-consistency",
+            "message": "claim package anchors is not the exact projection of verified facts"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "claim package anchors is not the exact projection of verified facts"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: claim package anchors is not the exact projection of verified facts\n"
+    }
+  },
   "report-envelope/signed-by-another-key": {
     "library": {
       "threw": {
@@ -1872,6 +1950,11 @@
       "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX"
     ]
   },
+  "report-envelope-signatures/url-safe-signature-is-accepted": {
+    "validSignerKeyids": [
+      "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX"
+    ]
+  },
   "report-envelope-signatures/not-an-envelope": {
     "validSignerKeyids": []
   },
@@ -1895,6 +1978,8 @@
   "evaluator-claim/key-id-is-not-the-evaluator-key": "unresolved",
   "evaluator-claim/a-stranger-signs-first": "urn:evaluator:characterization",
   "evaluator-claim/respelled-envelope-is-accepted": "urn:evaluator:characterization",
+  "evaluator-claim/url-safe-signature-is-accepted": "urn:evaluator:characterization",
+  "evaluator-claim/digest-has-another-prefix": "unresolved",
   "evaluator-claim/p256-key-with-a-signature-it-verifies": "urn:evaluator:characterization",
   "did-key-derivation/golden-report-key": {
     "returned": "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX"
@@ -1938,6 +2023,16 @@
     "fingerprint": null
   },
   "did-key-decoding/character-outside-the-alphabet": {
+    "publicKeyHex": null,
+    "spkiDerBase64": null,
+    "fingerprint": null
+  },
+  "did-key-decoding/character-outside-the-alphabet-at-key-length": {
+    "publicKeyHex": null,
+    "spkiDerBase64": null,
+    "fingerprint": null
+  },
+  "did-key-decoding/ed25519-prefix-on-a-short-key": {
     "publicKeyHex": null,
     "spkiDerBase64": null,
     "fingerprint": null
@@ -2581,6 +2676,181 @@
       {
         "subject": "matrix",
         "outcome": "anchored"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/chain-lock/records-given-out-of-digest-order": {
+    "anchors": [
+      {
+        "recordSha256": "19743553d17414dd1938d407c7d4c0080f1be360accdb9b41496b29f04f14120",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "pending",
+        "timeBasis": "authority-time",
+        "reason": "The proof carries 1 calendar promise and no Bitcoin attestation."
+      },
+      {
+        "recordSha256": "a4e48d9ce998b10c2f0e683831f53209ecc61a12bfdb257d85a8f44a94b3846a",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "present",
+        "timeBasis": "chain-time",
+        "facts": {
+          "blockHeight": 880017
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/chain-lock/pending-only": {
+    "anchors": [
+      {
+        "recordSha256": "19743553d17414dd1938d407c7d4c0080f1be360accdb9b41496b29f04f14120",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "pending",
+        "timeBasis": "authority-time",
+        "reason": "The proof carries 1 calendar promise and no Bitcoin attestation."
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/two-declared-none-carried": {
+    "anchors": [],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "declared-but-absent",
+        "declaredProfiles": [
+          "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+          "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1"
+        ]
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/rfc3161-lock/at-the-close-instant": {
+    "anchors": [
+      {
+        "recordSha256": "1a2669b7f264d6b1a5911d183b59fed021897bd3638cdf5e7ef08513f33458f8",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "present",
+        "timeBasis": "authority-time",
+        "facts": {
+          "genTime": "2026-06-01T00:00:00Z",
+          "policyOid": "2.999.1",
+          "serialNumber": "0102030405060708090a0b0c0d0e0f10",
+          "signerCertificateSha256": "a8130302dd961dca1397c081ee24fcc7201b8a9a9b85eca82caabdb02b5b785e",
+          "signatureAlgorithmOid": "1.2.840.10045.4.3.2",
+          "accuracy": {
+            "seconds": 1
+          }
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/rfc3161-lock/after-the-close-instant-with-trust-material": {
+    "anchors": [
+      {
+        "recordSha256": "38c249067f8f32ba49954d568bf1b6a1f7ac90dc8978b6a8fc5ce63216999dbe",
+        "status": "invalid",
+        "reason": "the token's genTime 2026-06-01T12:00:00Z is after this run's own pre-registered close instant 2026-06-01T00:00:00Z",
+        "trustMaterial": "none",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock"
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "absent"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": [
+      {
+        "recordSha256": "38c249067f8f32ba49954d568bf1b6a1f7ac90dc8978b6a8fc5ce63216999dbe",
+        "status": "invalid",
+        "reason": "the token's genTime 2026-06-01T12:00:00Z is after this run's own pre-registered close instant 2026-06-01T00:00:00Z",
+        "trustMaterial": "none",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock"
+      }
+    ]
+  },
+  "anchors/rfc3161-lock/trust-material-for-the-other-provider": {
+    "anchors": [
+      {
+        "recordSha256": "d87b5580e495afc652cc7854393fa81e12e8eca34835fbe3107aeaf655d65cba",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "present",
+        "timeBasis": "authority-time",
+        "facts": {
+          "genTime": "2026-05-01T12:00:00Z",
+          "policyOid": "2.999.1",
+          "serialNumber": "0102030405060708090a0b0c0d0e0f10",
+          "signerCertificateSha256": "a8130302dd961dca1397c081ee24fcc7201b8a9a9b85eca82caabdb02b5b785e",
+          "signatureAlgorithmOid": "1.2.840.10045.4.3.2",
+          "accuracy": {
+            "seconds": 1
+          }
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
       }
     ],
     "invalid": []

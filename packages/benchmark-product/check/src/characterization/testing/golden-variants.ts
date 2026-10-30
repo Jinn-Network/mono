@@ -6,11 +6,11 @@
  * written to. Temporary directories are swept by the suite's tmp isolation.
  */
 
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalJsonBytes, parseDsseEnvelope } from "@jinn-network/trust-core";
-import { BUNDLE_FORMAT, type LegacyBundleFormat } from "../../legacy-closures.js";
+import { BUNDLE_FORMAT, BUNDLE_V6_FORMAT, type LegacyBundleFormat } from "../../legacy-closures.js";
 import { buildBundleManifest } from "../../manifest.js";
 import { GOLDEN_BUNDLE_DIR } from "../../testing/golden-asset-input.js";
 import { sealSigned, type DsseSignatures } from "./signers.js";
@@ -60,5 +60,15 @@ export function goldenWithReportSignatures(signatures: DsseSignatures): string {
   const { payloadType, payloadBytes } = parseDsseEnvelope(new Uint8Array(readFileSync(path)));
   writeFileSync(path, sealSigned(payloadType, payloadBytes, signatures));
   reseal(bundleDir);
+  return bundleDir;
+}
+
+/** A `/6` copy of the golden bundle carrying this anchor record. */
+export function goldenAnchoredBy(record: { readonly recordSha256: string; readonly bytes: Uint8Array }): string {
+  const bundleDir = copyGolden();
+  const path = `anchors/${record.recordSha256}.bin`;
+  mkdirSync(join(bundleDir, "anchors"));
+  writeFileSync(join(bundleDir, path), record.bytes);
+  reseal(bundleDir, BUNDLE_V6_FORMAT, [...memberPaths(bundleDir), path]);
   return bundleDir;
 }

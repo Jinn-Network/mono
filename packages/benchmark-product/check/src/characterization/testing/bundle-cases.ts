@@ -10,10 +10,16 @@
  * every refusal case alone.
  */
 
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { RUN_RECORD_KIND } from "@jinn-network/benchmarking-records";
+import { buildRfc3161AnchorEvidenceRecord, createFixtureAuthority } from "@jinn-network/trust-testing";
 import { verdictKeyIdFromEd25519PublicKey } from "../../profile/verdict.js";
+import { GOLDEN_BUNDLE_DIR } from "../../testing/golden-asset-input.js";
 import { operatorOnlyBundle, twoHumanBundle } from "./binary-admission-bundles.js";
 import { EVIDENCE_NATIVE_EVALUATOR, evidenceNativeBundle } from "./evidence-native-bundles.js";
-import { goldenWith, goldenWithReportSignatures } from "./golden-variants.js";
+import { goldenAnchoredBy, goldenWith, goldenWithReportSignatures } from "./golden-variants.js";
 import {
   FOREIGN_SPKI_BASE64,
   allOf,
@@ -28,6 +34,17 @@ const stranger = signerFromLabel("stranger");
 const reportKey = kitReportSigner();
 const notAKey = Buffer.from("not a key").toString("base64");
 const TRUST = "trust/public-keys.json";
+const anchorAuthority = createFixtureAuthority("checker-characterization");
+const GOLDEN_RUN_SHA256 = createHash("sha256").update(readFileSync(join(GOLDEN_BUNDLE_DIR, "run.json"))).digest("hex");
+
+function carriedAnchorOver(subjectSha256: string, genTime = "20260101000000Z") {
+  const built = buildRfc3161AnchorEvidenceRecord({
+    subjectKind: RUN_RECORD_KIND,
+    subjectSha256,
+    proofBytes: anchorAuthority.mintTimeStampToken({ subjectSha256, genTime }).tokenDer,
+  });
+  return { recordSha256: built.recordDigest.slice("sha256:".length), bytes: built.bytes };
+}
 
 export const BUNDLE_CASES: Readonly<Record<string, () => string>> = {
   // ── `trust`, and the two `publicKey` refusals that run ahead of it ─────────────────────────────
@@ -67,6 +84,10 @@ export const BUNDLE_CASES: Readonly<Record<string, () => string>> = {
   "trust/verdict-key-id-disagrees-with-its-evaluator": () => goldenWith("verdicts.json", (catalog) => {
     catalog["verdicts"][0].keyId = "benchmark-product-verdict-0000000000000000";
   }),
+
+  // ── verify.ts around `anchor/check.ts`, through a /6 bundle ───────────────────────────────────
+  "anchored-bundle/dangling-anchor": () => goldenAnchoredBy(carriedAnchorOver("3".repeat(64))),
+  "anchored-bundle/anchor-over-the-sealed-run": () => goldenAnchoredBy(carriedAnchorOver(GOLDEN_RUN_SHA256)),
 
   // ── profile/signing.ts, through `report-verification` ──────────────────────────────────────────
   "report-envelope/signed-by-another-key": () => goldenWithReportSignatures(

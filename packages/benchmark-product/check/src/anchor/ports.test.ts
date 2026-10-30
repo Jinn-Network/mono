@@ -505,6 +505,31 @@ describe("the node:crypto chain verifier", () => {
     expect(verifyChain([leaf, intermediate], [root])).toBe(true);
   });
 
+  test("a certificate naming a supplied root but signed by another key does not verify", () => {
+    const impostor = mintCertificate({ commonName: "P4 test root", ca: true });
+    const forged = mintCertificate({
+      commonName: "P4 forged unit",
+      issuer: impostor,
+      extendedKeyUsageOids: [OID_ID_KP_TIME_STAMPING],
+    });
+    expect(verifyChain([forged], [root])).toBe(false);
+  });
+
+  test("an intermediate expired at the instant does not verify under a root still valid", () => {
+    const expired = mintCertificate({
+      commonName: "P4 expired intermediate",
+      ca: true,
+      issuer: root,
+      notAfter: "260101000000Z",
+    });
+    const unit = mintCertificate({
+      commonName: "P4 unit under an expired intermediate",
+      issuer: expired,
+      extendedKeyUsageOids: [OID_ID_KP_TIME_STAMPING],
+    });
+    expect(verifyChain([unit, expired], [root])).toBe(false);
+  });
+
   test("a chain that never reaches a supplied root does not verify", () => {
     const stranger = mintCertificate({ commonName: "P4 unrelated root", ca: true });
     expect(verifyChain([leaf, intermediate], [stranger])).toBe(false);

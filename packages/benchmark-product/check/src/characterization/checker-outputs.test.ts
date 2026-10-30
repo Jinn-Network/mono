@@ -14,6 +14,9 @@
  *
  *   CHECKER_CHARACTERIZATION_UPDATE=1 yarn vitest run src/characterization/checker-outputs.test.ts
  *
+ * The record-checks move must not touch the expected file: a diff in it during #5120 means the move
+ * changed an output, so fix the code.
+ *
  * Normalization happens in one place, `normalize` in `testing/observe.ts`.
  */
 

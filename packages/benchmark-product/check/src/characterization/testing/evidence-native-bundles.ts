@@ -247,7 +247,7 @@ export function evidenceNativeBundle(options: EvidenceNativeBundleOptions = {}):
       }],
       signatureValidityIsNotAuthorization: true,
     },
-    verification: { checks: [...EVIDENCE_NATIVE_BUNDLE_V5_CHECKS], command: "colophon-verify" },
+    verification: { checks: [...EVIDENCE_NATIVE_BUNDLE_V5_CHECKS], command: "colophon-check" },
     issuedAt: "2026-08-16T16:00:00.000Z",
   });
 
