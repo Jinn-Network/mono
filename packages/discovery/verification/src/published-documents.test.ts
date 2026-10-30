@@ -44,14 +44,24 @@ describe("the published documents this package carries", () => {
     expect(PUBLISHED_DOCUMENTS.map(({ path }) => path).sort()).toEqual(shipped);
   });
 
-  test("the task profiles read as profile documents and conform", async () => {
+  test("the task profiles read as profile documents, and all but one conform", async () => {
     const profiles = PUBLISHED_DOCUMENTS.filter(({ path }) => path.startsWith("profiles/task-profiles/"));
     expect(profiles).toHaveLength(4);
+    const outcomes: Record<string, string> = {};
     for (const { path } of profiles) {
       // eslint-disable-next-line no-await-in-loop -- four small files.
       const report = await checkRecord(carried(path));
-      expect(report).toMatchObject({ kind: RECORD_KINDS.profileDocument, outcome: "checked" });
+      expect(report.kind).toBe(RECORD_KINDS.profileDocument);
+      outcomes[path] = report.outcome;
     }
+    // Its pattern fails the §6.4 check its owner applies. Carrying it is still right: a carried
+    // document answers a citation by digest, and is not vouched for.
+    expect(outcomes).toEqual({
+      "profiles/task-profiles/binary-judgment/2.0/profile.json": "checked",
+      "profiles/task-profiles/evaluation-task/1.0/profile.json": "checked",
+      "profiles/task-profiles/prediction-forecast/1.0/profile.json": "failed",
+      "profiles/task-profiles/repository-work/1.0/profile.json": "checked",
+    });
   });
 
   test("loading returns every carried document", () => {

@@ -41,10 +41,10 @@ function signerFor(key: Key) {
     [{ keyid: key.keyid, signature: new Uint8Array(sign(null, preAuthEncoding, key.privateKey)) }] as const;
 }
 
-function eoaEvidence(agent: string, key: Key): EoaCeremonyEvidence {
+function eoaEvidence(agent: string, key: Key, voucherSigner = VOUCHER_SIGNER): EoaCeremonyEvidence {
   const message: SiweCeremonyMessage = {
     domain: "trust.jinn.network",
-    address: VOUCHER_SIGNER.address,
+    address: voucherSigner.address,
     uri: "https://trust.jinn.network/ceremony/key-binding",
     version: "1",
     chainId: 8453,
@@ -53,7 +53,7 @@ function eoaEvidence(agent: string, key: Key): EoaCeremonyEvidence {
     resources: [agent, key.keyid],
   };
   const messageBytes = serializeCeremonyMessage("eoa", message);
-  return { type: "eoa", message, messageBytes, signature: VOUCHER_SIGNER.sign(messageBytes) };
+  return { type: "eoa", message, messageBytes, signature: voucherSigner.sign(messageBytes) };
 }
 
 async function sealedBinding(key: Key, options: {
@@ -63,22 +63,27 @@ async function sealedBinding(key: Key, options: {
   readonly validFrom?: string;
   readonly expiresAt?: string;
   readonly scope?: readonly string[];
+  readonly voucherSigner?: ReturnType<typeof createEoaTestSigner>;
+  readonly relationship?: KeyBinding["relationship"];
+  readonly consent?: { readonly keyid: string; readonly sig: string };
 } = {}) {
   const agent = options.agent ?? AGENT;
   const ceremonyType = options.ceremonyType ?? "eoa";
-  const ceremonyEvidence = eoaEvidence(agent, key);
+  const voucherSigner = options.voucherSigner ?? VOUCHER_SIGNER;
+  const ceremonyEvidence = eoaEvidence(agent, key, voucherSigner);
   const binding: KeyBinding = {
     protocol: "https://spec.jinn.network/trust/key-binding/v1",
     agent,
     key: { publicKey: key.keyid, keyid: key.keyid, algorithm: "ed25519", didKey: key.keyid },
-    voucher: VOUCHER,
-    relationship: "controls",
+    voucher: voucherSigner === VOUCHER_SIGNER ? VOUCHER : { ...VOUCHER, did: `did:pkh:eip155:8453:${voucherSigner.address}` },
+    relationship: options.relationship ?? "controls",
     scope: [...(options.scope ?? ["verdicts"])],
     validFrom: options.validFrom ?? "2026-01-01T00:00:00Z",
     ...(options.expiresAt === undefined ? {} : { expiresAt: options.expiresAt }),
     ceremony: { type: ceremonyType, digest: ceremonyEvidenceDigest(ceremonyEvidence) },
     strength: deriveStrength(ceremonyType),
     anchors: [],
+    ...(options.consent === undefined ? {} : { consent: options.consent }),
   };
   const { envelopeBytes } = await sealKeyBinding(binding, signerFor(options.signer ?? key));
   return { binding, envelopeBytes, ceremonyEvidence };
@@ -214,6 +219,94 @@ describe("createStaticBindingResolver", () => {
       trust: { bindingResolver: resolver },
     });
     expect(binding(report).status).toBe("passed");
+  });
+
+  describe("§7.4a holds against what the resolver cannot run", () => {
+    const HOSTILE_VOUCHER = createEoaTestSigner("static-binding-resolver-hostile");
+    const atTime = "2026-07-28T00:00:00Z";
+
+    async function resolverOver(earlier: Awaited<ReturnType<typeof sealedBinding>>, later: Awaited<ReturnType<typeof sealedBinding>>) {
+      return createStaticBindingResolver([earlier, later].map(({ envelopeBytes, ceremonyEvidence }) => ({ envelopeBytes, ceremonyEvidence })));
+    }
+
+    test.each(["oidc-machine", "agentId", "github-human"] as const)(
+      "a held %s genesis keeps a later binding from being genesis",
+      async (ceremonyType) => {
+        const founding = ed25519();
+        const attacker = ed25519();
+        const genesis = await sealedBinding(founding, { ceremonyType });
+        const hostile = await sealedBinding(attacker, { validFrom: "2026-02-01T00:00:00Z", voucherSigner: HOSTILE_VOUCHER });
+        const resolver = await resolverOver(genesis, hostile);
+        expect(await resolver.resolveBinding({ key: attacker.keyid, agent: AGENT }, atTime)).toMatchObject({ isGenesis: false });
+        const report = await checkRecord(await signedEvaluation(attacker), { trust: { bindingResolver: resolver } });
+        expect(binding(report)).toMatchObject({ status: "failed", findings: [{ code: "consent-chain-violation" }] });
+        expect(report.outcome).toBe("failed");
+      },
+    );
+
+    test("a binding whose ceremony cannot be run stands as nobody's incumbent, even for its own voucher", async () => {
+      const founding = ed25519();
+      const later = ed25519();
+      const resolver = await resolverOver(
+        await sealedBinding(founding, { ceremonyType: "github-human" }),
+        await sealedBinding(later, { validFrom: "2026-02-01T00:00:00Z" }),
+      );
+      const report = await checkRecord(await signedEvaluation(later), { trust: { bindingResolver: resolver } });
+      expect(binding(report)).toMatchObject({ status: "failed", findings: [{ code: "consent-chain-violation" }] });
+    });
+
+    test("an earlier binding that does not control is no incumbent, so a later voucher needs consent", async () => {
+      const first = ed25519();
+      const second = ed25519();
+      const resolver = await resolverOver(
+        await sealedBinding(first, { relationship: "operates" }),
+        await sealedBinding(second, { validFrom: "2026-02-01T00:00:00Z" }),
+      );
+      const report = await checkRecord(await signedEvaluation(second), { trust: { bindingResolver: resolver } });
+      expect(binding(report)).toMatchObject({ status: "failed", findings: [{ code: "consent-chain-violation" }] });
+    });
+
+    test("an incumbent that expired before the later binding is no incumbent", async () => {
+      const first = ed25519();
+      const second = ed25519();
+      const resolver = await resolverOver(
+        await sealedBinding(first, { expiresAt: "2026-01-15T00:00:00Z" }),
+        await sealedBinding(second, { validFrom: "2026-02-01T00:00:00Z" }),
+      );
+      const report = await checkRecord(await signedEvaluation(second), { trust: { bindingResolver: resolver } });
+      expect(binding(report)).toMatchObject({ status: "failed", findings: [{ code: "consent-chain-violation" }] });
+    });
+  });
+
+  test("a binding that breaks the verifier fails the record: it is not a resolver outage", async () => {
+    const founding = ed25519();
+    const later = ed25519();
+    const genesis = await sealedBinding(founding);
+    const malformed = await sealedBinding(later, {
+      validFrom: "2026-02-01T00:00:00Z",
+      voucherSigner: createEoaTestSigner("static-binding-resolver-malformed"),
+      consent: { keyid: founding.keyid, sig: "!!!" },
+    });
+    const bindingResolver = createStaticBindingResolver([genesis, malformed].map(({ envelopeBytes, ceremonyEvidence }) => ({ envelopeBytes, ceremonyEvidence })));
+    const report = await checkRecord(await signedEvaluation(later), { trust: { bindingResolver } });
+    expect(binding(report)).toMatchObject({ status: "failed", findings: [{ code: "binding-unreadable", subject: later.keyid }] });
+  });
+
+  test("a binding resolves at the instant it expires", async () => {
+    const key = ed25519();
+    const { envelopeBytes, ceremonyEvidence } = await sealedBinding(key, { expiresAt: "2026-03-01T00:00:00Z" });
+    const resolver = createStaticBindingResolver([{ envelopeBytes, ceremonyEvidence }]);
+    expect(await resolver.resolveBinding({ key: key.keyid, agent: AGENT }, "2026-03-01T00:00:00Z")).not.toBeNull();
+  });
+
+  test("a safe binding's witness reaches the verifier", async () => {
+    const key = ed25519();
+    const { envelopeBytes } = await sealedBinding(key, { ceremonyType: "safe" });
+    const witness = { chainId: 8453, blockNumber: 1, blockHash: "0x00", verifier: AGENT, envelopeBytes: Uint8Array.of(1) };
+    const resolver = createStaticBindingResolver([{ envelopeBytes, witness }]);
+    const resolved = await resolver.resolveBinding({ key: key.keyid, agent: AGENT }, "2026-07-28T00:00:00Z");
+    expect(resolved?.witness).toBe(witness);
+    expect(resolved?.ceremonyEvidence).toBeUndefined();
   });
 
   test("two bindings of one key to one agent resolve to the earlier", async () => {

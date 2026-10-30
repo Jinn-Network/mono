@@ -148,13 +148,13 @@ function failureLines(report: CommandReport): readonly string[] {
 
 function conclusion(report: CommandReport): string {
   const failedChecks = (report.checks ?? []).filter(({ status }) => status === "failed").map(({ id }) => `${id} failed`);
-  const failures = [...(report.summary.failed > 0 ? [`${count(report.summary.failed, "record")} failed`] : []), ...failedChecks];
+  const failures = [...(report.summary.recordsFailed > 0 ? [`${count(report.summary.recordsFailed, "record")} failed`] : []), ...failedChecks];
   return `${failures.length === 0 ? "Nothing failed" : failures.join(", ")}. Skipped and unknown are not passes.`;
 }
 
 /** Whether anything failed, which is what the exit code answers. */
 export function reportFailed(report: CommandReport): boolean {
-  return report.summary.failed > 0 || (report.checks ?? []).some(({ status }) => status === "failed");
+  return report.summary.recordsFailed > 0 || (report.checks ?? []).some(({ status }) => status === "failed");
 }
 
 /**

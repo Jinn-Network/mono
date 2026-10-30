@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { DISCOVERY_KINDS } from "./discovery.js";
 import { EVIDENCE_KINDS } from "./evidence.js";
 import type { RecordKinds } from "./kind.js";
 import { PROFILE_KINDS } from "./profiles.js";
@@ -9,13 +10,15 @@ import { TRUST_KINDS } from "./trust.js";
 /**
  * Every kind this package knows, keyed by the spec's type identifier. Add one by spreading this into
  * the `kinds` option. Record discovery's entries and heads are not here: a feed is verified as a
- * chain, by `@jinn-network/record-discovery-client`, and they report as unknown.
+ * chain, by `@jinn-network/record-discovery-client`, and they report as unknown. Its published facts
+ * profiles are, because they are read the same way alone or in a set.
  */
 export const defaultRecordKinds: RecordKinds = {
   ...TASK_EXECUTION_KINDS,
   ...EVIDENCE_KINDS,
   ...TRUST_KINDS,
   ...PROFILE_KINDS,
+  ...DISCOVERY_KINDS,
 };
 
 export { OBSERVATION_KIND } from "./task-execution.js";

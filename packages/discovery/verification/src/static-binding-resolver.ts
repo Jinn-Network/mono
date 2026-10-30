@@ -36,16 +36,22 @@ const CEREMONIES_CHECKED_OFFLINE: ReadonlySet<CeremonyType> = new Set<CeremonyTy
 interface HeldBinding extends StaticKeyBinding {
   readonly binding: KeyBinding;
   readonly bindingDigest: Sha256Digest;
+  /** False for a ceremony this cannot run. Such a binding never resolves, and it is still a binding. */
+  readonly resolvable: boolean;
 }
 
 function hold(entry: Uint8Array | StaticKeyBinding, verifySignature: ReturnType<typeof createDidKeyDsseVerifier>): readonly HeldBinding[] {
   const held = entry instanceof Uint8Array ? { envelopeBytes: entry } : entry;
   const { value: binding, conforms } = validateKeyBinding(held.envelopeBytes);
   if (!conforms || binding === undefined) return [];
-  if (!CEREMONIES_CHECKED_OFFLINE.has(binding.ceremony.type)) return [];
   // §7.1: a binding proves possession by being signed with the key it binds.
   if (!verifySignature(held.envelopeBytes).validSignerKeyids.includes(binding.key.didKey)) return [];
-  return [{ ...held, binding, bindingDigest: recordDigest(held.envelopeBytes) }];
+  return [{
+    ...held,
+    binding,
+    bindingDigest: recordDigest(held.envelopeBytes),
+    resolvable: CEREMONIES_CHECKED_OFFLINE.has(binding.ceremony.type),
+  }];
 }
 
 /** A comparison of two instants already validated by `KeyBindingSchema`, or by the caller's `atTime`. */
@@ -74,10 +80,13 @@ function byEffectiveStart(left: HeldBinding, right: HeldBinding): number {
  * - No anchors. A backdated `validFrom` is believed. Under an anchor-requiring profile use the chain.
  * - No revocations. Leave a revoked binding out of the list.
  * - No `agentId`, `oidc-machine` or `github-human` bindings: they do not resolve, because trust-core
- *   leaves those ceremonies to the resolver and this one cannot run them.
+ *   leaves those ceremonies to the resolver and this one cannot run them. They still count as
+ *   earlier bindings of their Agent, so §7.4a's consent rule holds against what comes after them.
  *
- * A binding that does not conform, or that the key it binds did not sign, does not resolve. Holding
- * the bytes is not trusting them: `verifyEnvelopeBinding` still verifies the ceremony.
+ * A binding that does not conform, or that the key it binds did not sign, is not held at all.
+ * Holding the bytes is not trusting them: `verifyEnvelopeBinding` still verifies the ceremony.
+ * Genesis is the earliest `validFrom` in the list, so a backdated binding becomes the genesis. Pass
+ * only bindings you have reason to accept.
  */
 export function createStaticBindingResolver(keyBindingEnvelopes: readonly (Uint8Array | StaticKeyBinding)[]): BindingResolver {
   const verifySignature = createDidKeyDsseVerifier();
@@ -86,10 +95,13 @@ export function createStaticBindingResolver(keyBindingEnvelopes: readonly (Uint8
   return {
     async resolveBinding({ key, agent }, atTime): Promise<ResolvedBinding | null> {
       const forAgent = held.filter(({ binding }) => binding.agent === agent);
-      const winner = forAgent.find(({ binding }) => binding.key.didKey === key && isInWindow(binding, atTime));
+      const winner = forAgent.find(({ binding, resolvable }) => resolvable && binding.key.didKey === key && isInWindow(binding, atTime));
       if (winner === undefined) return null;
+      // §7.4a: a binding that cannot resolve still came first, so a later one is not the genesis.
+      // It cannot stand as the incumbent either, because its ceremony was not run.
       const incumbent = forAgent.find((candidate) =>
         candidate !== winner
+        && candidate.resolvable
         && candidate.binding.relationship === "controls"
         && isInWindow(candidate.binding, winner.binding.validFrom));
       return {

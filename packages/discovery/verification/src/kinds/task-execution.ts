@@ -39,12 +39,28 @@ function findings(result: ValidationResult): readonly Finding[] {
   return result.errors.map(({ path, message }) => ({ code: "invalid-document", path, detail: message }));
 }
 
+/**
+ * §21.3: a record whose extensions demonstrably contradict its core fields is `invalid-document`
+ * where a validator can detect it. Detectable here is a namespaced key that says it overrides a
+ * core field and carries another value. Most contradictions are not machine-checkable.
+ */
+function extensionOverrides(document: unknown): readonly Finding[] {
+  if (!isRecordObject(document)) return [];
+  return Object.keys(document).flatMap((key) => {
+    const namespace = Math.max(key.lastIndexOf("/"), key.lastIndexOf("."));
+    const local = namespace < 0 ? undefined : /^(.+)Override$/u.exec(key.slice(namespace + 1))?.[1];
+    return local !== undefined && Object.hasOwn(document, local) && document[local] !== document[key]
+      ? [{ code: "invalid-document", path: key, detail: `This extension contradicts the core field ${local} (§21.3).` }]
+      : [];
+  });
+}
+
 function hasField(view: RecordView, name: string): boolean {
   return isRecordObject(view.document) && Object.hasOwn(view.document, name);
 }
 
 function isFamilyDocument(view: RecordView): boolean {
-  return view.signatures === undefined && documentField(view, "protocol") === TASK_EXECUTION_PROTOCOL_URI;
+  return documentField(view, "protocol") === TASK_EXECUTION_PROTOCOL_URI;
 }
 
 function taskReferences({ document }: RecordView): readonly RecordReference[] {
@@ -106,7 +122,8 @@ export const TASK_EXECUTION_KINDS: Readonly<Record<string, RecordKind>> = {
     family: "task-execution",
     identify: (view) => view.payloadType === TASK_MEDIA_TYPE
       || (isFamilyDocument(view) && !hasField(view, "submission") && !hasField(view, "attempt")),
-    validate: ({ document }) => findings(validateTask(document)),
+    validate: ({ document }) => [...findings(validateTask(document)), ...extensionOverrides(document)],
+    mediaType: TASK_MEDIA_TYPE,
     unsignedBecause: UNSIGNED_IN_CORE,
     references: taskReferences,
   },
@@ -114,7 +131,8 @@ export const TASK_EXECUTION_KINDS: Readonly<Record<string, RecordKind>> = {
     family: "task-execution",
     identify: (view) => view.payloadType === SUBMISSION_MEDIA_TYPE
       || (isFamilyDocument(view) && hasField(view, "submission")),
-    validate: ({ document }) => findings(validateSubmission(document)),
+    validate: ({ document }) => [...findings(validateSubmission(document)), ...extensionOverrides(document)],
+    mediaType: SUBMISSION_MEDIA_TYPE,
     unsignedBecause: UNSIGNED_IN_CORE,
     references: submissionReferences,
     // Trust §7.5b. A Submission states no time of its own, so this needs the caller's `atTime`.
@@ -129,7 +147,8 @@ export const TASK_EXECUTION_KINDS: Readonly<Record<string, RecordKind>> = {
     family: "task-execution",
     identify: (view) => view.payloadType === DELIVERY_MEDIA_TYPE
       || (isFamilyDocument(view) && hasField(view, "attempt") && !hasField(view, "submission")),
-    validate: ({ document }) => findings(validateDelivery(document)),
+    validate: ({ document }) => [...findings(validateDelivery(document)), ...extensionOverrides(document)],
+    mediaType: DELIVERY_MEDIA_TYPE,
     unsignedBecause: UNSIGNED_IN_CORE,
     references: deliveryReferences,
   },
@@ -143,6 +162,8 @@ export const TASK_EXECUTION_KINDS: Readonly<Record<string, RecordKind>> = {
     },
     validate: ({ document }) => findings(validateObservation(document)),
     encodingExemption: "Task Execution Protocol §6.1 seals Task, Submission and Delivery; an observation is a CloudEvent, and §6.3 binds its exact bytes only where it is referenced as bytes.",
+    // §21.1: "The canonical serialization is I-JSON", for all five of the §5 families.
+    requiresIJson: true,
     unsignedBecause: "Task Execution Protocol §10.1: observations are unsigned in core.",
     references: observationReferences,
   },

@@ -14,6 +14,7 @@ import { createRequire } from "node:module";
 import { describe, expect, test } from "vitest";
 import {
   TRUST_POLICY_MEDIA_TYPE,
+  canonicalJsonBytes,
   sealAnchorEvidence,
   sealAuthorization,
   sealKeyBinding,
@@ -188,7 +189,7 @@ describe("task-execution golden-task-execution-v1", () => {
     const records = scenario(name);
     const result = await checkRecordSet({ records, roots: [expected.deliveryDigest, expected.submissionDigest] });
     expect(result.summary).toMatchObject({
-      failed: 0,
+      recordsFailed: 0,
       kinds: {
         [RECORD_KINDS.task]: 1,
         [RECORD_KINDS.submission]: 1,
@@ -307,6 +308,16 @@ describe("task-execution adversarial-v1", () => {
     ]));
   });
 
+  test("extension-override: invalid-document, because a validator can detect this one", async () => {
+    expect(disposition("extension-override")).toContain("invalid-document");
+    const sealed = canonicalJsonBytes(tasks.json(`${ROOT}/extension-override/task.json`));
+    const report = await checkRecord(sealed);
+    expect(check(report, "schema")).toMatchObject({
+      status: "failed",
+      findings: [{ code: "invalid-document", path: "x-jinn-example.test/protocolOverride" }],
+    });
+  });
+
   test("dispatch-context-grafting: a dispatch context names no type, and structure alone does not catch this", async () => {
     expect(disposition("dispatch-context-grafting")).toContain("NOT caught by structure alone");
     const report = await checkRecord(tasks.bytes(`${ROOT}/dispatch-context-grafting/grafted-dispatch-context.json`));
@@ -406,6 +417,19 @@ describe("evidence golden-execution-evidence-v1", () => {
     expect(references).toMatchObject({ status: "failed", dangling: 1 });
     expect(references.findings[0]).toMatchObject({ subject: recordDigest(verification), path: "/subject/0/digest/sha256" });
     expect(references.unavailable).toBeGreaterThan(0);
+  });
+});
+
+describe("the published prediction-forecast/1.0 profile", () => {
+  test("fails the §6.4 check its own package applies, and the report says which pattern", async () => {
+    const bytes = new Uint8Array(readFileSync(require.resolve(
+      "@jinn-network/task-execution-profiles/profiles/task-profiles/prediction-forecast/1.0/profile.json",
+    )));
+    const report = await checkRecord(bytes);
+    expect(check(report, "schema")).toMatchObject({
+      status: "failed",
+      findings: [{ code: "invalid-document", path: "payloadSchema", detail: expect.stringContaining("consensusProbabilityYes") }],
+    });
   });
 });
 

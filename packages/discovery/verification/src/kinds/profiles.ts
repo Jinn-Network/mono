@@ -3,13 +3,17 @@
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import {
   EVALUATION_SPEC_FORMAT_URI,
+  EVALUATION_SPEC_MEDIA_TYPE,
   EvaluationSpecSchema,
   TASK_PROFILE_FORMAT_URI,
+  TASK_PROFILE_MEDIA_TYPE,
   TaskProfileDocumentSchema,
+  assertSafeSchema,
 } from "@jinn-network/task-execution-profiles";
 
 import { documentField, isRecordObject } from "../record-view.js";
 import type { RecordView } from "../record-view.js";
+import { describeError } from "../results.js";
 import type { Finding } from "../results.js";
 import type { RecordKind, RecordReference } from "./kind.js";
 import { descriptorListReferences, descriptorReference, digestReference } from "./references.js";
@@ -79,18 +83,33 @@ function profileDocumentReferences(view: RecordView): readonly RecordReference[]
   ];
 }
 
+/** Profiles design §6.4: anyone may publish a profile, so a schema unsafe to load is `invalid-document`. */
+function profileFindings(view: RecordView): readonly Finding[] {
+  const shaped = findings(TaskProfileDocumentSchema.safeParse(view.document));
+  if (shaped.length > 0) return shaped;
+  const payloadSchema = documentField(view, "payloadSchema");
+  try {
+    assertSafeSchema(payloadSchema, new TextEncoder().encode(JSON.stringify(payloadSchema)));
+    return [];
+  } catch (cause) {
+    return [{ code: "invalid-document", path: "payloadSchema", detail: describeError(cause) }];
+  }
+}
+
 export const PROFILE_KINDS: Readonly<Record<string, RecordKind>> = {
   [RECORD_KINDS.evaluationSpec]: {
     family: "task-profiles",
     identify: (view) => documentField(view, "protocol") === EVALUATION_SPEC_FORMAT_URI,
     validate: ({ document }) => findings(EvaluationSpecSchema.safeParse(document)),
+    mediaType: EVALUATION_SPEC_MEDIA_TYPE,
     unsignedBecause: UNSIGNED_DOCUMENT,
     references: evaluationSpecReferences,
   },
   [RECORD_KINDS.profileDocument]: {
     family: "task-profiles",
     identify: (view) => documentField(view, "protocol") === TASK_PROFILE_FORMAT_URI,
-    validate: ({ document }) => findings(TaskProfileDocumentSchema.safeParse(document)),
+    validate: profileFindings,
+    mediaType: TASK_PROFILE_MEDIA_TYPE,
     unsignedBecause: UNSIGNED_DOCUMENT,
     references: profileDocumentReferences,
   },
