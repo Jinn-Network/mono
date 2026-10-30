@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { execFileSync } from "node:child_process";
-import { generateKeyPairSync, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import type { KeyObject } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { chmodSync, linkSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
 import { DSSE_PAYLOAD_TYPE, canonicalJsonBytes, dssePreAuthEncoding, sealDsseEnvelope } from "@jinn-network/trust-core";
 import { TASK_EXECUTION_PROTOCOL_URI, sealDelivery, sealTask } from "@jinn-network/task-execution-protocol";
@@ -14,6 +14,7 @@ import { buildRfc3161AnchorEvidenceRecord, createFixtureAuthority } from "@jinn-
 
 import { MAX_FILE_BYTES, runCommand } from "./command.js";
 import { recordDigest } from "./index.js";
+import { MAX_LIST_BYTES } from "./root-target.js";
 
 const temporary = mkdtempSync(join(tmpdir(), "jinn-verify-command-"));
 afterAll(() => rmSync(temporary, { recursive: true, force: true }));
@@ -24,7 +25,10 @@ function directory(files: Readonly<Record<string, Uint8Array | string>>): string
   directories += 1;
   const path = join(temporary, `set-${directories}`);
   mkdirSync(path);
-  for (const [name, content] of Object.entries(files)) writeFileSync(join(path, name), content);
+  for (const [name, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(path, name)), { recursive: true });
+    writeFileSync(join(path, name), content);
+  }
   return path;
 }
 
@@ -98,11 +102,21 @@ describe("usage and environment errors exit 2", () => {
     ["two paths", ["a", "b"]],
     ["an unknown flag", ["a", "--verbose"]],
     ["--keys with no file", ["a", "--keys"]],
+    ["--root with no digest", ["a", "--root"]],
+    ["--root with bare hex", ["a", "--root", "a".repeat(64)]],
+    ["--root in uppercase", ["a", "--root", `sha256:${"A".repeat(64)}`]],
+    ["--root too short", ["a", "--root", `sha256:${"a".repeat(63)}`]],
+    ["--root with another algorithm", ["a", "--root", `sha512:${"a".repeat(64)}`]],
+    ["--root with more after it", ["a", "--root", `sha256:${"a".repeat(64)}x`]],
   ])("%s prints usage and reads nothing", async (_name, argv) => {
     const { code, stdout, stderr } = await run(...argv);
     expect(code).toBe(2);
     expect(stdout).toBe("");
     expect(stderr).toContain("npx @jinn-network/verify <path>");
+  });
+
+  test("a malformed root says what a root looks like", async () => {
+    expect((await run("a", "--root", "abc")).stderr).toContain("--root takes sha256: and 64 lowercase hex digits");
   });
 
   test("a flag cannot put a control character on stderr", async () => {
@@ -642,5 +656,557 @@ describe("set checks read as they ran", () => {
     ])));
     expect(code).toBe(0);
     expect(stdout).toMatch(/References {5}passed: .*1 unavailable/u);
+  });
+});
+
+describe("--root", () => {
+  type Tree = Readonly<Record<string, Uint8Array | string>>;
+
+  function sha256(bytes: Uint8Array | string): string {
+    return createHash("sha256").update(bytes).digest("hex");
+  }
+
+  function listOf(files: Tree, members: Readonly<Record<string, unknown>> = {}): string {
+    const entries = Object.keys(files).sort().map((path) => ({
+      path,
+      bytes: Buffer.byteLength(files[path]!),
+      sha256: sha256(files[path]!),
+    }));
+    return JSON.stringify({ ...members, files: entries });
+  }
+
+  /** A directory holding `files` and a `bundle.json` listing them, with the digest that names it. */
+  function published(files: Tree, members: Readonly<Record<string, unknown>> = {}) {
+    const list = listOf(files, members);
+    return { path: directory({ ...files, "bundle.json": list }), root: `sha256:${sha256(list)}` };
+  }
+
+  const [taskFile, taskBytes] = named(task);
+  const [deliveryFile, deliveryBytes] = named(delivery());
+  const tree: Tree = {
+    "notes/readme.txt": "hello",
+    [`records/${taskFile}`]: taskBytes,
+    [`records/${deliveryFile}`]: deliveryBytes,
+  };
+
+  describe("when everything matches", () => {
+    test("prints the report, with the root and completeness lines", async () => {
+      const { path, root } = published(tree);
+      const { code, stdout, stderr } = await run(path, "--root", root);
+      expect(stderr).toBe("");
+      expect(code).toBe(0);
+      expect(stdout).toBe([
+        `Read 3 files from ${path}.`,
+        "",
+        `Root           matched: bundle.json is ${root}`,
+        "Kinds          2 known, 0 unknown naming a type, 1 naming no type",
+        "Digest         3 passed, compared with the list",
+        "Encoding       2 passed, 1 skipped (not records)",
+        "Schema         2 passed, 1 skipped (kind unknown)",
+        "Signatures     none in these files",
+        "Trust binding  skipped: no key was tied to an identity, and a root pins what was published, not who published it",
+        "References     passed for known kinds: 2 resolved, 1 by a published document",
+        "Lifecycle      skipped: no observations here",
+        "Anchors        not checked: no anchor records here",
+        "Completeness   passed: 3 listed files present and unchanged, no others",
+        "",
+        "Nothing failed. Skipped and unknown are not passes.",
+        "",
+      ].join("\n"));
+    });
+
+    test("finds the list among other files at the top, by its bytes and not its name", async () => {
+      const files: Tree = { ...tree, "a-first.txt": "before the list", "z-last.txt": "after it" };
+      const list = listOf(files);
+      const path = directory({ ...files, "whatever.manifest": list });
+      const { code, stdout } = await run(path, "--root", `sha256:${sha256(list)}`);
+      expect(code).toBe(0);
+      expect(stdout).toContain("Root           matched: whatever.manifest is sha256:");
+    });
+
+    test("reads a list over the size limit for a record", async () => {
+      const { path, root } = published(tree, { padding: "x".repeat(MAX_FILE_BYTES) });
+      expect((await run(path, "--root", root)).code).toBe(0);
+    });
+
+    test("ignores an empty directory, which holds no bytes to commit to", async () => {
+      const { path, root } = published(tree);
+      mkdirSync(join(path, "empty"));
+      expect((await run(path, "--root", root)).code).toBe(0);
+    });
+
+    test("does not change what a run without --root prints", async () => {
+      const { path } = published(Object.fromEntries([named(task)]));
+      const { stdout } = await run(path);
+      expect(stdout).not.toContain("Root ");
+      expect(stdout).toContain("Completeness   not checked: nothing here says which files should exist");
+      expect(stdout).toContain("compared with each file's own name");
+      expect(stdout).toContain("Trust binding  skipped: no key was tied to an identity\n");
+    });
+  });
+
+  describe("when no file at the top has the digest", () => {
+    test("fails, and says nothing else was checked", async () => {
+      const { path } = published(tree);
+      const root = `sha256:${"0".repeat(64)}`;
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toBe([
+        `Looked at the top of ${path} for ${root}.`,
+        "",
+        "Root           failed: no file there has this digest",
+        "Completeness   not checked: no list to compare with",
+        "",
+        "Root failed, so nothing else was checked.",
+        "",
+      ].join("\n"));
+    });
+
+    test("a list in a subdirectory is not the list", async () => {
+      const list = listOf({ "a.txt": "a" });
+      const path = directory({ "a.txt": "a", "sub/bundle.json": list });
+      expect((await run(path, "--root", `sha256:${sha256(list)}`)).code).toBe(1);
+    });
+
+    test("a link to the list is not followed to find it", async () => {
+      const list = listOf({ "a.txt": "a" });
+      const elsewhere = directory({ "bundle.json": list });
+      const path = directory({ "a.txt": "a" });
+      symlinkSync(join(elsewhere, "bundle.json"), join(path, "bundle.json"));
+      const { code, stdout } = await run(path, "--root", `sha256:${sha256(list)}`);
+      expect(code).toBe(1);
+      expect(stdout).toContain("no file there has this digest");
+    });
+
+    test("shows in --json", async () => {
+      const { path } = published(tree);
+      const root = `sha256:${"0".repeat(64)}`;
+      const report = JSON.parse((await run(path, "--root", root, "--json")).stdout) as Record<string, unknown>;
+      expect(report).toMatchObject({ failed: true, root: { digest: root, checked: false, listed: 0 } });
+      expect(report.records).toEqual([]);
+      expect(report.checks).toEqual([]);
+    });
+  });
+
+  describe("a file that matches and is no list", () => {
+    test.each<[string, string]>([
+      ["not JSON", "not json"],
+      ["JSON with no files", "{}"],
+      ["an empty list", '{"files":[]}'],
+    ])("%s is exit 2, because nothing could be compared", async (_name, bytes) => {
+      const path = directory({ "a.txt": bytes });
+      const { code, stdout, stderr } = await run(path, "--root", `sha256:${sha256(bytes)}`);
+      expect(code).toBe(2);
+      expect(stdout).toBe("");
+      expect(stderr).toContain("a.txt");
+    });
+
+    test("over the limit for a list is exit 2", async () => {
+      const path = directory({ "list.json": "x" });
+      truncateSync(join(path, "list.json"), MAX_LIST_BYTES + 1);
+      const zeros = Buffer.alloc(MAX_LIST_BYTES + 1);
+      zeros[0] = "x".charCodeAt(0);
+      const { code, stderr } = await run(path, "--root", `sha256:${sha256(zeros)}`);
+      expect(code).toBe(2);
+      expect(stderr).toContain(`over the ${MAX_LIST_BYTES} byte limit for a list`);
+    });
+  });
+
+  test("a path that is not a directory is exit 2", async () => {
+    const path = directory({ "a.txt": "a" });
+    expect((await run(join(path, "a.txt"), "--root", `sha256:${"0".repeat(64)}`)).code).toBe(2);
+  });
+
+  describe("a list that breaks the format", () => {
+    function withEntries(files: readonly unknown[]) {
+      const list = JSON.stringify({ files });
+      return { path: directory({ "a.txt": "a", "bundle.json": list }), root: `sha256:${sha256(list)}` };
+    }
+    const good = { path: "a.txt", bytes: 1, sha256: sha256("a") };
+
+    test.each<[string, Record<string, unknown>, string]>([
+      ["absolute", { path: "/a.txt" }, "is not relative and normalized"],
+      ["parent", { path: "../a.txt" }, "is not relative and normalized"],
+      ["dot", { path: "./a.txt" }, "is not relative and normalized"],
+      ["the list itself", { path: "bundle.json" }, "names the list itself"],
+    ])("%s fails, opens no file, and names the entry", async (_name, overrides, expected) => {
+      const { path, root } = withEntries([{ ...good, ...overrides }]);
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toContain(`Root           matched: bundle.json is ${root}`);
+      expect(stdout).toContain("Completeness   failed: 1 breaking the list format");
+      expect(stdout).toContain(expected);
+      expect(stdout).toContain("The list broke its format, so nothing else was checked.");
+      expect(stdout).not.toContain("Digest ");
+      expect(stdout).not.toContain("Nothing failed");
+    });
+
+    test("does not follow a parent path out of the directory", async () => {
+      const outside = directory({ "outside.txt": "outside" });
+      const list = JSON.stringify({ files: [{ path: "../outside.txt", bytes: 7, sha256: sha256("outside") }] });
+      const path = join(outside, "inner");
+      mkdirSync(path);
+      writeFileSync(join(path, "bundle.json"), list);
+      const { code, stdout } = await run(path, "--root", `sha256:${sha256(list)}`);
+      expect(code).toBe(1);
+      expect(stdout).not.toContain("Nothing failed");
+    });
+
+    test("a repeated path fails", async () => {
+      const { path, root } = withEntries([good, good]);
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toContain("a.txt is listed twice");
+    });
+
+    test("paths out of order fail", async () => {
+      const list = JSON.stringify({ files: [{ path: "b.txt", bytes: 1, sha256: sha256("b") }, good] });
+      const path = directory({ "a.txt": "a", "b.txt": "b", "bundle.json": list });
+      const { code, stdout } = await run(path, "--root", `sha256:${sha256(list)}`);
+      expect(code).toBe(1);
+      expect(stdout).toContain("a.txt is out of order");
+    });
+
+    test("cannot put a control character on the terminal", async () => {
+      const { path, root } = withEntries([{ ...good, path: "/\u001b[2J‮" }]);
+      const { stdout } = await run(path, "--root", root);
+      expect(stdout).not.toContain("\u001b");
+      expect(stdout).not.toContain("‮");
+    });
+  });
+
+  describe("a listed file that is not what the list says", () => {
+    test("one byte changed, same length, fails on both checks and names the file", async () => {
+      const { path, root } = published({ ...tree, "notes/readme.txt": "hello" });
+      writeFileSync(join(path, "notes/readme.txt"), "hellO");
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toContain("Root           matched");
+      expect(stdout).toContain("Digest         2 passed, compared with the list, 1 failed");
+      expect(stdout).toContain("Completeness   failed: 1 changed");
+      expect(stdout).toContain("notes/readme.txt: changed: does not hash to the digest in the list");
+      expect(stdout).toContain("notes/readme.txt: digest:");
+      expect(stdout).toContain("Completeness failed, 1 record failed. Skipped and unknown are not passes.");
+    });
+
+    test("a different length fails", async () => {
+      const { path, root } = published(tree);
+      writeFileSync(join(path, "notes/readme.txt"), "hello!");
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toContain("notes/readme.txt: changed: 6 bytes, and the list says 5");
+    });
+
+    test("the right digest with the wrong length in the list fails", async () => {
+      const list = JSON.stringify({ files: [{ path: "a.txt", bytes: 2, sha256: sha256("a") }] });
+      const path = directory({ "a.txt": "a", "bundle.json": list });
+      const { code, stdout } = await run(path, "--root", `sha256:${sha256(list)}`);
+      expect(code).toBe(1);
+      expect(stdout).toContain("a.txt: changed: 1 bytes, and the list says 2");
+    });
+
+    test("a missing file fails, and what cited it dangles", async () => {
+      const { path, root } = published(tree);
+      unlinkSync(join(path, `records/${taskFile}`));
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout.split("\n")[0]).toBe(`Read 2 files from ${path}.`);
+      expect(stdout).toContain("Completeness   failed: 1 missing");
+      expect(stdout).toContain(`records/${taskFile}: missing: listed, and not here`);
+      expect(stdout).toContain("References     failed: 1 dangling");
+      expect(stdout).toContain("Completeness failed, references failed.");
+    });
+
+    test.skipIf(process.getuid?.() === 0)("a file in a subdirectory that cannot be opened fails and is named", async () => {
+      const { path, root } = published(tree);
+      chmodSync(join(path, "notes/readme.txt"), 0o000);
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toContain("Completeness   failed: 1 unreadable");
+      expect(stdout).toContain("notes/readme.txt: unreadable:");
+    });
+
+    test.skipIf(process.getuid?.() === 0)("a file at the top that cannot be opened might be the list, so nothing can be said", async () => {
+      const { path, root } = published({ "a.txt": "a" });
+      chmodSync(join(path, "a.txt"), 0o000);
+      const { code, stderr } = await run(path, "--root", root);
+      expect(code).toBe(2);
+      expect(stderr).toContain("cannot check");
+    });
+
+    test("several kinds of problem are all counted", async () => {
+      const { path, root } = published(tree);
+      unlinkSync(join(path, `records/${taskFile}`));
+      writeFileSync(join(path, "notes/readme.txt"), "hellO");
+      writeFileSync(join(path, "extra-1.txt"), "x");
+      writeFileSync(join(path, "extra-2.txt"), "y");
+      const { stdout } = await run(path, "--root", root);
+      expect(stdout).toContain("Completeness   failed: 1 changed, 1 missing, 2 not listed");
+    });
+
+    test("shows in --json", async () => {
+      const { path, root } = published(tree);
+      unlinkSync(join(path, `records/${taskFile}`));
+      const report = JSON.parse((await run(path, "--root", root, "--json")).stdout) as Record<string, unknown>;
+      expect(report).toMatchObject({
+        formatVersion: 1,
+        failed: true,
+        root: {
+          digest: root,
+          list: "bundle.json",
+          listed: 3,
+          checked: true,
+          problems: [{ code: "missing", file: `records/${taskFile}`, detail: "listed, and not here" }],
+          notParsed: [],
+        },
+      });
+    });
+  });
+
+  describe("a file the list does not name", () => {
+    test.each([["at the top", "extra.txt"], ["in a subdirectory", "deep/er/extra.txt"]])("%s fails", async (_name, file) => {
+      const { path, root } = published(tree);
+      mkdirSync(dirname(join(path, file)), { recursive: true });
+      writeFileSync(join(path, file), "extra");
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toContain("Completeness   failed: 1 not listed");
+      expect(stdout).toContain(`${file}: not-listed: not in the list`);
+    });
+
+    test("is not read as a record, so a forged one adds nothing to the counts", async () => {
+      const { path, root } = published(tree);
+      const forged = sealTask({
+        protocol: TASK_EXECUTION_PROTOCOL_URI,
+        profile: { uri: "https://spec.jinn.network/task-profiles/binary-judgment/2.0", digest: { sha256: BINARY_JUDGMENT_PROFILE } },
+        instructions: "A forged task.",
+        outputs: [],
+      });
+      const [name, bytes] = named(forged);
+      writeFileSync(join(path, `records/${name}`), bytes);
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toContain("Kinds          2 known, 0 unknown naming a type, 1 naming no type");
+    });
+
+    test("a second copy of the list fails, so the list is the only exception", async () => {
+      const { path, root } = published(tree);
+      writeFileSync(join(path, "copy.json"), listOf(tree));
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toContain("Completeness   failed: 1 not listed");
+    });
+
+    test("with a hostile name is escaped", async () => {
+      const { path, root } = published(tree);
+      writeFileSync(join(path, "evil‮\u001b[2J.txt"), "x");
+      const { stdout } = await run(path, "--root", root);
+      expect(stdout).toContain("evil\\u{202e}\\u{1b}[2J.txt: not-listed");
+    });
+  });
+
+  describe("what is not a plain file", () => {
+    test("a link to a file with the right bytes fails, even when it is listed", async () => {
+      const { path, root } = published({ "a.txt": "a" });
+      const outside = directory({ "a.txt": "a" });
+      unlinkSync(join(path, "a.txt"));
+      symlinkSync(join(outside, "a.txt"), join(path, "a.txt"));
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toContain("Completeness   failed: 1 not regular");
+      expect(stdout).toContain("a.txt: not-regular: a symbolic link, not followed");
+    });
+
+    test("a link to a directory is not walked into", async () => {
+      const outside = directory({ "b.txt": "b" });
+      const { path, root } = published({ "a.txt": "a", "linked/b.txt": "b" });
+      rmSync(join(path, "linked"), { recursive: true });
+      symlinkSync(outside, join(path, "linked"));
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toContain("linked: not-regular: a symbolic link, not followed");
+      expect(stdout).toContain("linked/b.txt: missing: listed, and not here");
+    });
+
+    test("a link the list does not name fails too", async () => {
+      const { path, root } = published(tree);
+      symlinkSync("/etc/passwd", join(path, "passwd"));
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toContain("passwd: not-regular: a symbolic link, not followed");
+    });
+
+    test("a pipe fails and is not opened, listed or not", async () => {
+      const { path, root } = published({ "a.txt": "a" });
+      unlinkSync(join(path, "a.txt"));
+      execFileSync("mkfifo", [join(path, "a.txt")]);
+      execFileSync("mkfifo", [join(path, "other")]);
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toContain("a.txt: not-regular: a special file, not opened");
+      expect(stdout).toContain("other: not-regular: a special file, not opened");
+    });
+
+    test("a hard link fails", async () => {
+      const { path, root } = published({ "a.txt": "a" });
+      const outside = directory({});
+      linkSync(join(path, "a.txt"), join(outside, "a.txt"));
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toContain("Completeness   failed: 1 hard-linked");
+      expect(stdout).toContain("a.txt: hard-link: more than one name holds these bytes");
+    });
+
+    test("a hard link to the list fails", async () => {
+      const { path, root } = published({ "a.txt": "a" });
+      const outside = directory({});
+      linkSync(join(path, "bundle.json"), join(outside, "bundle.json"));
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toContain("bundle.json: hard-link:");
+    });
+  });
+
+  describe("a listed file over the size limit for a record", () => {
+    function big(): { bytes: Uint8Array; file: string } {
+      return { file: "big.dat", bytes: Buffer.alloc(MAX_FILE_BYTES + 1, "x") };
+    }
+
+    test("is compared and not parsed, and does not fail the run", async () => {
+      const { file, bytes } = big();
+      const { path, root } = published({ ...tree, [file]: bytes });
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(0);
+      expect(stdout.split("\n")[0]).toBe(`Read 4 files from ${path}, and did not parse 1 file over the size limit.`);
+      expect(stdout).toContain("Digest         3 passed, compared with the list");
+      expect(stdout).toContain("Completeness   passed: 4 listed files present and unchanged, no others");
+    });
+
+    test("that has changed fails", async () => {
+      const { file, bytes } = big();
+      const { path, root } = published({ ...tree, [file]: bytes });
+      const changed = Buffer.from(bytes);
+      changed[changed.length - 1] = "y".charCodeAt(0);
+      writeFileSync(join(path, file), changed);
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toContain("big.dat: changed: does not hash to the digest in the list");
+    });
+
+    test("has no upper limit, because it is hashed in pieces", async () => {
+      const size = MAX_LIST_BYTES + 1;
+      const list = JSON.stringify({ files: [{ path: "huge.dat", bytes: size, sha256: sha256(Buffer.alloc(size)) }] });
+      const path = directory({ "bundle.json": list, "huge.dat": "" });
+      truncateSync(join(path, "huge.dat"), size);
+      expect((await run(path, "--root", `sha256:${sha256(list)}`)).code).toBe(0);
+    });
+
+    test("is named in --json", async () => {
+      const { file, bytes } = big();
+      const { path, root } = published({ ...tree, [file]: bytes });
+      const report = JSON.parse((await run(path, "--root", root, "--json")).stdout) as Record<string, unknown>;
+      expect(report).toMatchObject({
+        failed: false,
+        tooLarge: [],
+        root: { notParsed: [{ file, bytes: MAX_FILE_BYTES + 1 }] },
+      });
+    });
+  });
+
+  describe("keys", () => {
+    const { publicKey } = generateKeyPairSync("ed25519");
+    const keys = keysFile([{ keyId: "evaluator-key-1", publicKey }]);
+
+    test("in the list are covered by the root, and still tied to no identity", async () => {
+      const { path, root } = published({ ...tree, "trust/keys.json": keys });
+      const { code, stdout } = await run(path, "--root", root, "--keys", join(path, "trust/keys.json"));
+      expect(code).toBe(0);
+      expect(stdout).toContain("Keys           covered by the root: trust/keys.json is in the list");
+      expect(stdout).toContain("Trust binding  skipped: no key was tied to an identity, and a root pins what was published, not who published it");
+    });
+
+    test("with the same bytes somewhere else are covered too, because the root commits to bytes", async () => {
+      const { path, root } = published({ ...tree, "trust/keys.json": keys });
+      const elsewhere = join(directory({ "copy.json": keys }), "copy.json");
+      const { stdout } = await run(path, "--root", root, "--keys", elsewhere);
+      expect(stdout).toContain("Keys           covered by the root: trust/keys.json is in the list");
+    });
+
+    test("not in the list are not covered, and that does not fail the run", async () => {
+      const { path, root } = published(tree);
+      const elsewhere = join(directory({ "keys.json": keys }), "keys.json");
+      const { code, stdout } = await run(path, "--root", root, "--keys", elsewhere);
+      expect(code).toBe(0);
+      expect(stdout).toContain("Keys           not covered by the root: their bytes are not in the list");
+      expect(stdout).toContain("Trust binding  skipped");
+    });
+
+    test("swapped for other keys are not covered, and fail as a changed file", async () => {
+      const { path, root } = published({ ...tree, "trust/keys.json": keys });
+      const other = keysFile([{ keyId: "evaluator-key-1", publicKey: generateKeyPairSync("ed25519").publicKey }]);
+      writeFileSync(join(path, "trust/keys.json"), other);
+      const { code, stdout } = await run(path, "--root", root, "--keys", join(path, "trust/keys.json"));
+      expect(code).toBe(1);
+      expect(stdout).toContain("Keys           not covered by the root");
+      expect(stdout).toContain("trust/keys.json: changed");
+    });
+
+    test("say nothing when no keys were given", async () => {
+      const { path, root } = published(tree);
+      expect((await run(path, "--root", root)).stdout).not.toContain("Keys ");
+    });
+
+    test("show in --json", async () => {
+      const { path, root } = published({ ...tree, "trust/keys.json": keys });
+      const covered = JSON.parse((await run(path, "--root", root, "--keys", join(path, "trust/keys.json"), "--json")).stdout) as Record<string, unknown>;
+      expect(covered).toMatchObject({ root: { keys: { covered: true, listedAs: "trust/keys.json" } } });
+      const elsewhere = join(directory({ "keys.json": `${keys}\n` }), "keys.json");
+      const bare = JSON.parse((await run(path, "--root", root, "--keys", elsewhere, "--json")).stdout) as Record<string, unknown>;
+      expect(bare).toMatchObject({ root: { keys: { covered: false } } });
+    });
+
+    test("a verified signature reads the same as without a root", async () => {
+      const { publicKey: signerKey, privateKey } = generateKeyPairSync("ed25519");
+      const signed = evaluation(privateKey, "evaluator-key-1");
+      const signerKeys = keysFile([{ keyId: "evaluator-key-1", publicKey: signerKey }]);
+      const [name, bytes] = named(signed);
+      const { path, root } = published({ ...tree, [`records/${name}`]: bytes, "trust/keys.json": signerKeys });
+      const { code, stdout } = await run(path, "--root", root, "--keys", join(path, "trust/keys.json"));
+      expect(code).toBe(0);
+      expect(stdout).toContain("Signatures     1 verified against keys you supplied, none unverified");
+    });
+  });
+
+  test("escapes every name from the input, in the report and in the root's --json", async () => {
+    const { publicKey } = generateKeyPairSync("ed25519");
+    const keys = keysFile([{ keyId: "evaluator-key-1", publicKey }]);
+    const files: Tree = {
+      "big\u202e.dat": Buffer.alloc(MAX_FILE_BYTES + 1, "x"),
+      "trust/keys\u202e.json": keys,
+    };
+    const list = listOf(files);
+    const path = directory({ ...files, "list\u202e.json": list, "extra\u202e.txt": "x" });
+    const argv = [path, "--root", `sha256:${sha256(list)}`, "--keys", join(path, "trust/keys\u202e.json")];
+    const { stdout } = await run(...argv);
+    expect(stdout).toContain("Root           matched: list\\u{202e}.json is sha256:");
+    expect(stdout).toContain("covered by the root: trust/keys\\u{202e}.json is in the list");
+    expect(stdout).toContain("extra\\u{202e}.txt: not-listed");
+    const report = JSON.parse((await run(...argv, "--json")).stdout) as { root: unknown };
+    expect(JSON.stringify(report.root)).not.toContain("\u202e");
+  });
+
+  test("lists at most five failures, and points to --json for the rest", async () => {
+    const { path, root } = published({ "a.txt": "a" });
+    for (let index = 0; index < 7; index += 1) writeFileSync(join(path, `extra-${index}.txt`), "x");
+    const { stdout } = await run(path, "--root", root);
+    expect(stdout.match(/extra-\d\.txt: not-listed/gu)).toEqual([0, 1, 2, 3, 4].map((index) => `extra-${index}.txt: not-listed`));
+    expect(stdout).toContain("and 2 more; --json has them all");
+  });
+
+  test("--help says what a root is", async () => {
+    const { code, stdout } = await run("--help");
+    expect(code).toBe(0);
+    expect(stdout).toContain("--root sha256:<hex>");
+    expect(stdout).toContain("somewhere you trust");
   });
 });

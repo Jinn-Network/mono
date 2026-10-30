@@ -71,7 +71,7 @@ const VERIFICATION_ALLOWED_PACKAGES = [
 // verify's command reads what it is pointed at, and its carried documents come from an installed
 // dependency. Everything else is a pure check over bytes, and none of it reaches a network: a
 // reference to a published document resolves against pinned local bytes.
-const VERIFICATION_FILE_READERS = ['command.ts', 'published-documents.ts'];
+const VERIFICATION_FILE_READERS = ['command.ts', 'published-documents.ts', 'root-target.ts'];
 const VERIFICATION_FORBIDDEN_MODULES = [
   'child_process', 'dgram', 'dns', 'http', 'http2', 'https', 'net', 'tls',
   'node:child_process', 'node:dgram', 'node:dns', 'node:http', 'node:http2', 'node:https', 'node:net', 'node:tls',

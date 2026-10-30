@@ -9,15 +9,17 @@ including records that belong to no Colophon bundle.
 ## The command
 
 ```sh
-npx @jinn-network/verify <path> [--keys <file>] [--json]
+npx @jinn-network/verify <path> [--root sha256:<hex>] [--keys <file>] [--json]
 ```
 
 `<path>` is one record file or a directory of records. A directory is not walked into its
-subdirectories, and the report says how many entries it did not read. It reads what it is pointed
-at and the documents below from its own install, and opens no network.
+subdirectories, and the report says how many entries it did not read. With `--root` the whole tree
+is walked. The command reads what it is pointed at and the documents below from its own install, and
+opens no network.
 
 | Flag | What it does |
 | --- | --- |
+| `--root sha256:<hex>` | Checks that the directory holds exactly the files that digest commits to. See [Checking against a root](#checking-against-a-root). |
 | `--keys <file>` | Verifies signatures against the keys in the file. |
 | `--json` | Prints the structured report instead, with `formatVersion` and a top-level `failed`. |
 | `--help` | Prints usage and exits 0. |
@@ -25,8 +27,8 @@ at and the documents below from its own install, and opens no network.
 | Exit code | Meaning |
 | --- | --- |
 | `0` | Nothing failed. |
-| `1` | A record failed a check, a set check failed, or a file was over the size limit. |
-| `2` | The command was misused, or could not read what it was pointed at. Nothing was checked. |
+| `1` | A record failed a check, a set check failed, a file was over the size limit without `--root`, or the directory is not what the root commits to. |
+| `2` | The command was misused, could not read what it was pointed at, or found the root in a file it cannot read as a list. Nothing was checked. |
 
 A file named by its digest, as `<64 hex>` or `<64 hex>.<extension>`, claims that digest, and the
 `digest` check compares it. Any other name claims nothing, and `digest` is skipped.
@@ -37,10 +39,11 @@ and 12 s at twice it. The largest record in the public claim below is 436,248 by
 the one limit the specification states for a stored object, in the IPFS repository profile. A larger
 file is not read. It is named in the report and fails the run, and anything citing it dangles. A
 keys file over the limit is exit code 2. The limit is per file, so a directory of many such files
-still takes as long as it takes.
+still takes as long as it takes. With `--root` a listed file over the limit is still hashed, and
+does not fail the run.
 
-File names, `keyid` values and details printed from a record have control and formatting characters
-escaped, so a record cannot add a line to the report or move the cursor.
+File names, list paths, `keyid` values and details printed from a record have control and formatting
+characters escaped, so a record cannot add a line to the report or move the cursor.
 
 Every record in a directory is a root of the reference walk. A reference to a document the
 specification publishes resolves against the documents below even when the directory does not hold
@@ -69,6 +72,90 @@ Nothing failed. Skipped and unknown are not passes.
 
 "Nothing failed" is the whole of what that last line says. Read it with
 [what passing does not show](#what-passing-does-not-show).
+
+### Checking against a root
+
+A directory says nothing about which files should be in it. A digest published somewhere else can.
+With `--root`, the command establishes that `<path>` holds exactly the files that digest commits to,
+complete and unaltered.
+
+**The digest has to come from somewhere you trust.** Anyone who can change the files can also write
+a new list and hand you its digest, and those files pass. A digest that arrives with the files shows
+nothing. A root pins what was published, not who published it, so `Trust binding` stays skipped.
+
+The root is the SHA-256 of the exact bytes of one file at the top of `<path>`: the list. The
+specification defines no container format, so this format is this package's own:
+
+```json
+{
+  "files": [
+    { "bytes": 9577757, "path": "README.md", "sha256": "622a99456e7146b9048643970a435536763ac773caa5cc127a3d61d8d0d26c6a" },
+    { "bytes": 1034, "path": "badge.svg", "sha256": "446436ba65c1351cffaf79119e4502c23cd42e1cdb20b7d36379a598b411acad" }
+  ]
+}
+```
+
+- The list is UTF-8 I-JSON of at most 67,108,864 bytes. The real list below is 8,156,179 bytes for
+  46,016 files, and that size is over the limit for a record, so a list has its own limit.
+- `files` holds at least one entry. Other top-level members are not read, and the root still commits
+  to them. That is why a Colophon `bundle.json` works as it is. The list does not name itself.
+- An entry holds exactly `path`, `bytes` and `sha256`, which is 64 lowercase hex digits.
+- A `path` is relative and normalized: separated by `/`, with no empty, `.` or `..` segment and no
+  backslash.
+- Entries are sorted by `path` in UTF-16 code-unit order, and no path repeats.
+
+| What the command finds | Exit code | Then |
+| --- | --- | --- |
+| No file at the top of `<path>` has the digest | `1` | Nothing else is checked. |
+| The file with the digest is not such a list at all, or is over its limit | `2` | Nothing else is checked. |
+| An entry breaks the rules above | `1` | No listed file is read. |
+| A listed file is missing, or differs in length or digest | `1` | The rest are still checked. |
+| A file under `<path>` is not listed, apart from the list | `1` | It is not read. |
+| A symbolic link or a special file anywhere under `<path>`, listed or not | `1` | It is not followed or opened. |
+| A listed file, or the list, has more than one hard link | `1` | The rest are still checked. |
+
+An empty directory holds no bytes and is ignored. A path in a list is only ever compared with the
+names found on disk and is never opened, so a list cannot aim a read.
+
+Every listed file is hashed in pieces, with no size limit. Files of at most 2,097,152 bytes then go
+through the record checks, on the same bytes that were hashed, with the list's digest as their
+claimed digest. A larger file is compared and not parsed: the first line counts it, `--json` names it
+under `root.notParsed`, and it does not fail the run.
+
+All listed files go through the record checks, not a subset, because the list is the only thing here
+that says which files matter, and a path is no evidence of what a file is. A file that is not a
+record lands in the counts as `not records` or as an unknown kind, and those are not passes. Files
+are counted once per path, so bytes listed under two paths count twice.
+
+With `--keys`, a `Keys` line says whether the keys file's bytes are in the list. It compares bytes,
+so a copy kept elsewhere counts. Covered means these are the keys that were published with the root.
+It does not say who holds them.
+
+This is the output on the same claim, with `--root` set to the ID it publishes and
+`--keys ./bundle/trust/public-keys.json`. It holds one more signature and one more reference than the
+`records/` run above, because `report-envelope.json` and the anchor are now in the set:
+
+```text
+Read 46,016 files from ./bundle, and did not parse 6 files over the size limit.
+
+Root           matched: bundle.json is sha256:de169c04a24bbb4d9d5b52e398b8bfe92e939ba4d8a8c9e6e3e551cf10aa3774
+Kinds          26,402 known, 4,818 unknown naming a type, 14,790 naming no type
+Digest         46,010 passed, compared with the list
+Encoding       31,891 passed, 14,119 skipped (9,799 not records, 4,320 not required by family)
+Schema         26,402 passed, 19,608 skipped (kind unknown)
+Signatures     4,323 verified against keys you supplied, none unverified
+Keys           covered by the root: trust/public-keys.json is in the list
+Trust binding  skipped: no key was tied to an identity, and a root pins what was published, not who published it
+References     passed for known kinds: 92,163 resolved, 9,600 of them by published documents
+Lifecycle      skipped: no observations here
+Anchors        1 pending
+Completeness   passed: 46,016 listed files present and unchanged, no others
+
+Nothing failed. Skipped and unknown are not passes.
+```
+
+`--json` adds a `root` object with `digest`, `list`, `listed`, `checked`, `problems`, `notParsed`, and
+`keys` when keys were supplied.
 
 ### Keys
 
@@ -193,18 +280,23 @@ they claim to be signed, so they fail.
 
 ## What passing does not show
 
-- **A digest shows the bytes are the ones asked for.** It does not show who wrote them. The command
-  compares a file with its own name, which sits beside it: whoever changes the bytes can change the
-  name, so `digest` shows a file was not damaged, not that it is the file that was published.
-- **The command does not know which files should exist.** Every file is its own root, so a record
-  added, or a record nothing known cites, removed or replaced, changes a count and fails nothing.
-  To tie a directory to a published claim, compare the claim's own digest by another route.
+- **A digest shows the bytes are the ones asked for.** It does not show who wrote them. Without
+  `--root` the command compares a file with its own name, which sits beside it: whoever changes the
+  bytes can change the name, so `digest` shows a file was not damaged, not that it is the file that
+  was published.
+- **Without `--root`, the command does not know which files should exist.** Every file is its own
+  root, so a record added, or a record nothing known cites, removed or replaced, changes a count and
+  fails nothing. To tie a directory to a published claim, pass the claim's digest with `--root`.
+- **A root shows these are the files a digest commits to.** It does not show who published the digest,
+  or that what the files say is true. A forged root from an untrusted source passes: new files, a new
+  list, and that list's digest are all a forger needs, so the digest has to come from somewhere you
+  trust.
 - **A schema shows the record is interpretable.** It does not show its claims are true, or that the
   work was good. The Execution Evidence Profile says the same of its own conformance.
 - **A signature shows a key signed.** Only `trust-binding` ties a key to an identity, and only as far
   as its resolver can see. A `did:key` is the key, not who holds it, and a key you supplied is only
   the key you supplied. A keys file that came with the records shows nothing against whoever handed
-  you both.
+  you both. Under a root you trust, it shows these are the keys that were published, not whose they are.
 - **Distinct keys are distinct keys.** Nothing here shows they belong to distinct parties.
 - **An anchor that is `present` was not evaluated.** Without trust material its time is unchecked.
   One `pending` has no attestation yet.

@@ -43,7 +43,7 @@ function run(command, args, cwd) {
 const CONSUMER = `
 import { spawnSync } from "node:child_process";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dssePreAuthEncoding, sealDsseEnvelope } from "@jinn-network/trust-core";
@@ -100,12 +100,33 @@ const corrupted = jinnVerify(records);
 const usage = jinnVerify();
 rmSync(records, { recursive: true, force: true });
 
+// The installed command against a root: a directory that is exactly the list, then one that is not.
+const bundle = mkdtempSync(join(tmpdir(), "jinn-verify-bundle-"));
+const taskPath = "records/" + taskDigest.slice("sha256:".length) + ".bin";
+mkdirSync(join(bundle, "records"));
+writeFileSync(join(bundle, taskPath), task);
+const list = new TextEncoder().encode(JSON.stringify({
+  files: [{ path: taskPath, bytes: task.length, sha256: taskDigest.slice("sha256:".length) }],
+}));
+writeFileSync(join(bundle, "bundle.json"), list);
+const rooted = jinnVerify(bundle, "--root", recordDigest(list));
+writeFileSync(join(bundle, "added.txt"), "not listed");
+const unlisted = jinnVerify(bundle, "--root", recordDigest(list));
+const noRoot = jinnVerify(bundle, "--root", recordDigest(task));
+rmSync(bundle, { recursive: true, force: true });
+
 const results = [
   clean.status === 0,
   clean.stdout.includes("1 by a published document"),
   clean.stdout.includes("Nothing failed."),
   corrupted.status === 1,
   usage.status === 2,
+  rooted.status === 0,
+  rooted.stdout.includes("Completeness   passed: 1 listed file present and unchanged, no others"),
+  unlisted.status === 1,
+  unlisted.stdout.includes("added.txt: not-listed"),
+  noRoot.status === 1,
+  noRoot.stdout.includes("Root           failed"),
   taskReport.outcome === "checked",
   taskReport.kind in defaultRecordKinds,
   setReport.summary.records === 1,
