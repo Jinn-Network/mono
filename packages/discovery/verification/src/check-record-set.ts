@@ -57,6 +57,8 @@ export interface ReferencesResult extends CheckResult<"references"> {
 
 export interface AttemptLifecycle {
   readonly attempt: string;
+  /** Whether an `attempt-engaged` pinned the authoritative source. Without one, `state` is unattributed. */
+  readonly engaged: boolean;
   readonly state: string;
   readonly terminal: boolean;
   readonly contradictory: boolean;
@@ -77,8 +79,8 @@ export interface AnchorsResult extends CheckResult<"anchors"> {
 
 export interface RecordSetSummary {
   readonly records: number;
-  /** Records with at least one failed check. */
-  readonly failed: number;
+  /** Records with at least one failed check. Set checks fail on their own, so this is not a verdict. */
+  readonly recordsFailed: number;
   /** Records per kind id, with those no kind claims under `unknown`. */
   readonly kinds: Readonly<Record<string, number>>;
   /** Of the `unknown` records, how many name each type no kind is registered for. */
@@ -169,6 +171,9 @@ function checkReferences(roots: readonly string[], held: Held): ReferencesResult
   if (counts.opaque > 0) {
     notes.push({ code: "references-not-read", detail: `${counts.opaque} reached records are of unknown kind or failed their schema, so any references they carry were not read.` });
   }
+  if (refusals.length === 0 && counts.opaque === counts.reached) {
+    return { ...skipped("references", "no-references-read", notes.map(({ detail }) => detail).join(" ")), ...counts };
+  }
   if (counts.unavailable > 0) {
     notes.push({ code: "references-unavailable", detail: `${counts.unavailable} references name bytes the family lets a reader lack and the set does not hold, so those bytes were not looked at.` });
   }
@@ -186,7 +191,9 @@ function attemptLogs(records: readonly InspectedRecord[]): ReadonlyMap<string, r
     if (!isKind(entry, OBSERVATION_KIND)) continue;
     const observation = entry.view.document as ProtocolObservation;
     if (!attemptTypes.includes(observation.type)) continue;
-    logs.set(observation.subject, [...(logs.get(observation.subject) ?? []), observation]);
+    const log = logs.get(observation.subject);
+    if (log === undefined) logs.set(observation.subject, [observation]);
+    else log.push(observation);
   }
   return logs;
 }
@@ -209,7 +216,13 @@ function checkLifecycle(records: readonly InspectedRecord[], held: Held): Lifecy
   // §11.3 rule 1, "checkable whenever both records are held": it needs no log.
   for (const entry of superseding) {
     const target = held.get(documentOf(entry)["supersedes"] as string);
-    if (target !== undefined && isKind(target, RECORD_KINDS.delivery) && documentOf(target)["attempt"] !== documentOf(entry)["attempt"]) {
+    if (target !== undefined && !isKind(target, RECORD_KINDS.delivery)) {
+      refusals.push({
+        code: "supersedes-not-a-delivery",
+        subject: entry.report.digest,
+        detail: `This Delivery supersedes ${target.report.digest}, which is not a valid Delivery (Task Execution Protocol §11.3 rule 1).`,
+      });
+    } else if (target !== undefined && documentOf(target)["attempt"] !== documentOf(entry)["attempt"]) {
       refusals.push({
         code: "supersedes-other-attempt",
         subject: entry.report.digest,
@@ -219,10 +232,16 @@ function checkLifecycle(records: readonly InspectedRecord[], held: Held): Lifecy
   }
 
   const attempts: AttemptLifecycle[] = [];
+  const unattributed: Finding[] = [];
   for (const [attempt, log] of logs) {
     const derived = foldObservations(log);
     const recorded = derived.deliveries.map(({ digest }) => digest);
-    attempts.push({ attempt, state: derived.state, terminal: derived.terminal, contradictory: derived.contradictory, deliveries: recorded });
+    // §10.1: "Consumers establish authority from the engagement event". Without one, any source counts.
+    const engaged = log.some(({ type }) => type === "network.jinn.task-execution.attempt-engaged.v1");
+    if (!engaged) {
+      unattributed.push({ code: "attempt-not-engaged", subject: attempt, detail: "The set holds no attempt-engaged for this Attempt, so nothing pins whose observations these are." });
+    }
+    attempts.push({ attempt, engaged, state: derived.state, terminal: derived.terminal, contradictory: derived.contradictory, deliveries: recorded });
     if (derived.contradictory) {
       refusals.push({ code: "contradictory-terminals", subject: attempt, detail: `The authoritative log holds contradictory terminals; the first in sequence is ${derived.state} (§10.4 rule 4).` });
     }
@@ -244,10 +263,13 @@ function checkLifecycle(records: readonly InspectedRecord[], held: Held): Lifecy
   }
 
   const deliveriesWithoutObservations = deliveries.filter((entry) => !logs.has(documentOf(entry)["attempt"] as string)).length;
-  const notes: Finding[] = deliveriesWithoutObservations === 0 ? [] : [{
+  const notes: Finding[] = [...unattributed, ...(deliveriesWithoutObservations === 0 ? [] : [{
     code: "deliveries-without-observations",
     detail: `${deliveriesWithoutObservations} Deliveries belong to Attempts with no observation in the set, so no lifecycle covers them.`,
-  }];
+  }])];
+  if (refusals.length === 0 && attempts.length > 0 && attempts.every(({ engaged }) => !engaged)) {
+    return { id: "lifecycle", status: "skipped", findings: notes, attempts, deliveriesWithoutObservations };
+  }
   const result = refusals.length > 0 ? failed("lifecycle", [...refusals, ...notes]) : passed("lifecycle", notes);
   return { ...result, attempts, deliveriesWithoutObservations };
 }
@@ -303,7 +325,7 @@ function summarize(reports: readonly RecordReport[]): RecordSetSummary {
   }
   return {
     records: reports.length,
-    failed: reports.filter(({ outcome }) => outcome === "failed").length,
+    recordsFailed: reports.filter(({ outcome }) => outcome === "failed").length,
     kinds,
     unknownTypes,
     namingNoType,

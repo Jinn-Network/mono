@@ -138,8 +138,8 @@ describe("references", () => {
 
   test("a reached record of unknown kind is opaque: its references were not read", async () => {
     const { references } = await set([recordDigest(PROFILE)], PROFILE);
-    expect(references).toMatchObject({ status: "passed", opaque: 1 });
-    expect(references.findings).toEqual([expect.objectContaining({ code: "references-not-read" })]);
+    expect(references).toMatchObject({ status: "skipped", opaque: 1 });
+    expect(references.findings).toEqual([expect.objectContaining({ code: "no-references-read" })]);
   });
 
   test("a record that failed its schema is not walked", async () => {
@@ -164,7 +164,14 @@ describe("references", () => {
         },
       },
     });
-    expect(report.checks[0]).toMatchObject({ status: "passed", opaque: 1 });
+    expect(report.checks[0]).toMatchObject({ status: "skipped", opaque: 1 });
+  });
+
+  test("two citations of one record are two citations, and its own are read once", async () => {
+    const first = delivery();
+    const second = delivery({ attempt: OTHER_ATTEMPT });
+    const { references } = await set([recordDigest(first), recordDigest(second)], first, second, task, PROFILE);
+    expect(references).toMatchObject({ status: "passed", reached: 4, resolved: 3 });
   });
 
   test("a claimed digest resolves nothing: only the bytes' own digest does", async () => {
@@ -199,11 +206,26 @@ describe("lifecycle", () => {
     expect(lifecycle.findings[0]).toMatchObject({ code: "no-lifecycle-records" });
   });
 
+  test("a log with no engagement has no authoritative source, so it does not read as passed", async () => {
+    const { lifecycle } = await set([], closing,
+      observation("delivery-recorded", "d", 8, { digest: closingDigest }, { source: "urn:attacker" }),
+      observation("attempt-terminal", "t", 9, { state: "delivered" }, { source: "urn:attacker" }));
+    expect(lifecycle.status).toBe("skipped");
+    expect(lifecycle.findings).toEqual([expect.objectContaining({ code: "attempt-not-engaged", subject: ATTEMPT })]);
+    expect(lifecycle.attempts[0]).toMatchObject({ engaged: false, state: "delivered" });
+  });
+
+  test("an observation that failed its schema is not folded", async () => {
+    const { lifecycle } = await set([], observation("attempt-engaged", "evt-1", 1, ENGAGED),
+      observation("attempt-terminal", "evt-2", 2, { state: "exploded" }));
+    expect(lifecycle.attempts).toEqual([expect.objectContaining({ engaged: true, state: "pending", terminal: false })]);
+  });
+
   test("a log folds to its derived state, and a Delivery recorded in it is held", async () => {
     const { lifecycle } = await set([], closing, task, PROFILE, ...log);
     expect(lifecycle).toMatchObject({
       status: "passed",
-      attempts: [{ attempt: ATTEMPT, state: "delivered", terminal: true, contradictory: false, deliveries: [closingDigest] }],
+      attempts: [{ attempt: ATTEMPT, engaged: true, state: "delivered", terminal: true, contradictory: false, deliveries: [closingDigest] }],
       deliveriesWithoutObservations: 0,
     });
   });
@@ -251,6 +273,17 @@ describe("lifecycle", () => {
     const { lifecycle } = await set([], stray, closing, ...log);
     expect(lifecycle).toMatchObject({ status: "passed", deliveriesWithoutObservations: 1 });
     expect(lifecycle.findings).toEqual([expect.objectContaining({ code: "deliveries-without-observations" })]);
+  });
+
+  test("§11.3 rule 1: what is superseded must be a Delivery", async () => {
+    const forged = delivery({ supersedes: taskDigest, createdAt: "2026-07-28T00:06:00Z" });
+    const { lifecycle } = await set([], forged, task);
+    expect(lifecycle.status).toBe("failed");
+    expect(lifecycle.findings).toEqual(expect.arrayContaining([expect.objectContaining({ code: "supersedes-not-a-delivery", subject: recordDigest(forged) })]));
+
+    const broken = canonicalJsonBytes({ protocol: TASK_EXECUTION_PROTOCOL_URI, attempt: ATTEMPT, task: taskDigest });
+    const overBroken = delivery({ supersedes: recordDigest(broken), createdAt: "2026-07-28T00:06:00Z" });
+    expect((await set([], overBroken, broken)).lifecycle.status).toBe("failed");
   });
 
   test("§11.3 rule 1 holds whenever both records are held, with no log at all", async () => {
@@ -336,7 +369,7 @@ describe("the summary", () => {
     const { report } = await set([recordDigest(closing)], closing, task, PROFILE, application, respelled, archive);
     expect(report.summary).toEqual({
       records: 6,
-      failed: 1,
+      recordsFailed: 1,
       kinds: { [RECORD_KINDS.delivery]: 1, [RECORD_KINDS.task]: 1, unknown: 4 },
       unknownTypes: { [APPLICATION_TYPE]: 2 },
       namingNoType: 2,

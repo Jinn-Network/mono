@@ -153,6 +153,12 @@ describe("evaluateAnchors", () => {
     expect(declared.subjects).toEqual([
       { subject: "task", outcome: "declared-but-absent", declaredProfiles: [OPENTIMESTAMPS_ANCHOR_PROFILE] },
     ]);
+
+    const unsorted = evaluateAnchors({
+      records: [],
+      subjects: [{ ...SUBJECTS[0]!, declaredProfiles: [RFC3161_TSA_ANCHOR_PROFILE, OPENTIMESTAMPS_ANCHOR_PROFILE] }],
+    });
+    expect(unsorted.subjects[0]!.declaredProfiles).toEqual([OPENTIMESTAMPS_ANCHOR_PROFILE, RFC3161_TSA_ANCHOR_PROFILE].sort());
   });
 
   test("a caller's rule can refuse a proof that verified, and the subject reads as unanchored", () => {
