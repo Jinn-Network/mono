@@ -132,6 +132,11 @@ function usableKey(keyid: string, supplied: readonly DsseVerificationKey[]): Usa
   return publicKey === undefined ? undefined : { keyId: keyid, publicKey, supplied: false };
 }
 
+/** One entry per keyid: a repeat would make the cost quadratic in a publisher's signatures. */
+function distinctKeys<Key extends DsseVerificationKey>(keys: readonly Key[]): readonly Key[] {
+  return [...new Map(keys.map((key) => [key.keyId, key])).values()];
+}
+
 const NO_SIGNATURES: SignatureCounts = { total: 0, verified: 0, verifiedWithSuppliedKey: 0, invalid: 0, unverified: 0 };
 
 interface SignatureOutcome {
@@ -187,14 +192,15 @@ function checkSignature(view: RecordView, kind: RecordKind | undefined, trust: R
     };
   }
 
-  const { validSignerKeyids } = verifyDsseSignatures(view.bytes, usable, {
+  const { validSignerKeyids } = verifyDsseSignatures(view.bytes, distinctKeys(usable), {
     allowRespelledEnvelope: kind.anyEnvelopeSpelling === true,
   });
+  const valid = new Set(validSignerKeyids);
   const invalid = usable
-    .filter(({ keyId }) => !validSignerKeyids.includes(keyId))
+    .filter(({ keyId }) => !valid.has(keyId))
     .map(({ keyId }): Finding => ({ code: "signature-invalid", subject: keyId, detail: `The signature under ${keyId} does not verify.` }));
   const suppliedAndVerified = usable
-    .filter(({ keyId, supplied }) => supplied && validSignerKeyids.includes(keyId))
+    .filter(({ keyId, supplied }) => supplied && valid.has(keyId))
     .map(({ keyId }): Finding => ({
       code: "verified-with-supplied-key",
       subject: keyId,
@@ -229,7 +235,7 @@ function bindingDsseVerifier(kind: RecordKind, trust: RecordTrustOptions): DsseC
       const key = keyid === undefined ? undefined : usableKey(keyid, trust.keys ?? []);
       return key === undefined ? [] : [key];
     });
-    return verifyDsseSignatures(envelopeBytes, keys, { allowRespelledEnvelope: kind.anyEnvelopeSpelling === true });
+    return verifyDsseSignatures(envelopeBytes, distinctKeys(keys), { allowRespelledEnvelope: kind.anyEnvelopeSpelling === true });
   };
 }
 

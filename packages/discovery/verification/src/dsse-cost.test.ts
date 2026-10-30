@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { sealDsseEnvelope } from "@jinn-network/trust-core";
 import type { DsseProducedSignature } from "@jinn-network/trust-core";
 
+import { checkRecord } from "./check-record.js";
 import { didKeyFromEd25519PublicKey } from "./did-key.js";
 import { createDidKeyDsseVerifier, verifyDsseSignatures } from "./dsse.js";
 
@@ -54,6 +55,23 @@ describe("one signature check per signature", () => {
   test("createDidKeyDsseVerifier, with every signature under its own key id", () => {
     const envelope = sealed(Array.from({ length: SIGNATURES }, () => wrongSignature(key())));
     expect(createDidKeyDsseVerifier()(envelope).validSignerKeyids).toEqual([]);
+    expect(verify).toHaveBeenCalledTimes(SIGNATURES);
+  });
+
+  test("checkRecord, with every signature repeating one key id", async () => {
+    const envelope = sealed(new Array<DsseProducedSignature>(SIGNATURES).fill(wrongSignature(signer)));
+    const report = await checkRecord(envelope, {
+      kinds: {
+        note: {
+          family: "example",
+          identify: () => true,
+          validate: () => [],
+          anyEnvelopeSpelling: true,
+        },
+      },
+      trust: { keys: [] },
+    });
+    expect(report.signatures).toMatchObject({ total: SIGNATURES, invalid: SIGNATURES });
     expect(verify).toHaveBeenCalledTimes(SIGNATURES);
   });
 
