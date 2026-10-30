@@ -18,3 +18,19 @@ export {
   anchorSignatureVerifier,
   nodeCryptoAnchorPorts,
 } from "./anchor/ports.js";
+export { checkRecord } from "./check-record.js";
+export type { CheckRecordOptions, RecordTrustOptions } from "./check-record.js";
+export { OBSERVATION_KIND, defaultRecordKinds } from "./kinds/index.js";
+export type { RecordAttribution, RecordKind, RecordKinds, RecordReference } from "./kinds/index.js";
+export type { RecordView } from "./record-view.js";
+export { UNKNOWN_KIND } from "./results.js";
+export type {
+  CheckId,
+  CheckResult,
+  CheckStatus,
+  Finding,
+  RecordCheckId,
+  RecordOutcome,
+  RecordReport,
+  SetCheckId,
+} from "./results.js";
