@@ -192,6 +192,18 @@ describe("a directory of records", () => {
     expect(stdout).toContain("References     passed for known kinds: 0 resolved");
   });
 
+  test("two reasons for one skip are both counted, the larger first", async () => {
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const keyId = "evaluator-key-1";
+    const keys = directory({ "keys.json": keysFile([{ keyId, publicKey }]) });
+    const { stdout } = await run(directory({
+      "one.bin": Uint8Array.of(0xff),
+      "two.bin": Uint8Array.of(0xfe),
+      "signed.json": evaluation(privateKey, keyId),
+    }), "--keys", join(keys, "keys.json"));
+    expect(stdout).toContain("Encoding       3 skipped (2 not records, 1 not required by family)");
+  });
+
   test("subdirectories are not walked, and the report says so", async () => {
     const path = directory(Object.fromEntries([named(task)]));
     mkdirSync(join(path, "nested"));

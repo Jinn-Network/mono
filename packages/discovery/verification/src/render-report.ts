@@ -23,7 +23,7 @@ const LISTED_FAILURES = 5;
 
 const SKIP_PHRASES: Readonly<Record<string, string>> = {
   "no-claimed-digest": "no digest claimed",
-  "encoding-not-required": "not required by their family",
+  "encoding-not-required": "not required by family",
   "not-a-record": "not records",
   "unknown-kind": "kind unknown",
 };
@@ -62,7 +62,10 @@ function skipReasons(records: readonly RecordReport[], id: RecordCheckId): strin
     reasons.set(phrase, (reasons.get(phrase) ?? 0) + 1);
   }
   if (reasons.size === 1) return [...reasons.keys()][0]!;
-  return [...reasons].map(([phrase, times]) => `${number(times)} ${phrase}`).join(", ");
+  return [...reasons]
+    .sort(([, left], [, right]) => right - left)
+    .map(([phrase, times]) => `${number(times)} ${phrase}`)
+    .join(", ");
 }
 
 function checkLine(label: string, id: RecordCheckId, report: CommandReport): string {
@@ -99,7 +102,7 @@ function referencesLine(result: ReferencesResult): string {
   const resolved = number(result.resolved + result.resolvedPublished);
   const published = result.resolvedPublished === 0
     ? ""
-    : `, ${count(result.resolvedPublished, "by a published document", "by published documents").replace(/^(\S+) by a /u, "$1 by a ")}`;
+    : `, ${count(result.resolvedPublished, "by a published document", "by published documents")}`;
   const unavailable = result.unavailable === 0 ? "" : `, ${number(result.unavailable)} unavailable`;
   if (result.status === "failed") return line("References", `failed: ${number(result.dangling)} dangling, ${resolved} resolved${published}${unavailable}`);
   return line("References", `${result.opaque > 0 ? "passed for known kinds" : "passed"}: ${resolved} resolved${published}${unavailable}`);

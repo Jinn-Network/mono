@@ -153,6 +153,13 @@ try {
   await run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], consumer);
   await writeFile(join(consumer, "smoke.mjs"), CONSUMER);
   await run(process.execPath, ["smoke.mjs"], consumer);
+
+  // A visitor's first run happens on whatever npm Node ships, and Node 22 ships 10.9.9. Packages
+  // elsewhere in this repository need 11.19, so this closure is held to the older one.
+  await rm(join(consumer, "node_modules"), { recursive: true, force: true });
+  await rm(join(consumer, "package-lock.json"), { force: true });
+  await run("npx", ["--yes", "npm@10.9.9", "install", "--ignore-scripts", "--no-audit", "--no-fund"], consumer);
+  await run(process.execPath, ["smoke.mjs"], consumer);
   console.log("Packed @jinn-network/verify distribution and archive shape verified.");
 } finally {
   await rm(temporary, { recursive: true, force: true });

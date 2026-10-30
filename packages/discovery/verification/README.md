@@ -34,18 +34,20 @@ Every record in a directory is a root of the reference walk. A reference to a do
 specification publishes resolves against the documents below even when the directory does not hold
 it. One file is not a set, so references, lifecycle and anchors say they were not checked.
 
-The report prints `passed` only for what ran. On a directory of records it reads:
+The report prints `passed` only for what ran. This is the output on the public claim
+[Judging the LoCoMo judges](https://colophon.claims/reports/locomo-judge-report/), from its
+`records/` directory with `--keys ./bundle/trust/public-keys.json`:
 
 ```text
-Read 3 files from ./records.
+Read 41,678 files from ./bundle/records.
 
-Kinds          2 known, 0 unknown naming a type, 1 naming no type
-Digest         3 passed
-Encoding       2 passed, 1 skipped (not records)
-Schema         2 passed, 1 skipped (kind unknown)
-Signatures     1 verified against keys you supplied, none unverified
+Kinds          26,401 known, 4,814 unknown naming a type, 10,463 naming no type
+Digest         41,678 passed
+Encoding       31,882 passed, 9,796 skipped (5,476 not records, 4,320 not required by family)
+Schema         26,401 passed, 15,277 skipped (kind unknown)
+Signatures     4,320 verified against keys you supplied, 2 not verified (kind unknown)
 Trust binding  skipped: no key was tied to an identity
-References     passed for known kinds: 4 resolved, 1 by a published document
+References     passed for known kinds: 92,162 resolved, 9,600 by published documents
 Lifecycle      skipped: no observations here
 Anchors        not checked: no anchor records here
 
