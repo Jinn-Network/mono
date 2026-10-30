@@ -5,8 +5,8 @@
  * of the packages that vendor them and checked against their digest manifests first, so a vector
  * that changed fails here as a vector and not as a mystery.
  *
- * `@jinn-network/evidence-protocol` is a devDependency only for its two golden DSSE claims: they are
- * the only published envelopes whose signatures another implementation made.
+ * The two golden DSSE claims in `@jinn-network/evidence-protocol` are the only published envelopes
+ * whose signatures another implementation made.
  */
 
 import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
