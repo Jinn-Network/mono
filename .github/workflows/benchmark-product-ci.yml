@@ -241,7 +241,7 @@ jobs:
         run: npm install --global npm@11.19.0 --no-audit --no-fund
       - id: inspect-python
         name: Install the pinned optional Inspect runtime
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.11"
       - name: Verify and install the supported Inspect wheel
