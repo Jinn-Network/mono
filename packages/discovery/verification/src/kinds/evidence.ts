@@ -38,8 +38,10 @@ function findings(diagnostics: readonly ConformanceDiagnostic[]): readonly Findi
   return diagnostics.map(({ code, path, message }) => ({ code, path, detail: message }));
 }
 
+/** A bare Statement names the kind too, and then fails it: §4 requires the DSSE envelope. */
 function isStatementOf(view: RecordView, predicateType: string): boolean {
-  return view.payloadType === DSSE_PAYLOAD_TYPE && documentField(view, "predicateType") === predicateType;
+  return documentField(view, "predicateType") === predicateType
+    && (view.payloadType === undefined || view.payloadType === DSSE_PAYLOAD_TYPE);
 }
 
 /** §3.1: the Root Dataset's `conformsTo` includes the profile. A generic RO-Crate does not. */

@@ -111,8 +111,8 @@ export const TRUST_KINDS: Readonly<Record<string, RecordKind>> = {
   },
   [RECORD_KINDS.authorization]: {
     family: "trust",
-    identify: (view) =>
-      view.payloadType === DSSE_PAYLOAD_TYPE && documentField(view, "predicateType") === AUTHORIZATION_PREDICATE_TYPE,
+    identify: (view) => documentField(view, "predicateType") === AUTHORIZATION_PREDICATE_TYPE
+      && (view.payloadType === undefined || view.payloadType === DSSE_PAYLOAD_TYPE),
     validate: ({ bytes }) => findings(validateAuthorization(bytes).diagnostics),
     references: authorizationReferences,
     attribution: (view) => {

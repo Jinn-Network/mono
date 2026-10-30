@@ -33,6 +33,18 @@ export type {
 } from "./anchor/evaluate.js";
 export { checkRecord } from "./check-record.js";
 export type { CheckRecordOptions, RecordTrustOptions } from "./check-record.js";
+export { checkRecordSet } from "./check-record-set.js";
+export type {
+  AnchorsResult,
+  AttemptLifecycle,
+  CheckRecordSetInput,
+  LifecycleResult,
+  RecordSetInputRecord,
+  RecordSetReport,
+  RecordSetSummary,
+  RecordSetTrustOptions,
+  ReferencesResult,
+} from "./check-record-set.js";
 export { createStaticBindingResolver } from "./static-binding-resolver.js";
 export type { StaticKeyBinding } from "./static-binding-resolver.js";
 export { OBSERVATION_KIND, defaultRecordKinds } from "./kinds/index.js";
