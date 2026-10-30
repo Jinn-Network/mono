@@ -18,6 +18,19 @@ export {
   anchorSignatureVerifier,
   nodeCryptoAnchorPorts,
 } from "./anchor/ports.js";
+export { evaluateAnchors } from "./anchor/evaluate.js";
+export type {
+  AnchorProofContext,
+  AnchorProofStatus,
+  AnchorRefusal,
+  AnchorSubject,
+  AnchorSubjectReport,
+  AnchorTrustMaterial,
+  AnchorVerificationEntry,
+  AnchorsReport,
+  CarriedAnchorRecord,
+  EvaluateAnchorsInput,
+} from "./anchor/evaluate.js";
 export { checkRecord } from "./check-record.js";
 export type { CheckRecordOptions, RecordTrustOptions } from "./check-record.js";
 export { createStaticBindingResolver } from "./static-binding-resolver.js";
