@@ -680,6 +680,59 @@ describe("what a report counts about signatures", () => {
     expect((await checkRecord(encoder.encode(JSON.stringify(envelope)))).signatures).toEqual({ ...unsigned, total: 1, invalid: 1 });
   });
 
+  test("one valid signature does not vouch for others under its keyid", async () => {
+    const key = ed25519();
+    const payloadBytes = canonicalJsonBytes(evaluationStatement());
+    const good = new Uint8Array(sign(null, dssePreAuthEncoding(DSSE_PAYLOAD_TYPE, payloadBytes), key.privateKey));
+    const bytes = sealDsseEnvelope({
+      payloadBytes,
+      signatures: [{ keyid: key.keyid, signature: good }, ...new Array(3).fill({ keyid: key.keyid, signature: new Uint8Array(64) })],
+    });
+    const report = await checkRecord(bytes);
+    expect(report.signatures).toEqual({ ...unsigned, total: 4, verified: 1, invalid: 3 });
+    expect(check(report, "signature").status).toBe("failed");
+  });
+
+  test("one key signing twice is two signatures", async () => {
+    const key = ed25519();
+    const payloadBytes = canonicalJsonBytes(evaluationStatement());
+    const signature = new Uint8Array(sign(null, dssePreAuthEncoding(DSSE_PAYLOAD_TYPE, payloadBytes), key.privateKey));
+    const report = await checkRecord(sealDsseEnvelope({ payloadBytes, signatures: [{ keyid: key.keyid, signature }, { keyid: key.keyid, signature }] }));
+    expect(report.signatures).toEqual({ ...unsigned, total: 2, verified: 2 });
+  });
+
+  test("a record of unknown kind has no envelope rule, so a respelled envelope still verifies", async () => {
+    const key = ed25519();
+    const payloadType = "application/vnd.jinn.not-registered.v1+json";
+    const payloadBytes = canonicalJsonBytes({});
+    const signature = new Uint8Array(sign(null, dssePreAuthEncoding(payloadType, payloadBytes), key.privateKey));
+    const sealed = sealDsseEnvelope({ payloadType, payloadBytes, signatures: [{ signature, keyid: key.keyid }] });
+    const respelled = encoder.encode(JSON.stringify(JSON.parse(new TextDecoder().decode(sealed)), null, 2));
+    expect((await checkRecord(respelled)).signatures).toEqual({ ...unsigned, total: 1, verified: 1 });
+  });
+
+  test("a bad signature on a record of unknown kind fails, whatever the record is", async () => {
+    const key = ed25519();
+    const bytes = sealDsseEnvelope({
+      payloadType: "application/vnd.jinn.not-registered.v1+json",
+      payloadBytes: canonicalJsonBytes({}),
+      signatures: [{ signature: new Uint8Array(64), keyid: key.keyid }],
+    });
+    const report = await checkRecord(bytes);
+    expect(report).toMatchObject({ kind: "unknown", outcome: "failed", signatures: { ...unsigned, total: 1, invalid: 1 } });
+  });
+
+  test("a good signature on a record of unknown kind verifies, and does not make the kind known", async () => {
+    const key = ed25519();
+    const payloadType = "application/vnd.jinn.not-registered.v1+json";
+    const payloadBytes = canonicalJsonBytes({});
+    const signature = new Uint8Array(sign(null, dssePreAuthEncoding(payloadType, payloadBytes), key.privateKey));
+    const report = await checkRecord(sealDsseEnvelope({ payloadType, payloadBytes, signatures: [{ signature, keyid: key.keyid }] }));
+    expect(report).toMatchObject({ kind: "unknown", outcome: "unknown-kind", signatures: { ...unsigned, total: 1, verified: 1 } });
+    expect(check(report, "signature").status).toBe("passed");
+    expect(check(report, "schema").status).toBe("skipped");
+  });
+
   test("a signed record of unknown kind is counted unverified and says it is signed", async () => {
     const bytes = sealDsseEnvelope({
       payloadType: "application/vnd.jinn.not-registered.v1+json",

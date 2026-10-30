@@ -160,23 +160,16 @@ interface SignatureOutcome {
 }
 
 function checkSignature(view: RecordView, kind: RecordKind | undefined, trust: RecordTrustOptions | undefined): SignatureOutcome {
-  const total = view.signatures?.length ?? 0;
-  const unverifiedOutcome = (result: CheckResult<"signature">) => ({
-    result,
-    verifiedSigners: [],
-    counts: { ...NO_SIGNATURES, total, unverified: total },
-  });
-  if (kind === undefined) {
-    return unverifiedOutcome(skipped("signature", "unknown-kind", total === 0
-      ? "No registered kind says who signs this record, so no signature was verified."
-      : `These bytes carry ${total} signature${total === 1 ? "" : "s"}, and no registered kind says who signs them, so none was verified.`));
-  }
   if (view.signatures === undefined) {
-    return unverifiedOutcome(kind.unsignedBecause === undefined
-      ? failed("signature", [{ code: "not-signed", detail: "This kind is a DSSE envelope, and these bytes are not a well-formed one." }])
-      : skipped("signature", "unsigned-record", kind.unsignedBecause));
+    const result = kind === undefined
+      ? skipped("signature", "unknown-kind", "No registered kind says who signs this record, so no signature was verified.")
+      : kind.unsignedBecause === undefined
+        ? failed("signature", [{ code: "not-signed", detail: "This kind is a DSSE envelope, and these bytes are not a well-formed one." }])
+        : skipped("signature", "unsigned-record", kind.unsignedBecause);
+    return { result, verifiedSigners: [], counts: NO_SIGNATURES };
   }
 
+  const total = view.signatures.length;
   const usable: UsableKey[] = [];
   const unverifiable: Finding[] = [];
   for (const { keyid } of view.signatures) {
@@ -192,12 +185,16 @@ function checkSignature(view: RecordView, kind: RecordKind | undefined, trust: R
       });
     }
   }
-  const required = kind.requiredSigners?.(view) ?? [];
+  const required = kind?.requiredSigners?.(view) ?? [];
   const missing = required
     .filter((signer) => !view.signatures!.some(({ keyid }) => keyid === signer))
     .map((signer): Finding => ({ code: "required-signer-missing", subject: signer, detail: `This kind must be signed by ${signer}, and no signature names it.` }));
   if (usable.length === 0) {
     const counts = { ...NO_SIGNATURES, total, unverified: total };
+    if (kind === undefined) {
+      const carried = `These bytes carry ${total} signature${total === 1 ? "" : "s"}, and no key for ${total === 1 ? "it" : "them"} is known, so none was verified.`;
+      return { result: skipped("signature", "unknown-kind", carried), verifiedSigners: [], counts };
+    }
     return {
       result: missing.length > 0
         ? failed("signature", [...missing, ...unverifiable])
@@ -207,20 +204,33 @@ function checkSignature(view: RecordView, kind: RecordKind | undefined, trust: R
     };
   }
 
+  // A signature is a fact whatever the record is, so an unknown kind cannot hide a bad one. Its
+  // family's envelope rule is not known, so any spelling is read.
   const { validSignerKeyids } = verifyDsseSignatures(view.bytes, distinctKeys(usable), {
-    allowRespelledEnvelope: kind.anyEnvelopeSpelling === true,
+    allowRespelledEnvelope: kind === undefined || kind.anyEnvelopeSpelling === true,
+    keepRepeatedSigners: true,
   });
-  const valid = new Set(validSignerKeyids);
-  const invalid = usable
-    .filter(({ keyId }) => !valid.has(keyId))
-    .map(({ keyId }): Finding => ({ code: "signature-invalid", subject: keyId, detail: `The signature under ${keyId} does not verify.` }));
-  const suppliedAndVerified = usable
-    .filter(({ keyId, supplied }) => supplied && valid.has(keyId))
-    .map(({ keyId }): Finding => ({
-      code: "verified-with-supplied-key",
-      subject: keyId,
-      detail: "Verified against a key the caller supplied. That shows this key signed, not whose key it is.",
-    }));
+  // Counted per signature: a key that signed once does not vouch for a second signature under its id.
+  const validUnder = new Map<string, number>();
+  for (const keyId of validSignerKeyids) validUnder.set(keyId, (validUnder.get(keyId) ?? 0) + 1);
+  const invalid: Finding[] = [];
+  const suppliedAndVerified: Finding[] = [];
+  for (const { keyId, supplied } of usable) {
+    const left = validUnder.get(keyId) ?? 0;
+    if (left === 0) {
+      invalid.push({ code: "signature-invalid", subject: keyId, detail: `The signature under ${keyId} does not verify.` });
+      continue;
+    }
+    validUnder.set(keyId, left - 1);
+    if (supplied) {
+      suppliedAndVerified.push({
+        code: "verified-with-supplied-key",
+        subject: keyId,
+        detail: "Verified against a key the caller supplied. That shows this key signed, not whose key it is.",
+      });
+    }
+  }
+  const verifiedSigners = [...new Set(validSignerKeyids)];
   const refused = [...invalid, ...missing];
   const counts = {
     total,
@@ -230,14 +240,14 @@ function checkSignature(view: RecordView, kind: RecordKind | undefined, trust: R
     unverified: unverifiable.length,
   };
   if (refused.length > 0) {
-    return { result: failed("signature", [...refused, ...unverifiable]), verifiedSigners: validSignerKeyids, counts };
+    return { result: failed("signature", [...refused, ...unverifiable]), verifiedSigners, counts };
   }
   const notes = [...suppliedAndVerified, ...unverifiable];
   // Naming a required signer is not being signed by it: one no key was known for did not verify.
-  const signed = required.every((signer) => valid.has(signer));
+  const signed = required.every((signer) => verifiedSigners.includes(signer));
   return {
     result: signed ? passed("signature", notes) : { id: "signature", status: "skipped", findings: notes },
-    verifiedSigners: validSignerKeyids,
+    verifiedSigners,
     counts,
   };
 }
