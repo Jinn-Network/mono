@@ -1568,6 +1568,31 @@
       {
         "from": "@jinn-network/verify",
         "kind": "runtime",
+        "to": "@jinn-network/evidence-offer"
+      },
+      {
+        "from": "@jinn-network/verify",
+        "kind": "runtime",
+        "to": "@jinn-network/evidence-protocol"
+      },
+      {
+        "from": "@jinn-network/verify",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-protocol"
+      },
+      {
+        "from": "@jinn-network/verify",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-profiles"
+      },
+      {
+        "from": "@jinn-network/verify",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-protocol"
+      },
+      {
+        "from": "@jinn-network/verify",
+        "kind": "runtime",
         "to": "@jinn-network/trust-core"
       }
     ],
@@ -3569,6 +3594,11 @@
         "optional": [],
         "peer": [],
         "runtime": [
+          "@jinn-network/evidence-offer",
+          "@jinn-network/evidence-protocol",
+          "@jinn-network/record-discovery-protocol",
+          "@jinn-network/task-execution-profiles",
+          "@jinn-network/task-execution-protocol",
           "@jinn-network/trust-core"
         ]
       },
@@ -3588,7 +3618,7 @@
       "requiredGateIds": [
         "record-discovery-ci"
       ],
-      "role": "general checking primitives for Jinn records",
+      "role": "checks Jinn records by the rules in the specification",
       "stability": "experimental",
       "supersedes": [],
       "tier": 3,

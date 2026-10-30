@@ -1,7 +1,7 @@
 {
   "name": "@jinn-network/verify",
   "version": "0.1.0",
-  "description": "Experimental. General checks for Jinn records: digests, did:key identifiers, DSSE signatures, and RFC 3161 anchor ports.",
+  "description": "Experimental. Checks Jinn records by the spec's rules: digests, exact encoding, schemas, DSSE signatures, trust bindings, references, lifecycles, and anchors.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "engines": {
@@ -36,10 +36,14 @@
     "prepack": "yarn build"
   },
   "dependencies": {
+    "@jinn-network/evidence-offer": "0.1.0",
+    "@jinn-network/evidence-protocol": "0.1.0",
+    "@jinn-network/record-discovery-protocol": "0.1.0",
+    "@jinn-network/task-execution-profiles": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0",
     "@jinn-network/trust-core": "0.1.0"
   },
   "devDependencies": {
-    "@jinn-network/evidence-protocol": "0.1.0",
     "@jinn-network/trust-resolve": "0.1.0",
     "@jinn-network/trust-testing": "0.1.0",
     "@types/node": "^22.0.0",
@@ -47,7 +51,11 @@
     "vitest": "^4.1.8"
   },
   "resolutions": {
+    "@jinn-network/evidence-offer": "portal:../../evidence/offer",
     "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
+    "@jinn-network/record-discovery-protocol": "portal:../protocol",
+    "@jinn-network/task-execution-profiles": "portal:../../task-execution/profiles",
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
     "@jinn-network/trust-core": "portal:../../trust/core",
     "@jinn-network/trust-resolve": "portal:../../trust/resolve",
     "@jinn-network/trust-testing": "portal:../../trust/testing"

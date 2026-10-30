@@ -45,7 +45,7 @@ The catalog contains **100** entries: **11** `sealed-platform-v1` packages, **54
 | @jinn-network/record-discovery-source-evidence-journal | packages/discovery/sources/evidence-journal | discovery | 3 | platform | evidence-journal source adapter | candidate | implementations-v1 | canary-and-stable | @jinn-network/evidence-discovery<br>@jinn-network/evidence-repository<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>zod | — | — |
 | @jinn-network/record-discovery-testing | packages/discovery/testing | discovery | — | platform-support | record-discovery conformance kit | candidate | sealed-platform-v1 | canary-and-stable | @jinn-network/record-discovery-protocol<br>zod | — | vitest |
 | @jinn-network/record-discovery-transport-http | packages/discovery/transport-http | discovery | 3 | platform | HTTP discovery transport | candidate | implementations-v1 | canary-and-stable | @jinn-network/record-discovery-client<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve | — | — |
-| @jinn-network/verify | packages/discovery/verification | discovery | 3 | platform | general checking primitives for Jinn records | experimental | implementations-v1 | canary-and-stable | @jinn-network/trust-core | — | — |
+| @jinn-network/verify | packages/discovery/verification | discovery | 3 | platform | checks Jinn records by the rules in the specification | experimental | implementations-v1 | canary-and-stable | @jinn-network/evidence-offer<br>@jinn-network/evidence-protocol<br>@jinn-network/record-discovery-protocol<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/trust-core | — | — |
 | @jinn-network/chain-state-extraction | packages/environments/chain-extraction | environments | 3 | platform | archive-fork chain-state extraction capability | experimental | implementations-v1 | canary-and-stable | @jinn-network/chain-environment-record<br>@jinn-network/chain-environment-verification<br>@jinn-network/trust-core<br>@noble/hashes<br>zod | — | vitest |
 | @jinn-network/chain-environment-record | packages/environments/chain-record | environments | 2 | platform | sealed chain and composite crypto environment record family | experimental | sealed-platform-v1 | canary-and-stable | @noble/hashes<br>zod | — | vitest |
 | @jinn-network/chain-environment-verification | packages/environments/chain-verification | environments | 3 | platform | chain environment materialization and verification capability | experimental | implementations-v1 | canary-and-stable | @jinn-network/chain-environment-record<br>@jinn-network/trust-core<br>@noble/hashes<br>zod | — | vitest |
@@ -427,6 +427,11 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/trust-resolve | runtime | @jinn-network/trust-core |
 | @jinn-network/trust-testing | runtime | @jinn-network/trust-core |
 | @jinn-network/trust-testing | runtime | @jinn-network/trust-resolve |
+| @jinn-network/verify | runtime | @jinn-network/evidence-offer |
+| @jinn-network/verify | runtime | @jinn-network/evidence-protocol |
+| @jinn-network/verify | runtime | @jinn-network/record-discovery-protocol |
+| @jinn-network/verify | runtime | @jinn-network/task-execution-profiles |
+| @jinn-network/verify | runtime | @jinn-network/task-execution-protocol |
 | @jinn-network/verify | runtime | @jinn-network/trust-core |
 
 
