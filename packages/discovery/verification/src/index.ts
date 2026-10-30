@@ -20,6 +20,8 @@ export {
 } from "./anchor/ports.js";
 export { checkRecord } from "./check-record.js";
 export type { CheckRecordOptions, RecordTrustOptions } from "./check-record.js";
+export { createStaticBindingResolver } from "./static-binding-resolver.js";
+export type { StaticKeyBinding } from "./static-binding-resolver.js";
 export { OBSERVATION_KIND, defaultRecordKinds } from "./kinds/index.js";
 export type { RecordAttribution, RecordKind, RecordKinds, RecordReference } from "./kinds/index.js";
 export type { RecordView } from "./record-view.js";
