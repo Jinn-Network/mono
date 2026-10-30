@@ -68,6 +68,14 @@ const VERIFICATION_ALLOWED_PACKAGES = [
   '@jinn-network/record-discovery-protocol', '@jinn-network/task-execution-profiles',
   '@jinn-network/task-execution-protocol', '@jinn-network/trust-core',
 ];
+// verify's command reads what it is pointed at, and its carried documents come from an installed
+// dependency. Everything else is a pure check over bytes, and none of it reaches a network: a
+// reference to a published document resolves against pinned local bytes.
+const VERIFICATION_FILE_READERS = ['command.ts', 'published-documents.ts'];
+const VERIFICATION_FORBIDDEN_MODULES = [
+  'child_process', 'dgram', 'dns', 'http', 'http2', 'https', 'net', 'tls',
+  'node:child_process', 'node:dgram', 'node:dns', 'node:http', 'node:http2', 'node:https', 'node:net', 'node:tls',
+];
 // client depends on protocol (production) + trust-core (production, the
 // verification driver) + testing (dev, conformance kit only); no serve, no
 // facts/* leaves (host-assembled runtime injection only, Task 18 note), no
@@ -446,6 +454,14 @@ test('verify production source imports only its allowlisted first-party packages
     .filter((finding) => !VERIFICATION_ALLOWED_PACKAGES.includes(finding.split(' -> ')[1]));
   assert.deepEqual(crossings, []);
   assert.deepEqual(forbiddenImportsInFiles(source, ['@colophon-claims/']), []);
+});
+
+test('verify reads files only in its command and carried documents, and opens no network', () => {
+  const sourceRoot = join(packages, 'verification', 'src');
+  const production = files(sourceRoot).filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
+  const elsewhere = production.filter((file) => !VERIFICATION_FILE_READERS.includes(relative(sourceRoot, file)));
+  assert.deepEqual(forbiddenImportsInFiles(elsewhere, ['node:fs', 'fs']), []);
+  assert.deepEqual(forbiddenImportsInFiles(production, VERIFICATION_FORBIDDEN_MODULES), []);
 });
 
 test('record-discovery-client production source stays within its architecture boundary', () => {

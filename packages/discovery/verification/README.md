@@ -4,18 +4,106 @@
 
 Checks Jinn records by the rules in
 [Verifying a record by hand](https://github.com/Jinn-Network/spec#verifying-a-record-by-hand),
-including records that belong to no Colophon bundle. Nothing here reads a network, a file, or a
-clock. A record that fails a check is an answer, not an exception.
+including records that belong to no Colophon bundle.
+
+## The command
+
+```sh
+npx @jinn-network/verify <path> [--keys <file>] [--json]
+```
+
+`<path>` is one record file or a directory of records. A directory is not walked into its
+subdirectories, and the report says how many entries it did not read. The command reads only what
+it is pointed at and opens no network.
+
+| Flag | What it does |
+| --- | --- |
+| `--keys <file>` | Verifies signatures against the keys in the file. |
+| `--json` | Prints the structured report instead. |
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | Nothing failed. |
+| `1` | A record failed a check, or a set check failed. |
+| `2` | The command was misused, or could not read what it was pointed at. Nothing was checked. |
+
+A file named by its digest, as `<64 hex>` or `<64 hex>.<extension>`, claims that digest, and the
+`digest` check compares it. Any other name claims nothing, and `digest` is skipped.
+
+Every record in a directory is a root of the reference walk. A reference to a document the
+specification publishes resolves against the documents below even when the directory does not hold
+it. One file is not a set, so references, lifecycle and anchors say they were not checked.
+
+The report prints `passed` only for what ran. On a directory of records it reads:
+
+```text
+Read 3 files from ./records.
+
+Kinds          2 known, 0 unknown naming a type, 1 naming no type
+Digest         3 passed
+Encoding       2 passed, 1 skipped (not records)
+Schema         2 passed, 1 skipped (kind unknown)
+Signatures     1 verified against keys you supplied, none unverified
+Trust binding  skipped: no key was tied to an identity
+References     passed for known kinds: 4 resolved, 1 by a published document
+Lifecycle      skipped: no observations here
+Anchors        not checked: no anchor records here
+
+Nothing failed. Skipped and unknown are not passes.
+```
+
+"Nothing failed" is the whole of what that last line says. Read it with
+[what passing does not show](#what-passing-does-not-show).
+
+### Keys
+
+A keys file is JSON. Every object in it, at any depth, with a string `keyId` and a string
+`spkiDerBase64` supplies one key, so a plain list works and so does a larger file that holds such
+objects, like a Colophon bundle's `trust/public-keys.json`:
+
+```json
+[{ "keyId": "evaluator-key-1", "spkiDerBase64": "MCowBQYDK2VwAyEA..." }]
+```
+
+`keyId` is compared exactly with each signature's `keyid`, and `spkiDerBase64` is the public key as
+base64 SPKI DER. A signature under a `did:key` needs no file, because the identifier carries the key.
+
+A key you supply says which bytes to check a signature against, and nothing about who holds them.
+The report calls such a signature verified against keys you supplied, and `Trust binding` stays
+skipped. The command resolves no key bindings, so it never ties a key to an identity.
+
+### Published documents
+
+Records cite task profiles and parser semantics by digest. The specification publishes those
+documents, and a reader should not need a network to find them. `loadPublishedDocuments()` returns
+20 of them, pinned by digest in `src/published-documents.ts`.
+
+The package carries no copy. The bytes are the files `@jinn-network/task-execution-profiles` ships
+under `profiles/`, a runtime dependency, so this adds only the list of pins. Each pin equals the
+document's entry in the signed `sealed-platform-v1` manifest of specification release v0.1.0.
+Those documents are sealed, so a change is a new document and a new pin. A test fails if a file
+drifts from its pin or the owner ships a document with no pin, and a file that does not hash to its
+pin is not loaded, so it resolves nothing.
+
+## The library
+
+The checks read no network, file or clock, and a record that fails one is an answer, not an
+exception. `loadPublishedDocuments` reads files from the installed dependency, and the command reads
+its target.
 
 ```ts
-import { checkRecord, checkRecordSet } from "@jinn-network/verify";
+import { checkRecord, checkRecordSet, loadPublishedDocuments } from "@jinn-network/verify";
 
 const report = await checkRecord(bytes, { digest: "sha256:..." });
 report.kind;     // "https://spec.jinn.network/records/task/v1", or "unknown"
 report.outcome;  // "failed", "unknown-kind", or "checked"
 report.checks;   // [{ id: "digest", status: "passed", findings: [] }, ...]
 
-const set = await checkRecordSet({ records: [{ bytes }], roots: ["sha256:..."] });
+const set = await checkRecordSet({
+  records: [{ bytes }],
+  roots: ["sha256:..."],
+  published: loadPublishedDocuments(),
+});
 set.summary;     // what ran, by check and by kind
 set.checks;      // references, lifecycle, anchors
 ```
@@ -83,12 +171,14 @@ is `skipped`, not `failed`.
 - **A schema shows the record is interpretable.** It does not show its claims are true, or that the
   work was good. The Execution Evidence Profile says the same of its own conformance.
 - **A signature shows a key signed.** Only `trust-binding` ties a key to an identity, and only as far
-  as its resolver can see. A `did:key` is the key, not who holds it.
+  as its resolver can see. A `did:key` is the key, not who holds it, and a key you supplied is only
+  the key you supplied.
 - **Distinct keys are distinct keys.** Nothing here shows they belong to distinct parties.
 - **An anchor that is `present` was not evaluated.** Without trust material its time is unchecked.
   One `pending` has no attestation yet.
 - **A closed reference walk covers known kinds.** Records of unknown kind are opaque to it, and
-  anything `unavailable` was not looked at.
+  anything `unavailable` was not looked at. A reference met by a published document shows the bytes
+  exist, not that the record used them correctly.
 - **A lifecycle folds the log it is given.** Between implementations with no venue, nothing yet says
   who mints an attempt number, so a fold cannot show that two operators did not collide.
 - **Passing these vectors here is not interoperability.** One implementation exists, and some
@@ -115,6 +205,8 @@ Trust policy chains are not walked here. `verifyPolicyChain` in `@jinn-network/t
 | `createDidKeyDsseVerifier()` | The DSSE verifier port `@jinn-network/trust-core` leaves open, for `did:key` signers. |
 | `nodeCryptoAnchorPorts` | The `node:crypto` ports `createRfc3161AnchorProofVerifier` injects. |
 | `evaluateAnchors(input)` | Every anchor record and every subject, with subjects passed as data and refusals worded by the caller if it wants. |
+| `parseKeysFile(text)` | The verification keys in a keys file. Throws `KeysFileError` on a file it cannot use. |
+| `loadPublishedDocuments()` | The published documents above, for the `published` option of `checkRecordSet`. |
 
 ## `verifyDsseSignatures`
 

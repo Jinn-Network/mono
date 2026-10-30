@@ -41,7 +41,11 @@ function run(command, args, cwd) {
 }
 
 const CONSUMER = `
+import { spawnSync } from "node:child_process";
 import { generateKeyPairSync, sign } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { dssePreAuthEncoding, sealDsseEnvelope } from "@jinn-network/trust-core";
 import { TASK_EXECUTION_PROTOCOL_URI, sealTask } from "@jinn-network/task-execution-protocol";
 import {
@@ -73,7 +77,10 @@ const envelope = sealDsseEnvelope({ payloadType, payloadBytes, signatures: [{ ke
 
 const task = sealTask({
   protocol: TASK_EXECUTION_PROTOCOL_URI,
-  profile: { uri: "https://example.test/profile", digest: { sha256: "1".repeat(64) } },
+  profile: {
+    uri: "https://spec.jinn.network/task-profiles/binary-judgment/2.0",
+    digest: { sha256: "ebb34d8362e2cc3135847a5ad6f3ee3d9c2d9922a2b827aa9dfcbaf440b22557" },
+  },
   instructions: "Do the work.",
   outputs: [],
 });
@@ -83,7 +90,22 @@ const setReport = await checkRecordSet({ records: [{ bytes: task }], roots: [tas
 const anchors = evaluateAnchors({ records: [], subjects: [{ id: "task", sha256: taskDigest.slice("sha256:".length) }] });
 const nobody = await createStaticBindingResolver([]).resolveBinding({ key: keyId, agent: "urn:example:agent" }, "2026-01-01T00:00:00Z");
 
+// The installed command, over a record whose only citation is a published document it carries.
+const records = mkdtempSync(join(tmpdir(), "jinn-verify-records-"));
+const jinnVerify = (...args) => spawnSync(join("node_modules", ".bin", "jinn-verify"), args, { encoding: "utf8" });
+writeFileSync(join(records, taskDigest.slice("sha256:".length) + ".bin"), task);
+const clean = jinnVerify(records);
+writeFileSync(join(records, "0".repeat(64) + ".bin"), task);
+const corrupted = jinnVerify(records);
+const usage = jinnVerify();
+rmSync(records, { recursive: true, force: true });
+
 const results = [
+  clean.status === 0,
+  clean.stdout.includes("1 by a published document"),
+  clean.stdout.includes("Nothing failed."),
+  corrupted.status === 1,
+  usage.status === 2,
   taskReport.outcome === "checked",
   taskReport.kind in defaultRecordKinds,
   setReport.summary.records === 1,
@@ -116,7 +138,7 @@ try {
   await run("corepack", ["yarn@4.13.0", "pack", "--out", archive], root);
 
   const entries = (await run("tar", ["-tzf", archive], root)).split(/\r?\n/u).filter(Boolean);
-  for (const required of ["package/README.md", "package/dist/index.js", "package/dist/index.d.ts"]) {
+  for (const required of ["package/README.md", "package/dist/index.js", "package/dist/index.d.ts", "package/dist/bin.js"]) {
     if (!entries.includes(required)) throw new Error(`packed package is missing ${required}`);
   }
   const leakedTests = entries.filter((entry) => /\.test\./u.test(entry));
