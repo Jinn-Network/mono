@@ -42,6 +42,10 @@ export interface RecordKind {
   validate(view: RecordView): readonly Finding[];
   /** Why RFC 8785 is not this kind's rule. Omit when a sealed record's encoding applies. */
   readonly encodingExemption?: string;
+  /** Exempt from RFC 8785 and still I-JSON, so `encoding` checks that much. */
+  readonly requiresIJson?: boolean;
+  /** The envelope's `payloadType` when this kind is signed (TEP §21.2). Trust validators check their own. */
+  readonly mediaType?: string;
   /** Why a bare document is acceptable. Omit when the kind must be a signed envelope. */
   readonly unsignedBecause?: string;
   /** The family accepts any JSON spelling of the DSSE envelope. Defaults to the exact sealed bytes. */

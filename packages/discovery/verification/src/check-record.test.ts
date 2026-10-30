@@ -214,6 +214,127 @@ describe("schema", () => {
   });
 });
 
+describe("a signed record's envelope states its media type (§21.2)", () => {
+  const signatures = [{ signature: Uint8Array.of(1), keyid: "did:key:z" }] as const;
+  const PROFILE = {
+    protocol: "https://spec.jinn.network/profiles/task-profile/v1",
+    profile: "https://example.test/profiles/safe/1.0",
+    description: "safe",
+    payloadSchema: { type: "object" },
+    inputConventions: { slots: [] },
+    outputConventions: { slots: [] },
+    evaluationFamilies: [],
+    requirementKeys: [],
+  };
+
+  test.each([
+    ["a Task", sealTask(TASK), RECORD_KINDS.task],
+    ["a profile document", canonicalJsonBytes(PROFILE), RECORD_KINDS.profileDocument],
+  ])("%s under text/plain is refused", async (_name, payloadBytes, kind) => {
+    const report = await checkRecord(sealDsseEnvelope({ payloadType: "text/plain", payloadBytes, signatures: [...signatures] as never }));
+    expect(report.kind).toBe(kind);
+    expect(check(report, "schema")).toMatchObject({ status: "failed", findings: [{ code: "payload-type-mismatch" }] });
+  });
+
+  test("a profile document under its own media type is read", async () => {
+    const report = await checkRecord(sealDsseEnvelope({
+      payloadType: "application/vnd.jinn.task-execution.task-profile.v1+json",
+      payloadBytes: canonicalJsonBytes(PROFILE),
+      signatures: [...signatures] as never,
+    }));
+    expect(check(report, "schema").status).toBe("passed");
+  });
+
+  test.each([
+    ["remote-ref", { $ref: "https://evil.example/schema.json" }],
+    ["redos-pattern", { type: "string", pattern: "(a+)+$" }],
+  ])("§6.4 %s: a profile whose payload schema is unsafe to load is invalid", async (_name, payloadSchema) => {
+    const report = await checkRecord(canonicalJsonBytes({ ...PROFILE, payloadSchema }));
+    expect(check(report, "schema")).toMatchObject({ status: "failed", findings: [{ code: "invalid-document", path: "payloadSchema" }] });
+  });
+});
+
+describe("§21.1: an observation is I-JSON, though §6.1 does not seal it", () => {
+  const event = {
+    specversion: "1.0",
+    id: "evt-1",
+    source: "urn:jinn:backend:local",
+    subject: "urn:uuid:aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa",
+    time: "2026-07-28T00:00:00Z",
+    datacontenttype: "application/json",
+    sequence: "0000000000000001",
+    taskdigest: `sha256:${"2".repeat(64)}`,
+    type: "network.jinn.task-execution.progress.v1",
+    data: { message: "working" },
+  };
+  const text = JSON.stringify(event, null, 2);
+
+  test("any spelling of an I-JSON event passes, and says what was not asked of it", async () => {
+    const report = await checkRecord(encoder.encode(text));
+    expect(check(report, "encoding")).toMatchObject({ status: "passed", findings: [{ code: "i-json-only" }] });
+  });
+
+  test.each([
+    ["a number no double can hold", text.replace(`"working"`, `"working", "com.example.size": 1e400`)],
+    ["a lone surrogate", text.replace(`"working"`, `"\\ud800"`)],
+    ["a repeated member", text.replace(`"id": "evt-1",`, `"id": "evt-1", "id": "evt-2",`)],
+    ["a repeated member spelled two ways", text.replace(`"id": "evt-1",`, `"id": "evt-1", "\\u0069d": "evt-2",`)],
+    ["a repeated member in a nested object", text.replace(`"message": "working"`, `"message": "a", "message": "b"`)],
+  ])("%s fails", async (_name, bytes) => {
+    const report = await checkRecord(encoder.encode(bytes));
+    expect(check(report, "encoding")).toMatchObject({ status: "failed", findings: [{ code: "not-i-json" }] });
+  });
+
+  test("a repeated member name in sibling objects is no repeat", async () => {
+    const report = await checkRecord(encoder.encode(JSON.stringify({ ...event, "com.example.a": { x: 1 }, "com.example.b": { x: 1 } })));
+    expect(check(report, "encoding").status).toBe("passed");
+  });
+});
+
+describe("§21.3: an extension that contradicts a core field", () => {
+  test.each([
+    ["an absolute-URI key", "x-jinn-example.test/protocolOverride"],
+    ["a reverse-DNS key", "com.example.protocolOverride"],
+  ])("%s is an invalid document where a validator can see it", async (_name, key) => {
+    const report = await checkRecord(canonicalJsonBytes({ ...TASK, [key]: "https://not-the-real-protocol.example/v9" }));
+    expect(check(report, "schema")).toMatchObject({ status: "failed", findings: [{ code: "invalid-document", path: key }] });
+  });
+
+  test("one that repeats the core value contradicts nothing", async () => {
+    const report = await checkRecord(canonicalJsonBytes({ ...TASK, "com.example.protocolOverride": TASK.protocol }));
+    expect(check(report, "schema").status).toBe("passed");
+  });
+
+  test("a bare key is no namespaced extension, and one naming no core field overrides nothing", async () => {
+    for (const key of ["protocolOverride", "com.example.colorOverride"]) {
+      // eslint-disable-next-line no-await-in-loop -- two small records.
+      const report = await checkRecord(canonicalJsonBytes({ ...TASK, [key]: "anything" }));
+      expect(check(report, "schema").status).toBe("passed");
+    }
+  });
+});
+
+describe("a published facts profile is a document, not a sealed record", () => {
+  const facts = {
+    protocol: "https://spec.jinn.network/record-discovery/v1",
+    kind: "https://spec.jinn.network/records/task/v1",
+    profile: "https://spec.jinn.network/facts/task/v2",
+    fields: [{ name: "profileUri", class: "record" }, { name: "profileDigest", class: "record", referenceBearing: true }],
+  };
+
+  test("its pretty-printed bytes do not fail, and its kind field names what it describes", async () => {
+    const report = await checkRecord(encoder.encode(JSON.stringify(facts, null, 2)));
+    expect(report).toMatchObject({ kind: "application/vnd.jinn.record-discovery.facts-profile.v1+json", outcome: "checked" });
+    expect(statuses(report)).toMatchObject({ encoding: "skipped", schema: "passed", signature: "skipped" });
+    expect(check(report, "encoding").findings[0]).toMatchObject({ code: "encoding-not-required" });
+  });
+
+  test("one that does not parse as a facts profile fails its schema", async () => {
+    const report = await checkRecord(encoder.encode(JSON.stringify({ ...facts, fields: [{ name: "a", class: "record" }, { name: "a", class: "record" }] })));
+    expect(check(report, "schema")).toMatchObject({ status: "failed", findings: [{ code: "invalid-document" }] });
+  });
+});
+
 describe("unknown kinds", () => {
   const APPLICATION_TYPE = "https://spec.jinn.network/binary-judgment/judge-observation/v1";
 

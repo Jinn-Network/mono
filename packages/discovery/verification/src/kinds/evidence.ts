@@ -135,7 +135,10 @@ export const EVIDENCE_KINDS: Readonly<Record<string, RecordKind>> = {
   },
   [OFFER_RECORD_KIND]: {
     family: "execution-evidence",
-    identify: (view) => view.payloadType === OFFER_RECORD_MEDIA_TYPE || documentField(view, "kind") === OFFER_RECORD_KIND,
+    // A published facts profile for offers carries the same `kind`, as the kind it describes, beside
+    // a `protocol` no offer has.
+    identify: (view) => view.payloadType === OFFER_RECORD_MEDIA_TYPE
+      || (documentField(view, "kind") === OFFER_RECORD_KIND && documentField(view, "protocol") === undefined),
     validate: offerFindings,
     references: (view) => [
       // An offer is for a record its reader may not hold yet.

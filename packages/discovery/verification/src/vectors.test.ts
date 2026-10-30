@@ -14,6 +14,7 @@ import { createRequire } from "node:module";
 import { describe, expect, test } from "vitest";
 import {
   TRUST_POLICY_MEDIA_TYPE,
+  canonicalJsonBytes,
   sealAnchorEvidence,
   sealAuthorization,
   sealKeyBinding,
@@ -188,7 +189,7 @@ describe("task-execution golden-task-execution-v1", () => {
     const records = scenario(name);
     const result = await checkRecordSet({ records, roots: [expected.deliveryDigest, expected.submissionDigest] });
     expect(result.summary).toMatchObject({
-      failed: 0,
+      recordsFailed: 0,
       kinds: {
         [RECORD_KINDS.task]: 1,
         [RECORD_KINDS.submission]: 1,
@@ -305,6 +306,16 @@ describe("task-execution adversarial-v1", () => {
     expect(lifecycle.findings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "supersedes-other-attempt", subject: recordDigest(forged) }),
     ]));
+  });
+
+  test("extension-override: invalid-document, because a validator can detect this one", async () => {
+    expect(disposition("extension-override")).toContain("invalid-document");
+    const sealed = canonicalJsonBytes(tasks.json(`${ROOT}/extension-override/task.json`));
+    const report = await checkRecord(sealed);
+    expect(check(report, "schema")).toMatchObject({
+      status: "failed",
+      findings: [{ code: "invalid-document", path: "x-jinn-example.test/protocolOverride" }],
+    });
   });
 
   test("dispatch-context-grafting: a dispatch context names no type, and structure alone does not catch this", async () => {

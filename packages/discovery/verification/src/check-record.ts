@@ -11,6 +11,7 @@ import type {
 import { ed25519PublicKeyFromDidKey } from "./did-key.js";
 import { verifyDsseSignatures } from "./dsse.js";
 import type { DsseVerificationKey } from "./dsse.js";
+import { iJsonViolation } from "./i-json.js";
 import { defaultRecordKinds } from "./kinds/index.js";
 import type { RecordKind, RecordKinds } from "./kinds/index.js";
 import { documentField, readRecord } from "./record-view.js";
@@ -107,7 +108,13 @@ function checkEncoding(view: RecordView, kind: RecordKind | undefined, named: st
   if (kind === undefined && view.payloadType !== undefined && view.signatures === undefined) {
     return failed("encoding", [{ code: "malformed-envelope", detail: "These bytes have the three DSSE members and are not a well-formed envelope, so what they claim to be could not be read." }]);
   }
-  if (kind?.encodingExemption !== undefined) return skipped("encoding", "encoding-not-required", kind.encodingExemption);
+  if (kind?.encodingExemption !== undefined) {
+    if (kind.requiresIJson !== true) return skipped("encoding", "encoding-not-required", kind.encodingExemption);
+    const violation = iJsonViolation(new TextDecoder().decode(view.documentBytes));
+    return violation === undefined
+      ? passed("encoding", [{ code: "i-json-only", detail: `Checked as I-JSON only. ${kind.encodingExemption}` }])
+      : failed("encoding", [{ code: "not-i-json", detail: `These bytes are not I-JSON: ${violation}.` }]);
+  }
   const finding = kind !== undefined && view.signatures !== undefined
     ? exactEnvelopeFinding(view.bytes) ?? canonicalFinding(view.documentBytes, view.document)
     : canonicalFinding(view.bytes, view.parsed);
@@ -121,6 +128,9 @@ function checkEncoding(view: RecordView, kind: RecordKind | undefined, named: st
 function checkSchema(view: RecordView, kind: RecordKind | undefined, ambiguous: boolean): CheckResult<"schema"> {
   if (kind === undefined) return skipped("schema", "unknown-kind", "No registered kind claims this record, so no schema was applied.");
   if (ambiguous) return failed("schema", [{ code: "ambiguous-kind", detail: "More than one registered kind claims this record." }]);
+  if (view.signatures !== undefined && kind.mediaType !== undefined && view.payloadType !== kind.mediaType) {
+    return failed("schema", [{ code: "payload-type-mismatch", path: "payloadType", detail: `A signed record's payloadType is its media type, ${kind.mediaType}, not ${view.payloadType}.` }]);
+  }
   const findings = kind.validate(view);
   return findings.length === 0 ? passed("schema") : failed("schema", findings);
 }

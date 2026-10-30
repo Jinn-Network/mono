@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 
-import { defaultRecordKinds } from "../index.js";
+import { OBSERVATION_KIND, defaultRecordKinds } from "../index.js";
 import { readRecord } from "../record-view.js";
 import type { RecordView } from "../record-view.js";
 
@@ -202,6 +202,35 @@ describe("what each kind cites", () => {
   });
 });
 
+describe("a Lifecycle Observation cites by what it is", () => {
+  const event = (type: string, data: unknown) => bare({ taskdigest: digest("1"), type: `network.jinn.task-execution.${type}.v1`, data });
+
+  test("a delivery-recorded cites its Delivery", () => {
+    expect(citations(OBSERVATION_KIND, event("delivery-recorded", { digest: digest("2") }))).toEqual([
+      ["taskdigest", digest("1"), "must be held"],
+      ["delivery", digest("2"), "must be held"],
+    ]);
+  });
+
+  test("any other type carrying a digest member cites nothing by it", () => {
+    expect(citations(OBSERVATION_KIND, event("progress", { digest: digest("2") }))).toEqual([
+      ["taskdigest", digest("1"), "must be held"],
+    ]);
+  });
+});
+
+describe("Execution Evidence is told by its Root Dataset", () => {
+  const profile = "https://spec.jinn.network/profiles/execution-evidence/v1";
+  const crate = (conformsTo: unknown) => bare({ "@graph": [{ "@id": "./", conformsTo }] });
+  const claims = (view: RecordView) => defaultRecordKinds[RECORD_KINDS.executionEvidence]!.identify(view);
+
+  test("whether conformsTo is one reference or a list", () => {
+    expect(claims(crate({ "@id": profile }))).toBe(true);
+    expect(claims(crate([{ "@id": "https://w3id.org/ro/crate/1.3" }, { "@id": profile }]))).toBe(true);
+    expect(claims(crate([{ "@id": "https://w3id.org/ro/crate/1.3" }]))).toBe(false);
+  });
+});
+
 describe("the kinds inside the Task Execution family", () => {
   const protocol = "https://spec.jinn.network/profiles/task-execution/v1";
   const claimedBy = (document: unknown) => Object.entries(defaultRecordKinds)
@@ -224,6 +253,13 @@ describe("the kinds inside the Task Execution family", () => {
       { protocol: "https://spec.jinn.network/profiles/task-profile/v1" },
       { kind: "https://spec.jinn.network/records/anchor-evidence/v1" },
       { specversion: "1.0", type: "network.jinn.task-execution.progress.v1" },
+      // The one published facts profile whose `kind` is also a kind identified by that member.
+      {
+        protocol: "https://spec.jinn.network/record-discovery/v1",
+        kind: "https://spec.jinn.network/records/offer/v1",
+        profile: "https://spec.jinn.network/facts/offer/v1",
+        fields: [],
+      },
     ];
     for (const record of records) expect(claimedBy(record)).toHaveLength(1);
   });
