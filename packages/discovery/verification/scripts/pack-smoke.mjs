@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,8 +9,17 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const temporary = await mkdtemp(join(tmpdir(), "jinn-verify-"));
 const archive = join(temporary, "verify.tgz");
-const trustArchive = join(temporary, "trust-core.tgz");
 const consumer = join(temporary, "consumer");
+
+/** The runtime closure, each reached through a portal here and so packed from its built tree. */
+const CLOSURE = {
+  "@jinn-network/evidence-offer": "../../evidence/offer",
+  "@jinn-network/evidence-protocol": "../../evidence/protocol",
+  "@jinn-network/record-discovery-protocol": "../protocol",
+  "@jinn-network/task-execution-profiles": "../../task-execution/profiles",
+  "@jinn-network/task-execution-protocol": "../../task-execution/protocol",
+  "@jinn-network/trust-core": "../../trust/core",
+};
 
 /**
  * @param {string} command
@@ -34,14 +43,20 @@ function run(command, args, cwd) {
 const CONSUMER = `
 import { generateKeyPairSync, sign } from "node:crypto";
 import { dssePreAuthEncoding, sealDsseEnvelope } from "@jinn-network/trust-core";
+import { TASK_EXECUTION_PROTOCOL_URI, sealTask } from "@jinn-network/task-execution-protocol";
 import {
   anchorCertificateReader,
   anchorChainVerifier,
   anchorSignatureVerifier,
+  checkRecord,
+  checkRecordSet,
   createDidKeyDsseVerifier,
+  createStaticBindingResolver,
+  defaultRecordKinds,
   didKeyFromEd25519PublicKey,
   ed25519PublicKeyBytesFromDidKey,
   ed25519PublicKeyFromDidKey,
+  evaluateAnchors,
   nodeCryptoAnchorPorts,
   recordDigest,
   verifyDsseSignatures,
@@ -56,7 +71,24 @@ const preAuthEncoding = dssePreAuthEncoding(payloadType, payloadBytes);
 const signature = new Uint8Array(sign(null, preAuthEncoding, privateKey));
 const envelope = sealDsseEnvelope({ payloadType, payloadBytes, signatures: [{ keyid: keyId, signature }] });
 
+const task = sealTask({
+  protocol: TASK_EXECUTION_PROTOCOL_URI,
+  profile: { uri: "https://example.test/profile", digest: { sha256: "1".repeat(64) } },
+  instructions: "Do the work.",
+  outputs: [],
+});
+const taskDigest = recordDigest(task);
+const taskReport = await checkRecord(task, { digest: taskDigest });
+const setReport = await checkRecordSet({ records: [{ bytes: task }], roots: [taskDigest] });
+const anchors = evaluateAnchors({ records: [], subjects: [{ id: "task", sha256: taskDigest.slice("sha256:".length) }] });
+const nobody = await createStaticBindingResolver([]).resolveBinding({ key: keyId, agent: "urn:example:agent" }, "2026-01-01T00:00:00Z");
+
 const results = [
+  taskReport.outcome === "checked",
+  taskReport.kind in defaultRecordKinds,
+  setReport.summary.records === 1,
+  anchors.subjects[0].outcome === "absent",
+  nobody === null,
   recordDigest(new Uint8Array(0)) === "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   ed25519PublicKeyBytesFromDidKey(keyId)?.length === 32,
   ed25519PublicKeyFromDidKey(keyId)?.asymmetricKeyType === "ed25519",
@@ -71,12 +103,16 @@ if (results.some((result) => result !== true)) throw new Error("packed public AP
 `;
 
 try {
-  const packed = JSON.parse(await run(
-    "npm",
-    ["pack", "--ignore-scripts", "--json", "--pack-destination", temporary],
-    join(root, "../../trust/core"),
-  ));
-  await writeFile(trustArchive, await readFile(join(temporary, packed[0].filename)));
+  /** @type {Record<string, string>} */
+  const dependencies = {};
+  for (const [name, directory] of Object.entries(CLOSURE)) {
+    const packed = JSON.parse(await run(
+      "npm",
+      ["pack", "--ignore-scripts", "--json", "--pack-destination", temporary],
+      join(root, directory),
+    ));
+    dependencies[name] = `file:${join(temporary, packed[0].filename)}`;
+  }
   await run("corepack", ["yarn@4.13.0", "pack", "--out", archive], root);
 
   const entries = (await run("tar", ["-tzf", archive], root)).split(/\r?\n/u).filter(Boolean);
@@ -90,10 +126,7 @@ try {
   await writeFile(join(consumer, "package.json"), JSON.stringify({
     private: true,
     type: "module",
-    dependencies: {
-      "@jinn-network/trust-core": `file:${trustArchive}`,
-      "@jinn-network/verify": `file:${archive}`,
-    },
+    dependencies: { ...dependencies, "@jinn-network/verify": `file:${archive}` },
   }));
   await run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], consumer);
   await writeFile(join(consumer, "smoke.mjs"), CONSUMER);
