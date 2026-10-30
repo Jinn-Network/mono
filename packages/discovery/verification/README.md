@@ -128,12 +128,19 @@ that wants less must ask by name:
 
 | Option | Default | When set |
 | --- | --- | --- |
-| `allowRespelledEnvelope` | `false` | Accepts any JSON spelling of the envelope, not only the exact bytes `sealDsseEnvelope` writes. |
+| `allowRespelledEnvelope` | `false` | Accepts anything `parseDsseEnvelope` reads, not only the exact bytes `sealDsseEnvelope` writes: other whitespace and member order, unknown and repeated members, a byte order mark, and URL-safe, unpadded, or non-canonical base64 in `payload` and `sig`. |
 | `allowNonEd25519Keys` | `false` | Verifies under any key type `node:crypto` can verify, not only Ed25519. |
 | `keepRepeatedSigners` | `false` | Reports a key once for each signature it made, not once overall. |
 | `requireSingleSignature` | `false` | Refuses an envelope carrying more than one signature. |
 
+A threshold counts distinct `keyid`s, not distinct keys. A caller that lists one public key under two
+ids gets two. `createDidKeyDsseVerifier` cannot produce that, because its `keyid` is the key.
+
 ## Limits
+
+`verifyDsseSignatures` and `createDidKeyDsseVerifier` report what `node:crypto` reports. A small-order
+public key verifies any message, so a passing signature means something only with a trust record
+that binds a real key.
 
 `createDidKeyDsseVerifier` reads Ed25519 `did:key` identifiers only. A signature under a `did:pkh`,
 a secp256k1 `did:key`, or no `keyid` at all is not reported as valid. `checkRecord` reports such a

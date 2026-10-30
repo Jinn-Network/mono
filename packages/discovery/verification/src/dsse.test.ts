@@ -63,6 +63,23 @@ function respelled(envelope: Uint8Array): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(JSON.parse(new TextDecoder().decode(envelope)), null, 2));
 }
 
+/** A signature whose base64 holds both `+` and `/`, so its URL-safe spelling differs. */
+function signatureWithBothSpecialCharacters(): { readonly payload: Uint8Array; readonly sig: string } {
+  for (let round = 0; ; round += 1) {
+    const payload = new TextEncoder().encode(`{"round":${round}}`);
+    const sig = sign(null, dssePreAuthEncoding(PAYLOAD_TYPE, payload), signer.privateKey).toString("base64");
+    if (sig.includes("+") && sig.includes("/")) return { payload, sig };
+  }
+}
+
+function spelled(payload: string, sig: string): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify({
+    payload,
+    payloadType: PAYLOAD_TYPE,
+    signatures: [{ keyid: signer.keyId, sig }],
+  }));
+}
+
 function flipped({ signature, ...rest }: DsseProducedSignature): DsseProducedSignature {
   const copy = signature.slice();
   copy[0] = copy[0]! ^ 0x01;
@@ -171,6 +188,50 @@ describe("verifyDsseSignatures", () => {
       const tampered = respelled(sealed(flipped(signatureBy(signer))));
       expect(verifyDsseSignatures(tampered, [signer], { allowRespelledEnvelope: true }).validSignerKeyids).toEqual([]);
     });
+
+    function expectReadOnlyWhenAsked(bytes: Uint8Array): void {
+      expect(verifyDsseSignatures(bytes, [signer], { allowRespelledEnvelope: true }).validSignerKeyids)
+        .toEqual([signer.keyId]);
+      expect(verifyDsseSignatures(bytes, [signer]).validSignerKeyids).toEqual([]);
+    }
+
+    // Every case the option's documentation lists. Both lenient checks in the benchmark checker
+    // accept these today, so tightening the reader would break them without another test noticing.
+    test.each([
+      ["a URL-safe sig", (sig: string) => sig.replaceAll("+", "-").replaceAll("/", "_")],
+      ["an unpadded sig", (sig: string) => sig.replace(/=+$/u, "")],
+      ["a URL-safe unpadded sig", (sig: string) => sig.replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "")],
+      // Sixty-four bytes leave four unused bits in the last digit, so the next digit is the same bytes.
+      ["a non-canonical sig", (sig: string) => {
+        const digits = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        return `${sig.slice(0, -3)}${digits[digits.indexOf(sig.at(-3)!) + 1]}==`;
+      }],
+    ])("reads %s only when asked by name", (_name, spell) => {
+      const signature = signatureWithBothSpecialCharacters();
+      expectReadOnlyWhenAsked(spelled(Buffer.from(signature.payload).toString("base64"), spell(signature.sig)));
+    });
+
+    // The bytes 0xfb 0xff, whose exact spelling is `+/8=`.
+    test.each([
+      ["a URL-safe payload", "-_8="],
+      ["an unpadded payload", "+/8"],
+      ["a non-canonical payload", "+/9="],
+    ])("reads %s only when asked by name", (_name, payload) => {
+      const preAuth = dssePreAuthEncoding(PAYLOAD_TYPE, Uint8Array.of(0xfb, 0xff));
+      expectReadOnlyWhenAsked(spelled(payload, sign(null, preAuth, signer.privateKey).toString("base64")));
+    });
+
+    test.each([
+      ["surrounding whitespace", (exact: string) => ` ${exact}\n`],
+      ["another member order", (exact: string) => JSON.stringify(Object.fromEntries(Object.entries(JSON.parse(exact)).reverse()))],
+      ["a byte order mark", (exact: string) => `\ufeff${exact}`],
+      ["an unknown envelope member", (exact: string) => exact.replace('{"payload"', '{"note":"added","payload"')],
+      ["an unknown signature member", (exact: string) => exact.replace('"sig"', '"note":"added","sig"')],
+      ["a repeated member", (exact: string) => exact.replace('{"payload"', '{"payload":"AAAA","payload"')],
+    ])("reads %s only when asked by name", (_name, spell) => {
+      const exact = new TextDecoder().decode(sealed(signatureBy(signer)));
+      expectReadOnlyWhenAsked(new TextEncoder().encode(spell(exact)));
+    });
   });
 
   describe("allowNonEd25519Keys", () => {
@@ -247,6 +308,13 @@ describe("createDidKeyDsseVerifier", () => {
 
   test("a key that signs twice is one signer", () => {
     expect(verifier(sealed(signatureBy(signer), signatureBy(signer))).validSignerKeyids).toEqual([signer.keyId]);
+  });
+
+  test("reports what node:crypto reports, so a small-order key verifies any message", () => {
+    // The identity point as the key, signing with R the identity point and S zero.
+    const keyid = "did:key:z6MkeXATEjyXENzBXBxgC5EHk2JE5aqd7qMGGtDpLUH1e2Sj";
+    const signature = Uint8Array.from([1, ...new Array<number>(63).fill(0)]);
+    expect(verifier(sealed({ signature, keyid })).validSignerKeyids).toEqual([keyid]);
   });
 
   describe("as trust-core's verifier port", () => {
