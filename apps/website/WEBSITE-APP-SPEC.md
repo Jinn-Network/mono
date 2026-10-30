@@ -79,37 +79,51 @@ The persistent shell: the Fumadocs nav bar over both the landing page and the do
 
 ### 2.2 Landing router
 
-The apex page (`/`). Its job is to say what Jinn is today and route the visitor to one of
-three doors. It persuades; it does not transact.
+The apex page (`/`). Its job is to say what Jinn is today, to a visitor who has never
+heard of it, and route them to one of three doors. It persuades; it does not transact.
+
+It shows one line per idea and leaves the detail to the docs. A release date, a runtime
+version, a test network or a conformance vector belongs on a docs page, not here. Where
+the page needs more than a line, the line stays visible and the detail opens beneath it.
 
 - **Static**
-  - the identity statement: the canonical noun, "an open protocol and network for work and
-    the data it produces", and what a record is (THESIS.md §3). It says a holder can offer
-    a record, free or priced. It does not say or imply that selling records works today
-  - where things stand: three lists, kept apart. *Exists today* (the protocol, the
-    published checker, Colophon's sealed claims), *Direction* (a market in records; the
-    next application's records) and *Parked* (the task marketplace)
-  - how a record moves: five steps (Record, Check, Offer, Find, Buy). The first four are in
-    the protocol today. The fifth is marked as direction
+  - the hero: one headline that leads from the gap (BRAND.md "Lead from structure, not
+    from fear") and one sentence with the canonical noun, "an open protocol and network
+    for work and the data it produces", and what anyone can do with a record: check it
+    from its own bytes, with their own tools
+  - the checker run: the passing output the published checker prints for the public claim
+    that `/docs/check-a-claim` checks, copied from that page, with the claim named. It is
+    the page's one picture of a record being checked. When the docs page changes its
+    claim or its pinned checker version, this changes with it
+  - how a record moves: five steps (Record, Check, Offer, Find, Buy), one line and one
+    icon each. The first four are in the protocol today. The fifth is marked as direction
+    and says, in its own line, that buying records is the direction, not a working market.
+    A holder offering a record, free or priced, is said here
   - the first application: Colophon, named and linked, with what it does and what it does
-    not yet offer
-  - the caveats: the "what this does not yet prove" list, each with its source linked. This
-    section is not optional and does not shrink: a surface that omits its own gap is less
-    Legible, not more.
+    not offer (no hosted service, account or billing)
+  - where things stand: three short lists, kept apart. *Exists today* (the protocol,
+    Colophon's checker, Colophon's sealed claims), *Direction* (a market in records; the
+    next application's records) and *Parked* (the task marketplace)
+  - the caveats: the "what this does not yet prove" list. Every caveat is always visible
+    as a one-line statement; its explanation and its linked source open beneath it. The
+    section is not optional and no caveat is dropped: a surface that omits its own gap is
+    less Legible, not more.
 - **Collections**
   - doors: exactly three. *Check a claim* (`/docs/check-a-claim`), *Find a claim*
     (external, Colophon's listing) and *Build on the protocol* (`/docs/protocol`). Each
-    carries a title, one sentence of scope, and one line of honest status. They are
+    carries a title, one sentence of scope, and a short status label. They are
     **navigation**, not calls to action, and each leads to something that works today. A
     door for something parked or not yet built is out of model.
 - **Actions**
-  - **bring a claim**: the single call to action, an outbound link to the part of
-    Colophon's site that says how a claim is brought today. No lifecycle. GROWTH.md §3
-    names "Bring a claim" as the single call to action on every outward surface, so there
-    is exactly one button element on this page. A second ask is a GROWTH.md amendment, not
-    a UI change.
+  - **bring a claim**: the single call to action, in the hero, an outbound link to the
+    part of Colophon's site that says how a claim is brought today. No lifecycle.
+    GROWTH.md §3 names "Bring a claim" as the single call to action on every outward
+    surface, so there is exactly one button element on this page. A second ask is a
+    GROWTH.md amendment, not a UI change.
   - enter a door: navigate to `/docs/check-a-claim` or `/docs/protocol`, or leave for
-    Colophon's listing
+    Colophon's listing. The hero's "Check a claim" link is this action, not a second ask.
+  - open a caveat: show or hide that caveat's explanation and source. Any number may be
+    open at once. Lifecycle: `closed -> open -> closed`; nothing persists.
   - outbound links: the specification repository, the published checker, Colophon, this
     repository, `/llms.txt`, and the explorer. No lifecycle. Every explorer link is
     labelled, in its own words, as the record of what ran on the parked network; it is

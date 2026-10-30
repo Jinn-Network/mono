@@ -1,6 +1,12 @@
 import Link from 'next/link';
-import { ArrowRight } from 'lucide-react';
+import { ArrowLeftRight, ArrowRight, FileText, Search, ShieldCheck, Tag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion';
 import { JinnSigil } from '@/components/jinn-mark';
 import { links, repoFile } from '@/lib/shared';
 
@@ -13,6 +19,8 @@ import { links, repoFile } from '@/lib/shared';
  *   - Record, holder, offer and price: GLOSSARY.md "Records and offers", which
  *     points at Jinn-Network/spec as the authority.
  *   - Colophon: the root README.md "What you can do here".
+ *   - The checker run: the passing output printed on /docs/check-a-claim, for
+ *     the public claim that page checks.
  *   - The caveats: the specification's own list of what is still open,
  *     THESIS.md §4, and the limits Colophon's checker prints.
  *   - The verb rules are CLAUDE.md "External Communication"; the protocol
@@ -20,249 +28,308 @@ import { links, repoFile } from '@/lib/shared';
  *     `test/content.test.mjs` asserts them over this file.
  *
  * Selling records is the direction, not a working market. Nothing here says
- * or implies otherwise: the hero says a holder can offer a record, and the
- * one step that involves payment is marked as direction.
+ * or implies otherwise: the one step that involves payment is marked as
+ * direction and says so in its own words.
+ *
+ * Progressive disclosure: the page shows one line per idea and leaves the
+ * detail to the docs. Each caveat is a visible one-line trigger whose
+ * explanation and source open beneath it.
  *
  * Call to action: GROWTH.md §3 names "Bring a claim" as the single call to
  * action on every outward surface. The doors below are navigation, not a
  * second ask. There is exactly one button on this page.
  */
 
-const doors = [
-  {
-    title: 'Check a claim',
-    href: '/docs/check-a-claim',
-    body: 'Run the published checker over a sealed benchmark claim, on your own machine.',
-    detail: 'Free, with no account. Needs Node 22 or newer.',
-    label: 'Read the docs',
-  },
-  {
-    title: 'Find a claim',
-    href: links.colophonFind,
-    body: 'Every public claim listed on Colophon, newest first.',
-    detail: 'One claim is listed as of 12 October 2026.',
-    label: 'Open Colophon',
-  },
-  {
-    title: 'Build on the protocol',
-    href: '/docs/protocol',
-    body: 'The normative text, the schemas and the conformance vectors, in one public repository.',
-    detail: 'Release v0.1.0. One implementation exists so far.',
-    label: 'Read the docs',
-  },
+const checks = [
+  'manifest',
+  'evidence-closure',
+  'trust',
+  'matrix-rederivation',
+  'report-verification',
+  'claim-consistency',
+  'integrity-anchors',
 ];
 
 const steps = [
+  { name: 'Record', icon: FileText, body: 'Work leaves a sealed record.' },
+  { name: 'Check', icon: ShieldCheck, body: 'Anyone checks it from its own bytes.' },
+  { name: 'Offer', icon: Tag, body: 'Its holder offers it, free or priced.' },
+  { name: 'Find', icon: Search, body: 'Others find the record and its offer.' },
   {
-    step: '01',
-    name: 'Record',
-    body: 'Work produces a record: a sealed document with a published schema, a stable identifier and a digest.',
-  },
-  {
-    step: '02',
-    name: 'Check',
-    body: 'Anyone can check it from its own bytes, with their own tools. No Jinn code is needed.',
-  },
-  { step: '03', name: 'Offer', body: 'Its holder publishes an offer for it, free or priced.' },
-  { step: '04', name: 'Find', body: 'Others find the record and its offer.' },
-  {
-    step: '05',
     name: 'Buy',
-    body: 'A buyer asks the holder for the record. Payment goes straight to the holder, outside the protocol.',
+    icon: ArrowLeftRight,
+    body: 'Buying records is the direction, not a working market.',
     direction: true,
   },
 ];
 
+const doors = [
+  {
+    title: 'Check a claim',
+    href: '/docs/check-a-claim',
+    body: 'Run the checker on a sealed claim, on your own machine.',
+    status: 'Free, no account',
+  },
+  {
+    title: 'Find a claim',
+    href: links.colophonFind,
+    body: 'Browse the public claims listed on Colophon.',
+    status: 'On Colophon',
+  },
+  {
+    title: 'Build on the protocol',
+    href: '/docs/protocol',
+    body: 'The spec, its schemas and its conformance vectors.',
+    status: 'Release v0.1.0',
+  },
+];
+
+const eyebrow = 'text-muted-foreground text-xs tracking-[0.14em] uppercase';
+const sectionClassName = 'mx-auto w-full max-w-6xl px-6';
+
 const doorClassName =
-  'border-border hover:border-accent-sky group flex flex-col rounded-lg border p-8 no-underline transition-colors';
+  'border-border hover:border-accent-sky bg-background group flex flex-col rounded-lg border p-7 no-underline transition-colors';
+
+function CheckRun() {
+  return (
+    <figure className="border-border bg-sunken overflow-hidden rounded-lg border font-mono text-[12px] leading-6">
+      <div className="border-border text-dim flex items-center justify-between gap-4 border-b px-5 py-3">
+        <span className="truncate">Judging the LoCoMo judges</span>
+        <span className="shrink-0">Colophon claim</span>
+      </div>
+      <div className="px-5 py-5">
+        <p className="text-foreground break-all">
+          <span className="text-dim select-none">$ </span>npx @colophon-claims/verify@0.2.1 ./bundle
+        </p>
+        <p className="text-vow mt-4">Verified: 7 of 7 checks passed</p>
+        <p className="text-dim truncate">sha256:de169c04a24bbb4d9d5b52e398b8bfe92e939ba4d8a8c9e6e3e551cf10aa3774</p>
+        <ul className="mt-4">
+          {checks.map((check, i) => (
+            <li
+              key={check}
+              className="flex justify-between gap-6 motion-safe:animate-[jinn-reveal_420ms_ease-out_both]"
+              style={{ animationDelay: `${250 + i * 110}ms` }}
+            >
+              <span>{check}</span>
+              <span className="text-vow">passed</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </figure>
+  );
+}
 
 export default function HomePage() {
   return (
     <main className="flex flex-1 flex-col">
-      <section className="border-border mx-auto w-full max-w-5xl border-b px-6 py-20 sm:py-28">
-        <h1 className="font-serif max-w-[20ch] text-4xl leading-[1.05] text-balance sm:text-6xl">
-          An open protocol and network for work and the data it produces.
-        </h1>
-        <p className="text-muted-foreground mt-10 max-w-[62ch] text-[15px] leading-relaxed text-pretty">
-          Most work leaves an answer behind and discards the record of how it was reached.
-          The Jinn protocol says how work is described, done, evidenced, judged, trusted and
-          found.
-        </p>
-        <p className="text-muted-foreground mt-5 max-w-[62ch] text-[15px] leading-relaxed text-pretty">
-          A record can be kept in Jinn&rsquo;s standard formats or its producer&rsquo;s own.
-          Either way anyone can check it from its own bytes, with their own tools, and find
-          it. Whoever holds a record can offer it, free or priced. The protocol takes no fee
-          and no part in payment, and there is no Jinn token.
-        </p>
+      <section
+        className={`${sectionClassName} grid items-center gap-14 pt-20 pb-24 sm:pt-28 lg:grid-cols-[1.25fr_1fr] lg:gap-16`}
+      >
+        <div>
+          <h1 className="font-serif text-5xl leading-[1.02] text-balance sm:text-6xl">
+            Keep the work, not just the answer.
+          </h1>
+          <p className="text-muted-foreground mt-8 max-w-[46ch] text-[15px] leading-relaxed text-pretty">
+            Jinn is an open protocol and network for work and the data it produces. Anyone can
+            check a record from its own bytes, with their own tools.
+          </p>
+          <div className="mt-10 flex flex-wrap items-center gap-x-8 gap-y-4">
+            <Button asChild size="lg">
+              <a href={links.bringAClaim}>Bring a claim</a>
+            </Button>
+            <Link
+              href="/docs/check-a-claim"
+              className="text-accent-sky group inline-flex items-center gap-2 text-sm no-underline"
+            >
+              Check a claim
+              <ArrowRight
+                aria-hidden="true"
+                className="size-4 transition-transform group-hover:translate-x-1"
+              />
+            </Link>
+          </div>
+        </div>
+        <CheckRun />
       </section>
 
-      <section className="border-border mx-auto w-full max-w-5xl border-b px-6 py-16">
-        <div className="grid gap-5 lg:grid-cols-3">
-          {doors.map((door) => {
-            const content = (
-              <>
-                <h2 className="font-serif text-3xl leading-tight">{door.title}</h2>
-                <p className="text-foreground mt-4 text-sm leading-relaxed">{door.body}</p>
-                <p className="text-dim mt-3 text-xs leading-relaxed">{door.detail}</p>
-                <span className="text-accent-sky mt-8 inline-flex items-center gap-2 text-xs tracking-[0.14em] uppercase">
-                  {door.label}
-                  <ArrowRight aria-hidden="true" className="size-3" />
+      <section className="border-border border-t">
+        <div className={`${sectionClassName} py-24`}>
+          <h2 className="font-serif text-4xl leading-tight sm:text-5xl">How a record moves</h2>
+          <ol className="relative mt-14 grid gap-7 sm:grid-cols-2 lg:grid-cols-5 lg:gap-6">
+            <div
+              aria-hidden="true"
+              className="bg-border absolute top-6 right-[10%] left-[10%] hidden h-px lg:block"
+            />
+            {steps.map(({ name, icon: Icon, body, direction }) => (
+              <li
+                key={name}
+                className="relative flex items-start gap-5 lg:flex-col lg:items-center lg:gap-0 lg:text-center"
+              >
+                <span
+                  className={
+                    direction
+                      ? 'border-gold/50 text-gold bg-background flex size-12 shrink-0 items-center justify-center rounded-md border border-dashed'
+                      : 'border-border text-accent-sky bg-background flex size-12 shrink-0 items-center justify-center rounded-md border'
+                  }
+                >
+                  <Icon aria-hidden="true" className="size-5" />
                 </span>
-              </>
-            );
-            return door.href.startsWith('/') ? (
-              <Link key={door.href} href={door.href} className={doorClassName}>
-                {content}
-              </Link>
-            ) : (
-              <a key={door.href} href={door.href} className={doorClassName}>
-                {content}
-              </a>
-            );
-          })}
+                <div className="lg:mt-5">
+                  <p className="flex items-center gap-2 text-sm lg:justify-center">
+                    {name}
+                    {direction ? (
+                      <span className="border-gold/40 text-gold rounded-full border px-2 py-0.5 text-[10px] tracking-[0.14em] uppercase">
+                        Direction
+                      </span>
+                    ) : null}
+                  </p>
+                  <p className="text-muted-foreground mt-1 max-w-[24ch] text-sm leading-relaxed lg:mx-auto lg:mt-2">
+                    {body}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ol>
         </div>
       </section>
 
-      <section className="border-border mx-auto w-full max-w-5xl border-b px-6 py-20">
-        <p className="text-muted-foreground text-xs tracking-[0.14em] uppercase">
-          Where things stand
-        </p>
-        <h2 className="font-serif mt-5 max-w-[24ch] text-4xl leading-tight sm:text-5xl">
-          The protocol and the checker exist today. The market is the direction.
-        </h2>
-        <div className="mt-12 grid gap-5 lg:grid-cols-3">
-          <div className="border-border rounded-lg border p-8">
-            <p className="text-muted-foreground text-xs tracking-[0.14em] uppercase">
-              Exists today
-            </p>
-            <ul className="mt-6 space-y-3 text-sm leading-relaxed">
-              <li>
-                The protocol, written only in <a href={links.spec}>Jinn-Network/spec</a> and
-                first released as <a href={links.specRelease}>v0.1.0</a> on 24 September 2026.
-              </li>
-              <li>
-                The checker, published on npm as{' '}
-                <a href={links.verifier}>@colophon-claims/verify</a>.
-              </li>
-              <li>
-                <a href={links.colophon}>Colophon</a>&rsquo;s sealed benchmark claims, which
-                are Jinn records.
-              </li>
-            </ul>
-          </div>
-          <div className="border-border rounded-lg border p-8">
-            <p className="text-gold text-xs tracking-[0.14em] uppercase">Direction</p>
-            <ul className="mt-6 space-y-3 text-sm leading-relaxed">
-              <li>
-                A market in records. Buying and selling records is the direction, not a
-                working market.
-              </li>
-              <li>
-                Work records from the daemon that turns issues into pull requests, to be
-                published once they can be anonymized.
-              </li>
-            </ul>
-          </div>
-          <div className="border-border rounded-lg border p-8">
-            <p className="text-dim text-xs tracking-[0.14em] uppercase">Parked</p>
-            <ul className="mt-6 space-y-3 text-sm leading-relaxed">
-              <li>
-                The <Link href="/docs/task-marketplace">task marketplace</Link>, in which a
-                Curator funds tasks and an operator network solves and evaluates them for
-                OLAS.
-              </li>
-              <li>
-                Its network on Base Sepolia has recorded no attempt or verdict since 13
-                August 2026. A node started today finds no work and earns nothing.
-              </li>
-              <li>
-                <a href={links.explorer}>The record of what ran</a>
-              </li>
-            </ul>
+      <section className="border-border bg-sunken border-y">
+        <div className={`${sectionClassName} py-24`}>
+          <p className={eyebrow}>Start here</p>
+          <div className="mt-8 grid gap-5 lg:grid-cols-3">
+            {doors.map((door) => {
+              const content = (
+                <>
+                  <h3 className="font-serif text-3xl leading-tight">{door.title}</h3>
+                  <p className="text-muted-foreground mt-3 text-sm leading-relaxed">{door.body}</p>
+                  <span className="mt-10 flex items-center justify-between text-xs">
+                    <span className="text-dim">{door.status}</span>
+                    <ArrowRight
+                      aria-hidden="true"
+                      className="text-accent-sky size-4 transition-transform group-hover:translate-x-1"
+                    />
+                  </span>
+                </>
+              );
+              return door.href.startsWith('/') ? (
+                <Link key={door.href} href={door.href} className={doorClassName}>
+                  {content}
+                </Link>
+              ) : (
+                <a key={door.href} href={door.href} className={doorClassName}>
+                  {content}
+                </a>
+              );
+            })}
           </div>
         </div>
       </section>
 
-      <section className="border-border mx-auto w-full max-w-5xl border-b px-6 py-20">
-        <p className="text-muted-foreground text-xs tracking-[0.14em] uppercase">
-          How a record moves
-        </p>
-        <h2 className="font-serif mt-5 max-w-[22ch] text-4xl leading-tight sm:text-5xl">
-          Work leaves a record, and anyone can check it.
-        </h2>
-        <ol className="mt-14 grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
-          {steps.map((item) => (
-            <li key={item.step} className="border-border rounded-lg border p-6">
-              <p className="text-dim text-xs tracking-[0.14em] uppercase">
-                {item.step} {item.name}
-              </p>
-              {item.direction ? (
-                <p className="text-gold mt-2 text-xs tracking-[0.14em] uppercase">Direction</p>
-              ) : null}
-              <p className="mt-3 text-sm leading-relaxed">{item.body}</p>
-            </li>
-          ))}
-        </ol>
-        <p className="text-muted-foreground mt-10 max-w-[64ch] text-sm leading-relaxed text-pretty">
-          The first four steps are in the protocol today. Buying and selling records is the
-          direction, not a working market.
-        </p>
+      <section className={`${sectionClassName} grid gap-10 py-24 lg:grid-cols-2 lg:gap-20`}>
+        <div>
+          <p className={eyebrow}>The first application</p>
+          <h2 className="font-serif mt-5 text-4xl leading-tight sm:text-5xl">Colophon</h2>
+        </div>
+        <div className="lg:pt-10">
+          <p className="text-[15px] leading-relaxed text-pretty">
+            Turns a comparison of AI agent setups, planned in advance, into a sealed claim anyone
+            can check. Its claims are Jinn records.
+          </p>
+          <p className="text-muted-foreground mt-4 text-sm leading-relaxed text-pretty">
+            Checking is free. Sealing runs on your own machine, with no hosted service, account or
+            billing.
+          </p>
+          <a
+            href={links.colophon}
+            className="text-accent-sky group mt-8 inline-flex items-center gap-2 text-sm no-underline"
+          >
+            Open Colophon
+            <ArrowRight
+              aria-hidden="true"
+              className="size-4 transition-transform group-hover:translate-x-1"
+            />
+          </a>
+        </div>
       </section>
 
-      <section className="border-border mx-auto w-full max-w-5xl border-b px-6 py-20">
-        <p className="text-muted-foreground text-xs tracking-[0.14em] uppercase">
-          The first application
-        </p>
-        <h2 className="font-serif mt-5 max-w-[24ch] text-4xl leading-tight sm:text-5xl">
-          Colophon is the first application built on Jinn.
-        </h2>
-        <p className="text-muted-foreground mt-10 max-w-[64ch] text-sm leading-relaxed text-pretty">
-          <a href={links.colophon}>Colophon</a> turns a preregistered comparison of agent
-          configurations into a portable bundle anyone can check from its own bytes. Its
-          sealed benchmark claims are Jinn records.
-        </p>
-        <p className="text-muted-foreground mt-5 max-w-[64ch] text-sm leading-relaxed text-pretty">
-          Checking a published claim is free. The sealing tool is not published yet, so
-          sealing a claim is still local, and there is no hosted service, account or billing.
-        </p>
-      </section>
+      <section className="border-border border-t">
+        <div className={`${sectionClassName} py-24`}>
+          <h2 className="font-serif text-4xl leading-tight sm:text-5xl">Where things stand</h2>
+          <div className="mt-12 grid gap-10 sm:grid-cols-3">
+            <div>
+              <p className="text-vow text-xs tracking-[0.14em] uppercase">Exists today</p>
+              <ul className="mt-5 space-y-3 text-sm leading-relaxed">
+                <li>
+                  <a href={links.spec}>The protocol</a>, release v0.1.0
+                </li>
+                <li>
+                  <a href={links.verifier}>Colophon&rsquo;s checker</a>, on npm
+                </li>
+                <li>
+                  <a href={links.colophon}>Colophon</a>&rsquo;s sealed claims
+                </li>
+              </ul>
+            </div>
+            <div>
+              <p className="text-gold text-xs tracking-[0.14em] uppercase">Direction</p>
+              <ul className="mt-5 space-y-3 text-sm leading-relaxed">
+                <li>A market in records</li>
+                <li>Records from the daemon that turns issues into pull requests</li>
+              </ul>
+            </div>
+            <div>
+              <p className="text-dim text-xs tracking-[0.14em] uppercase">Parked</p>
+              <ul className="mt-5 space-y-3 text-sm leading-relaxed">
+                <li>
+                  The <Link href="/docs/task-marketplace">task marketplace</Link>
+                </li>
+              </ul>
+            </div>
+          </div>
 
-      <section className="border-border mx-auto w-full max-w-5xl border-b px-6 py-20">
-        <p className="text-muted-foreground text-xs tracking-[0.14em] uppercase">
-          What this does not yet prove
-        </p>
-        <ul className="mt-8 max-w-[68ch] space-y-4 text-sm leading-relaxed">
-          <li>
-            One implementation of the protocol exists. Until a second one passes the
-            conformance vectors, &ldquo;written from the spec alone&rdquo; is a
-            claim, not a result.
-          </li>
-          <li>Buying and selling records is the direction, not a working market.</li>
-          <li>
-            A passing check covers a bundle&rsquo;s integrity, evidence, calculations and
-            report. It does not show that the machine that produced the bundle was honest,
-            or that distinct signing keys belong to distinct parties.
-          </li>
-          <li>The task marketplace is parked until demand for it exists.</li>
-        </ul>
-        <p className="text-dim mt-8 max-w-[68ch] text-xs leading-relaxed">
-          Sources: <a href={links.specOpenQuestions}>the specification</a>,{' '}
-          <a href={repoFile('THESIS.md')}>the thesis</a>, and{' '}
-          <a href={links.colophonLimits}>the limits of a Colophon report</a>.
-        </p>
-      </section>
-
-      <section className="mx-auto flex w-full max-w-5xl flex-col items-center gap-10 px-6 py-24 text-center">
-        <h2 className="font-serif max-w-[24ch] text-4xl leading-tight text-balance sm:text-5xl">
-          What AI performance claim or decision do you need other people to trust next?
-        </h2>
-        <Button asChild size="lg">
-          <a href={links.bringAClaim}>Bring a claim</a>
-        </Button>
+          <div className="mt-20 max-w-3xl">
+            <p className={eyebrow}>What this does not yet prove</p>
+            <Accordion type="multiple" className="border-border mt-4 border-t">
+              <AccordionItem value="implementations" className="border-border">
+                <AccordionTrigger>One implementation of the protocol exists.</AccordionTrigger>
+                <AccordionContent className="text-muted-foreground leading-relaxed">
+                  Until a second one passes the conformance vectors, &ldquo;written from the spec
+                  alone&rdquo; is a claim, not a result.{' '}
+                  <a href={links.specOpenQuestions}>The specification</a>
+                </AccordionContent>
+              </AccordionItem>
+              <AccordionItem value="market" className="border-border">
+                <AccordionTrigger>There is no working market in records.</AccordionTrigger>
+                <AccordionContent className="text-muted-foreground leading-relaxed">
+                  A holder can offer a record today. Buying and selling records is the direction,
+                  not a working market. <a href={repoFile('THESIS.md')}>The thesis</a>
+                </AccordionContent>
+              </AccordionItem>
+              <AccordionItem value="check" className="border-border">
+                <AccordionTrigger>A check covers the bundle, not the machine.</AccordionTrigger>
+                <AccordionContent className="text-muted-foreground leading-relaxed">
+                  A passing check covers a bundle&rsquo;s integrity, evidence, calculations and
+                  report. It does not show that the machine that produced the bundle was honest,
+                  or that distinct signing keys belong to distinct parties.{' '}
+                  <a href={links.colophonLimits}>The limits of a Colophon report</a>
+                </AccordionContent>
+              </AccordionItem>
+              <AccordionItem value="parked" className="border-border">
+                <AccordionTrigger>The task marketplace is parked.</AccordionTrigger>
+                <AccordionContent className="text-muted-foreground leading-relaxed">
+                  It stays parked until demand for it exists. Its network on Base Sepolia has
+                  recorded no attempt or verdict since 13 August 2026.{' '}
+                  <a href={links.explorer}>The record of what ran</a>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
+          </div>
+        </div>
       </section>
 
       <footer className="border-border border-t">
-        <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-4 px-6 py-8">
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-8">
           <JinnSigil className="text-dim size-6" />
           <div className="flex flex-wrap items-center gap-6 text-xs">
             <Link href="/docs">Docs</Link>
