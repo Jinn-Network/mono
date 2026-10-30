@@ -51,6 +51,9 @@ describe("decoding a did:key", () => {
     ["another did method", "did:web:example.com"],
     ["an empty payload", "did:key:z"],
     ["a character outside the alphabet", "did:key:z0OIl"],
+    // Full length, so only the alphabet test refuses it: read as digit 0, this is the kit's key.
+    ["a full-length identifier with a character outside the alphabet", KIT_DID_KEY.replace("K1f", "K0f")],
+    ["the same payload under another did method", KIT_DID_KEY.replace("did:key:", "did:web:")],
     ["a payload one digit too long", `did:key:z${"1".repeat(48)}`],
     ["too few bytes for a key", "did:key:z6Mk"],
     ["a secp256k1 key", "did:key:zQ3shokFTS3brHcDQrn82RUDfCZESWL1ZdCEJwekUDPQiYBme"],
