@@ -417,6 +417,80 @@ describe("signature", () => {
     expect(check(report, "signature").status).toBe("passed");
   });
 
+  test("one verified signature beside one with no key passes, and says what it did not cover", async () => {
+    const key = ed25519();
+    const payloadBytes = canonicalJsonBytes(evaluationStatement());
+    const signature = new Uint8Array(sign(null, dssePreAuthEncoding(DSSE_PAYLOAD_TYPE, payloadBytes), key.privateKey));
+    const bytes = sealDsseEnvelope({
+      payloadBytes,
+      signatures: [{ keyid: key.keyid, signature }, { keyid: "evaluator-key-1", signature }],
+    });
+    expect(check(await checkRecord(bytes), "signature")).toMatchObject({
+      status: "passed",
+      findings: [{ code: "no-verification-key", subject: "evaluator-key-1" }],
+    });
+  });
+
+  test("naming the bound key is not being signed by it", async () => {
+    const other = ed25519();
+    const secp256k1 = "did:key:zQ3shokFTS3brHcDQrn82RUDfCZESWL1ZdCEJwekUDPQiYBme";
+    const payloadBytes = canonicalJsonBytes({
+      protocol: "https://spec.jinn.network/trust/key-binding/v1",
+      agent: AGENT,
+      key: { publicKey: secp256k1, keyid: secp256k1, algorithm: "secp256k1", didKey: secp256k1 },
+      voucher: { kind: "account", did: "did:pkh:eip155:8453:0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed", contractAccount: false },
+      relationship: "controls",
+      scope: ["verdicts"],
+      validFrom: "2026-07-28T00:00:00Z",
+      ceremony: { type: "eoa", digest: `sha256:${"a".repeat(64)}` },
+      strength: "strong",
+      anchors: [],
+    });
+    const payloadType = "application/vnd.jinn.trust.key-binding.v1+json";
+    const bytes = sealDsseEnvelope({
+      payloadType,
+      payloadBytes,
+      signatures: [
+        { keyid: secp256k1, signature: Uint8Array.of(1, 2, 3) },
+        { keyid: other.keyid, signature: new Uint8Array(sign(null, dssePreAuthEncoding(payloadType, payloadBytes), other.privateKey)) },
+      ],
+    });
+    expect(check(await checkRecord(bytes), "signature").status).toBe("skipped");
+  });
+
+  describe("a revocation names who signed it", () => {
+    const revocation = (revokedBy: string) => ({
+      protocol: "https://spec.jinn.network/trust/revocation/v1",
+      target: `sha256:${"b".repeat(64)}`,
+      revokedBy,
+      effectiveFrom: "2026-07-29T00:00:00Z",
+      anchors: [],
+    });
+    const payloadType = "application/vnd.jinn.trust.revocation.v1+json";
+
+    test("a key other than its did:key revokedBy is refused", async () => {
+      const revoker = ed25519();
+      const { envelopeBytes } = await signedRecord(ed25519(), revocation(revoker.keyid), payloadType);
+      expect(check(await checkRecord(envelopeBytes), "signature")).toMatchObject({
+        status: "failed",
+        findings: [{ code: "required-signer-missing", subject: revoker.keyid }],
+      });
+    });
+
+    test("its own did:key passes", async () => {
+      const revoker = ed25519();
+      const { envelopeBytes } = await signedRecord(revoker, revocation(revoker.keyid), payloadType);
+      expect(check(await checkRecord(envelopeBytes), "signature").status).toBe("passed");
+    });
+
+    test("a voucher account signs by a ceremony, so its did:pkh is not looked for among the keys", async () => {
+      const key = ed25519();
+      const account = "did:pkh:eip155:8453:0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed";
+      const { envelopeBytes } = await signedRecord(key, revocation(account), payloadType);
+      expect(check(await checkRecord(envelopeBytes), "signature").status).toBe("passed");
+    });
+  });
+
   test("a key binding must be signed by the working key it binds", async () => {
     const working = ed25519();
     const stranger = ed25519();
@@ -440,6 +514,30 @@ describe("signature", () => {
     );
     const { envelopeBytes: right } = await signedRecord(working, binding, "application/vnd.jinn.trust.key-binding.v1+json");
     expect(check(await checkRecord(right), "signature").status).toBe("passed");
+  });
+});
+
+describe("a corrupted signed record", () => {
+  const key = ed25519();
+  const payloadBytes = encoder.encode(JSON.stringify(evaluationStatement()));
+  const envelope = {
+    payloadType: DSSE_PAYLOAD_TYPE,
+    payload: Buffer.from(payloadBytes).toString("base64"),
+    signatures: [{ keyid: key.keyid, sig: sign(null, dssePreAuthEncoding(DSSE_PAYLOAD_TYPE, payloadBytes), key.privateKey).toString("base64") }],
+  };
+
+  test.each([
+    ["a signature that is not base64", { signatures: [{ keyid: key.keyid, sig: "not base64!!" }] }],
+    ["no signatures", { signatures: [] }],
+    ["a payload that is not base64", { payload: "not base64!!" }],
+  ])("%s fails: it claims to be signed, so it is not an artifact of unknown kind", async (_name, damage) => {
+    const report = await checkRecord(encoder.encode(JSON.stringify({ ...envelope, ...damage })));
+    expect(report.outcome).toBe("failed");
+    expect(check(report, "encoding")).toMatchObject({ status: "failed", findings: [{ code: "malformed-envelope" }] });
+  });
+
+  test("the same bytes unbroken read as the claim they are", async () => {
+    expect(await checkRecord(encoder.encode(JSON.stringify(envelope)))).toMatchObject({ kind: RECORD_KINDS.resultEvaluation, outcome: "checked" });
   });
 });
 
@@ -481,6 +579,19 @@ describe("trust binding", () => {
     });
     expect(check(report, "trust-binding").status).toBe("failed");
     expect(codes(check(report, "trust-binding"))).toEqual(["scope-violation"]);
+    expect(report.outcome).toBe("failed");
+  });
+
+  test("§7.5b: a signed Submission's requester may be bound by signs-for alone", async () => {
+    const key = ed25519();
+    const { envelopeBytes } = await signedRecord(key, SUBMISSION, "application/vnd.jinn.task-execution.submission.v1+json");
+    const report = await checkRecord(envelopeBytes, {
+      trust: {
+        bindingResolver: resolving({ agent: SUBMISSION.requester, relationship: "signs-for", scope: ["deliveries"] }),
+        atTime: "2026-01-15T00:00:00Z",
+      },
+    });
+    expect(check(report, "trust-binding").status).toBe("passed");
   });
 
   test("a binding for another agent is not this agent's", async () => {
@@ -501,6 +612,18 @@ describe("trust binding", () => {
     });
     expect(check(report, "trust-binding").status).toBe("skipped");
     expect(check(report, "trust-binding").findings[0]).toMatchObject({ code: "no-verified-signer" });
+  });
+
+  test("a witness verifier that throws is an outage too", async () => {
+    const bindingResolver = resolving({ ceremony: { type: "safe", digest: `sha256:${"a".repeat(64)}` } as never });
+    const resolved = await bindingResolver.resolveBinding({ key: "", agent: "" }, "");
+    const report = await checkRecord(signedEvaluation(ed25519()), {
+      trust: {
+        bindingResolver: { resolveBinding: async () => ({ ...resolved!, witness: {} as never }) },
+        witnessVerifier: { verify1271Witness: async () => { throw new Error("no route to host"); } },
+      },
+    });
+    expect(check(report, "trust-binding")).toMatchObject({ status: "skipped", findings: [{ code: "binding-dependency-failed" }] });
   });
 
   test("a resolver that throws is an outage, not a verdict on the record", async () => {

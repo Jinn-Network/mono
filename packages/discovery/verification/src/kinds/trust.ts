@@ -11,7 +11,6 @@ import {
   TRUST_POLICY_MEDIA_TYPE,
   TRUST_REVOCATION_FORMAT,
   TRUST_REVOCATION_MEDIA_TYPE,
-  decodeAnchorProofContent,
   validateAnchorEvidence,
   validateAuthorization,
   validateKeyBinding,
@@ -22,7 +21,6 @@ import type { ValidationDiagnostic } from "@jinn-network/trust-core";
 
 import { documentField, isRecordObject } from "../record-view.js";
 import type { RecordView } from "../record-view.js";
-import { describeError } from "../results.js";
 import type { Finding } from "../results.js";
 import type { RecordKind, RecordReference } from "./kind.js";
 import { descriptorListReferences, descriptorReference, digestListReferences, digestReference } from "./references.js";
@@ -70,17 +68,6 @@ function authorizationReferences(view: RecordView): readonly RecordReference[] {
   ];
 }
 
-function anchorEvidenceFindings({ bytes }: RecordView): readonly Finding[] {
-  const report = validateAnchorEvidence(bytes);
-  if (!report.conforms) return findings(report.diagnostics);
-  try {
-    decodeAnchorProofContent(report.value!.proof.content);
-    return [];
-  } catch (cause) {
-    return [{ code: "SCHEMA_VIOLATION", path: "proof.content", detail: describeError(cause) }];
-  }
-}
-
 export const TRUST_KINDS: Readonly<Record<string, RecordKind>> = {
   [RECORD_KINDS.keyBinding]: {
     family: "trust",
@@ -103,6 +90,12 @@ export const TRUST_KINDS: Readonly<Record<string, RecordKind>> = {
     family: "trust",
     identify: (view) => isFormat(view, TRUST_REVOCATION_MEDIA_TYPE, TRUST_REVOCATION_FORMAT),
     validate: ({ bytes }) => findings(validateRevocation(bytes).diagnostics),
+    // §7.4b: a working key signs as itself. A voucher account signs by a fresh ceremony, whose
+    // did:pkh is no DSSE key this can look for.
+    requiredSigners: (view) => {
+      const revokedBy = documentField(view, "revokedBy");
+      return typeof revokedBy === "string" && revokedBy.startsWith("did:key:") ? [revokedBy] : [];
+    },
     references: (view) => [
       ...digestReference(documentField(view, "target"), "target", "/target", false),
       ...anchorReferences(view),
@@ -132,7 +125,7 @@ export const TRUST_KINDS: Readonly<Record<string, RecordKind>> = {
   [ANCHOR_EVIDENCE_KIND]: {
     family: "trust",
     identify: (view) => documentField(view, "kind") === ANCHOR_EVIDENCE_KIND,
-    validate: anchorEvidenceFindings,
+    validate: ({ bytes }) => findings(validateAnchorEvidence(bytes).diagnostics),
     unsignedBecause: "Pluggable integrity providers design §5 rule 4: AnchorEvidence is sealed, not signed; the proof inside is the authority's signature.",
     references: (view) => {
       const subject = documentField(view, "subject");

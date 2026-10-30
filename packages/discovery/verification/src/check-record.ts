@@ -103,6 +103,10 @@ function exactEnvelopeFinding(bytes: Uint8Array): Finding | undefined {
 }
 
 function checkEncoding(view: RecordView, kind: RecordKind | undefined, named: string | undefined): CheckResult<"encoding"> {
+  // The three DSSE members and no readable envelope: it claims to be signed, so it is no artifact.
+  if (kind === undefined && view.payloadType !== undefined && view.signatures === undefined) {
+    return failed("encoding", [{ code: "malformed-envelope", detail: "These bytes have the three DSSE members and are not a well-formed envelope, so what they claim to be could not be read." }]);
+  }
   if (kind?.encodingExemption !== undefined) return skipped("encoding", "encoding-not-required", kind.encodingExemption);
   const finding = kind !== undefined && view.signatures !== undefined
     ? exactEnvelopeFinding(view.bytes) ?? canonicalFinding(view.documentBytes, view.document)
@@ -142,11 +146,12 @@ function checkSignature(view: RecordView, kind: RecordKind | undefined, trust: R
       : skipped("signature", "unsigned-record", kind.unsignedBecause));
   }
 
-  const usable: DsseVerificationKey[] = [];
+  // One entry per keyid: a repeat would make the cost quadratic in a publisher's signatures.
+  const keysById = new Map<string, DsseVerificationKey>();
   const unverifiable: Finding[] = [];
   for (const { keyid } of view.signatures) {
     const key = keyid === undefined ? undefined : usableKey(keyid, trust?.keys ?? []);
-    if (key !== undefined) usable.push(key);
+    if (key !== undefined) keysById.set(key.keyId, key);
     else {
       unverifiable.push({
         code: "no-verification-key",
@@ -157,7 +162,9 @@ function checkSignature(view: RecordView, kind: RecordKind | undefined, trust: R
       });
     }
   }
-  const missing = (kind.requiredSigners?.(view) ?? [])
+  const usable = [...keysById.values()];
+  const required = kind.requiredSigners?.(view) ?? [];
+  const missing = required
     .filter((signer) => !view.signatures!.some(({ keyid }) => keyid === signer))
     .map((signer): Finding => ({ code: "required-signer-missing", subject: signer, detail: `This kind must be signed by ${signer}, and no signature names it.` }));
   if (usable.length === 0) {
@@ -169,14 +176,15 @@ function checkSignature(view: RecordView, kind: RecordKind | undefined, trust: R
   const { validSignerKeyids } = verifyDsseSignatures(view.bytes, usable, {
     allowRespelledEnvelope: kind.anyEnvelopeSpelling === true,
   });
+  const valid = new Set(validSignerKeyids);
   const invalid = usable
-    .filter(({ keyId }) => !validSignerKeyids.includes(keyId))
+    .filter(({ keyId }) => !valid.has(keyId))
     .map(({ keyId }): Finding => ({ code: "signature-invalid", subject: keyId, detail: `The signature under ${keyId} does not verify.` }));
   const refused = [...invalid, ...missing];
-  return outcome(
-    refused.length > 0 ? failed("signature", [...refused, ...unverifiable]) : passed("signature", unverifiable),
-    validSignerKeyids,
-  );
+  if (refused.length > 0) return outcome(failed("signature", [...refused, ...unverifiable]), validSignerKeyids);
+  // Naming a required signer is not being signed by it: one no key was known for did not verify.
+  const signed = required.every((signer) => valid.has(signer));
+  return outcome(signed ? passed("signature", unverifiable) : { id: "signature", status: "skipped", findings: unverifiable }, validSignerKeyids);
 }
 
 /** A verifier for `verifyEnvelopeBinding`, which also calls it on consent and revocation envelopes. */
@@ -188,7 +196,7 @@ function bindingDsseVerifier(kind: RecordKind, trust: RecordTrustOptions): DsseC
     } catch {
       return { validSignerKeyids: [] };
     }
-    const keys = keyids.flatMap((keyid) => {
+    const keys = [...new Set(keyids)].flatMap((keyid) => {
       const key = keyid === undefined ? undefined : usableKey(keyid, trust.keys ?? []);
       return key === undefined ? [] : [key];
     });
@@ -210,6 +218,28 @@ async function checkTrustBinding(
   const atTime = trust.atTime ?? attribution.atTime;
   if (atTime === undefined) return skipped("trust-binding", "no-effective-time", "This record states no effective time and the caller supplied none.");
 
+  // Already verified above. Verifying again per signer would be quadratic in a publisher's signatures.
+  const verifyOther = bindingDsseVerifier(kind, trust);
+  const dsseVerifier: DsseChainVerifier = (bytes) =>
+    (bytes === view.bytes ? { validSignerKeyids: signature.verifiedSigners } : verifyOther(bytes));
+  // Trust §7.5's ports are dependencies, and their outage says nothing about the record. Anything
+  // else thrown in the procedure came from what a record or a binding contains.
+  let outage = false;
+  const observed = async <Result>(call: () => Promise<Result>): Promise<Result> => {
+    try {
+      return await call();
+    } catch (cause) {
+      outage = true;
+      throw cause;
+    }
+  };
+  const bindingResolver: BindingResolver = {
+    resolveBinding: (query, at) => observed(() => trust.bindingResolver!.resolveBinding(query, at)),
+  };
+  const witnessVerifier: WitnessVerifier = trust.witnessVerifier === undefined
+    ? { verify1271Witness: async () => ({ verified: false, reason: "no witness verifier was supplied" }) }
+    : { verify1271Witness: (witness) => observed(() => trust.witnessVerifier!.verify1271Witness(witness)) };
+
   const findings: Finding[] = [];
   for (const key of signature.verifiedSigners) {
     try {
@@ -223,14 +253,7 @@ async function checkTrustBinding(
           atTime,
           ...(attribution.allowSignsForAuthorization === true ? { allowSignsForAuthorization: true } : {}),
         },
-        {
-          bindingResolver: trust.bindingResolver,
-          witnessVerifier: trust.witnessVerifier ?? {
-            verify1271Witness: async () => ({ verified: false, reason: "no witness verifier was supplied" }),
-          },
-          dsseVerifier: bindingDsseVerifier(kind, trust),
-          ...(trust.policy === undefined ? {} : { policy: trust.policy }),
-        },
+        { bindingResolver, witnessVerifier, dsseVerifier, ...(trust.policy === undefined ? {} : { policy: trust.policy }) },
       );
       if (verdict.ok) return passed("trust-binding");
       findings.push({
@@ -239,8 +262,8 @@ async function checkTrustBinding(
         detail: verdict.detail ?? `No binding ties ${key} to ${attribution.agent} at ${atTime}.`,
       });
     } catch (cause) {
-      // Trust §7.5's resolver is a dependency. Its outage says nothing about the record.
-      return skipped("trust-binding", "binding-dependency-failed", `The binding could not be resolved: ${describeError(cause)}`);
+      if (outage) return skipped("trust-binding", "binding-dependency-failed", `The binding could not be resolved: ${describeError(cause)}`);
+      findings.push({ code: "binding-unreadable", subject: key, detail: describeError(cause) });
     }
   }
   return failed("trust-binding", findings);

@@ -267,6 +267,20 @@ describe("createStaticBindingResolver", () => {
     });
   });
 
+  test("a binding that breaks the verifier fails the record: it is not a resolver outage", async () => {
+    const founding = ed25519();
+    const later = ed25519();
+    const genesis = await sealedBinding(founding);
+    const malformed = await sealedBinding(later, {
+      validFrom: "2026-02-01T00:00:00Z",
+      voucherSigner: createEoaTestSigner("static-binding-resolver-malformed"),
+      consent: { keyid: founding.keyid, sig: "!!!" },
+    });
+    const bindingResolver = createStaticBindingResolver([genesis, malformed].map(({ envelopeBytes, ceremonyEvidence }) => ({ envelopeBytes, ceremonyEvidence })));
+    const report = await checkRecord(await signedEvaluation(later), { trust: { bindingResolver } });
+    expect(binding(report)).toMatchObject({ status: "failed", findings: [{ code: "binding-unreadable", subject: later.keyid }] });
+  });
+
   test("a binding resolves at the instant it expires", async () => {
     const key = ed25519();
     const { envelopeBytes, ceremonyEvidence } = await sealedBinding(key, { expiresAt: "2026-03-01T00:00:00Z" });
