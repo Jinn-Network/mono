@@ -46,7 +46,7 @@ jobs:
       needs.canary-verification.result == 'success' &&
       vars.PLATFORM_CANARY_PUBLISH_ENABLED == 'true'
     runs-on: ubuntu-latest
-    # The implementations-v1 leg walks 53 packages in waves and has run into the former
+    # The implementations-v1 leg walks 54 packages in waves and has run into the former
     # 120-minute limit since 2026-09-26: about 118 and 120 minutes on the last two successes, then
     # cancelled at 120 on 2026-09-29 before its later waves. A product release receipt pins one
     # canary sha across groups, and @colophon-claims/check's closure needs trust-testing from this

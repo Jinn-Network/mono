@@ -6,7 +6,7 @@ Source authority: [`architecture/platform-packages.v1.json`](../platform-package
 
 ## Inventory
 
-The catalog contains **99** entries: **11** `sealed-platform-v1` packages, **53** `implementations-v1` packages, **2** disabled `experimental-policy` packages, **27** other entries below `packages/**`, and **6** adjacent entries.
+The catalog contains **100** entries: **11** `sealed-platform-v1` packages, **54** `implementations-v1` packages, **2** disabled `experimental-policy` packages, **27** other entries below `packages/**`, and **6** adjacent entries.
 
 | Package | Path | Domain | Tier | Classification | Role | Stability | Release group | Publish policy | Runtime dependencies | Optional dependencies | Peer dependencies |
 | --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -45,6 +45,7 @@ The catalog contains **99** entries: **11** `sealed-platform-v1` packages, **53*
 | @jinn-network/record-discovery-source-evidence-journal | packages/discovery/sources/evidence-journal | discovery | 3 | platform | evidence-journal source adapter | candidate | implementations-v1 | canary-and-stable | @jinn-network/evidence-discovery<br>@jinn-network/evidence-repository<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>zod | — | — |
 | @jinn-network/record-discovery-testing | packages/discovery/testing | discovery | — | platform-support | record-discovery conformance kit | candidate | sealed-platform-v1 | canary-and-stable | @jinn-network/record-discovery-protocol<br>zod | — | vitest |
 | @jinn-network/record-discovery-transport-http | packages/discovery/transport-http | discovery | 3 | platform | HTTP discovery transport | candidate | implementations-v1 | canary-and-stable | @jinn-network/record-discovery-client<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve | — | — |
+| @jinn-network/verify | packages/discovery/verification | discovery | 3 | platform | general checking primitives for Jinn records | experimental | implementations-v1 | canary-and-stable | @jinn-network/trust-core | — | — |
 | @jinn-network/chain-state-extraction | packages/environments/chain-extraction | environments | 3 | platform | archive-fork chain-state extraction capability | experimental | implementations-v1 | canary-and-stable | @jinn-network/chain-environment-record<br>@jinn-network/chain-environment-verification<br>@jinn-network/trust-core<br>@noble/hashes<br>zod | — | vitest |
 | @jinn-network/chain-environment-record | packages/environments/chain-record | environments | 2 | platform | sealed chain and composite crypto environment record family | experimental | sealed-platform-v1 | canary-and-stable | @noble/hashes<br>zod | — | vitest |
 | @jinn-network/chain-environment-verification | packages/environments/chain-verification | environments | 3 | platform | chain environment materialization and verification capability | experimental | implementations-v1 | canary-and-stable | @jinn-network/chain-environment-record<br>@jinn-network/trust-core<br>@noble/hashes<br>zod | — | vitest |
@@ -426,6 +427,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/trust-resolve | runtime | @jinn-network/trust-core |
 | @jinn-network/trust-testing | runtime | @jinn-network/trust-core |
 | @jinn-network/trust-testing | runtime | @jinn-network/trust-resolve |
+| @jinn-network/verify | runtime | @jinn-network/trust-core |
 
 
 ### `sealed-platform-v1` runtime waves
@@ -452,7 +454,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 
 ### `implementations-v1` runtime waves
 
-1. `@jinn-network/chain-environment-verification`, `@jinn-network/contract-abis`, `@jinn-network/environment-verification`, `@jinn-network/evidence-derivation`, `@jinn-network/evidence-repository`, `@jinn-network/evidence-trace-decode`, `@jinn-network/execution-evidence-builder`, `@jinn-network/information-world`, `@jinn-network/record-discovery-client`, `@jinn-network/record-discovery-facts-environments`, `@jinn-network/record-discovery-facts-offers`, `@jinn-network/record-discovery-facts-task-execution`, `@jinn-network/record-discovery-facts-trust`, `@jinn-network/record-discovery-serve`, `@jinn-network/task-admission`, `@jinn-network/task-curation`, `@jinn-network/task-execution-backend`, `@jinn-network/task-execution-workspace`, `@jinn-network/trust-observation`, `@jinn-network/trust-resolve`
+1. `@jinn-network/chain-environment-verification`, `@jinn-network/contract-abis`, `@jinn-network/environment-verification`, `@jinn-network/evidence-derivation`, `@jinn-network/evidence-repository`, `@jinn-network/evidence-trace-decode`, `@jinn-network/execution-evidence-builder`, `@jinn-network/information-world`, `@jinn-network/record-discovery-client`, `@jinn-network/record-discovery-facts-environments`, `@jinn-network/record-discovery-facts-offers`, `@jinn-network/record-discovery-facts-task-execution`, `@jinn-network/record-discovery-facts-trust`, `@jinn-network/record-discovery-serve`, `@jinn-network/task-admission`, `@jinn-network/task-curation`, `@jinn-network/task-execution-backend`, `@jinn-network/task-execution-workspace`, `@jinn-network/trust-observation`, `@jinn-network/trust-resolve`, `@jinn-network/verify`
 2. `@jinn-network/attestation-issuer`, `@jinn-network/chain-state-extraction`, `@jinn-network/evidence-discovery`, `@jinn-network/evidence-gate`, `@jinn-network/evidence-repository-ipfs`, `@jinn-network/evidence-repository-oci`, `@jinn-network/execution-recorder`, `@jinn-network/marketplace-binding`, `@jinn-network/record-discovery-facts-chain-environments`, `@jinn-network/record-discovery-transport-http`, `@jinn-network/record-publication`, `@jinn-network/task-derivation`, `@jinn-network/task-execution-supervisor`, `@jinn-network/trust-testing`
 3. `@jinn-network/chain-scenarios`, `@jinn-network/evidence-catalog-sqlite`, `@jinn-network/evidence-publication`, `@jinn-network/evidence-retrieval`, `@jinn-network/execution-recorder-bridge`, `@jinn-network/marketplace-projector`, `@jinn-network/record-discovery-facts-evidence`, `@jinn-network/record-discovery-source-evidence-journal`, `@jinn-network/task-execution-launchers`, `@jinn-network/task-posting`
 4. `@jinn-network/evidence-contribution`, `@jinn-network/evidence-local-runtime`, `@jinn-network/marketplace-venue-base`, `@jinn-network/task-execution-backend-local`, `@jinn-network/task-execution-evaluation-harness`
@@ -516,6 +518,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/trust-observation | — |
 | @jinn-network/trust-resolve | — |
 | @jinn-network/trust-testing | @jinn-network/trust-resolve |
+| @jinn-network/verify | — |
 
 ## Release and trusted publishers
 
@@ -526,12 +529,12 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | experimental-lifecycle-notifications | 1 | lifecycle-notifications-ci | disabled | false | false | false |
 | experimental-policy | 2 | policy-ci | disabled | false | false | false |
 | experimental-read-plane | 1 | read-plane-ci | disabled | false | false | false |
-| implementations-v1 | 53 | contracts-ci<br>environments-ci<br>evidence-ci<br>marketplace-ci<br>record-discovery-ci<br>task-execution-ci<br>task-supply-ci<br>trust-ci | canary-and-stable | true | true | true |
+| implementations-v1 | 54 | contracts-ci<br>environments-ci<br>evidence-ci<br>marketplace-ci<br>record-discovery-ci<br>task-execution-ci<br>task-supply-ci<br>trust-ci | canary-and-stable | true | true | true |
 | legacy-product-lines | 6 | client-ci<br>core-ci<br>layer-ci<br>marketplace-ci<br>plugin-ci<br>sdk-ci | independent | false | false | false |
 | sealed-platform-v1 | 11 | environments-ci<br>evidence-ci<br>record-discovery-ci<br>task-execution-ci<br>trust-ci | canary-and-stable | true | true | true |
 | transitional-or-private | 10 | benchmark-product-ci<br>broadcast-bot-ci<br>environments-ci<br>indexer-ci<br>indexer-enrichment-ci<br>operator-console-ci<br>plugin-tree-ci<br>policy-optimization-ci<br>task-supply-ci<br>website-ci | private<br>never | false | false | false |
 
-The exact 75-package trusted-publisher set is the union of canary-eligible groups: the 64 stack-published packages plus every canary-only group, which publishes npm canaries but is never stack-published or served at `spec.jinn.network`. Receipt-gated canary publication is enabled for every canary-eligible group. **Stable publication is disabled until live `spec.jinn.network` profile hosting verification passes.** The 2 `experimental-policy` packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
+The exact 76-package trusted-publisher set is the union of canary-eligible groups: the 65 stack-published packages plus every canary-only group, which publishes npm canaries but is never stack-published or served at `spec.jinn.network`. Receipt-gated canary publication is enabled for every canary-eligible group. **Stable publication is disabled until live `spec.jinn.network` profile hosting verification passes.** The 2 `experimental-policy` packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
 
 | Package | Workflow | Environment field |
 | --- | --- | --- |
@@ -610,6 +613,7 @@ The exact 75-package trusted-publisher set is the union of canary-eligible group
 | @jinn-network/trust-observation | stack-npm-publish.yml | npm-publish |
 | @jinn-network/trust-resolve | stack-npm-publish.yml | npm-publish |
 | @jinn-network/trust-testing | stack-npm-publish.yml | npm-publish |
+| @jinn-network/verify | stack-npm-publish.yml | npm-publish |
 
 ## Public surfaces and identity claims
 
@@ -650,6 +654,7 @@ The exact 75-package trusted-publisher set is the union of canary-eligible group
 | @jinn-network/record-discovery-source-evidence-journal | implementations-v1 | — | — | fixtures | — |
 | @jinn-network/record-discovery-testing | sealed-platform-v1 | — | — | fixtures | . |
 | @jinn-network/record-discovery-transport-http | implementations-v1 | — | — | — | — |
+| @jinn-network/verify | implementations-v1 | — | — | — | — |
 | @jinn-network/chain-state-extraction | implementations-v1 | — | — | fixtures | ./testing |
 | @jinn-network/chain-environment-record | sealed-platform-v1 | schemas | — | fixtures | ./testing |
 | @jinn-network/chain-environment-verification | implementations-v1 | — | — | fixtures | ./testing |

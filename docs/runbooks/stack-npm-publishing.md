@@ -1,7 +1,7 @@
 # Platform stack npm publishing runbook
 
 **Scope:** the catalog-derived stack-published release groups `sealed-platform-v1` (11 packages)
-and `implementations-v1` (53 packages), plus the canary-only product group
+and `implementations-v1` (54 packages), plus the canary-only product group
 `benchmarking-product-v1` (11 packages), which publishes npm canaries from the same workflow but
 is never stack-published or served at `spec.jinn.network`
 ([DR-2026-09-03](../../log/decisions/2026-09-03-protocol-spec-repository.md) section 3). Their exact package sets, runtime waves,
@@ -41,7 +41,7 @@ The count contract is pinned by `.github/scripts/stack-trusted-publishers.test.m
   `0.1.0-canary.sha.<fullSha>` under dist-tag `canary`. That is not `latest` and not a
   `stack-v*` cut.
 - The trusted-publisher set is the union of the canary-eligible groups (both stack-published groups
-  and `benchmarking-product-v1`): **75** rows, one registration each,
+  and `benchmarking-product-v1`): **76** rows, one registration each,
   bound to `stack-npm-publish.yml` and `npm-publish`. Per-group publication receipts are a subset
   of that list. The generated topology is authoritative for membership.
 - The two `experimental-policy` packages remain disabled and are not part of either
@@ -168,19 +168,21 @@ and [`npm trust`](https://docs.npmjs.com/cli/v11/commands/npm-trust/).
 An npm scope owner must complete this once for every generated registration:
 
 - [x] Confirm the operator belongs to a team in the `@jinn-network` npm organization. (`ritsukai` / `@jinn-network:developers`)
-- [x] Regenerate the list and compare it with the generated release view (75 names;
+- [x] Regenerate the list and compare it with the generated release view (76 names;
   topology union), then add every registration using the CLI path above (or the npmjs
-  web UI with the same fields), including Environment `npm-publish`. **Complete as of
-  2026-10-01**: all 75 names exist on npm and carry a `canary` dist-tag
+  web UI with the same fields), including Environment `npm-publish`. **Complete**:
+  all 76 names exist on npm, the 65 stack-published names and the 11
+  `benchmarking-product-v1` names. As of 2026-10-01 every one of them except
+  `@jinn-network/verify`, which joined later, carried a `canary` dist-tag
   (`npm view <name> dist-tags`), and each of those canary versions has SLSA provenance naming
-  `stack-npm-publish.yml`. That is the 64 stack-published names and the 11
-  `benchmarking-product-v1` names. `@jinn-network/contract-abis`,
+  `stack-npm-publish.yml`. `@jinn-network/contract-abis`,
   `@jinn-network/evidence-gate`, and `@jinn-network/record-discovery-facts-offers` were
   reserved on 2026-09-25 and have published canaries since. npm does not expose a
   trusted-publisher row to readers; a publish from this workflow with no long-lived token is
   the evidence that the row exists. The `canary` tags can name different shas across packages
   after a leg ends early (see Recovery); that is a partial walk, not a missing registration.
 - [x] `@jinn-network/evidence-offer` registered 2026-09-01 by `ritsukai` via CLI: bootstrap `0.0.0` (`npm publish --tag bootstrap`) then `npm trust github` (GitHub Actions / `Jinn-Network/mono` / `stack-npm-publish.yml` / environment `npm-publish` / allow publish). The package joined the release catalog on 2026-08-29 (#3217).
+- [x] `@jinn-network/verify` reserved at `0.0.0` and bound to `stack-npm-publish.yml` / `npm-publish` before it joined the release catalog ([#5120](https://github.com/Jinn-Network/mono/issues/5120)). It is the 76th name; its first canary follows the merge that adds it.
 - [ ] Protect the `npm-publish` GitHub environment with required reviewers and allowed branches. **Explicitly skipped 2026-08-17** — shared with operator/client canary; see [DR-2026-08-17-d](../../log/decisions/2026-08-17-platform-canary-publish-enabled.md).
 - [x] Add no `NODE_AUTH_TOKEN` or other long-lived npm credential.
 - [x] Run the full hosted verifier and record its exact successful source SHA. (`b546aa40fe82aab95552bbb7270846f0500fdf10`, [run 32065136927](https://github.com/Jinn-Network/mono/actions/runs/32065136927))
