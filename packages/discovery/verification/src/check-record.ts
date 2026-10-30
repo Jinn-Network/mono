@@ -16,7 +16,7 @@ import type { RecordKind, RecordKinds } from "./kinds/index.js";
 import { documentField, readRecord } from "./record-view.js";
 import type { RecordView } from "./record-view.js";
 import { UNKNOWN_KIND, describeError, failed, passed, skipped } from "./results.js";
-import type { CheckResult, Finding, RecordCheckId, RecordOutcome, RecordReport } from "./results.js";
+import type { CheckResult, Finding, RecordCheckId, RecordOutcome, RecordReport, SignatureCounts } from "./results.js";
 
 export interface RecordTrustOptions {
   /** Keys for signatures whose `keyid` does not carry its own key. Consulted before the `keyid`. */
@@ -121,28 +121,44 @@ function checkSchema(view: RecordView, kind: RecordKind | undefined, ambiguous: 
   return findings.length === 0 ? passed("schema") : failed("schema", findings);
 }
 
-function usableKey(keyid: string, supplied: readonly DsseVerificationKey[]): DsseVerificationKey | undefined {
-  const given = supplied.find(({ keyId }) => keyId === keyid);
-  if (given !== undefined) return given.publicKey.asymmetricKeyType === "ed25519" ? given : undefined;
-  const publicKey = ed25519PublicKeyFromDidKey(keyid);
-  return publicKey === undefined ? undefined : { keyId: keyid, publicKey };
+interface UsableKey extends DsseVerificationKey {
+  readonly supplied: boolean;
 }
+
+function usableKey(keyid: string, supplied: readonly DsseVerificationKey[]): UsableKey | undefined {
+  const given = supplied.find(({ keyId }) => keyId === keyid);
+  if (given !== undefined) return given.publicKey.asymmetricKeyType === "ed25519" ? { ...given, supplied: true } : undefined;
+  const publicKey = ed25519PublicKeyFromDidKey(keyid);
+  return publicKey === undefined ? undefined : { keyId: keyid, publicKey, supplied: false };
+}
+
+const NO_SIGNATURES: SignatureCounts = { total: 0, verified: 0, verifiedWithSuppliedKey: 0, invalid: 0, unverified: 0 };
 
 interface SignatureOutcome {
   readonly result: CheckResult<"signature">;
   readonly verifiedSigners: readonly string[];
+  readonly counts: SignatureCounts;
 }
 
 function checkSignature(view: RecordView, kind: RecordKind | undefined, trust: RecordTrustOptions | undefined): SignatureOutcome {
-  const outcome = (result: CheckResult<"signature">, verifiedSigners: readonly string[] = []) => ({ result, verifiedSigners });
-  if (kind === undefined) return outcome(skipped("signature", "unknown-kind", "No registered kind says who signs this record, so no signature was verified."));
+  const total = view.signatures?.length ?? 0;
+  const unverifiedOutcome = (result: CheckResult<"signature">) => ({
+    result,
+    verifiedSigners: [],
+    counts: { ...NO_SIGNATURES, total, unverified: total },
+  });
+  if (kind === undefined) {
+    return unverifiedOutcome(skipped("signature", "unknown-kind", total === 0
+      ? "No registered kind says who signs this record, so no signature was verified."
+      : `These bytes carry ${total} signature${total === 1 ? "" : "s"}, and no registered kind says who signs them, so none was verified.`));
+  }
   if (view.signatures === undefined) {
-    return outcome(kind.unsignedBecause === undefined
+    return unverifiedOutcome(kind.unsignedBecause === undefined
       ? failed("signature", [{ code: "not-signed", detail: "This kind is a DSSE envelope, and these bytes are not a well-formed one." }])
       : skipped("signature", "unsigned-record", kind.unsignedBecause));
   }
 
-  const usable: DsseVerificationKey[] = [];
+  const usable: UsableKey[] = [];
   const unverifiable: Finding[] = [];
   for (const { keyid } of view.signatures) {
     const key = keyid === undefined ? undefined : usableKey(keyid, trust?.keys ?? []);
@@ -161,9 +177,14 @@ function checkSignature(view: RecordView, kind: RecordKind | undefined, trust: R
     .filter((signer) => !view.signatures!.some(({ keyid }) => keyid === signer))
     .map((signer): Finding => ({ code: "required-signer-missing", subject: signer, detail: `This kind must be signed by ${signer}, and no signature names it.` }));
   if (usable.length === 0) {
-    return outcome(missing.length > 0
-      ? failed("signature", [...missing, ...unverifiable])
-      : { id: "signature", status: "skipped", findings: unverifiable });
+    const counts = { ...NO_SIGNATURES, total, unverified: total };
+    return {
+      result: missing.length > 0
+        ? failed("signature", [...missing, ...unverifiable])
+        : { id: "signature", status: "skipped", findings: unverifiable },
+      verifiedSigners: [],
+      counts,
+    };
   }
 
   const { validSignerKeyids } = verifyDsseSignatures(view.bytes, usable, {
@@ -172,11 +193,27 @@ function checkSignature(view: RecordView, kind: RecordKind | undefined, trust: R
   const invalid = usable
     .filter(({ keyId }) => !validSignerKeyids.includes(keyId))
     .map(({ keyId }): Finding => ({ code: "signature-invalid", subject: keyId, detail: `The signature under ${keyId} does not verify.` }));
+  const suppliedAndVerified = usable
+    .filter(({ keyId, supplied }) => supplied && validSignerKeyids.includes(keyId))
+    .map(({ keyId }): Finding => ({
+      code: "verified-with-supplied-key",
+      subject: keyId,
+      detail: "Verified against a key the caller supplied. That shows this key signed, not whose key it is.",
+    }));
   const refused = [...invalid, ...missing];
-  return outcome(
-    refused.length > 0 ? failed("signature", [...refused, ...unverifiable]) : passed("signature", unverifiable),
-    validSignerKeyids,
-  );
+  return {
+    result: refused.length > 0
+      ? failed("signature", [...refused, ...unverifiable])
+      : passed("signature", [...suppliedAndVerified, ...unverifiable]),
+    verifiedSigners: validSignerKeyids,
+    counts: {
+      total,
+      verified: usable.length - invalid.length,
+      verifiedWithSuppliedKey: suppliedAndVerified.length,
+      invalid: invalid.length,
+      unverified: unverifiable.length,
+    },
+  };
 }
 
 /** A verifier for `verifyEnvelopeBinding`, which also calls it on consent and revocation envelopes. */
@@ -274,7 +311,7 @@ export async function inspectRecord(bytes: Uint8Array, options: CheckRecordOptio
   try {
     signature = checkSignature(view, kind, options.trust);
   } catch (cause) {
-    signature = { result: failed("signature", [{ code: "check-threw", detail: describeError(cause) }]), verifiedSigners: [] };
+    signature = { result: failed("signature", [{ code: "check-threw", detail: describeError(cause) }]), verifiedSigners: [], counts: NO_SIGNATURES };
   }
   let trustBinding: CheckResult<"trust-binding">;
   try {
@@ -291,6 +328,7 @@ export async function inspectRecord(bytes: Uint8Array, options: CheckRecordOptio
     ...(names === undefined ? {} : { names }),
     outcome: outcomeOf(checks, kind),
     checks,
+    signatures: signature.counts,
   };
   return { report, view, ...(kind === undefined ? {} : { kind }) };
 }

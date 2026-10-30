@@ -443,6 +443,60 @@ describe("signature", () => {
   });
 });
 
+describe("what a report counts about signatures", () => {
+  const unsigned = { total: 0, verified: 0, verifiedWithSuppliedKey: 0, invalid: 0, unverified: 0 };
+
+  test("an unsigned record has none", async () => {
+    expect((await checkRecord(sealTask(TASK))).signatures).toEqual(unsigned);
+  });
+
+  test("a signature verified from the key in its own keyid is not a supplied key", async () => {
+    const report = await checkRecord(signedEvaluation(ed25519()));
+    expect(report.signatures).toEqual({ ...unsigned, total: 1, verified: 1 });
+    expect(check(report, "signature").findings).toEqual([]);
+  });
+
+  test("a signature verified against a supplied key says exactly that, and trust binding stays skipped", async () => {
+    const key = ed25519();
+    const envelope = JSON.parse(new TextDecoder().decode(signedEvaluation(key))) as { signatures: { keyid: string }[] };
+    envelope.signatures[0]!.keyid = "evaluator-key-1";
+    const report = await checkRecord(encoder.encode(JSON.stringify(envelope)), {
+      trust: { keys: [{ keyId: "evaluator-key-1", publicKey: key.publicKey }] },
+    });
+    expect(report.signatures).toEqual({ ...unsigned, total: 1, verified: 1, verifiedWithSuppliedKey: 1 });
+    expect(check(report, "signature")).toMatchObject({
+      status: "passed",
+      findings: [{ code: "verified-with-supplied-key", subject: "evaluator-key-1", detail: expect.stringContaining("not whose key it is") }],
+    });
+    expect(check(report, "trust-binding")).toMatchObject({ status: "skipped", findings: [{ code: "no-binding-resolver" }] });
+  });
+
+  test("a signature with no key is unverified", async () => {
+    const key = ed25519();
+    const envelope = JSON.parse(new TextDecoder().decode(signedEvaluation(key))) as { signatures: { keyid: string }[] };
+    envelope.signatures[0]!.keyid = "unknown-key";
+    expect((await checkRecord(encoder.encode(JSON.stringify(envelope)))).signatures).toEqual({ ...unsigned, total: 1, unverified: 1 });
+  });
+
+  test("a signature that does not verify is invalid", async () => {
+    const key = ed25519();
+    const envelope = JSON.parse(new TextDecoder().decode(signedEvaluation(ed25519()))) as { signatures: { keyid: string }[] };
+    envelope.signatures[0]!.keyid = key.keyid;
+    expect((await checkRecord(encoder.encode(JSON.stringify(envelope)))).signatures).toEqual({ ...unsigned, total: 1, invalid: 1 });
+  });
+
+  test("a signed record of unknown kind is counted unverified and says it is signed", async () => {
+    const bytes = sealDsseEnvelope({
+      payloadType: "application/vnd.jinn.not-registered.v1+json",
+      payloadBytes: canonicalJsonBytes({}),
+      signatures: [{ signature: Uint8Array.of(1), keyid: "did:key:z" }],
+    });
+    const report = await checkRecord(bytes);
+    expect(report.signatures).toEqual({ ...unsigned, total: 1, unverified: 1 });
+    expect(check(report, "signature")).toMatchObject({ status: "skipped", findings: [{ code: "unknown-kind", detail: expect.stringContaining("1 signature") }] });
+  });
+});
+
 describe("trust binding", () => {
   function resolving(binding: Partial<ResolvedBinding["binding"]>): BindingResolver {
     const resolved = {
