@@ -12,3 +12,9 @@ export {
   verifyEd25519Signature,
 } from "./dsse.js";
 export type { DsseVerificationKey, VerifyDsseSignaturesOptions } from "./dsse.js";
+export {
+  anchorCertificateReader,
+  anchorChainVerifier,
+  anchorSignatureVerifier,
+  nodeCryptoAnchorPorts,
+} from "./anchor/ports.js";
