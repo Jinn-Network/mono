@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  AnchorReferenceSchema,
   KeyBindingSchema,
-  RevocationSchema,
   Sha256DigestSchema,
   ceremonyEvidenceDigest,
   compareCalendarStrictRfc3339Instants,
@@ -128,27 +128,52 @@ interface EffectiveBinding {
   readonly effectiveStart: string;
 }
 
-const readableRecords = new WeakMap<object, boolean>();
+type Verdicts = WeakMap<object, boolean>;
 
-/** A store may hold anything. Whatever is not the record it says it is cannot
- * be placed in time or read for authority, so it is not considered at all. */
-function readable(entry: object | null, isRecord: () => boolean): boolean {
+const placedBindings: Verdicts = new WeakMap();
+const readableBindings: Verdicts = new WeakMap();
+const readableRevocations: Verdicts = new WeakMap();
+
+/** A store may hold anything, and one object may be listed as both kinds of
+ * record, so each question keeps its own answers. */
+function remembered(verdicts: Verdicts, entry: object | null, decide: () => boolean): boolean {
   if (typeof entry !== "object" || entry === null) return false;
-  const known = readableRecords.get(entry);
+  const known = verdicts.get(entry);
   if (known !== undefined) return known;
-  const verdict = isRecord();
-  readableRecords.set(entry, verdict);
+  const verdict = decide();
+  verdicts.set(entry, verdict);
   return verdict;
 }
 
+const AnchorsSchema = AnchorReferenceSchema.array();
+
+function hasReadableAnchors(record: { readonly anchors?: unknown } | null | undefined): boolean {
+  return typeof record === "object" && record !== null && AnchorsSchema.safeParse(record.anchors).success;
+}
+
+/** Whether a stored entry can be placed in time. One that can counts when
+ * deciding what came first, whatever else it holds: it may be the true genesis,
+ * and leaving it out would make the next record the founder of the IRI (§7.4a). */
+function canBePlaced(record: SealedKeyBindingRecord): boolean {
+  return remembered(placedBindings, record, () => hasReadableAnchors(record.binding)
+    && Sha256DigestSchema.safeParse(record.bindingDigest).success);
+}
+
+/** Whether a stored entry is the record it says it is. Only one that is can
+ * resolve or give authority. */
 function isReadableBinding(record: SealedKeyBindingRecord): boolean {
-  return readable(record, () => KeyBindingSchema.safeParse(record.binding).success
+  return remembered(readableBindings, record, () => KeyBindingSchema.safeParse(record.binding).success
     && Sha256DigestSchema.safeParse(record.bindingDigest).success
     && record.envelopeBytes instanceof Uint8Array);
 }
 
+/** Whether a stored revocation has what verification reads: a place in time, a
+ * signer and the bytes that signer signed. A time that cannot be read claims
+ * nothing, so the anchor stands alone, and authority is settled in `verify.ts`.
+ * A revocation by someone with standing must not vanish for how it is spelled. */
 function isReadableRevocation(record: SealedRevocationRecord): boolean {
-  return readable(record, () => RevocationSchema.safeParse(record.revocation).success
+  return remembered(readableRevocations, record, () => hasReadableAnchors(record.revocation)
+    && typeof record.revocation.revokedBy === "string"
     && record.envelopeBytes instanceof Uint8Array);
 }
 
@@ -351,11 +376,14 @@ function findIncumbentControls(
     .map(({ record }) => ({ key: record.binding.key.didKey, voucher: record.binding.voucher }));
 }
 
-/** Whether a record could found an IRI at all: it claims control, and names
- * no authority over itself. A digest must not hand the founding of a batch to
- * one that does not, and so leave the rest of the batch without an incumbent. */
-function claimsFounding({ binding }: SealedKeyBindingRecord): boolean {
-  return binding.relationship === "controls" && binding.consent === undefined;
+/** Whether a record could found an IRI at all: it is a binding, it claims
+ * control, and it names no authority over itself. A digest must not hand the
+ * founding of a batch to one that does not, and so leave the rest of the batch
+ * without an incumbent. */
+function claimsFounding(record: SealedKeyBindingRecord): boolean {
+  return isReadableBinding(record)
+    && record.binding.relationship === "controls"
+    && record.binding.consent === undefined;
 }
 
 /** True only for the founding binding of the Agent IRI (§7.4a): the
@@ -401,23 +429,24 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
 
       const withEffectiveStart: EffectiveBinding[] = [];
       for (const record of allForAgent) {
-        if (!isReadableBinding(record)) continue;
+        if (!canBePlaced(record)) continue;
         // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
         const effectiveStart = await effectiveStartOf(record.binding, options.anchors);
         if (effectiveStart === undefined) {
-          if (requireAnchors) continue; // unanchored -- non-resolvable (§7.3)
+          if (requireAnchors || typeof record.binding.validFrom !== "string") continue; // unanchored -- non-resolvable (§7.3)
           withEffectiveStart.push({ record, effectiveStart: record.binding.validFrom });
           continue;
         }
         withEffectiveStart.push({ record, effectiveStart });
       }
+      const readable = withEffectiveStart.filter(({ record }) => isReadableBinding(record));
 
       // The ceremony gate applies to what may resolve, never to the set the
       // genesis and the incumbents are read from: a record nothing here can
       // verify may be the true genesis, and leaving it out would make the next
       // record the founder of the IRI (§7.4a).
       const forKeyAtTime: EffectiveBinding[] = [];
-      for (const candidate of withEffectiveStart) {
+      for (const candidate of readable) {
         if (candidate.record.binding.key.didKey !== query.key) continue;
         if (!isWithinWindow(candidate.record.binding, candidate.effectiveStart, atTime)) continue;
         if (!signedByItsKey(candidate.record)) continue;
@@ -429,7 +458,7 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
       const withComposition: EffectiveBinding[] = [];
       for (const candidate of forKeyAtTime) {
         // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
-        const holds = await agentIdCompositionHolds(candidate.record, atTime, withEffectiveStart, options);
+        const holds = await agentIdCompositionHolds(candidate.record, atTime, readable, options);
         if (holds) withComposition.push(candidate);
       }
       if (withComposition.length === 0) return null;
@@ -467,7 +496,7 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
       revocations.sort((a, b) => compareTimes(a.effectiveTime, b.effectiveTime)
         || compareCodeUnitStrings(recordDigest(a.envelopeBytes), recordDigest(b.envelopeBytes)));
 
-      const incumbentControls = findIncumbentControls(winner, withEffectiveStart);
+      const incumbentControls = findIncumbentControls(winner, readable);
       const resolved: ResolvedBinding = {
         binding: winner.record.binding,
         envelopeBytes: winner.record.envelopeBytes,

@@ -226,6 +226,54 @@ describe("createBindingResolver", () => {
       expect(resolved?.revocations).toEqual([]);
     });
 
+    it.each([
+      ["an offset in its stated time", { validFrom: "2026-01-01T01:00:00+01:00" }],
+      ["a ceremony this version cannot name", { ceremony: { type: "passkey", digest: CEREMONY_DIGEST } }],
+      ["a relationship this version cannot name", { relationship: "owns" }],
+      ["a time that is not one", { validFrom: "soon" }],
+    ])("still counts a record with %s when deciding what came first", async (_label, overrides) => {
+      const key = { publicKey: "pk", keyid: KEY_OWNER, algorithm: "secp256k1", didKey: KEY_OWNER };
+      const first = record(accountBinding({ key, ...overrides } as never), DIGEST_A);
+      const later = record(accountBinding({ anchors: [{ digest: DIGEST_B }] }), DIGEST_B);
+      const resolver = createBindingResolver({ bindings: storeHolding([later, first]), anchors });
+      expect(await resolver.resolveBinding({ key: KEY_OWNER, agent: AGENT }, at)).toBeNull();
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(false);
+    });
+
+    it("keeps a revocation whose stated time cannot be read, at its anchor", async () => {
+      const bindings: BindingStore = {
+        ...fakeStore([genuine]),
+        async listRevocationsForTargets() {
+          return [{
+            revocation: {
+              protocol: "https://spec.jinn.network/trust/revocation/v1",
+              target: DIGEST_A,
+              revokedBy: KEY_A,
+              anchors: [{ digest: DIGEST_B }],
+              effectiveFrom: "soon",
+            },
+            envelopeBytes: Uint8Array.of(1),
+          }];
+        },
+      };
+      const resolved = await createBindingResolver({ bindings, anchors }).resolveBinding({ key: KEY_A, agent: AGENT }, at);
+      expect(resolved?.revocations.map(({ effectiveTime }) => effectiveTime)).toEqual(["2026-01-02T00:00:00.000Z"]);
+    });
+
+    it("reads an entry listed as both kinds of record as each kind", async () => {
+      const both = { ...genuine, revocation: { target: DIGEST_A } };
+      const bindings: BindingStore = {
+        async listBindingsForAgent() {
+          return [both];
+        },
+        async listRevocationsForTargets() {
+          return [both as never];
+        },
+      };
+      const resolved = await createBindingResolver({ bindings, anchors }).resolveBinding({ key: KEY_A, agent: AGENT }, at);
+      expect(resolved?.revocations).toEqual([]);
+    });
+
     it("takes a host's ceremony leg that throws as a ceremony it did not verify", async () => {
       const binding = accountBinding({ ceremony: { type: "oidc-machine", digest: CEREMONY_DIGEST } });
       const resolver = createBindingResolver({

@@ -22,8 +22,9 @@ may be the true genesis.
 
 `recordSignedByItsKey` is required, because this package has no DSSE verifier of
 its own. A record its key never signed does not resolve and cannot win a conflict
-over the key. Ceremony evidence that cannot be read is a failed ceremony, and a
-stored entry that is not the record it says it is is not considered at all.
+over the key. Ceremony evidence that cannot be read is a failed ceremony. A
+stored entry that is not a key binding never resolves and gives no authority, but
+if its anchors can be read it still counts when deciding which binding came first.
 
 See `docs/superpowers/plans/2026-07-28-trust-layer.md` for the implementation
 plan.
