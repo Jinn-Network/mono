@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { compareCodeUnitStrings } from "@jinn-network/trust-core";
+import { compareCodeUnitStrings, recordDigest } from "@jinn-network/trust-core";
 import type {
   AnchorResolver,
   BindingResolver,
@@ -8,12 +8,12 @@ import type {
   ChainFactResolver,
   Eip1271Witness,
   EoaCeremonyEvidence,
+  IncumbentControl,
   KeyBinding,
   Revocation,
   ResolvedBinding,
   ResolvedRevocation,
   Sha256Digest,
-  VoucherIdentity,
 } from "@jinn-network/trust-core";
 
 // ---------------------------------------------------------------------------
@@ -91,6 +91,13 @@ export interface CreateBindingResolverOptions {
    * (§7.2). Omit for deployments/tests that never use agentId vouchers --
    * any agentId-voucher candidate then simply fails to resolve. */
   readonly chainFacts?: ChainFactResolver;
+  /** §7.5 step 3 for the ceremonies nothing in this package can verify:
+   * `safe` (the witness leg in `verify.ts` does not tie a witness to this
+   * record), `oidc-machine` (anchored JWKS) and `github-human`. A host that
+   * can verify them says so here, record by record. Omit it and those
+   * bindings simply fail to resolve: `verify.ts` takes a resolved binding as
+   * this resolver's word that its ceremony was checked. */
+  readonly verifyHostedCeremony?: (record: SealedKeyBindingRecord) => Promise<boolean>;
   /** Under an anchor-requiring profile an unanchored binding never
    * resolves (§7.3). Defaults to `true`, the safer default. */
   readonly requireAnchors?: boolean;
@@ -162,6 +169,24 @@ function parseCaip19ChainId(caip19: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
+/** §7.5 step 3, before anything else is asked of a record: whether this
+ * package or the host can verify its ceremony at all. `trust-core` verifies
+ * `eoa` offline; `agentId` is composition, below, which is keyed on the
+ * voucher, so the label must name that voucher or the leg never runs. */
+async function ceremonyCanBeVerified(
+  record: SealedKeyBindingRecord,
+  verifyHostedCeremony: CreateBindingResolverOptions["verifyHostedCeremony"],
+): Promise<boolean> {
+  switch (record.binding.ceremony.type) {
+    case "eoa":
+      return true;
+    case "agentId":
+      return record.binding.voucher.kind === "agentId";
+    default:
+      return verifyHostedCeremony === undefined ? false : verifyHostedCeremony(record);
+  }
+}
+
 /** §7.2's agentId composition leg: the agentId voucher's registry owner
  * must itself hold a currently-valid account-ceremony binding to the same
  * Agent IRI, valid at `atTime` (see the module's finding re: `ownerOf`
@@ -195,20 +220,31 @@ async function agentIdCompositionHolds(
   });
 }
 
-/** §7.4a option 1 (self-extension): the voucher already holding a valid
- * `controls`-relationship binding to this Agent IRI at the moment this
- * candidate binding was minted (`validFrom`), if any. */
-function findIncumbentControlVoucher(
-  candidate: SealedKeyBindingRecord,
+/** The order §7.3 ranks an Agent's bindings by: earliest effective start,
+ * ties broken by digest, so that no stored order can decide anything. */
+function compareEffective(a: EffectiveBinding, b: EffectiveBinding): number {
+  if (a.effectiveStart !== b.effectiveStart) return a.effectiveStart < b.effectiveStart ? -1 : 1;
+  return compareCodeUnitStrings(a.record.bindingDigest, b.record.bindingDigest);
+}
+
+/** §7.4a option 1 (self-extension): every `controls`-relationship peer in
+ * window when this candidate took effect. `effectiveStart`, not `validFrom`:
+ * the minter chooses `validFrom`, and §7.3 is what stops a choice reaching
+ * back. All of them are surfaced because the resolver does not judge them:
+ * one chosen here would hide the rest. `verify.ts` matches the candidate's
+ * voucher and requires the match to stand. */
+function findIncumbentControls(
+  candidate: EffectiveBinding,
   peers: readonly EffectiveBinding[],
-): VoucherIdentity | undefined {
-  const mintTime = candidate.binding.validFrom;
-  const incumbent = peers.find(({ record, effectiveStart }) => {
-    if (record.bindingDigest === candidate.bindingDigest) return false;
-    if (record.binding.relationship !== "controls") return false;
-    return isWithinWindow(record.binding, effectiveStart, mintTime);
-  });
-  return incumbent?.record.binding.voucher;
+): IncumbentControl[] {
+  return peers
+    .filter(({ record, effectiveStart }) => {
+      if (record.bindingDigest === candidate.record.bindingDigest) return false;
+      if (record.binding.relationship !== "controls") return false;
+      return isWithinWindow(record.binding, effectiveStart, candidate.effectiveStart);
+    })
+    .sort(compareEffective)
+    .map(({ record }) => ({ key: record.binding.key.didKey, voucher: record.binding.voucher }));
 }
 
 /** True only for the founding binding of the Agent IRI (§7.4a): the
@@ -238,6 +274,8 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
       const withEffectiveStart: EffectiveBinding[] = [];
       for (const record of allForAgent) {
         // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
+        if (!(await ceremonyCanBeVerified(record, options.verifyHostedCeremony))) continue;
+        // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
         const effectiveStart = await effectiveStartOf(record.binding, options.anchors);
         if (effectiveStart === undefined) {
           if (requireAnchors) continue; // unanchored -- non-resolvable (§7.3)
@@ -262,10 +300,7 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
       }
       if (withComposition.length === 0) return null;
 
-      let winner = withComposition[0]!;
-      for (const candidate of withComposition.slice(1)) {
-        if (candidate.effectiveStart < winner.effectiveStart) winner = candidate;
-      }
+      const winner = [...withComposition].sort(compareEffective)[0]!;
       if (withComposition.length > 1 && options.onConflict) {
         options.onConflict({
           key: query.key,
@@ -288,8 +323,13 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
           effectiveTime,
         });
       }
+      revocations.sort((a, b) => (
+        a.effectiveTime === b.effectiveTime
+          ? compareCodeUnitStrings(recordDigest(a.envelopeBytes), recordDigest(b.envelopeBytes))
+          : (a.effectiveTime < b.effectiveTime ? -1 : 1)
+      ));
 
-      const incumbentControlVoucher = findIncumbentControlVoucher(winner.record, withEffectiveStart);
+      const incumbentControls = findIncumbentControls(winner, withEffectiveStart);
       const resolved: ResolvedBinding = {
         binding: winner.record.binding,
         envelopeBytes: winner.record.envelopeBytes,
@@ -299,7 +339,7 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
         revocations,
         ...(winner.record.ceremonyEvidence === undefined ? {} : { ceremonyEvidence: winner.record.ceremonyEvidence }),
         ...(winner.record.witness === undefined ? {} : { witness: winner.record.witness }),
-        ...(incumbentControlVoucher === undefined ? {} : { incumbentControlVoucher }),
+        ...(incumbentControls.length === 0 ? {} : { incumbentControls }),
       };
       return resolved;
     },

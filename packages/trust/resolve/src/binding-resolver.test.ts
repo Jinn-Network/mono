@@ -126,6 +126,161 @@ describe("createBindingResolver", () => {
     });
   });
 
+  it("settles a tie over one (key, agent) by digest, whichever record a store lists first", async () => {
+    const first = accountBinding({ anchors: [{ digest: DIGEST_A }] });
+    const second = accountBinding({ anchors: [{ digest: DIGEST_B }] });
+    const anchors = fakeAnchors({
+      [DIGEST_A]: "2026-01-01T00:00:00.000Z",
+      [DIGEST_B]: "2026-01-01T00:00:00.000Z",
+    });
+    const forward = createBindingResolver({ bindings: fakeStore([record(first, DIGEST_A), record(second, DIGEST_B)]), anchors });
+    const reversed = createBindingResolver({ bindings: fakeStore([record(second, DIGEST_B), record(first, DIGEST_A)]), anchors });
+
+    const at = "2026-06-01T00:00:00.000Z";
+    expect((await forward.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.bindingDigest).toBe(DIGEST_A);
+    expect((await reversed.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.bindingDigest).toBe(DIGEST_A);
+  });
+
+  it("surfaces every in-window controls peer as an incumbent, in an order the store cannot change", async () => {
+    const voucherOf = (address: string) => ({
+      kind: "account" as const,
+      did: `did:pkh:eip155:84532:${address}`,
+      contractAccount: false,
+    });
+    const keyed = (didKey: string) => ({ publicKey: "pk", keyid: didKey, algorithm: "secp256k1", didKey });
+    const genesisVoucher = voucherOf("0x1111111111111111111111111111111111111111");
+    const laterVoucher = voucherOf("0x2222222222222222222222222222222222222222");
+    const records = [
+      record(accountBinding({ voucher: genesisVoucher }), DIGEST_A),
+      record(accountBinding({
+        key: keyed(KEY_OWNER),
+        voucher: laterVoucher,
+        validFrom: "2026-02-01T00:00:00.000Z",
+      }), DIGEST_B),
+      record(accountBinding({
+        key: keyed("did:key:zOutOfWindow"),
+        voucher: laterVoucher,
+        validFrom: "2026-01-01T00:00:00.000Z",
+        expiresAt: "2026-01-15T00:00:00.000Z",
+      }), ("sha256:" + "d".repeat(64)) as Sha256Digest),
+      record(accountBinding({
+        key: keyed("did:key:zSignsFor"),
+        voucher: laterVoucher,
+        relationship: "signs-for",
+      }), ("sha256:" + "e".repeat(64)) as Sha256Digest),
+      record(accountBinding({
+        key: keyed("did:key:zCandidate"),
+        voucher: laterVoucher,
+        validFrom: "2026-03-01T00:00:00.000Z",
+      }), ("sha256:" + "f".repeat(64)) as Sha256Digest),
+    ];
+    const anchors = fakeAnchors({ [DIGEST_A]: "2026-01-01T00:00:00.000Z" });
+
+    for (const stored of [records, [...records].reverse()]) {
+      const resolver = createBindingResolver({ bindings: fakeStore(stored), anchors });
+      // eslint-disable-next-line no-await-in-loop -- comparing one store order, then the other.
+      const resolved = await resolver.resolveBinding({ key: "did:key:zCandidate", agent: AGENT }, "2026-06-01T00:00:00.000Z");
+      expect(resolved?.incumbentControls).toEqual([
+        { key: KEY_A, voucher: genesisVoucher },
+        { key: KEY_OWNER, voucher: laterVoucher },
+      ]);
+    }
+  });
+
+  it("windows incumbents at the candidate's effective start, not the validFrom its minter chose", async () => {
+    const incumbent = accountBinding({ expiresAt: "2026-02-01T00:00:00.000Z", anchors: [{ digest: DIGEST_A }] });
+    const candidate = accountBinding({
+      key: { publicKey: "pk2", keyid: KEY_OWNER, algorithm: "secp256k1", didKey: KEY_OWNER },
+      validFrom: "2026-01-15T00:00:00.000Z",
+      anchors: [{ digest: DIGEST_B }],
+    });
+    const store = fakeStore([record(incumbent, DIGEST_A), record(candidate, DIGEST_B)]);
+    const anchors = fakeAnchors({
+      [DIGEST_A]: "2026-01-01T00:00:00.000Z",
+      [DIGEST_B]: "2026-03-01T00:00:00.000Z", // after the incumbent expired
+    });
+    const resolver = createBindingResolver({ bindings: store, anchors });
+
+    const resolved = await resolver.resolveBinding({ key: KEY_OWNER, agent: AGENT }, "2026-06-01T00:00:00.000Z");
+    expect(resolved?.effectiveStart).toBe("2026-03-01T00:00:00.000Z");
+    expect(resolved?.incumbentControls).toBeUndefined();
+  });
+
+  describe("ceremonies nothing here can verify (§7.5 step 3)", () => {
+    const anchors = fakeAnchors({ [DIGEST_A]: "2026-01-01T00:00:00.000Z" });
+    const at = "2026-06-01T00:00:00.000Z";
+
+    it.each(["safe", "oidc-machine", "github-human"] as const)("does not resolve a %s binding by default", async (type) => {
+      const binding = accountBinding({ ceremony: { type, digest: CEREMONY_DIGEST }, strength: deriveStrength(type) });
+      const resolver = createBindingResolver({ bindings: fakeStore([record(binding, DIGEST_A)]), anchors });
+
+      expect(await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at)).toBeNull();
+    });
+
+    it.each(["safe", "oidc-machine", "github-human"] as const)("resolves a %s binding only on the host's say-so", async (type) => {
+      const binding = accountBinding({ ceremony: { type, digest: CEREMONY_DIGEST }, strength: deriveStrength(type) });
+      const sealed = record(binding, DIGEST_A);
+      const verifyHostedCeremony = vi.fn(async () => true);
+      const vouched = createBindingResolver({ bindings: fakeStore([sealed]), anchors, verifyHostedCeremony });
+      const refused = createBindingResolver({
+        bindings: fakeStore([sealed]),
+        anchors,
+        verifyHostedCeremony: async () => false,
+      });
+
+      expect((await vouched.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.bindingDigest).toBe(DIGEST_A);
+      expect(verifyHostedCeremony).toHaveBeenCalledWith(sealed);
+      expect(await refused.resolveBinding({ key: KEY_A, agent: AGENT }, at)).toBeNull();
+    });
+
+    it("never consults the host for an EOA ceremony, which trust-core verifies itself", async () => {
+      const verifyHostedCeremony = vi.fn(async () => false);
+      const resolver = createBindingResolver({
+        bindings: fakeStore([record(accountBinding(), DIGEST_A)]),
+        anchors,
+        verifyHostedCeremony,
+      });
+
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.bindingDigest).toBe(DIGEST_A);
+      expect(verifyHostedCeremony).not.toHaveBeenCalled();
+    });
+
+    it("does not resolve an agentId ceremony on a voucher its composition leg never examines", async () => {
+      const binding = accountBinding({
+        ceremony: { type: "agentId", digest: CEREMONY_DIGEST },
+        strength: deriveStrength("agentId"),
+      });
+      const resolver = createBindingResolver({
+        bindings: fakeStore([record(binding, DIGEST_A)]),
+        anchors,
+        chainFacts: unusedChainFacts(),
+      });
+
+      expect(await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at)).toBeNull();
+    });
+
+    it("a record whose ceremony cannot be verified cannot take genesis from one whose can", async () => {
+      const unverified = accountBinding({
+        key: { publicKey: "pk2", keyid: KEY_OWNER, algorithm: "secp256k1", didKey: KEY_OWNER },
+        ceremony: { type: "oidc-machine", digest: CEREMONY_DIGEST },
+        strength: deriveStrength("oidc-machine"),
+        anchors: [{ digest: DIGEST_B }],
+      });
+      const genuine = accountBinding({ validFrom: "2026-01-02T00:00:00.000Z" });
+      const resolver = createBindingResolver({
+        bindings: fakeStore([record(unverified, DIGEST_B), record(genuine, DIGEST_A)]),
+        anchors: fakeAnchors({
+          [DIGEST_A]: "2026-01-02T00:00:00.000Z",
+          [DIGEST_B]: "2026-01-01T00:00:00.000Z",
+        }),
+      });
+
+      const resolved = await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at);
+      expect(resolved?.isGenesis).toBe(true);
+      expect(resolved?.incumbentControls).toBeUndefined();
+    });
+  });
+
   it("does not resolve an agentId binding without a valid account-ceremony composition leg", async () => {
     const agentIdBinding = accountBinding({
       voucher: { kind: "agentId", caip19: AGENT_ASSET },

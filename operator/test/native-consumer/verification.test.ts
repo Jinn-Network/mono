@@ -310,7 +310,13 @@ function makeTrust(keys: Record<string, RoleKey>, input: { revokedRequester?: bo
       return anchorTime === undefined ? null : { digest, anchorTime };
     },
   };
-  const resolver = createBindingResolver({ bindings: store, anchors: anchorResolver, requireAnchors: true });
+  const resolver = createBindingResolver({
+    bindings: store,
+    anchors: anchorResolver,
+    requireAnchors: true,
+    // These fixture bindings carry a placeholder machine ceremony; the fixture is the host vouching for it.
+    verifyHostedCeremony: async () => true,
+  });
   const keyMap = new Map(Object.values(keys).map((key) => [key.id, key.publicKey]));
   const dsseVerifier: DsseChainVerifier = (bytes) => {
     let parsed;

@@ -75,7 +75,7 @@ export async function runOldVerdictAfterKeyRotationWalkthrough(
     agent: evaluatorAgent,
     resolved: binding2026.resolved,
     validFrom: "2026-01-01T00:00:00.000Z",
-    validTo: "2027-01-01T00:00:00.000Z", // superseded by the first rotation
+    validTo: "2027-02-01T00:00:00.000Z", // overlaps its successor, which it must stand to authorize
   });
 
   const key2027 = testDidKey("walkthrough-rotation-key-2027");
@@ -88,14 +88,14 @@ export async function runOldVerdictAfterKeyRotationWalkthrough(
     validFrom: "2027-01-01T00:00:00.000Z",
     scope: ["verdicts"],
     isGenesis: false,
-    incumbentControlVoucher: voucher, // self-extension: the same account re-vouches
+    incumbentControls: [{ key: key2026, voucher }], // self-extension: the same account re-vouches
   });
   fakes.registerBinding({
     key: key2027,
     agent: evaluatorAgent,
     resolved: binding2027.resolved,
     validFrom: "2027-01-01T00:00:00.000Z",
-    validTo: "2028-01-01T00:00:00.000Z", // superseded by the second rotation
+    validTo: "2028-02-01T00:00:00.000Z", // overlaps its successor, as above
   });
 
   const key2028 = testDidKey("walkthrough-rotation-key-2028");
@@ -108,7 +108,7 @@ export async function runOldVerdictAfterKeyRotationWalkthrough(
     validFrom: "2028-01-01T00:00:00.000Z",
     scope: ["verdicts"],
     isGenesis: false,
-    incumbentControlVoucher: voucher,
+    incumbentControls: [{ key: key2027, voucher }],
   });
   fakes.registerBinding({
     key: key2028,
@@ -126,16 +126,16 @@ export async function runOldVerdictAfterKeyRotationWalkthrough(
     ceremonyType: "eoa",
     voucher,
     eoaCeremony: { signer: evaluatorSigner, chainId: 84532 },
-    validFrom: "2026-01-01T00:00:00.000Z",
+    validFrom: "2026-02-01T00:00:00.000Z",
     scope: ["settlements"],
     isGenesis: false,
-    incumbentControlVoucher: voucher,
+    incumbentControls: [{ key: key2026, voucher }],
   });
   fakes.registerBinding({
     key: settlementKey,
     agent: evaluatorAgent,
     resolved: settlementBinding.resolved,
-    validFrom: "2026-01-01T00:00:00.000Z",
+    validFrom: "2026-02-01T00:00:00.000Z",
   });
 
   // The verdict envelope itself was sealed in 2026, by the 2026 key.
@@ -333,6 +333,7 @@ export async function runTwoSafeEvaluatorDistinctnessWalkthrough(
     voucher: accountVoucher(84532, stakingSigner.address),
     eoaCeremony: { signer: stakingSigner, chainId: 84532 },
     scope: ["verdicts"],
+    validFrom: "2026-02-01T00:00:00.000Z", // consent comes from a binding already in place
     isGenesis: false,
     consent: { keyid: fleetKey, sig: btoa("walkthrough-two-safe-consent-signature") },
   });

@@ -12,5 +12,11 @@ anchor lookups, and the §7.3 at-time binding resolution composition. It is
 the RPC package of the trust tree -- `viem` and node network I/O are
 expected here (they are banned everywhere else in `packages/trust/`).
 
+`createBindingResolver` does not resolve a binding whose ceremony nothing has
+verified: `@jinn-network/trust-core` takes a resolved binding as the resolver's
+word for the ceremony legs that need I/O. It verifies `eoa` offline and runs the
+`agentId` composition leg itself. `safe`, `oidc-machine` and `github-human`
+bindings resolve only when the host passes `verifyHostedCeremony`.
+
 See `docs/superpowers/plans/2026-07-28-trust-layer.md` for the implementation
 plan.
