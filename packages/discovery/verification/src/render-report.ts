@@ -82,6 +82,7 @@ const NOTES: ReadonlySet<string> = new Set([
   "references-not-read",
   "references-unavailable",
   "deliveries-without-observations",
+  "supersedes-target-not-held",
   "anchor-time-not-evaluated",
   "anchor-pending",
   "anchor-subject-kind-unchecked",
@@ -155,7 +156,9 @@ function lifecycleLine(result: LifecycleResult): string {
   const uncovered = result.deliveriesWithoutObservations === 0
     ? ""
     : `, ${count(result.deliveriesWithoutObservations, "Delivery", "Deliveries")} with no log`;
-  return line("Lifecycle", `${result.status}: ${count(result.attempts.length, "attempt")} folded${uncovered}`);
+  const notCompared = result.findings.filter(({ code }) => code === "supersedes-target-not-held").length;
+  const uncompared = notCompared === 0 ? "" : `, ${count(notCompared, "supersession")} not compared`;
+  return line("Lifecycle", `${result.status}: ${count(result.attempts.length, "attempt")} folded${uncovered}${uncompared}`);
 }
 
 function anchorsLine(result: AnchorsResult): string {

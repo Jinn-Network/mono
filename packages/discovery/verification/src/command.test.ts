@@ -624,6 +624,20 @@ describe("set checks read as they ran", () => {
     expect(stdout).toContain("Lifecycle      skipped: no attempt-engaged here, so no source is authoritative");
   });
 
+  test("a supersession that could not be compared is said, and is not listed as a failure", async () => {
+    const engagement = observation("attempt-engaged", "evt-1", 1, ENGAGED);
+    const unheld = delivery({ supersedes: `sha256:${"7".repeat(64)}`, createdAt: "2026-07-28T00:06:00Z" });
+    const { stdout } = await run(directory(Object.fromEntries([task, unheld, engagement].map(named))));
+    expect(stdout).toContain("Lifecycle      passed: 1 attempt folded, 1 supersession not compared");
+    expect(stdout).toContain("References     failed: 1 dangling");
+
+    const forged = delivery({ supersedes: taskDigest, createdAt: "2026-07-28T00:07:00Z" });
+    const failing = await run(directory(Object.fromEntries([task, unheld, forged, engagement].map(named))));
+    expect(failing.code).toBe(1);
+    expect(failing.stdout).toContain("not a valid Delivery");
+    expect(failing.stdout).not.toContain("was not compared");
+  });
+
   test("a lifecycle that failed never reads as passed", async () => {
     const closing = delivery();
     const { code, stdout } = await run(directory(Object.fromEntries([
