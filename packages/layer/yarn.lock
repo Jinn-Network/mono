@@ -392,11 +392,6 @@ __metadata:
   resolution: "@jinn-network/plugin@portal:../plugin::locator=%40jinn-network%2Fjinn-layer%40workspace%3A."
   dependencies:
     zod: "npm:4.4.3"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 

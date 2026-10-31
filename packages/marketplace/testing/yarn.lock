@@ -61,11 +61,6 @@ __metadata:
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
@@ -83,11 +78,6 @@ __metadata:
   resolution: "@jinn-network/evidence-repository@portal:../../evidence/repository::locator=%40jinn-network%2Fmarketplace-testing%40workspace%3A."
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
@@ -106,11 +96,6 @@ __metadata:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
     "@jinn-network/execution-evidence-builder": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
@@ -172,11 +157,6 @@ __metadata:
     typescript: "npm:^5.9.3"
     viem: "npm:^2.0.0"
     vitest: "npm:^4.1.8"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: unknown
   linkType: soft
 
@@ -219,11 +199,6 @@ __metadata:
   dependencies:
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
     zod: "npm:4.4.3"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
@@ -302,11 +277,6 @@ __metadata:
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
     "@jinn-network/task-execution-supervisor": "npm:0.1.0"
     "@jinn-network/task-execution-workspace": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
@@ -346,11 +316,6 @@ __metadata:
     "@jinn-network/trust-resolve": "npm:0.1.0"
     "@noble/curves": "npm:^2.0.0"
     "@noble/hashes": "npm:^2.2.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 

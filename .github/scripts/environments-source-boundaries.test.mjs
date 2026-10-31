@@ -62,7 +62,7 @@ const RECORD_ALLOWED_DEPENDENCIES = ['@noble/hashes', 'zod'];
 const RECORD_ALLOWED_DEV_DEPENDENCIES = [
   '@jinn-network/evidence-protocol', '@types/node', 'ajv', 'canonicalize', 'typescript', 'vitest',
 ];
-const RECORD_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const RECORD_ALLOWED_PEER_DEPENDENCIES = [];
 
 // `packages/environments/chain-record` is tier 2 with the same purity rules as `record`: zod +
 // noble-class primitives only, no ports, no I/O outside the fixture loaders. Two Jinn packages
@@ -76,7 +76,7 @@ const CHAIN_RECORD_ALLOWED_DEV_DEPENDENCIES = [
   '@jinn-network/environment-record', '@jinn-network/evidence-protocol',
   '@types/node', 'ajv', 'canonicalize', 'typescript', 'vitest',
 ];
-const CHAIN_RECORD_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const CHAIN_RECORD_ALLOWED_PEER_DEPENDENCIES = [];
 
 // `packages/environments/chain-verification` is tier 3: it runs the closed-state and archive
 // protocols and seals the attestation. Design §3 gives it exactly two package edges — the
@@ -200,7 +200,7 @@ const INFORMATION_WORLD_ALLOWED_DEV_DEPENDENCIES = [
   '@jinn-network/evidence-protocol',
   '@types/node', 'ajv', 'canonicalize', 'typescript', 'vitest',
 ];
-const INFORMATION_WORLD_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const INFORMATION_WORLD_ALLOWED_PEER_DEPENDENCIES = [];
 const INFORMATION_WORLD_TEST_ONLY_JINN_PACKAGES = [
   '@jinn-network/chain-environment-record',
   '@jinn-network/chain-environment-verification',
@@ -801,7 +801,7 @@ test('environments source boundaries remain one-way across the approved graph', 
   assert.deepEqual(Object.keys(manifest.dependencies ?? {}).sort(), RECORD_ALLOWED_DEPENDENCIES);
   assert.deepEqual(Object.keys(manifest.devDependencies ?? {}).sort(), RECORD_ALLOWED_DEV_DEPENDENCIES);
   assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).sort(), RECORD_ALLOWED_PEER_DEPENDENCIES);
-  assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+  assert.equal(manifest.peerDependenciesMeta, undefined);
 });
 
 test('chain-environment-record stays pure and keeps the SWE kind out of production source', () => {
@@ -879,7 +879,7 @@ test('chain-environment-record stays pure and keeps the SWE kind out of producti
   assert.deepEqual(Object.keys(manifest.dependencies ?? {}).sort(), CHAIN_RECORD_ALLOWED_DEPENDENCIES);
   assert.deepEqual(Object.keys(manifest.devDependencies ?? {}).sort(), CHAIN_RECORD_ALLOWED_DEV_DEPENDENCIES);
   assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).sort(), CHAIN_RECORD_ALLOWED_PEER_DEPENDENCIES);
-  assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+  assert.equal(manifest.peerDependenciesMeta, undefined);
 });
 
 test('environment-verification takes exactly its two approved package edges', () => {
@@ -1064,7 +1064,7 @@ test('information-world is pure except for one loopback server and fixture reade
   assert.deepEqual(Object.keys(manifest.dependencies ?? {}).sort(), INFORMATION_WORLD_ALLOWED_DEPENDENCIES);
   assert.deepEqual(Object.keys(manifest.devDependencies ?? {}).sort(), INFORMATION_WORLD_ALLOWED_DEV_DEPENDENCIES);
   assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).sort(), INFORMATION_WORLD_ALLOWED_PEER_DEPENDENCIES);
-  assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+  assert.equal(manifest.peerDependenciesMeta, undefined);
 
   const externals = productionFiles.flatMap((file) => specifiers(readFileSync(file, 'utf8'))
     .filter((specifier) => !specifier.startsWith('.') && !specifier.startsWith('node:')))

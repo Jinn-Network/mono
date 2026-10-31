@@ -49,14 +49,6 @@
     "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
     "@jinn-network/trust-core": "portal:../../trust/core"
   },
-  "peerDependencies": {
-    "vitest": "^4.1.8"
-  },
-  "peerDependenciesMeta": {
-    "vitest": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@jinn-network/benchmarking-aggregate": "0.1.0",
     "@jinn-network/trust-core": "0.1.0",

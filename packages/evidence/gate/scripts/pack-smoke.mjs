@@ -169,8 +169,8 @@ assert.equal(missing.code, "unknown-offer");
       "utf8",
     ),
   );
-  assert.deepEqual(installedManifest.peerDependencies, { vitest: "^4.1.8" });
-  assert.deepEqual(installedManifest.peerDependenciesMeta, { vitest: { optional: true } });
+  assert.equal(installedManifest.peerDependencies, undefined);
+  assert.equal(installedManifest.peerDependenciesMeta, undefined);
   assert.deepEqual(Object.keys(installedManifest.dependencies ?? {}).sort(), [
     "@jinn-network/evidence-offer",
     "@jinn-network/evidence-repository",

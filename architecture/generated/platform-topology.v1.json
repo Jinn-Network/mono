@@ -2914,9 +2914,7 @@
       "classification": "product",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/benchmarking-records",
           "@jinn-network/task-execution-profiles",
@@ -3476,9 +3474,7 @@
       "classification": "platform-support",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/record-discovery-protocol",
           "zod"
@@ -3637,9 +3633,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@noble/hashes",
           "zod"
@@ -3725,9 +3719,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@noble/hashes",
           "zod"
@@ -3770,9 +3762,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@noble/hashes",
           "zod"
@@ -3857,9 +3847,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/evidence-protocol",
           "@jinn-network/evidence-repository"
@@ -3938,9 +3926,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/evidence-derivation",
           "@jinn-network/evidence-protocol",
@@ -3982,9 +3968,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/evidence-protocol",
           "@noble/hashes",
@@ -4027,9 +4011,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/evidence-protocol",
           "@jinn-network/evidence-repository"
@@ -4104,9 +4086,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/evidence-protocol",
           "@jinn-network/evidence-repository",
@@ -4185,9 +4165,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/evidence-offer",
           "@jinn-network/evidence-repository",
@@ -4270,9 +4248,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/trust-core",
           "zod"
@@ -4356,9 +4332,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/evidence-repository",
           "@jinn-network/record-publication"
@@ -4397,9 +4371,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/evidence-protocol"
         ]
@@ -4521,9 +4493,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/evidence-discovery",
           "@jinn-network/evidence-protocol",
@@ -4563,9 +4533,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/evidence-protocol",
           "@jinn-network/trust-core",
@@ -4613,9 +4581,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/evidence-trace"
         ]
@@ -4999,9 +4965,7 @@
       "classification": "platform-support",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/evidence-protocol",
           "@jinn-network/marketplace-binding",
@@ -5093,9 +5057,7 @@
       "classification": "legacy",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "zod"
         ]
@@ -5756,9 +5718,7 @@
       "classification": "platform-support",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/task-execution-backend",
           "@jinn-network/task-execution-backend-local",
@@ -5803,9 +5763,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/environment-record",
           "@jinn-network/task-execution-profiles",
@@ -5849,9 +5807,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/chain-environment-record",
           "@jinn-network/task-admission",
@@ -5935,9 +5891,7 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/environment-record",
           "@jinn-network/task-admission",
@@ -6171,9 +6125,7 @@
       "classification": "platform-support",
       "dependencies": {
         "optional": [],
-        "peer": [
-          "vitest"
-        ],
+        "peer": [],
         "runtime": [
           "@jinn-network/trust-core",
           "@jinn-network/trust-resolve",

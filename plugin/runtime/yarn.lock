@@ -225,11 +225,6 @@ __metadata:
     "@secretlint/secretlint-rule-preset-recommend": "npm:13.0.4"
     canonicalize: "npm:3.0.0"
     zod: "npm:4.4.3"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
@@ -239,11 +234,6 @@ __metadata:
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
@@ -275,11 +265,6 @@ __metadata:
   resolution: "@jinn-network/evidence-repository@portal:../../packages/evidence/repository::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
@@ -290,11 +275,6 @@ __metadata:
     "@jinn-network/evidence-discovery": "npm:0.1.0"
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
@@ -303,11 +283,6 @@ __metadata:
   resolution: "@jinn-network/evidence-trace-decode@portal:../../packages/evidence/trace-decode::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
   dependencies:
     "@jinn-network/evidence-trace": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
@@ -320,11 +295,6 @@ __metadata:
     "@noble/hashes": "npm:2.2.0"
     ajv: "npm:8.17.1"
     zod: "npm:4.4.3"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
@@ -343,11 +313,6 @@ __metadata:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
     "@jinn-network/execution-evidence-builder": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 

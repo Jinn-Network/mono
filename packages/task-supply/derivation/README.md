@@ -150,3 +150,7 @@ A refusal is an outcome, not an error: refused candidates are summarized and dis
 nothing is written for them. A per-candidate `DerivationError` becomes a `failed` row and
 the run continues; anything else — a port outage, a full disk — propagates and aborts the
 run, because a summary full of spurious failures is worse than a run that stops.
+
+## Vitest
+
+`@jinn-network/task-derivation/testing` needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project. The other entry points do not need it.

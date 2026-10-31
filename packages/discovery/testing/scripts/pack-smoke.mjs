@@ -53,8 +53,8 @@ try {
         "@jinn-network/record-discovery-testing": `file:${archive}`,
         // The kit's exported run*Conformance functions call vitest's
         // describe/it/expect at module scope (they wrap `describe(...)`
-        // blocks); vitest is an optional peer (satisfied by whatever
-        // consumer devDependency supplies it, evidence/task-execution-
+        // blocks); vitest is not a dependency of this package (the
+        // consumer's own devDependency supplies it, evidence/task-execution-
         // testing precedent), but the smoke consumer needs it present to
         // resolve the root import at all.
         vitest: "4.1.8",
@@ -92,9 +92,9 @@ import * as recordDiscoveryTesting from "@jinn-network/record-discovery-testing"
 
 if (typeof recordDiscoveryTesting !== "object") throw new Error("root import failed");
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
-if (packageJson.peerDependencies?.vitest !== "^4.1.8"
-    || packageJson.peerDependenciesMeta?.vitest?.optional !== true) {
-  throw new Error("packed optional Vitest peer contract changed");
+if (packageJson.peerDependencies?.vitest !== undefined
+    || packageJson.peerDependenciesMeta?.vitest !== undefined) {
+  throw new Error("packed manifest must not declare a vitest peer");
 }
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/"));
 const expectedJinnDependencies = ["@jinn-network/record-discovery-protocol"];

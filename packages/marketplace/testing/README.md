@@ -70,3 +70,7 @@ Consumed by component packages as a **devDependency only, never a production dep
 note this kit does not itself appear in `binding`/`projector`/`pipeline`'s `package.json`
 (see `binding`'s README for why: a two-way portal cycle breaks the standalone `node-modules`
 linker). "The relevant conformance kit run" for those packages is this package's own `yarn test`.
+
+## Vitest
+
+This package needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project.
