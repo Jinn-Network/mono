@@ -26,6 +26,8 @@ import type {
   Sha256Digest,
 } from "@jinn-network/trust-core";
 
+import { TrustResolveError } from "./errors.js";
+
 // ---------------------------------------------------------------------------
 // §7.3's at-time binding resolution, composed for `BindingResolver`:
 // `effectiveStart = max(validFrom, anchorTime)`; unanchored bindings do
@@ -99,15 +101,20 @@ export interface CreateBindingResolverOptions {
   readonly anchors: AnchorResolver;
   /** Needed only to resolve agentId-voucher bindings' composition leg
    * (§7.2). Omit for deployments/tests that never use agentId vouchers --
-   * any agentId-voucher candidate then simply fails to resolve. */
+   * any agentId-voucher candidate then simply fails to resolve. A
+   * `TrustResolveError` with code `INVALID_INPUT` says the registry holds no such
+   * agent, and the leg fails. Any other throw is an outage: it leaves
+   * `resolveBinding` as a throw. */
   readonly chainFacts?: ChainFactResolver;
   /** §7.5 step 3 for the ceremonies nothing in this package can verify:
    * `safe` (the witness leg in `verify.ts` does not tie a witness to this
    * record), `oidc-machine` (anchored JWKS) and `github-human`. A host that
    * can verify them says so here, record by record. Omit it and those
    * bindings simply fail to resolve: `verify.ts` takes a resolved binding as
-   * this resolver's word that its ceremony was checked. A leg that throws
-   * counts as a no, as a failed `ownerOf` read does. */
+   * this resolver's word that its ceremony was checked. A record the leg cannot
+   * read is a `false`, because a store may hold anything. A throw says the leg
+   * could not find out: it is an outage and leaves `resolveBinding` as a throw,
+   * so a caller can tell it from a refusal. */
   readonly verifyHostedCeremony?: (record: SealedKeyBindingRecord) => Promise<boolean>;
   /** §7.1: a binding is DSSE-signed by the key it binds. A record that key
    * never signed does not resolve and cannot win a conflict over the key. It
@@ -267,12 +274,7 @@ async function ceremonyCanBeVerified(
     case "agentId":
       return record.binding.voucher.kind === "agentId";
     default:
-      if (verifyHostedCeremony === undefined) return false;
-      try {
-        return await verifyHostedCeremony(record);
-      } catch {
-        return false;
-      }
+      return verifyHostedCeremony === undefined ? false : verifyHostedCeremony(record);
   }
 }
 
@@ -333,8 +335,9 @@ async function agentIdCompositionHolds(
   let ownerAddress: string;
   try {
     ownerAddress = await chainFacts.ownerOf(voucher.caip19);
-  } catch {
-    return false;
+  } catch (cause) {
+    if (cause instanceof TrustResolveError && cause.code === "INVALID_INPUT") return false;
+    throw cause;
   }
   const ownerDid = didPkhFromAddress(chainId, ownerAddress);
 

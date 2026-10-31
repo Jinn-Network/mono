@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { sealDsseEnvelope } from "@jinn-network/trust-core";
+import {
+  ContractFunctionExecutionError,
+  ContractFunctionRevertedError,
+  ContractFunctionZeroDataError,
+} from "viem";
 import { describe, expect, it, vi } from "vitest";
 
-import { ERC1271_MAGIC_VALUE } from "./abis.js";
+import { ERC1271_IS_VALID_SIGNATURE_ABI, ERC1271_MAGIC_VALUE } from "./abis.js";
 import { createWitnessVerifier } from "./witness.js";
 
 const VERIFIER_IRI = "https://spec.jinn.network/agents/verifier-1";
@@ -142,6 +147,53 @@ describe("createWitnessVerifier", () => {
     const result = await verifier.verify1271Witness(outerWitness(payload, envelopeBytes));
     expect(result.verified).toBe(false);
     expect(result.reason).toMatch(/magic value/);
+  });
+
+  describe("when the archive read does not return", () => {
+    const payload = witnessPayload();
+    const witness = outerWitness(payload, sealWitnessPayload(payload));
+    const verifierFailingWith = (cause: unknown) => createWitnessVerifier({
+      acceptedVerifiers: [],
+      archiveClient: {
+        readContract: async () => {
+          throw cause;
+        },
+      },
+    });
+
+    it("lets a read that failed out as an outage", async () => {
+      await expect(verifierFailingWith(new Error("no route to host")).verify1271Witness(witness))
+        .rejects.toThrow("no route to host");
+    });
+
+    it.each([
+      ["reverted", new ContractFunctionExecutionError(
+        new ContractFunctionRevertedError({ abi: ERC1271_IS_VALID_SIGNATURE_ABI, functionName: "isValidSignature", message: "GS026" }),
+        { abi: ERC1271_IS_VALID_SIGNATURE_ABI, args: [HASH, SIGNATURE], functionName: "isValidSignature" },
+      )],
+      ["has no code at that block", new ContractFunctionZeroDataError({ functionName: "isValidSignature" })],
+    ])("takes a contract that %s as its answer", async (_label, cause) => {
+      const result = await verifierFailingWith(cause).verify1271Witness(witness);
+      expect(result.verified).toBe(false);
+      expect(result.reason).toMatch(/archive re-execution/);
+    });
+  });
+
+  it.each([
+    ["an address that is not one", { safe: "0xnot-an-address" }],
+    ["a hash that is not 32 bytes", { hash: "0xaa" }],
+    ["a signature that is not hex", { signature: "bytes" }],
+    ["a block that is not a number on the chain", { blockNumber: 1.5 }],
+    ["a block below the first", { blockNumber: -1 }],
+  ])("answers for a statement holding %s, before any read", async (_label, overrides) => {
+    const payload = witnessPayload(overrides);
+    const readContract = vi.fn(async () => {
+      throw new Error("not read");
+    });
+    const verifier = createWitnessVerifier({ acceptedVerifiers: [], archiveClient: { readContract } });
+    const result = await verifier.verify1271Witness(outerWitness(payload, sealWitnessPayload(payload)));
+    expect(result.verified).toBe(false);
+    expect(readContract).not.toHaveBeenCalled();
   });
 
   it("fails when the witness-attested result itself is not the magic value (even if policy-accepted)", async () => {

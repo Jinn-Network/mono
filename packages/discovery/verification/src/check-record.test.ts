@@ -11,7 +11,15 @@ import {
   sealSignedPayload,
   sealSignedRecord,
 } from "@jinn-network/trust-core";
-import type { BindingResolver, DsseProducedSignature, ResolvedBinding } from "@jinn-network/trust-core";
+import type {
+  BindingResolver,
+  DsseProducedSignature,
+  Eip1271Witness,
+  KeyBinding,
+  ResolvedBinding,
+} from "@jinn-network/trust-core";
+import { createBindingResolver, createWitnessVerifier } from "@jinn-network/trust-resolve";
+import type { SealedKeyBindingRecord } from "@jinn-network/trust-resolve";
 import {
   DELIVERY_MEDIA_TYPE,
   TASK_EXECUTION_PROTOCOL_URI,
@@ -975,6 +983,112 @@ describe("trust binding", () => {
     const unreached = await checkRecord(signedEvaluation(ed25519()), { trust: { bindingResolver: down } });
     expect(check(unreached, "trust-binding")).toMatchObject({ status: "skipped", findings: [{ code: "binding-dependency-failed" }] });
     expect(unreached.outcome).toBe("checked");
+  });
+
+  describe("over the real resolver", () => {
+    const CEREMONY = `sha256:${"c".repeat(64)}` as const;
+
+    /** A store holding one binding the host must verify, and nothing else this package can read. */
+    function realResolver(options: {
+      readonly key: ReturnType<typeof ed25519>;
+      readonly type?: "oidc-machine" | "safe";
+      readonly verifyHostedCeremony: () => Promise<boolean>;
+      readonly witness?: Eip1271Witness;
+    }): BindingResolver {
+      const { key, type = "oidc-machine", verifyHostedCeremony, witness } = options;
+      const binding = {
+        protocol: "https://spec.jinn.network/trust/key-binding/v1",
+        agent: AGENT,
+        key: { publicKey: key.keyid, keyid: key.keyid, algorithm: "ed25519", didKey: key.keyid },
+        voucher: { kind: "oidc-machine", subject: "repo:example/example:ref:refs/heads/main" },
+        relationship: "controls",
+        scope: ["verdicts"],
+        validFrom: "2026-01-01T00:00:00Z",
+        ceremony: { type, digest: CEREMONY },
+        strength: "strong",
+        anchors: [],
+      } as unknown as KeyBinding;
+      const record: SealedKeyBindingRecord = {
+        binding,
+        envelopeBytes: Uint8Array.of(1),
+        bindingDigest: `sha256:${"d".repeat(64)}`,
+        ...(witness === undefined ? {} : { witness }),
+      };
+      return createBindingResolver({
+        bindings: { listBindingsForAgent: async () => [record], listRevocationsForTargets: async () => [] },
+        anchors: { lookupAnchor: async () => null },
+        requireAnchors: false,
+        recordSignedByItsKey: () => true,
+        verifyHostedCeremony,
+      });
+    }
+
+    test("a host's refusal fails the record", async () => {
+      const key = ed25519();
+      const report = await checkRecord(signedEvaluation(key), {
+        trust: { bindingResolver: realResolver({ key, verifyHostedCeremony: async () => false }) },
+      });
+      expect(check(report, "trust-binding")).toMatchObject({ status: "failed", findings: [{ code: "binding-not-resolved" }] });
+      expect(report.outcome).toBe("failed");
+    });
+
+    test("a host's outage is not a refusal: it says the binding could not be resolved, and nothing passes", async () => {
+      const key = ed25519();
+      const report = await checkRecord(signedEvaluation(key), {
+        trust: {
+          bindingResolver: realResolver({
+            key,
+            verifyHostedCeremony: async () => {
+              throw new Error("no route to host");
+            },
+          }),
+        },
+      });
+      expect(check(report, "trust-binding")).toMatchObject({
+        status: "skipped",
+        findings: [{ code: "binding-dependency-failed", detail: expect.stringContaining("no route to host") }],
+      });
+      expect(report.outcome).toBe("checked");
+    });
+
+    test("a witness archive that cannot be read is an outage, and one that answers no fails the record", async () => {
+      const key = ed25519();
+      const statement = {
+        chainId: 84532,
+        blockNumber: 12345,
+        blockHash: `0x${"cc".repeat(32)}`,
+        verifier: "urn:uuid:44444444-4444-4444-8444-444444444444",
+        safe: "0x4444444444444444444444444444444444444444",
+        hash: `0x${"aa".repeat(32)}`,
+        signature: `0x${"bb".repeat(65)}`,
+        result: "0x1626ba7e",
+      };
+      const witness: Eip1271Witness = {
+        chainId: statement.chainId,
+        blockNumber: statement.blockNumber,
+        blockHash: statement.blockHash,
+        verifier: statement.verifier,
+        envelopeBytes: sealDsseEnvelope({
+          payloadBytes: encoder.encode(JSON.stringify(statement)),
+          payloadType: DSSE_PAYLOAD_TYPE,
+          signatures: [{ signature: Uint8Array.of(1), keyid: "did:key:zWitness" }],
+        }),
+      };
+      const reportWith = (readContract: () => Promise<unknown>) => checkRecord(signedEvaluation(key), {
+        trust: {
+          bindingResolver: realResolver({ key, type: "safe", verifyHostedCeremony: async () => true, witness }),
+          witnessVerifier: createWitnessVerifier({ archiveClient: { readContract } }),
+        },
+      });
+
+      const down = await reportWith(async () => {
+        throw new Error("no route to host");
+      });
+      expect(check(down, "trust-binding")).toMatchObject({ status: "skipped", findings: [{ code: "binding-dependency-failed" }] });
+
+      const refused = await reportWith(async () => "0xdeadbeef");
+      expect(check(refused, "trust-binding")).toMatchObject({ status: "failed", findings: [{ code: "ceremony-verification-failed" }] });
+    });
   });
 
   test("a key binding record is attributed to its own agent, scope and start", async () => {

@@ -149,11 +149,16 @@ function makePorts(
   omittedKey?: string,
   solverAgent: string = SOLVER_AGENT,
   requesterRevocations: readonly ResolvedRevocation[] = [],
+  settlementRevocations: readonly ResolvedRevocation[] = [],
 ): VerdictObservationGatePorts {
   const entries = [
     { key: ADMISSION_KEY, agent: ADMISSION_AGENT, binding: resolvedBinding(ADMISSION_KEY, ADMISSION_AGENT, [ADMISSION_RECEIPT_TRUST_SCOPE]) },
     { key: VERDICT_KEY, agent: EVALUATOR_AGENT, binding: resolvedBinding(VERDICT_KEY, EVALUATOR_AGENT, ["verdicts"]) },
-    { key: SETTLEMENT_KEY, agent: EVALUATOR_AGENT, binding: resolvedBinding(SETTLEMENT_KEY, EVALUATOR_AGENT, ["settlements"]) },
+    {
+      key: SETTLEMENT_KEY,
+      agent: EVALUATOR_AGENT,
+      binding: resolvedBinding(SETTLEMENT_KEY, EVALUATOR_AGENT, ["settlements"], "controls", settlementRevocations),
+    },
     { key: SOLVER_KEY, agent: solverAgent, binding: resolvedBinding(SOLVER_KEY, solverAgent, ["deliveries"]) },
     {
       key: REQUESTER_KEY,
@@ -621,6 +626,21 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
       decisionGrade: false,
       failures: [{ check: "settlement-join", detail: expect.any(String) }],
     });
+  });
+
+  test("fails closed when a key entitled to revoke the settlement declaration revoked it before the claim", async () => {
+    const fixture = makeFixture();
+    const ports = makePorts(undefined, SOLVER_AGENT, [], [revocationEntry(REQUESTER_VOUCHER, CLAIM_BLOCK_TIME)]);
+    expect(await gateVerdictObservation(fixture.input, ports)).toEqual({
+      decisionGrade: false,
+      failures: [{ check: "settlement-join", detail: expect.stringContaining("settlement leg is revoked at claim time") }],
+    });
+  });
+
+  test("a revocation of the settlement declaration with no authority changes nothing", async () => {
+    const fixture = makeFixture();
+    const ports = makePorts(undefined, SOLVER_AGENT, [], [revocationEntry(UNAUTHORIZED_REVOKER, CLAIM_BLOCK_TIME)]);
+    await expect(gateVerdictObservation(fixture.input, ports)).resolves.toEqual({ decisionGrade: true, failures: [] });
   });
 
   test("fails closed when the verdict signer has no evaluator binding", async () => {

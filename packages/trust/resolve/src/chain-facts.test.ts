@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  ContractFunctionExecutionError,
+  ContractFunctionRevertedError,
+  ContractFunctionZeroDataError,
+} from "viem";
 import { describe, expect, it, vi } from "vitest";
 
+import { ERC721_OWNER_OF_ABI } from "./abis.js";
 import { createChainFactResolver } from "./chain-facts.js";
 
 const REGISTRY = "0x1111111111111111111111111111111111111111";
@@ -136,6 +142,47 @@ describe("createChainFactResolver", () => {
       });
 
       await expect(resolver.ownerOf("not-a-caip19")).rejects.toThrow(/CAIP-19/);
+    });
+
+    describe("when no provider returns an owner", () => {
+      const AGENT_ASSET = `eip155:84532/erc721:${REGISTRY}/101`;
+      const reverted = new ContractFunctionExecutionError(
+        new ContractFunctionRevertedError({ abi: ERC721_OWNER_OF_ABI, functionName: "ownerOf", message: "ERC721NonexistentToken" }),
+        { abi: ERC721_OWNER_OF_ABI, args: [101n], functionName: "ownerOf" },
+      );
+      const failing = (cause: unknown) => ({
+        getChainId: async () => 84532,
+        readContract: async () => {
+          throw cause;
+        },
+      });
+      const resolverOver = (client: ReturnType<typeof failing>, ...fallbackClients: ReturnType<typeof failing>[]) => createChainFactResolver({
+        rpcUrl: "http://unused.test",
+        expectedChainId: 84532,
+        identityRegistry: REGISTRY,
+        client,
+        fallbackClients,
+      });
+
+      it("reads a revert as the registry's answer that it holds no such agent", async () => {
+        await expect(resolverOver(failing(reverted)).ownerOf(AGENT_ASSET))
+          .rejects.toMatchObject({ code: "INVALID_INPUT" });
+      });
+
+      it("reads a contract with no code as the same answer", async () => {
+        await expect(resolverOver(failing(new ContractFunctionZeroDataError({ functionName: "ownerOf" }))).ownerOf(AGENT_ASSET))
+          .rejects.toMatchObject({ code: "INVALID_INPUT" });
+      });
+
+      it("takes a revert as the answer even if another provider was down", async () => {
+        await expect(resolverOver(failing(new Error("no route to host")), failing(reverted)).ownerOf(AGENT_ASSET))
+          .rejects.toMatchObject({ code: "INVALID_INPUT" });
+      });
+
+      it("reads every provider failing as an outage", async () => {
+        await expect(resolverOver(failing(new Error("no route to host"))).ownerOf(AGENT_ASSET))
+          .rejects.toMatchObject({ code: "RESOLUTION_FAILED" });
+      });
     });
   });
 });

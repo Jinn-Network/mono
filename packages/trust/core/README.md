@@ -24,3 +24,30 @@ success signal. `resolvedBinding` is attached whenever step 2 resolved
 a different Agent IRI than the one claimed, where the outcome carries the
 offending binding so the mismatch can be named. Never infer success from the
 presence of `resolvedBinding`; read `ok`, and `reason` / `detail` on failure.
+
+## What a revocation needs
+
+A resolver lists every revocation that names a binding, whoever signed it, and a
+revoked binding still resolves. Only §7.4b's authority decides whether one counts,
+so a consumer that reads a resolved binding without the whole §7.5 procedure calls
+`checkBindingRevocation`, and never reads `revocations` itself. `settlementJoinCheck`
+applies the same rule to both legs. Its `deps` and `checkBindingRevocation`'s need a
+resolver that answers for every key of an Agent: a revoker's key is rarely in the
+family the binding it revokes signs.
+
+## What a ceremony does not show
+
+Nothing here shows that a ceremony is current. A ceremony (§7.2) shows that an
+account vouched a key for an Agent IRI. The content match covers those two, and the
+account signs nothing about the record that relies on the ceremony. So a record's
+`scope`, `validFrom` and `expiresAt` carry the word of the key being bound, not of
+the account, and `verifyEnvelopeBinding` reads no time from a ceremony: its evidence
+verifies offline forever.
+
+The specification gives no rule to enforce here. §7.2 names the content match and
+validity windows as the replay defense, and rules out nonce tracking. The windows it
+can mean are the record's, which are checked, and a ceremony states none that a
+verifier is told to compare. The other uses of the word are not checkable either:
+a revocation has no field for §7.4b's "fresh ceremony", and §7.4c's rule on a witness
+older than an owner change needs a chain fact no interface here carries, so it falls
+to the host behind `verifyHostedCeremony`.

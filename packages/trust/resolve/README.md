@@ -26,5 +26,12 @@ over the key. Ceremony evidence that cannot be read is a failed ceremony. A
 stored entry that is not a key binding never resolves and gives no authority, but
 if its anchors can be read it still counts when deciding which binding came first.
 
+A resolve that could not find out is not a refusal. `resolveBinding` answers `null`
+when nothing resolves, and throws when a store, an anchor read, the registry or a
+`verifyHostedCeremony` leg failed, so a caller can tell the two apart. Both fail
+closed. A leg must answer `false` for a record it cannot read: a store may hold
+anything, and a throw reads as an outage. `createWitnessVerifier` does the same: an
+archive read that fails throws, and a contract that reverts is an answer.
+
 See `docs/superpowers/plans/2026-07-28-trust-layer.md` for the implementation
 plan.

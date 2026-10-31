@@ -10,6 +10,7 @@ import {
 import type { ChainFactResolver } from "@jinn-network/trust-core";
 
 import { ERC721_OWNER_OF_ABI, IDENTITY_REGISTRY_GET_AGENT_WALLET_ABI } from "./abis.js";
+import { isContractAnswer } from "./contract-answer.js";
 import { invalidInput, resolutionFailed } from "./errors.js";
 
 // ---------------------------------------------------------------------------
@@ -87,6 +88,7 @@ export function createChainFactResolver(options: ChainFactResolverOptions): Chai
 
   async function readAcrossProviders<T>(read: (client: RegistryReadClient) => Promise<T>): Promise<T> {
     const failures: string[] = [];
+    let answered = false;
     for (const [index, candidate] of clients.entries()) {
       try {
         let actualChainId = rpcChains.get(candidate);
@@ -103,9 +105,13 @@ export function createChainFactResolver(options: ChainFactResolverOptions): Chai
         }
         return await read(candidate);
       } catch (error) {
+        answered ||= isContractAnswer(error);
         failures.push(`provider ${index + 1}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+    // A registry that reverted has said it holds no such agent. Only when no
+    // provider got that far is this an outage.
+    if (answered) invalidInput(`the registry holds no such agent: ${failures.join("; ")}`);
     resolutionFailed(`chain-fact resolution failed on all RPC providers: ${failures.join("; ")}`);
   }
 

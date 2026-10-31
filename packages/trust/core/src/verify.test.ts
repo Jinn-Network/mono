@@ -24,6 +24,7 @@ import type { DsseChainVerifier } from "./policy.js";
 import { didPkh } from "./spellings.js";
 import {
   authenticateRequester,
+  checkBindingRevocation,
   settlementJoinCheck,
   verifyEnvelopeBinding,
 } from "./verify.js";
@@ -1232,7 +1233,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
         envelopeEffectiveTime: "2026-03-01T00:00:00Z",
         claimTime: "2026-03-05T00:00:00Z",
       },
-      { bindingResolver: resolver },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
     expect(outcome.ok).toBe(true);
     expect(outcome.agent).toBe(AGENT);
@@ -1251,7 +1252,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
         envelopeEffectiveTime: "2026-03-01T00:00:00Z",
         claimTime: "2026-03-05T00:00:00Z",
       },
-      { bindingResolver: resolver },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
     expect(outcome.ok).toBe(false);
   });
@@ -1275,7 +1276,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
         envelopeEffectiveTime: "2026-03-01T00:00:00Z",
         claimTime: "2026-03-05T00:00:00Z",
       },
-      { bindingResolver: resolver },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
     expect(outcome.ok).toBe(false);
   });
@@ -1303,7 +1304,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
         envelopeEffectiveTime: "2026-03-01T00:00:00Z",
         claimTime: "2026-03-05T00:00:00Z",
       },
-      { bindingResolver: keyOnlyResolver },
+      { bindingResolver: keyOnlyResolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
     expect(outcome.ok, JSON.stringify(outcome)).toBe(false);
     expect(outcome.reason).toMatch(/verdict leg does not resolve/);
@@ -1326,7 +1327,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
         envelopeEffectiveTime: "2026-03-01T00:00:00Z",
         claimTime: "2026-03-05T00:00:00Z",
       },
-      { bindingResolver: keyOnlyResolver },
+      { bindingResolver: keyOnlyResolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
     expect(outcome.ok, JSON.stringify(outcome)).toBe(false);
     expect(outcome.reason).toMatch(/settlement leg does not resolve/);
@@ -1350,7 +1351,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
         envelopeEffectiveTime: "2026-03-01T00:00:00Z",
         claimTime: "2026-03-05T00:00:00Z",
       },
-      { bindingResolver: expiringResolver },
+      { bindingResolver: expiringResolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
     expect(outcome.ok, JSON.stringify(outcome)).toBe(false);
     expect(outcome.reason).toMatch(/not valid \(revoked or expired\) at claim time/);
@@ -1374,7 +1375,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
         envelopeEffectiveTime: "2026-03-01T00:00:00Z",
         claimTime: "2026-03-05T00:00:00Z",
       },
-      { bindingResolver: keyOnlyResolver },
+      { bindingResolver: keyOnlyResolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
     expect(outcome.ok, JSON.stringify(outcome)).toBe(false);
     // Agent drift is not revocation: the reason names the drifted IRI rather
@@ -1407,7 +1408,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
         envelopeEffectiveTime: "2026-03-01T00:00:00Z",
         claimTime: "2026-03-05T00:00:00Z",
       },
-      { bindingResolver: keyOnlyResolver },
+      { bindingResolver: keyOnlyResolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
     expect(outcome.ok, JSON.stringify(outcome)).toBe(false);
     expect(outcome.reason).toMatch(/resolves to Agent IRI/);
@@ -1433,10 +1434,84 @@ describe("settlementJoinCheck (§7.5a)", () => {
         envelopeEffectiveTime: "2026-03-01T00:00:00Z",
         claimTime: "2026-03-05T00:00:00Z",
       },
-      { bindingResolver: timeVaryingResolver },
+      { bindingResolver: timeVaryingResolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
     expect(outcome.ok, JSON.stringify(outcome)).toBe(false);
     expect(outcome.reason).toBe("settlement leg lost scope:settlements at claim time.");
+  });
+
+  describe("a revocation the resolver lists", () => {
+    const CLAIM_TIME = "2026-03-05T00:00:00Z";
+    const ENVELOPE_TIME = "2026-03-01T00:00:00Z";
+
+    function joinOver(legs: { verdict?: ResolvedBinding; settlement?: ResolvedBinding; claimLeg?: ResolvedBinding }) {
+      const verdict = legs.verdict ?? resolvedBinding({ binding: verdictBinding() });
+      const settlement = legs.settlement ?? resolvedBinding({ binding: settlementBinding() });
+      const claimLeg = legs.claimLeg ?? settlement;
+      return settlementJoinCheck(
+        {
+          verdictKey: VERDICT_KEY,
+          settlementDeclarationKey: SETTLEMENT_KEY,
+          claimedEvaluatorAgent: AGENT,
+          family: "verdicts",
+          envelopeEffectiveTime: ENVELOPE_TIME,
+          claimTime: CLAIM_TIME,
+        },
+        {
+          bindingResolver: {
+            async resolveBinding(query, atTime) {
+              if (query.key === VERDICT_KEY) return verdict;
+              return atTime === CLAIM_TIME ? claimLeg : settlement;
+            },
+          },
+          witnessVerifier: fakeWitnessVerifier,
+          dsseVerifier: trustingDsseVerifier,
+        },
+      );
+    }
+
+    function settlementRevokedBy(revokedBy: string, effectiveTime: string): ResolvedBinding {
+      return resolvedBinding({ binding: settlementBinding(), revocations: [revocationEntry(revokedBy, effectiveTime)] });
+    }
+
+    test("(e) a settlement leg its voucher revoked by claim time fails the join", async () => {
+      const outcome = await joinOver({ settlement: settlementRevokedBy(OTHER_VOUCHER_DID, "2026-03-02T00:00:00Z") });
+      expect(outcome).toMatchObject({ ok: false, reason: expect.stringMatching(/settlement leg is revoked at claim time/) });
+      expect(outcome.agent).toBeUndefined();
+    });
+
+    test("(e) a revocation effective after the claim leaves the join standing", async () => {
+      expect(await joinOver({ settlement: settlementRevokedBy(OTHER_VOUCHER_DID, "2026-03-06T00:00:00Z") }))
+        .toEqual({ ok: true, agent: AGENT });
+    });
+
+    test("(e) a revocation with no authority over the leg leaves the join standing", async () => {
+      expect(await joinOver({ settlement: settlementRevokedBy(VOUCHER_DID, "2026-03-02T00:00:00Z") }))
+        .toEqual({ ok: true, agent: AGENT });
+    });
+
+    test("(e) a leg revoked by the envelope's time is named as that", async () => {
+      expect(await joinOver({
+        settlement: settlementRevokedBy(OTHER_VOUCHER_DID, "2026-02-01T00:00:00Z"),
+        claimLeg: resolvedBinding({ binding: settlementBinding() }),
+      })).toMatchObject({ ok: false, reason: expect.stringMatching(/settlement leg is revoked at the envelope's time/) });
+    });
+
+    test("(e) a revocation of the record resolved at claim time fails the join", async () => {
+      expect(await joinOver({ claimLeg: settlementRevokedBy(OTHER_VOUCHER_DID, "2026-03-02T00:00:00Z") }))
+        .toMatchObject({ ok: false, reason: expect.stringMatching(/settlement leg is revoked at claim time/) });
+    });
+
+    test("(e) a verdict leg its voucher revoked by the envelope's time fails the join", async () => {
+      const verdict = resolvedBinding({ binding: verdictBinding(), revocations: [revocationEntry(VOUCHER_DID, "2026-02-01T00:00:00Z")] });
+      expect(await joinOver({ verdict }))
+        .toMatchObject({ ok: false, reason: expect.stringMatching(/verdict leg is revoked at the envelope's time/) });
+    });
+
+    test("(e) a verdict leg revoked after the envelope still joins: a revocation is never retroactive", async () => {
+      const verdict = resolvedBinding({ binding: verdictBinding(), revocations: [revocationEntry(VOUCHER_DID, "2026-03-02T00:00:00Z")] });
+      expect(await joinOver({ verdict })).toEqual({ ok: true, agent: AGENT });
+    });
   });
 
   // The join's `ok: true` should carry the agent it PROVED, not the one it was
@@ -1456,10 +1531,39 @@ describe("settlementJoinCheck (§7.5a)", () => {
         envelopeEffectiveTime: "2026-03-01T00:00:00Z",
         claimTime: "2026-03-05T00:00:00Z",
       },
-      { bindingResolver: resolver },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
     expect(outcome.ok).toBe(true);
     expect(outcome.agent).toBe(verdictBinding().agent);
+  });
+});
+
+describe("checkBindingRevocation (§7.5 step 4, §7.4b)", () => {
+  const binding = keyBinding({
+    agent: AGENT,
+    key: { publicKey: "0x00", keyid: "did:key:z6MkfONLY11111111111111111111111111111111", algorithm: "ed25519", didKey: "did:key:z6MkfONLY11111111111111111111111111111111" },
+    voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+    scope: ["verdicts"],
+  });
+  const deps = {
+    bindingResolver: new FakeBindingResolver(),
+    witnessVerifier: fakeWitnessVerifier,
+    dsseVerifier: trustingDsseVerifier,
+  };
+
+  test("a binding with no revocation passes", async () => {
+    expect(await checkBindingRevocation(resolvedBinding({ binding }), "2026-03-01T00:00:00Z", deps)).toEqual({ ok: true });
+  });
+
+  test("an authorized revocation counts from its effective time, that instant included", async () => {
+    const resolved = resolvedBinding({ binding, revocations: [revocationEntry(VOUCHER_DID, "2026-02-01T00:00:00Z")] });
+    expect(await checkBindingRevocation(resolved, "2026-01-31T23:59:59Z", deps)).toEqual({ ok: true });
+    expect(await checkBindingRevocation(resolved, "2026-02-01T00:00:00Z", deps)).toMatchObject({ ok: false, detail: expect.stringContaining(VOUCHER_DID) });
+  });
+
+  test("a revocation with no authority has no effect", async () => {
+    const resolved = resolvedBinding({ binding, revocations: [revocationEntry(OTHER_VOUCHER_DID, "2026-02-01T00:00:00Z")] });
+    expect(await checkBindingRevocation(resolved, "2026-03-01T00:00:00Z", deps)).toEqual({ ok: true });
   });
 });
 

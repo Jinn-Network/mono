@@ -252,6 +252,7 @@ export function buildNativeDiscoverySources(input: {
         candidateKeys: async (agent) => [...input.trust.candidateKeys(agent)],
       },
       verifier: input.trust.rawSignatureVerifier,
+      revocationAuthority: input.trust,
     });
     const source: NativeDiscoverySource = {
       identity: { agent: configured.agent, name: configured.name },

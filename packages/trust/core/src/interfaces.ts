@@ -82,6 +82,10 @@ export interface BindingResolverQuery {
  * claim names which is in play). Anchor-ordered per §7.3; under
  * anchor-requiring profiles an unanchored binding does not resolve, so
  * implementations return `null` rather than an unanchored `ResolvedBinding`.
+ *
+ * `null` is an answer: nothing resolves for this pair. A resolver that could not
+ * find out, because a dependency it reads failed, throws instead, so a caller can
+ * tell a refusal from an outage. Both fail closed.
  */
 export interface BindingResolver {
   resolveBinding(query: BindingResolverQuery, atTime: string): Promise<ResolvedBinding | null>;

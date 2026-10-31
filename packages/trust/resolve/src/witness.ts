@@ -2,8 +2,10 @@
 
 import { parseDsseEnvelope } from "@jinn-network/trust-core";
 import type { Eip1271Witness, WitnessResult, WitnessVerifier } from "@jinn-network/trust-core";
+import { isAddress, isHex, size } from "viem";
 
 import { ERC1271_IS_VALID_SIGNATURE_ABI, ERC1271_MAGIC_VALUE } from "./abis.js";
+import { isContractAnswer } from "./contract-answer.js";
 
 // ---------------------------------------------------------------------------
 // §7.2a's 1271 witness: "A witness is not bare data. It is a DSSE-signed
@@ -104,6 +106,15 @@ function contentMatches(payload: WitnessStatementPayload, witness: Eip1271Witnes
     && payload.verifier === witness.verifier;
 }
 
+/** Whether a statement can be put to the archive at all. A read that fails is an
+ * outage, so what a store holds must be turned away before one is made. */
+function canBeReexecuted(payload: WitnessStatementPayload): boolean {
+  return isAddress(payload.safe, { strict: false })
+    && isHex(payload.hash) && size(payload.hash) === 32
+    && isHex(payload.signature)
+    && Number.isSafeInteger(payload.blockNumber) && payload.blockNumber >= 0;
+}
+
 /**
  * Builds a `WitnessVerifier` (§7.2a): checks the witness envelope decodes
  * and is signed, and that its content matches the outer `Eip1271Witness`
@@ -149,6 +160,10 @@ export function createWitnessVerifier(options: CreateWitnessVerifierOptions = {}
         };
       }
 
+      if (!canBeReexecuted(payload)) {
+        return { verified: false, reason: "witness statement cannot be put to the archive." };
+      }
+
       let magicValue: unknown;
       try {
         magicValue = await options.archiveClient.readContract({
@@ -159,6 +174,7 @@ export function createWitnessVerifier(options: CreateWitnessVerifierOptions = {}
           blockNumber: BigInt(witness.blockNumber),
         });
       } catch (cause) {
+        if (!isContractAnswer(cause)) throw cause; // an outage, not a verdict on the witness
         return {
           verified: false,
           reason: `archive re-execution of isValidSignature failed: `
