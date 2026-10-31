@@ -18,3 +18,45 @@ export {
   anchorSignatureVerifier,
   nodeCryptoAnchorPorts,
 } from "./anchor/ports.js";
+export { evaluateAnchors } from "./anchor/evaluate.js";
+export type {
+  AnchorProofContext,
+  AnchorProofStatus,
+  AnchorRefusal,
+  AnchorSubject,
+  AnchorSubjectReport,
+  AnchorTrustMaterial,
+  AnchorVerificationEntry,
+  AnchorsReport,
+  CarriedAnchorRecord,
+  EvaluateAnchorsInput,
+} from "./anchor/evaluate.js";
+export { checkRecord } from "./check-record.js";
+export type { CheckRecordOptions, RecordTrustOptions } from "./check-record.js";
+export { checkRecordSet } from "./check-record-set.js";
+export type {
+  AnchorsResult,
+  AttemptLifecycle,
+  CheckRecordSetInput,
+  LifecycleResult,
+  RecordSetInputRecord,
+  RecordSetReport,
+  RecordSetSummary,
+  RecordSetTrustOptions,
+  ReferencesResult,
+} from "./check-record-set.js";
+export { OBSERVATION_KIND, defaultRecordKinds } from "./kinds/index.js";
+export type { RecordAttribution, RecordKind, RecordKinds, RecordReference } from "./kinds/index.js";
+export type { RecordView } from "./record-view.js";
+export { UNKNOWN_KIND } from "./results.js";
+export type {
+  CheckId,
+  CheckResult,
+  CheckStatus,
+  Finding,
+  RecordCheckId,
+  RecordOutcome,
+  RecordReport,
+  SetCheckId,
+  SignatureCounts,
+} from "./results.js";
