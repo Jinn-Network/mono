@@ -1,3 +1,4 @@
+import { compareCodeUnitStrings } from "./order.js";
 import type { ProtocolObservation } from "./schemas/observation.js";
 import type { AttemptState, FailureBlame } from "./states.js";
 
@@ -44,10 +45,47 @@ function isTerminal(observation: ProtocolObservation): observation is TerminalOb
   return observation.type === "network.jinn.task-execution.attempt-terminal.v1";
 }
 
-function dedupe(observations: readonly ProtocolObservation[]): ProtocolObservation[] {
-  const seen = new Set<string>();
-  const result: ProtocolObservation[] = [];
-  for (const observation of observations) {
+/**
+ * Two observations from one producer share a (`source`, `id`) pair but disagree on what the fold
+ * reads. §10.1 makes the pair unique per producer, so this is not the duplicate §10.4 rule 2 drops,
+ * and keeping either one would let array position pick the Attempt's state. The fold refuses, in
+ * either order, as `@jinn-network/policy-outcomes` and `@jinn-network/task-curation` do for their
+ * own dedupe keys. Carries the plain `category` shape the `backend` package wraps in
+ * `TaskExecutionError`, as `InvalidDocumentError` does: §13's `protocol-violation`.
+ */
+export class ConflictingObservationError extends Error {
+  readonly category = "protocol-violation" as const;
+  constructor(readonly source: string, readonly id: string) {
+    super(`observations share source "${source}" and id "${id}" but disagree (§10.1, §10.4 rule 2)`);
+    this.name = "ConflictingObservationError";
+  }
+}
+
+/** Canonical text of a payload: key order is not content, and neither is an explicit `undefined`. */
+function canonicalText(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalText).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    const record = value as Record<string, unknown>;
+    const members = Object.keys(record)
+      .filter((key) => record[key] !== undefined)
+      .sort(compareCodeUnitStrings)
+      .map((key) => `${JSON.stringify(key)}:${canonicalText(record[key])}`);
+    return `{${members.join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/** One observation with what the fold compares it by. Two with the same `dedupeKey` and `reads`
+ * are the same observation to this fold: nothing else about them can change its result. */
+interface FoldEntry {
+  readonly observation: ProtocolObservation;
+  readonly dedupeKey: string;
+  readonly reads: string;
+}
+
+function toFoldEntry(observation: ProtocolObservation): FoldEntry {
+  return {
+    observation,
     // A raw byte (not an escape) was used as the delimiter here pre-fix -- invisible in a
     // normal read, and (like the fake backend's idempotency scope key, see
     // testing/src/fake-backend.ts) it made this file register as binary to git, hiding this
@@ -55,12 +93,41 @@ function dedupe(observations: readonly ProtocolObservation[]): ProtocolObservati
     // (source/id are unconstrained strings, so an undelimited or ambiguous join could
     // collide two distinct pairs into one dedupe key), same U+001F convention this tree
     // already uses in `deriveAttemptUri` and the fake backend's idempotency scope.
-    const key = `${observation.source}\u001f${observation.id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(observation);
+    dedupeKey: `${observation.source}\u001f${observation.id}`,
+    reads: `${observation.type}\u001f${canonicalText(observation.data)}`,
+  };
+}
+
+function compareFoldEntries(a: FoldEntry, b: FoldEntry): number {
+  return compareCodeUnitStrings(a.observation.sequence, b.observation.sequence)
+    || compareCodeUnitStrings(a.dedupeKey, b.dedupeKey)
+    || compareCodeUnitStrings(a.reads, b.reads);
+}
+
+/**
+ * §10.4 rules 2 and 3: `sequence` order with exact replays dropped. The tiebreaks after `sequence`
+ * mean no array position decides anything, and they make every replay adjacent. An entry whose
+ * key survives twice therefore disagrees with its twin (see `refuseConflicts`).
+ */
+function inFoldOrder(observations: readonly ProtocolObservation[]): FoldEntry[] {
+  return observations
+    .map(toFoldEntry)
+    .sort(compareFoldEntries)
+    .filter((entry, index, entries) => index === 0 || compareFoldEntries(entries[index - 1]!, entry) !== 0);
+}
+
+/**
+ * Only the fold's own input can refuse it. §10.4 folds the authoritative source's observations, so
+ * a producer outside that source contradicting itself is excluded like everything else it says,
+ * and cannot take an Attempt's state away from the source that owns it.
+ */
+function refuseConflicts(entries: readonly FoldEntry[], authoritativeSource: string | undefined): void {
+  const seen = new Set<string>();
+  for (const { observation, dedupeKey } of entries) {
+    if (authoritativeSource !== undefined && observation.source !== authoritativeSource) continue;
+    if (seen.has(dedupeKey)) throw new ConflictingObservationError(observation.source, observation.id);
+    seen.add(dedupeKey);
   }
-  return result;
 }
 
 /**
@@ -118,15 +185,18 @@ function findAuthoritativeSource(ordered: readonly ProtocolObservation[]): strin
  * not match it — including a forged or merely corroborating observation from a different
  * producer — is excluded from the fold entirely: it neither updates derived state nor
  * participates in terminal resolution (so it can never raise a false `contradictory`).
+ *
+ * @throws {ConflictingObservationError} when the authoritative source's log holds two observations
+ * sharing a (`source`, `id`) pair that disagree. The result never depends on array order.
  */
 export function foldObservations(
   observations: readonly ProtocolObservation[],
   opts?: FoldObservationsOptions,
 ): DerivedAttemptState {
-  const ordered = dedupe(observations)
-    .slice()
-    .sort((a, b) => (a.sequence < b.sequence ? -1 : a.sequence > b.sequence ? 1 : 0));
+  const entries = inFoldOrder(observations);
+  const ordered = entries.map(({ observation }) => observation);
   const authoritativeSource = findAuthoritativeSource(ordered);
+  refuseConflicts(entries, authoritativeSource);
 
   let running = false;
   let cancelRequested = false;

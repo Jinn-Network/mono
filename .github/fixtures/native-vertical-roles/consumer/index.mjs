@@ -154,6 +154,8 @@ const bindingResolver = createBindingResolver({
     },
   },
   requireAnchors: true,
+  // These fixture bindings carry a placeholder machine ceremony; the fixture is the host vouching for it.
+  verifyHostedCeremony: async () => true,
 });
 const witnessVerifier = { async verify1271Witness() { return { verified: false, reason: 'not used' }; } };
 

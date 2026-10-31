@@ -351,19 +351,19 @@ describe("lifecycle", () => {
         "a later engagement reusing the true (source, id)",
         [engaged, ...terminals],
         observation("attempt-engaged", "evt-1", 9, { ...ENGAGED, source: FORGED_SOURCE }),
-        "contradictory-terminals",
+        "conflicting-observations",
       ],
       [
         "a later delivery-recorded reusing the true id",
         [engaged, unheldRecorded, closing],
         observation("delivery-recorded", "evt-3", 9, { digest: closingDigest }),
-        "recorded-delivery-missing",
+        "conflicting-observations",
       ],
       [
         "a later progress reusing a terminal's id",
         [engaged, ...terminals],
         observation("progress", "evt-5", 9, { message: "still going" }),
-        "contradictory-terminals",
+        "conflicting-observations",
       ],
       [
         "a forged engagement tied on sequence",
@@ -377,6 +377,21 @@ describe("lifecycle", () => {
       expect(first.status).toBe("failed");
       expect(first.findings).toEqual(expect.arrayContaining([expect.objectContaining({ code })]));
       expect(last).toEqual(first);
+    });
+
+    test("a log the fold refuses is a finding on that Attempt, and the others still fold", async () => {
+      const onOther = { subject: OTHER_ATTEMPT };
+      const { lifecycle } = await set(
+        [],
+        ...[engaged, ...terminals],
+        observation("progress", "evt-5", 9, { message: "still going" }),
+        observation("attempt-engaged", "evt-1", 1, ENGAGED, onOther),
+      );
+      expect(lifecycle.status).toBe("failed");
+      expect(lifecycle.findings).toEqual([
+        expect.objectContaining({ code: "conflicting-observations", subject: ATTEMPT }),
+      ]);
+      expect(lifecycle.attempts.map(({ attempt }) => attempt)).toEqual([OTHER_ATTEMPT]);
     });
 
     test("the same bytes twice are one record, not a tie", async () => {
@@ -437,7 +452,9 @@ describe("lifecycle", () => {
       ];
       const expected = (await set([], ...records)).lifecycle;
       expect(expected.status).toBe("failed");
-      expect(expected.attempts).toHaveLength(3);
+      // Two of the three logs hold a disagreeing pair, so only the third is folded.
+      expect(expected.attempts).toHaveLength(1);
+      expect(expected.findings.filter(({ code }) => code === "conflicting-observations")).toHaveLength(2);
       const seeds = Array.from({ length: 300 }, (_unused, index) => index + 1);
       await Promise.all(seeds.map(async (seed) => {
         expect((await set([], ...shuffled(records, seed))).lifecycle).toEqual(expected);

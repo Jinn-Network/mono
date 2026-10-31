@@ -51,15 +51,24 @@ export interface ResolvedBinding {
    * consent-chain check applies (design §7.4a: "the genesis binding of an
    * Agent IRI stands alone"). */
   readonly isGenesis: boolean;
-  /** The voucher currently holding a valid `controls`-relationship binding
-   * to this same Agent IRI, if any -- the fact §7.4a's self-extension
-   * check (option 1) compares this binding's own `voucher` against. */
-  readonly incumbentControlVoucher?: VoucherIdentity;
+  /** Every other `controls`-relationship binding of this same Agent IRI in
+   * window at this binding's `effectiveStart`, whoever vouched for it, in an
+   * order independent of the store's -- the candidates §7.4a's self-extension
+   * check (option 1) tests. Data, like the rest of this record: `verify.ts`
+   * re-resolves the one it relies on and requires that binding to stand. */
+  readonly incumbentControls?: readonly IncumbentControl[];
   /** Every anchored revocation naming this binding's digest as `target`,
    * whether or not its signer authority holds -- `verify.ts` (not the
    * resolver) determines authority (§7.4b), consistent with §7.5 step 4
    * being `core`'s job. */
   readonly revocations: readonly ResolvedRevocation[];
+}
+
+/** One §7.4a incumbent candidate: the key that re-resolves it, and the
+ * voucher it claims. */
+export interface IncumbentControl {
+  readonly key: string; // did:key
+  readonly voucher: VoucherIdentity;
 }
 
 export interface BindingResolverQuery {

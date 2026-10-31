@@ -108,7 +108,13 @@ export function createRealTrustFixture(input: {
       return anchorTime === undefined ? null : { digest, anchorTime };
     },
   };
-  const bindingResolver = createBindingResolver({ bindings: store, anchors: anchorResolver, requireAnchors: true });
+  const bindingResolver = createBindingResolver({
+    bindings: store,
+    anchors: anchorResolver,
+    requireAnchors: true,
+    // These fixture bindings carry a placeholder machine ceremony; the fixture is the host vouching for it.
+    verifyHostedCeremony: async () => true,
+  });
   const identityByKey = new Map(input.bindings.map(({ identity }) => [identity.keyId, identity]));
   const dsseVerifier: DsseChainVerifier = (bytes) => {
     let parsed;
