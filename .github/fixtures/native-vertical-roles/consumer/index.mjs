@@ -137,10 +137,11 @@ function addBinding(agent, key, scope, relationship, order) {
 
 addBinding(REQUESTER_AGENT, keys.requester, ['authorizations'], 'controls', 1);
 addBinding(ADMISSION_AGENT, keys.admission, [ADMISSION_RECEIPT_TRUST_SCOPE], 'controls', 2);
-addBinding(SOLVER_AGENT, keys.executor, ['deliveries'], 'signs-for', 3);
-addBinding(SOLVER_AGENT, keys.solverSettlement, ['settlements'], 'controls', 4);
-addBinding(EVALUATOR_AGENT, keys.evaluator, ['deliveries', 'verdicts'], 'signs-for', 5);
-addBinding(EVALUATOR_AGENT, keys.evaluatorSettlement, ['settlements'], 'controls', 6);
+// Each Agent's `controls` binding comes first: it founds the Agent, and the next one extends from it.
+addBinding(SOLVER_AGENT, keys.solverSettlement, ['settlements'], 'controls', 3);
+addBinding(SOLVER_AGENT, keys.executor, ['deliveries'], 'signs-for', 4);
+addBinding(EVALUATOR_AGENT, keys.evaluatorSettlement, ['settlements'], 'controls', 5);
+addBinding(EVALUATOR_AGENT, keys.evaluator, ['deliveries', 'verdicts'], 'signs-for', 6);
 
 const bindingResolver = createBindingResolver({
   bindings: {
