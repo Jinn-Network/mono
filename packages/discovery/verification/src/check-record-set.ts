@@ -2,7 +2,11 @@
 
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import { ANCHOR_EVIDENCE_KIND, compareCodeUnitStrings } from "@jinn-network/trust-core";
-import { ATTEMPT_OBSERVATION_TYPES, foldObservations } from "@jinn-network/task-execution-protocol";
+import {
+  ATTEMPT_OBSERVATION_TYPES,
+  ConflictingObservationError,
+  foldObservations,
+} from "@jinn-network/task-execution-protocol";
 import type { ProtocolObservation } from "@jinn-network/task-execution-protocol";
 
 import { evaluateAnchors } from "./anchor/evaluate.js";
@@ -68,6 +72,7 @@ export interface AttemptLifecycle {
 }
 
 export interface LifecycleResult extends CheckResult<"lifecycle"> {
+  /** The Attempts that folded. One whose log the fold refuses is a finding instead. */
   readonly attempts: readonly AttemptLifecycle[];
   /** Deliveries held for an Attempt no observation in the set speaks about. */
   readonly deliveriesWithoutObservations: number;
@@ -193,9 +198,8 @@ interface LoggedObservation {
 
 /**
  * Each Attempt's log, in (`sequence`, record digest) order, and the Attempts in code-unit order.
- * `foldObservations` keeps the first it is handed of a repeated (`source`, `id`), before it sorts,
- * and a stable sort leaves a tie on `sequence` in the order it was handed, so the order handed to it
- * decides the result unless it is fixed here (§10.4 rule 3).
+ * `foldObservations` needs no order from its caller, but the first engagement below and the order
+ * of the findings do, and neither may come from the order of the input (§10.4 rule 3).
  */
 function attemptLogs(records: readonly InspectedRecord[]): ReadonlyMap<string, readonly LoggedObservation[]> {
   const attemptTypes: readonly string[] = ATTEMPT_OBSERVATION_TYPES;
@@ -251,7 +255,14 @@ function checkLifecycle(records: readonly InspectedRecord[], held: Held): Lifecy
   const attempts: AttemptLifecycle[] = [];
   const unattributed: Finding[] = [];
   for (const [attempt, log] of logs) {
-    const derived = foldObservations(log.map(({ observation }) => observation));
+    let derived;
+    try {
+      derived = foldObservations(log.map(({ observation }) => observation));
+    } catch (cause) {
+      if (!(cause instanceof ConflictingObservationError)) throw cause;
+      refusals.push({ code: "conflicting-observations", subject: attempt, detail: `${cause.message}.` });
+      continue;
+    }
     const recorded = derived.deliveries.map(({ digest }) => digest);
     // §10.1: "Consumers establish authority from the engagement event". Without one, any source counts.
     const engagements = log.filter(({ observation }) => observation.type === "network.jinn.task-execution.attempt-engaged.v1");
