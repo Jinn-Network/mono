@@ -781,8 +781,8 @@ function decodeBase64(value: string): Uint8Array {
 
 /**
  * Runs the capability against the fake runtime for each scripted scenario and asserts the
- * exact statement it produces against the committed golden. Requires `vitest` (an optional
- * peer) with `globals: true` -- the suite functions are read off `globalThis` at call time so
+ * exact statement it produces against the committed golden. Requires a `vitest` run with
+ * `globals: true` -- the suite functions are read off `globalThis` at call time so
  * importing this module outside a test run (the golden generator does exactly that) never
  * pulls vitest's worker state into a plain Node process.
  */

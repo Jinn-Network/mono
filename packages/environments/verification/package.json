@@ -46,14 +46,6 @@
     "@jinn-network/trust-core": "0.1.0",
     "zod": "4.4.3"
   },
-  "peerDependencies": {
-    "vitest": "^4.1.8"
-  },
-  "peerDependenciesMeta": {
-    "vitest": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@jinn-network/trust-resolve": "0.1.0",
     "@jinn-network/trust-testing": "0.1.0",

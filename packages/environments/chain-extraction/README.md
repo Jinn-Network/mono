@@ -54,3 +54,7 @@ supplies a `DsseSigner`; the kit holds no key material.
 Five scenarios are asserted end-to-end: first-pass convergence, convergence after two
 widenings, bound exhaustion under infinite hidden reads, archive self-disagreement refusal,
 and dump omission detection without shipping a broken artifact.
+
+## Vitest
+
+`@jinn-network/chain-state-extraction/testing` needs `vitest` installed and a run with `globals: true`. `vitest` is not a dependency of this package, so add it to your own project. The other entry points do not need it.

@@ -207,3 +207,7 @@ with trust model, settlement, and payment visibility as construction options),
 That signer emits a hash, not a cryptographic signature. DSSE signature checking is an
 injected port throughout this tree, so its bytes are opaque to every code path these helpers
 exercise. Fixtures and tests only.
+
+## Vitest
+
+`@jinn-network/evidence-gate/testing` needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project. The other entry points do not need it.

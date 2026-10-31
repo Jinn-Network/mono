@@ -132,11 +132,6 @@ __metadata:
   dependencies:
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
     zod: "npm:4.4.3"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 

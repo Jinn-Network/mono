@@ -101,8 +101,8 @@ try {
       "@jinn-network/evidence-protocol": `file:${evidenceProtocolArchive}`,
       "@jinn-network/trust-testing": `file:${testingArchive}`,
       // trust-testing's index re-exports its conformance battery, which
-      // imports vitest at module scope (an optional peer dependency) --
-      // installed here so the packed consumer resolves it.
+      // imports vitest at module scope -- installed here so the packed
+      // consumer resolves it.
       vitest: "4.1.8",
     },
   }));

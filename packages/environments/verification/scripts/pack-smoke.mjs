@@ -76,7 +76,7 @@ try {
     },
   }));
   // npm 10.9.x Arborist can crash with `edgesOut` while resolving these local tarballs and
-  // Vitest's optional peer graph. The peer relationship is exercised by the packed test below;
+  // Vitest's optional peer graph. The kit's need for Vitest is exercised by the packed test below;
   // use the stable legacy-peer resolver rather than weakening the consumer assertion.
   await run("npm", [
     "install", "--ignore-scripts", "--no-audit", "--no-fund", "--legacy-peer-deps",

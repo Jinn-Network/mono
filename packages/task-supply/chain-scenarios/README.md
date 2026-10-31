@@ -133,3 +133,7 @@ No materialization, no replay, no verification, no signing, no posting, no prici
 owners elsewhere in the chain-environment family program. This package owns templates,
 parameterization, sealing, and the derivation strategy that orchestrates an injected admission
 port.
+
+## Vitest
+
+`@jinn-network/chain-scenarios/testing` needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project. The other entry points do not need it.
