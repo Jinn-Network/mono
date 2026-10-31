@@ -18,16 +18,24 @@ import { hexToBytes } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it, vi } from "vitest";
 
-import { createBindingResolver } from "./binding-resolver.js";
+import { createBindingResolver as createResolverWithAllOptions } from "./binding-resolver.js";
 import type { BindingStore, CreateBindingResolverOptions, SealedKeyBindingRecord } from "./binding-resolver.js";
 
 const AGENT = "https://spec.jinn.network/agents/1";
 const KEY_A = "did:key:zKeyA";
-const KEY_OWNER = "did:key:zKeyOwner";
+const KEY_OWNER = "did:key:zKeyKeeper";
 const DIGEST_A = ("sha256:" + "a".repeat(64)) as Sha256Digest;
 const DIGEST_B = ("sha256:" + "b".repeat(64)) as Sha256Digest;
 const CEREMONY_DIGEST = ("sha256:" + "c".repeat(64)) as Sha256Digest;
 const AGENT_ASSET = "eip155:84532/erc721:0x2222222222222222222222222222222222222222/7";
+
+/** These cases are not about envelopes, except where one passes its own `recordSignedByItsKey`. */
+function createBindingResolver(
+  options: Omit<CreateBindingResolverOptions, "recordSignedByItsKey">
+    & Partial<Pick<CreateBindingResolverOptions, "recordSignedByItsKey">>,
+) {
+  return createResolverWithAllOptions({ recordSignedByItsKey: () => true, ...options });
+}
 
 function accountBinding(overrides: Partial<KeyBinding> = {}): KeyBinding {
   return {
@@ -155,6 +163,99 @@ describe("createBindingResolver", () => {
     expect((await reversed.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.bindingDigest).toBe(DIGEST_A);
   });
 
+  describe("what a store can hold", () => {
+    const anchors = fakeAnchors({ [DIGEST_A]: "2026-01-01T00:00:00.000Z", [DIGEST_B]: "2026-01-02T00:00:00.000Z" });
+    const at = "2026-06-01T00:00:00.000Z";
+    const genuine = record(accountBinding(), DIGEST_A);
+    /** Sorts first, so that an entry considered at all takes the key from `genuine`. */
+    const FIRST = ("sha256:" + "0".repeat(64)) as Sha256Digest;
+    const storeHolding = (entries: readonly unknown[]): BindingStore => ({
+      ...fakeStore([]),
+      async listBindingsForAgent() {
+        return entries as SealedKeyBindingRecord[];
+      },
+    });
+
+    it.each([
+      ["nothing at all", null],
+      ["an empty entry", {}],
+      ["no binding", { envelopeBytes: new Uint8Array(), bindingDigest: FIRST }],
+      ["a binding that is not one", { binding: {}, envelopeBytes: new Uint8Array(), bindingDigest: FIRST }],
+      ["a binding without anchors", {
+        binding: { ...accountBinding(), anchors: undefined },
+        envelopeBytes: new Uint8Array(),
+        bindingDigest: FIRST,
+      }],
+      ["a binding with an unreadable key", {
+        binding: { ...accountBinding(), key: 7 },
+        envelopeBytes: new Uint8Array(),
+        bindingDigest: FIRST,
+      }],
+      ["a time that is not one", record(accountBinding({ validFrom: "soon" }), FIRST)],
+      ["envelope bytes that are not bytes", { ...record(accountBinding(), FIRST), envelopeBytes: "bytes" }],
+      ["a digest that is not one", { ...record(accountBinding(), FIRST), bindingDigest: 7 }],
+    ])("ignores %s and still resolves what is genuine", async (_label, junk) => {
+      const resolver = createBindingResolver({ bindings: storeHolding([junk, genuine]), anchors });
+      const resolved = await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at);
+      expect(resolved?.bindingDigest).toBe(DIGEST_A);
+      expect(resolved?.isGenesis).toBe(true);
+    });
+
+    it.each([
+      ["nothing at all", null],
+      ["an empty entry", {}],
+      ["a revocation without anchors", { revocation: { target: DIGEST_A }, envelopeBytes: Uint8Array.of(1) }],
+      ["envelope bytes that are not bytes", {
+        revocation: {
+          protocol: "https://spec.jinn.network/trust/revocation/v1",
+          target: DIGEST_A,
+          revokedBy: KEY_A,
+          anchors: [{ digest: DIGEST_B }],
+          effectiveFrom: "2026-02-01T00:00:00.000Z",
+        },
+        envelopeBytes: "bytes",
+      }],
+    ])("ignores a revocation of %s", async (_label, junk) => {
+      const bindings: BindingStore = {
+        ...fakeStore([genuine]),
+        async listRevocationsForTargets() {
+          return [junk as never];
+        },
+      };
+      const resolved = await createBindingResolver({ bindings, anchors }).resolveBinding({ key: KEY_A, agent: AGENT }, at);
+      expect(resolved?.revocations).toEqual([]);
+    });
+
+    it("takes a host's ceremony leg that throws as a ceremony it did not verify", async () => {
+      const binding = accountBinding({ ceremony: { type: "oidc-machine", digest: CEREMONY_DIGEST } });
+      const resolver = createBindingResolver({
+        bindings: fakeStore([record(binding, DIGEST_A)]),
+        anchors,
+        verifyHostedCeremony: async () => {
+          throw new Error("cannot read this record");
+        },
+      });
+      expect(await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at)).toBeNull();
+    });
+
+    it("takes a signature check that throws as a record its key did not sign", async () => {
+      const resolver = createBindingResolver({
+        bindings: fakeStore([genuine]),
+        anchors,
+        recordSignedByItsKey: () => {
+          throw new Error("cannot read this envelope");
+        },
+      });
+      expect(await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at)).toBeNull();
+    });
+
+    it("takes evidence that cannot be read as a failed ceremony when choosing between records", async () => {
+      const unreadable = { ...record(accountBinding(), DIGEST_B), ceremonyEvidence: { message: 7 } as never };
+      const resolver = createBindingResolver({ bindings: fakeStore([unreadable]), anchors });
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.bindingDigest).toBe(DIGEST_B);
+    });
+  });
+
   describe("a conflict over one key", () => {
     const owner = privateKeyToAccount(`0x${"6".repeat(64)}`);
     const voucher = { kind: "account" as const, did: didPkh(84532, owner.address), contractAccount: false };
@@ -259,7 +360,7 @@ describe("createBindingResolver", () => {
         validFrom: "2026-02-01T00:00:00.000Z",
       }), DIGEST_B),
       record(accountBinding({
-        key: keyed("did:key:zOutOfWindow"),
+        key: keyed("did:key:zPastWindow"),
         voucher: laterVoucher,
         validFrom: "2026-01-01T00:00:00.000Z",
         expiresAt: "2026-01-15T00:00:00.000Z",
@@ -431,8 +532,8 @@ describe("createBindingResolver", () => {
     });
 
     it("opens an effective start spelled with an offset at its instant", async () => {
-      const binding = accountBinding({ validFrom: "2026-02-01T00:00:00+01:00" });
-      const anchors = fakeAnchors({ [DIGEST_A]: "2026-01-01T00:00:00.000Z" });
+      const binding = accountBinding();
+      const anchors = fakeAnchors({ [DIGEST_A]: "2026-02-01T00:00:00+01:00" });
       const resolver = createBindingResolver({ bindings: fakeStore([record(binding, DIGEST_A)]), anchors });
 
       expect(await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, "2026-01-31T22:30:00Z")).toBeNull();
@@ -475,23 +576,23 @@ describe("createBindingResolver", () => {
     });
 
     it("treats one instant spelled two ways as a tie", async () => {
-      const first = accountBinding({ validFrom: "2026-01-01T00:00:00.000Z", anchors: [{ digest: DIGEST_A }] });
+      const first = accountBinding({ validFrom: "2026-01-01T00:00:00.000Z", anchors: [{ digest: DIGEST_B }] });
       const second = accountBinding({
         key: keyed(KEY_OWNER),
-        validFrom: "2026-01-01T01:00:00+01:00",
-        anchors: [{ digest: DIGEST_B }],
+        validFrom: "2026-01-01T00:00:00.000Z",
+        anchors: [{ digest: DIGEST_A }],
       });
       const anchors = fakeAnchors({
-        [DIGEST_A]: "2026-01-01T00:00:00.000Z",
+        [DIGEST_A]: "2026-01-01T01:00:00+01:00",
         [DIGEST_B]: "2026-01-01T00:00:00Z",
       });
       const resolver = createBindingResolver({
-        bindings: fakeStore([record(second, DIGEST_B), record(first, DIGEST_A)]),
+        bindings: fakeStore([record(first, DIGEST_B), record(second, DIGEST_A)]),
         anchors,
       });
 
-      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(true);
-      expect((await resolver.resolveBinding({ key: KEY_OWNER, agent: AGENT }, at))?.isGenesis).toBe(false);
+      expect((await resolver.resolveBinding({ key: KEY_OWNER, agent: AGENT }, at))?.isGenesis).toBe(true);
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(false);
     });
 
     it("orders revocations by instant", async () => {

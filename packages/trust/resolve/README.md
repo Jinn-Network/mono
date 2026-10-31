@@ -20,9 +20,10 @@ bindings resolve only when the host passes `verifyHostedCeremony`. A record
 that does not resolve still counts when deciding which binding came first: it
 may be the true genesis.
 
-Pass `recordSignedByItsKey` wherever binding envelopes are DSSE envelopes. With
-it, a record its key never signed does not resolve and cannot win a conflict over
-the key. Without it, a record can claim a key it does not hold.
+`recordSignedByItsKey` is required, because this package has no DSSE verifier of
+its own. A record its key never signed does not resolve and cannot win a conflict
+over the key. Ceremony evidence that cannot be read is a failed ceremony, and a
+stored entry that is not the record it says it is is not considered at all.
 
 See `docs/superpowers/plans/2026-07-28-trust-layer.md` for the implementation
 plan.

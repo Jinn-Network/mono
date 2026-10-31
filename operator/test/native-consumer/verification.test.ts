@@ -95,7 +95,7 @@ interface RoleKey { readonly id: string; readonly privateKey: KeyObject; readonl
 
 function roleKey(label: string): RoleKey {
   const pair = generateKeyPairSync('ed25519');
-  return { id: `did:key:z6Mk${label}111111111111111111111111111111`, ...pair };
+  return { id: `did:key:z6Mk${label.replace(/[0OIl]/gu, '1')}111111111111111111111111111111`, ...pair };
 }
 
 function envelope(payloadBytes: Uint8Array, payloadType: string, key: RoleKey): Uint8Array {
@@ -273,7 +273,7 @@ function makeTrust(keys: Record<string, RoleKey>, input: { revokedRequester?: bo
     const value: KeyBinding = {
       protocol: TRUST_KEY_BINDING_FORMAT, agent,
       key: { publicKey: key.publicKey.export({ type: 'spki', format: 'der' }).toString('base64'), keyid: key.id, algorithm: 'ed25519', didKey: key.id },
-      voucher: { kind: 'oidc-machine', subject: `machine:${agent}` },
+      voucher: { kind: 'oidc-machine', subject: `repo:fixture/${agent.replace(/\W/gu, '-')}:ref:refs/heads/main` },
       relationship, scope, validFrom: `2026-01-${String(order).padStart(2, '0')}T00:00:00Z`,
       ceremony: { type: 'oidc-machine', digest: `sha256:${'c'.repeat(64)}` }, strength: deriveStrength('oidc-machine'),
       anchors: [{ digest: anchor }],
@@ -316,6 +316,8 @@ function makeTrust(keys: Record<string, RoleKey>, input: { revokedRequester?: bo
     requireAnchors: true,
     // These fixture bindings carry a placeholder machine ceremony; the fixture is the host vouching for it.
     verifyHostedCeremony: async () => true,
+    recordSignedByItsKey: ({ binding, envelopeBytes }) =>
+      dsseVerifier(envelopeBytes).validSignerKeyids.includes(binding.key.didKey),
   });
   const keyMap = new Map(Object.values(keys).map((key) => [key.id, key.publicKey]));
   const dsseVerifier: DsseChainVerifier = (bytes) => {

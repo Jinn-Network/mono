@@ -6,7 +6,7 @@ import {
   sealDsseEnvelope,
   verifyEnvelopeBinding,
 } from "@jinn-network/trust-core";
-import type { CeremonyType, Relationship, Scope, Sha256Digest } from "@jinn-network/trust-core";
+import type { CeremonyType, EoaCeremonyEvidence, Relationship, Scope, Sha256Digest } from "@jinn-network/trust-core";
 import { createAnchorResolver, createBindingResolver } from "@jinn-network/trust-resolve";
 import type {
   BindingStore,
@@ -74,6 +74,8 @@ interface BindOptions {
   readonly ceremonyType?: Exclude<CeremonyType, "eoa">;
   /** Drops the ceremony evidence from the record, so its ceremony cannot verify. */
   readonly withoutCeremonyEvidence?: boolean;
+  /** Replaces the genuine evidence the record would hold. */
+  readonly evidence?: (genuine: EoaCeremonyEvidence) => unknown;
 }
 
 class World {
@@ -119,6 +121,9 @@ class World {
       ...(options.withoutCeremonyEvidence === true || fixture.ceremonyEvidence === undefined
         ? {}
         : { ceremonyEvidence: fixture.ceremonyEvidence }),
+      ...(options.evidence === undefined || fixture.ceremonyEvidence === undefined
+        ? {}
+        : { ceremonyEvidence: options.evidence(fixture.ceremonyEvidence) as EoaCeremonyEvidence }),
     };
     this.records.push(record);
     return record;
@@ -158,7 +163,8 @@ class World {
       }),
       requireAnchors: this.requireAnchors,
       ...(this.verifyHostedCeremony === undefined ? {} : { verifyHostedCeremony: this.verifyHostedCeremony }),
-      ...(this.recordSignedByItsKey === undefined ? {} : { recordSignedByItsKey: this.recordSignedByItsKey }),
+      recordSignedByItsKey: this.recordSignedByItsKey
+        ?? ((record) => fakes.dsseVerifier(record.envelopeBytes).validSignerKeyids.includes(record.binding.key.didKey)),
     });
     const envelopeBytes = sealDsseEnvelope({
       payloadBytes: new TextEncoder().encode("{}"),
@@ -535,6 +541,37 @@ describe.each([
       await w.revoke(genesis, GENESIS_KEY, T1);
       await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T2 });
       expect(await w.verdict(STRANGER_KEY)).toMatchObject(refusedChain);
+    });
+  });
+
+  describe("evidence that cannot be read is a failed ceremony (§7.5 step 3)", () => {
+    const mangled = [
+      { unreadable: "a lone surrogate", evidence: (e: EoaCeremonyEvidence) => ({ ...e, message: { ...e.message, nonce: "a\ud800b" } }) },
+      { unreadable: "an unsafe integer", evidence: (e: EoaCeremonyEvidence) => ({ ...e, message: { ...e.message, chainId: 1e21 } }) },
+      { unreadable: "no message", evidence: (e: EoaCeremonyEvidence) => ({ ...e, message: undefined }) },
+      { unreadable: "resources that are not a list", evidence: (e: EoaCeremonyEvidence) => ({ ...e, message: { ...e.message, resources: 7 } }) },
+      { unreadable: "message bytes that are not bytes", evidence: (e: EoaCeremonyEvidence) => ({ ...e, messageBytes: "bytes" }) },
+      { unreadable: "no signature", evidence: (e: EoaCeremonyEvidence) => ({ ...e, signature: undefined }) },
+      { unreadable: "evidence that is not an object", evidence: () => null },
+    ];
+
+    test.each(mangled)("a stranger's record holding $unreadable, and its revocation, change nothing for an honest key", async ({ evidence }) => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      await w.bind({ key: NEXT_KEY, signer: SECOND_OWNER, validFrom: T1, consentBy: GENESIS_KEY });
+      await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T2, evidence });
+      await w.revoke(genesis, STRANGER_KEY, T3);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+      expect(await w.verdict(STRANGER_KEY)).toMatchObject({ ok: false, reason: "ceremony-verification-failed" });
+    });
+
+    test.each(mangled)("a record holding $unreadable cannot win a key from one that verifies", async ({ evidence }) => {
+      const w = world();
+      await bindGenesis(w);
+      await w.bind({ key: NEXT_KEY, signer: STRANGER, validFrom: T1, evidence });
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T2 });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
     });
   });
 

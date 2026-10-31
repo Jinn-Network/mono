@@ -156,17 +156,21 @@ async function verifyCeremonyLeg(
     // commitment -- any evidence that independently recovers and content-
     // matches would verify, regardless of what the signed record actually
     // committed to (major finding: the digest is otherwise decorative).
-    const committedDigest = resolved.binding.ceremony.digest;
-    const suppliedDigest = ceremonyEvidenceDigest(resolved.ceremonyEvidence);
-    if (suppliedDigest !== committedDigest) {
-      return {
-        verified: false,
-        reason: `ceremony evidence digest "${suppliedDigest}" does not match the binding's `
-          + `committed ceremony.digest "${committedDigest}".`,
-      };
+    try {
+      const committedDigest = resolved.binding.ceremony.digest;
+      const suppliedDigest = ceremonyEvidenceDigest(resolved.ceremonyEvidence);
+      if (suppliedDigest !== committedDigest) {
+        return {
+          verified: false,
+          reason: `ceremony evidence digest "${suppliedDigest}" does not match the binding's `
+            + `committed ceremony.digest "${committedDigest}".`,
+        };
+      }
+      const result = verifyEoaCeremony(resolved.ceremonyEvidence, resolved.binding);
+      return { verified: result.verified, ...(result.reason === undefined ? {} : { reason: result.reason }) };
+    } catch {
+      return { verified: false, reason: "ceremony evidence cannot be read." };
     }
-    const result = verifyEoaCeremony(resolved.ceremonyEvidence, resolved.binding);
-    return { verified: result.verified, ...(result.reason === undefined ? {} : { reason: result.reason }) };
   }
 
   if (ceremonyType === "safe") {
@@ -256,6 +260,16 @@ async function settle(walk: AuthorityWalk, fact: string, decide: () => Promise<b
   return decided;
 }
 
+/** Whether `keyid` signed these bytes. A store may hold anything, and what
+ * cannot be read was signed by no one. */
+function signedBy(walk: AuthorityWalk, envelopeBytes: Uint8Array, keyid: string): boolean {
+  try {
+    return walk.dsseVerifier(envelopeBytes).validSignerKeyids.includes(keyid);
+  } catch {
+    return false;
+  }
+}
+
 function withinWindow(resolved: ResolvedBinding, atTime: string): boolean {
   const start = compareCalendarStrictRfc3339Instants(atTime, resolved.effectiveStart);
   if (start === undefined || start < 0) return false;
@@ -284,11 +298,10 @@ async function authorityUsable(
   revocationsThatCount: RevocationsThatCount = "all",
 ): Promise<boolean> {
   if (!withinWindow(resolved, atTime)) return false;
-  const sound = await settle(walk, `record\u001f${resolved.bindingDigest}`, async () => {
-    const { validSignerKeyids } = walk.dsseVerifier(resolved.envelopeBytes);
-    if (!validSignerKeyids.includes(resolved.binding.key.didKey)) return false;
-    return (await verifyCeremonyLeg(resolved, walk.witnessVerifier)).verified;
-  });
+  const sound = await settle(walk, `record\u001f${resolved.bindingDigest}`, async () => (
+    signedBy(walk, resolved.envelopeBytes, resolved.binding.key.didKey)
+    && (await verifyCeremonyLeg(resolved, walk.witnessVerifier)).verified
+  ));
   return sound && (await checkRevocation(resolved, atTime, "before", walk, revocationsThatCount)).ok;
 }
 
@@ -484,10 +497,9 @@ async function isRevocationAuthorized(
   entry: ResolvedRevocation,
   walk: AuthorityWalk,
 ): Promise<boolean> {
-  const { validSignerKeyids } = walk.dsseVerifier(entry.envelopeBytes);
-  if (!validSignerKeyids.includes(entry.revocation.revokedBy)) return false;
-
   const revokedBy = entry.revocation.revokedBy;
+  if (!signedBy(walk, entry.envelopeBytes, revokedBy)) return false;
+
   if (revokedBy.startsWith("did:pkh:")) {
     // The binding's voucher account (§7.4b). The injected verifier decides
     // whether that account signed; nothing here checks that the ceremony is new.

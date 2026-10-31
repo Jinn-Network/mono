@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  KeyBindingSchema,
+  RevocationSchema,
+  Sha256DigestSchema,
   ceremonyEvidenceDigest,
   compareCalendarStrictRfc3339Instants,
   compareCodeUnitStrings,
@@ -103,14 +106,15 @@ export interface CreateBindingResolverOptions {
    * record), `oidc-machine` (anchored JWKS) and `github-human`. A host that
    * can verify them says so here, record by record. Omit it and those
    * bindings simply fail to resolve: `verify.ts` takes a resolved binding as
-   * this resolver's word that its ceremony was checked. */
+   * this resolver's word that its ceremony was checked. A leg that throws
+   * counts as a no, as a failed `ownerOf` read does. */
   readonly verifyHostedCeremony?: (record: SealedKeyBindingRecord) => Promise<boolean>;
-  /** §7.1: a binding is DSSE-signed by the key it binds. Given this, a record
-   * that key never signed does not resolve and cannot win a conflict over the
-   * key. It still counts when deciding what came first, like any other record
-   * that does not resolve. Omit it only where a store's envelopes are not DSSE
-   * envelopes: without it a record can claim a key it does not hold. */
-  readonly recordSignedByItsKey?: (record: SealedKeyBindingRecord) => boolean;
+  /** §7.1: a binding is DSSE-signed by the key it binds. A record that key
+   * never signed does not resolve and cannot win a conflict over the key. It
+   * still counts when deciding what came first, like any other record that
+   * does not resolve. This package has no DSSE verifier of its own, so the host
+   * supplies this leg, and an envelope it cannot read counts as unsigned. */
+  readonly recordSignedByItsKey: (record: SealedKeyBindingRecord) => boolean;
   /** Under an anchor-requiring profile an unanchored binding never
    * resolves (§7.3). Defaults to `true`, the safer default. */
   readonly requireAnchors?: boolean;
@@ -122,6 +126,30 @@ export interface CreateBindingResolverOptions {
 interface EffectiveBinding {
   readonly record: SealedKeyBindingRecord;
   readonly effectiveStart: string;
+}
+
+const readableRecords = new WeakMap<object, boolean>();
+
+/** A store may hold anything. Whatever is not the record it says it is cannot
+ * be placed in time or read for authority, so it is not considered at all. */
+function readable(entry: object | null, isRecord: () => boolean): boolean {
+  if (typeof entry !== "object" || entry === null) return false;
+  const known = readableRecords.get(entry);
+  if (known !== undefined) return known;
+  const verdict = isRecord();
+  readableRecords.set(entry, verdict);
+  return verdict;
+}
+
+function isReadableBinding(record: SealedKeyBindingRecord): boolean {
+  return readable(record, () => KeyBindingSchema.safeParse(record.binding).success
+    && Sha256DigestSchema.safeParse(record.bindingDigest).success
+    && record.envelopeBytes instanceof Uint8Array);
+}
+
+function isReadableRevocation(record: SealedRevocationRecord): boolean {
+  return readable(record, () => RevocationSchema.safeParse(record.revocation).success
+    && record.envelopeBytes instanceof Uint8Array);
 }
 
 function isObserved<T>(observation: T | null): observation is T {
@@ -214,7 +242,12 @@ async function ceremonyCanBeVerified(
     case "agentId":
       return record.binding.voucher.kind === "agentId";
     default:
-      return verifyHostedCeremony === undefined ? false : verifyHostedCeremony(record);
+      if (verifyHostedCeremony === undefined) return false;
+      try {
+        return await verifyHostedCeremony(record);
+      } catch {
+        return false;
+      }
   }
 }
 
@@ -225,9 +258,14 @@ const eoaCeremonyVerdicts = new WeakMap<SealedKeyBindingRecord, boolean>();
 function eoaCeremonyVerified(record: SealedKeyBindingRecord): boolean {
   const known = eoaCeremonyVerdicts.get(record);
   if (known !== undefined) return known;
-  const verified = record.ceremonyEvidence !== undefined
-    && ceremonyEvidenceDigest(record.ceremonyEvidence) === record.binding.ceremony.digest
-    && verifyEoaCeremony(record.ceremonyEvidence, record.binding).verified;
+  let verified = false;
+  try {
+    verified = record.ceremonyEvidence !== undefined
+      && ceremonyEvidenceDigest(record.ceremonyEvidence) === record.binding.ceremony.digest
+      && verifyEoaCeremony(record.ceremonyEvidence, record.binding).verified;
+  } catch {
+    // Evidence that cannot be read verifies nothing.
+  }
   eoaCeremonyVerdicts.set(record, verified);
   return verified;
 }
@@ -345,10 +383,14 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
   const requireAnchors = options.requireAnchors ?? true;
   const signatureVerdicts = new WeakMap<SealedKeyBindingRecord, boolean>();
   const signedByItsKey = (record: SealedKeyBindingRecord): boolean => {
-    if (options.recordSignedByItsKey === undefined) return true;
     const known = signatureVerdicts.get(record);
     if (known !== undefined) return known;
-    const signed = options.recordSignedByItsKey(record);
+    let signed = false;
+    try {
+      signed = options.recordSignedByItsKey(record);
+    } catch {
+      // An envelope that cannot be read was signed by no one.
+    }
     signatureVerdicts.set(record, signed);
     return signed;
   };
@@ -359,6 +401,7 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
 
       const withEffectiveStart: EffectiveBinding[] = [];
       for (const record of allForAgent) {
+        if (!isReadableBinding(record)) continue;
         // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
         const effectiveStart = await effectiveStartOf(record.binding, options.anchors);
         if (effectiveStart === undefined) {
@@ -411,6 +454,7 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
       const revocationRecords = await options.bindings.listRevocationsForTargets([winner.record.bindingDigest]);
       const revocations: ResolvedRevocation[] = [];
       for (const revocationRecord of revocationRecords) {
+        if (!isReadableRevocation(revocationRecord)) continue;
         // eslint-disable-next-line no-await-in-loop -- revocation sets are small.
         const effectiveTime = await effectiveTimeOfRevocation(revocationRecord.revocation, options.anchors);
         if (effectiveTime === undefined) continue; // unanchored revocations never take effect

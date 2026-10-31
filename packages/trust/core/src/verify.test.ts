@@ -856,6 +856,108 @@ describe("verifyEnvelopeBinding", () => {
     });
   });
 
+  describe("what a store can hold ends in a verdict", () => {
+    const voucher = { kind: "account" as const, did: VOUCHER_DID, contractAccount: false };
+    const verifyKey2 = (resolver: BindingResolver) =>
+      verifyEnvelopeBinding(
+        {
+          envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+          key: KEY_2,
+          agent: AGENT,
+          family: "deliveries",
+          atTime: "2026-03-01T00:00:00Z",
+        },
+        { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
+      );
+    const own = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+      voucher,
+    });
+    const peer = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: CONSENT_KEY, algorithm: "ed25519", didKey: CONSENT_KEY },
+      voucher,
+      scope: ["bindings"],
+    });
+
+    test.each([
+      ["a lone surrogate", (evidence: EoaCeremonyEvidence) => ({ ...evidence, message: { ...evidence.message, nonce: "a\ud800b" } })],
+      ["an unsafe integer", (evidence: EoaCeremonyEvidence) => ({ ...evidence, message: { ...evidence.message, chainId: 1e21 } })],
+      ["no message", (evidence: EoaCeremonyEvidence) => ({ ...evidence, message: undefined })],
+      ["resources that are not a list", (evidence: EoaCeremonyEvidence) => ({ ...evidence, message: { ...evidence.message, resources: 7 } })],
+      ["message bytes that are not bytes", (evidence: EoaCeremonyEvidence) => ({ ...evidence, messageBytes: "bytes" })],
+      ["no signature", (evidence: EoaCeremonyEvidence) => ({ ...evidence, signature: undefined })],
+      ["evidence that is not an object", () => null],
+    ])("ceremony evidence with %s is a failed ceremony", async (_label, mangle) => {
+      const resolver = new FakeBindingResolver().register({
+        key: KEY_2,
+        agent: AGENT,
+        resolved: resolvedBinding({
+          binding: keyBinding({ ...own, ceremony: { type: "eoa", digest: `sha256:${"a".repeat(64)}` } }),
+          ceremonyEvidence: mangle(eoaCeremonyEvidence()) as never,
+        }),
+      });
+      expect(await verifyKey2(resolver)).toMatchObject({ ok: false, reason: "ceremony-verification-failed" });
+    });
+
+    test("evidence the record commits to fails the same way when it cannot be read past its digest", async () => {
+      const evidence = eoaCeremonyEvidence();
+      const committed = { ...evidence, message: { ...evidence.message, resources: 7 } } as never;
+      const resolver = new FakeBindingResolver().register({
+        key: KEY_2,
+        agent: AGENT,
+        resolved: resolvedBinding({
+          binding: keyBinding({
+            ...own,
+            voucher: { kind: "account", did: didPkh(1, evidence.message.address as `0x${string}`), contractAccount: false },
+            ceremony: { type: "eoa", digest: ceremonyEvidenceDigest(committed) },
+          }),
+          ceremonyEvidence: committed,
+        }),
+      });
+      expect(await verifyKey2(resolver)).toMatchObject({
+        ok: false,
+        reason: "ceremony-verification-failed",
+        detail: "ceremony evidence cannot be read.",
+      });
+    });
+
+    test("an authority whose envelope cannot be read gives nothing", async () => {
+      const resolver = new FakeBindingResolver()
+        .register({
+          key: KEY_2,
+          agent: AGENT,
+          resolved: resolvedBinding({ binding: own, isGenesis: false, incumbentControls: [{ key: CONSENT_KEY, voucher }] }),
+        })
+        .register({
+          key: CONSENT_KEY,
+          agent: AGENT,
+          resolved: authorityBinding(keyBinding({ ...peer, scope: ["deliveries"] }), {
+            envelopeBytes: new TextEncoder().encode("not an envelope"),
+          }),
+        });
+      expect(await verifyKey2(resolver)).toMatchObject({ ok: false, reason: "consent-chain-violation" });
+    });
+
+    test("a revocation whose envelope cannot be read has no effect", async () => {
+      const resolver = new FakeBindingResolver()
+        .register({
+          key: KEY_2,
+          agent: AGENT,
+          resolved: resolvedBinding({
+            binding: own,
+            revocations: [{
+              ...revocationEntry(CONSENT_KEY, "2026-02-01T00:00:00Z"),
+              envelopeBytes: new TextEncoder().encode("not an envelope"),
+            }],
+          }),
+        })
+        .register({ key: CONSENT_KEY, agent: AGENT, resolved: authorityBinding(peer) });
+      expect(await verifyKey2(resolver)).toMatchObject({ ok: true });
+    });
+  });
+
   describe("an agentId voucher (§7.2)", () => {
     const voucher = { kind: "agentId" as const, caip19: "eip155:84532/erc721:0x2222222222222222222222222222222222222222/7" };
     const peer = (keyid: string, scope: KeyBinding["scope"]) => keyBinding({
