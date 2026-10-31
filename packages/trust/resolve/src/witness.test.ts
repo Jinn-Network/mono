@@ -73,6 +73,16 @@ describe("createWitnessVerifier", () => {
     });
   });
 
+  it.each([
+    ["nothing", null],
+    ["a number", 7],
+    ["an empty object", {}],
+    ["envelope bytes that are not bytes", { envelopeBytes: 7 }],
+  ])("answers for a stored witness of %s, because a throw here reads as an outage", async (_label, witness) => {
+    const verifier = createWitnessVerifier({ acceptedVerifiers: [VERIFIER_IRI] });
+    await expect(verifier.verify1271Witness(witness as never)).resolves.toMatchObject({ verified: false });
+  });
+
   it("fails when the witness statement content does not match the claimed fields (lifted witness)", async () => {
     const payload = witnessPayload();
     const envelopeBytes = sealWitnessPayload(payload);

@@ -117,6 +117,10 @@ export function createWitnessVerifier(options: CreateWitnessVerifierOptions = {}
 
   return {
     async verify1271Witness(witness: Eip1271Witness): Promise<WitnessResult> {
+      // A store may hold anything, and a throw from this leg reads as an outage.
+      if (typeof witness !== "object" || witness === null) {
+        return { verified: false, reason: "witness cannot be read." };
+      }
       const payload = parseWitnessPayload(witness.envelopeBytes);
       if (payload === undefined) {
         return { verified: false, reason: "witness envelope does not decode to a signed statement." };

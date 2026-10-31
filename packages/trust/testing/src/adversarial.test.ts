@@ -204,7 +204,7 @@ describe("§16 adversarial battery", () => {
       ceremonyType: "eoa",
       voucher: accountVoucher(84532, attackerSigner.address), // the attacker's OWN account -- a genuine ceremony
       eoaCeremony: { signer: attackerSigner, chainId: 84532 },
-      isGenesis: false, // no incumbentControlVoucher, no consent countersignature
+      isGenesis: false, // no incumbent controls binding, no consent countersignature
     });
     fakes.registerBinding({
       key: attackerKey,

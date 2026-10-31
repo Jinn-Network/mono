@@ -12,5 +12,19 @@ anchor lookups, and the §7.3 at-time binding resolution composition. It is
 the RPC package of the trust tree -- `viem` and node network I/O are
 expected here (they are banned everywhere else in `packages/trust/`).
 
+`createBindingResolver` does not resolve a binding whose ceremony nothing has
+verified: `@jinn-network/trust-core` takes a resolved binding as the resolver's
+word for the ceremony legs that need I/O. It verifies `eoa` offline and runs the
+`agentId` composition leg itself. `safe`, `oidc-machine` and `github-human`
+bindings resolve only when the host passes `verifyHostedCeremony`. A record
+that does not resolve still counts when deciding which binding came first: it
+may be the true genesis.
+
+`recordSignedByItsKey` is required, because this package has no DSSE verifier of
+its own. A record its key never signed does not resolve and cannot win a conflict
+over the key. Ceremony evidence that cannot be read is a failed ceremony. A
+stored entry that is not a key binding never resolves and gives no authority, but
+if its anchors can be read it still counts when deciding which binding came first.
+
 See `docs/superpowers/plans/2026-07-28-trust-layer.md` for the implementation
 plan.

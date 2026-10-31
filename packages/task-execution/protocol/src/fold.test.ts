@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { foldObservations } from "./fold.js";
+import { ConflictingObservationError, foldObservations } from "./fold.js";
 import type { ProtocolObservation } from "./schemas/observation.js";
 
 const ATTEMPT = "urn:uuid:33333333-3333-5333-8333-333333333333";
@@ -91,6 +91,133 @@ describe("foldObservations", () => {
     expect(derived.state).toBe("running");
     // no crash / no duplication artifact — executionIds/deliveries stay empty either way
     expect(derived.executionIds).toEqual([]);
+  });
+
+  test("two observations sharing (source, id) that disagree on the terminal are refused, in either order", () => {
+    sequenceCounter = 0;
+    const delivered = terminal("delivered", {}, { id: "evt-terminal", sequence: "0000000000000009" });
+    const failed = terminal("failed", { blame: "task" }, { id: "evt-terminal", sequence: "0000000000000005" });
+    expect(() => foldObservations([engaged(), delivered, failed])).toThrow(ConflictingObservationError);
+    expect(() => foldObservations([engaged(), failed, delivered])).toThrow(ConflictingObservationError);
+  });
+
+  test("the refusal names the pair and carries the protocol-violation category", () => {
+    sequenceCounter = 0;
+    const log = [
+      engaged(),
+      terminal("delivered", {}, { id: "evt-terminal", sequence: "0000000000000009" }),
+      terminal("delivered", {}, { id: "evt-terminal", sequence: "0000000000000005" }),
+    ];
+    let refusal: unknown;
+    try {
+      foldObservations(log);
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(ConflictingObservationError);
+    expect(refusal).toMatchObject({ category: "protocol-violation", source: SOURCE, id: "evt-terminal" });
+  });
+
+  test("agreeing on sequence does not make two observations the same one", () => {
+    sequenceCounter = 0;
+    const one = started({ id: "evt-started", sequence: "0000000000000007" });
+    const other = progress({ id: "evt-started", sequence: "0000000000000007" });
+    expect(() => foldObservations([engaged(), one, other])).toThrow(ConflictingObservationError);
+    expect(() => foldObservations([engaged(), other, one])).toThrow(ConflictingObservationError);
+  });
+
+  test("one sequence and one type do not make two observations the same one when the data differs", () => {
+    sequenceCounter = 0;
+    const delivered = terminal("delivered", {}, { id: "evt-terminal", sequence: "0000000000000005" });
+    const failed = terminal("failed", { blame: "task" }, { id: "evt-terminal", sequence: "0000000000000005" });
+    expect(() => foldObservations([engaged(), delivered, failed])).toThrow(ConflictingObservationError);
+    expect(() => foldObservations([engaged(), failed, delivered])).toThrow(ConflictingObservationError);
+  });
+
+  test("one sequence and one payload do not make two observations the same one when the type differs", () => {
+    sequenceCounter = 0;
+    const one = observation("network.jinn.task-execution.progress.v1", {}, { id: "evt-same", sequence: "0000000000000005" });
+    const other = observation("network.jinn.task-execution.attempt-started.v1", {}, { id: "evt-same", sequence: "0000000000000005" });
+    expect(() => foldObservations([engaged(), one, other])).toThrow(ConflictingObservationError);
+    expect(() => foldObservations([engaged(), other, one])).toThrow(ConflictingObservationError);
+  });
+
+  test("array boundaries are content: [1, 23] and [12, 3] disagree", () => {
+    sequenceCounter = 0;
+    const one = observation("network.jinn.task-execution.progress.v1", { a: [1, 23] }, { id: "evt-same", sequence: "0000000000000005" });
+    const other = observation("network.jinn.task-execution.progress.v1", { a: [12, 3] }, { id: "evt-same", sequence: "0000000000000005" });
+    expect(() => foldObservations([engaged(), one, other])).toThrow(ConflictingObservationError);
+    expect(() => foldObservations([engaged(), other, one])).toThrow(ConflictingObservationError);
+  });
+
+  test("an explicit undefined field is not a disagreement", () => {
+    sequenceCounter = 0;
+    const one = terminal("failed", { blame: "task" }, { id: "evt-terminal", sequence: "0000000000000005" });
+    const replay = terminal("failed", { blame: "task", detail: undefined }, { id: "evt-terminal", sequence: "0000000000000005" });
+    expect(foldObservations([engaged(), one, replay])).toEqual(foldObservations([engaged(), one]));
+  });
+
+  test("a payload nested far past any call stack folds and compares", () => {
+    sequenceCounter = 0;
+    let deep: Record<string, unknown> = { leaf: true };
+    for (let depth = 0; depth < 500_000; depth += 1) deep = { deep };
+    const one = terminal("failed", { blame: "task", annotations: deep }, { id: "evt-terminal", sequence: "0000000000000005" });
+    const other = terminal("failed", { blame: "task", annotations: { deep } }, { id: "evt-terminal", sequence: "0000000000000005" });
+    expect(foldObservations([engaged(), one, { ...one }]).state).toBe("failed");
+    expect(() => foldObservations([engaged(), one, other])).toThrow(ConflictingObservationError);
+  });
+
+  test("a replay that differs only in what the fold never reads is still a duplicate (§10.1 rebuild)", () => {
+    sequenceCounter = 0;
+    const one = started({ id: "evt-started" });
+    const rebuilt = { ...one, time: "2026-08-02T00:00:00Z", traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01" };
+    expect(foldObservations([engaged(), one, rebuilt]).state).toBe("running");
+    expect(foldObservations([engaged(), rebuilt, one]).state).toBe("running");
+  });
+
+  test("key order inside a payload does not make a replay a disagreement", () => {
+    sequenceCounter = 0;
+    const one = observation(
+      "network.jinn.task-execution.cancel-requested.v1",
+      { reason: "requester asked", requestedBy: "urn:jinn:requester:1" },
+      { id: "evt-cancel", sequence: "0000000000000007" },
+    );
+    const replay = observation(
+      "network.jinn.task-execution.cancel-requested.v1",
+      { requestedBy: "urn:jinn:requester:1", reason: "requester asked" },
+      { id: "evt-cancel", sequence: "0000000000000007" },
+    );
+    expect(foldObservations([engaged(), one, replay]).cancelRequested).toBe(true);
+  });
+
+  test("a non-authoritative producer cannot refuse the fold by disagreeing with itself", () => {
+    sequenceCounter = 0;
+    const FOREIGN = "urn:jinn:attacker:forged-executor";
+    const genuine = [engaged({ source: SOURCE, sequence: "0000000000000001" }), terminal("delivered", {}, { sequence: "0000000000000002" })];
+    const forged = [
+      terminal("failed", { blame: "task" }, { source: FOREIGN, id: "evt-forged", sequence: "0000000000000003" }),
+      terminal("cancelled", {}, { source: FOREIGN, id: "evt-forged", sequence: "0000000000000004" }),
+    ];
+    const expected = foldObservations(genuine);
+    expect(foldObservations([...genuine, ...forged])).toEqual(expected);
+    expect(foldObservations([...forged].reverse().concat(genuine))).toEqual(expected);
+  });
+
+  test("with no engagement to pin a source, a disagreement from any source is refused", () => {
+    sequenceCounter = 0;
+    const one = started({ id: "evt-started", sequence: "0000000000000001" });
+    const other = started({ id: "evt-started", sequence: "0000000000000002" });
+    expect(() => foldObservations([one, other])).toThrow(ConflictingObservationError);
+  });
+
+  test("the same sequence on two different observations resolves the same way in either order", () => {
+    sequenceCounter = 0;
+    const delivered = terminal("delivered", {}, { id: "evt-a", sequence: "0000000000000005" });
+    const failed = terminal("failed", { blame: "task" }, { id: "evt-b", sequence: "0000000000000005" });
+    const forward = foldObservations([engaged({ sequence: "0000000000000001" }), delivered, failed]);
+    const reversed = foldObservations([failed, delivered, engaged({ sequence: "0000000000000001" })]);
+    expect(reversed).toEqual(forward);
+    expect(forward).toMatchObject({ state: "delivered", contradictory: true });
   });
 
   test("out-of-order non-terminal observations are resolved by sequence", () => {
