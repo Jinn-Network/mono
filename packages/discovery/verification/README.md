@@ -99,8 +99,8 @@ specification defines no container format, so this format is this package's own:
 
 - The list is UTF-8 I-JSON of at most 67,108,864 bytes. The real list below is 8,156,179 bytes for
   46,016 files, and that size is over the limit for a record, so a list has its own limit. It does not
-  keep memory small: a hostile list at that size took about 5 GiB here, and a smaller Node heap than
-  that stops the command with no report.
+  keep memory small: a hostile list at that size took about 5 GiB here, and a Node heap under about
+  3 GiB stops the command with no report.
 - `files` holds at least one entry. Other top-level members are not read, and the root still commits
   to them. That is why a Colophon `bundle.json` works as it is. The list does not name itself.
 - An entry holds exactly `path`, `bytes` and `sha256`, which is 64 lowercase hex digits.
