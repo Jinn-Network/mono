@@ -50,8 +50,8 @@ function isTerminal(observation: ProtocolObservation): observation is TerminalOb
  * reads. §10.1 makes the pair unique per producer, so this is not the duplicate §10.4 rule 2 drops,
  * and keeping either one would let array position pick the Attempt's state. The fold refuses, in
  * either order, as `@jinn-network/policy-outcomes` and `@jinn-network/task-curation` do for their
- * own dedupe keys. Carries the plain `category` shape the `backend` package wraps in
- * `TaskExecutionError`, as `InvalidDocumentError` does: §13's `protocol-violation`.
+ * own dedupe keys. `category` is §13's `protocol-violation`, the same plain shape
+ * `InvalidDocumentError` carries.
  */
 export class ConflictingObservationError extends Error {
   readonly category = "protocol-violation" as const;
@@ -61,18 +61,44 @@ export class ConflictingObservationError extends Error {
   }
 }
 
-/** Canonical text of a payload: key order is not content, and neither is an explicit `undefined`. */
-function canonicalText(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalText).join(",")}]`;
-  if (typeof value === "object" && value !== null) {
-    const record = value as Record<string, unknown>;
-    const members = Object.keys(record)
-      .filter((key) => record[key] !== undefined)
-      .sort(compareCodeUnitStrings)
-      .map((key) => `${JSON.stringify(key)}:${canonicalText(record[key])}`);
-    return `{${members.join(",")}}`;
+/**
+ * Canonical text of a payload: key order is not content, and neither is an explicit `undefined`.
+ * Iterative, because `annotations` has no depth bound and a recursive walk would overflow the stack
+ * on a record a checker of untrusted sets has to report, not die on.
+ */
+function canonicalText(root: unknown): string {
+  type Step = { readonly text: string } | { readonly value: unknown };
+  const parts: string[] = [];
+  const pending: Step[] = [{ value: root }];
+  while (pending.length > 0) {
+    const step = pending.pop()!;
+    if ("text" in step) {
+      parts.push(step.text);
+    } else if (Array.isArray(step.value)) {
+      const items = step.value as readonly unknown[];
+      pending.push({ text: "]" });
+      for (let index = items.length - 1; index >= 0; index -= 1) {
+        pending.push({ value: items[index] });
+        if (index > 0) pending.push({ text: "," });
+      }
+      pending.push({ text: "[" });
+    } else if (typeof step.value === "object" && step.value !== null) {
+      const record = step.value as Record<string, unknown>;
+      const keys = Object.keys(record)
+        .filter((key) => record[key] !== undefined)
+        .sort(compareCodeUnitStrings);
+      pending.push({ text: "}" });
+      for (let index = keys.length - 1; index >= 0; index -= 1) {
+        const key = keys[index]!;
+        pending.push({ value: record[key] });
+        pending.push({ text: `${index > 0 ? "," : ""}${JSON.stringify(key)}:` });
+      }
+      pending.push({ text: "{" });
+    } else {
+      parts.push(String(JSON.stringify(step.value)));
+    }
   }
-  return JSON.stringify(value);
+  return parts.join("");
 }
 
 /** One observation with what the fold compares it by. Two with the same `dedupeKey` and `reads`

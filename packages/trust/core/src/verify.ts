@@ -5,7 +5,6 @@ import { canonicalJsonBytes } from "./canonical-json.js";
 import { dssePreAuthEncoding, sealDsseEnvelope } from "./dsse.js";
 import { recordDigest } from "./hashing.js";
 import { TRUST_KEY_BINDING_MEDIA_TYPE } from "./identifiers.js";
-import { compareCodeUnitStrings } from "./order.js";
 import { compareCalendarStrictRfc3339Instants, isCalendarStrictRfc3339 } from "./rfc3339.js";
 import type { DsseChainVerifier } from "./policy.js";
 import type { Strength } from "./key-binding.js";
@@ -241,20 +240,6 @@ async function settle(walk: AuthorityWalk, fact: string, decide: () => Promise<b
   return decided;
 }
 
-/**
- * §7.4a's "already": a strict order over an Agent's bindings, effective start
- * first and digest on a tie, the order `trust-resolve` picks genesis by. This
- * is the cycle guard: authority only flows down this order, so a binding
- * cannot countersign itself, and a ring of bindings countersigning each other
- * has a first member with nothing above it.
- */
-function precedes(authority: ResolvedBinding, candidate: ResolvedBinding): boolean {
-  const comparison = compareCalendarStrictRfc3339Instants(authority.effectiveStart, candidate.effectiveStart);
-  if (comparison === undefined) return false;
-  if (comparison !== 0) return comparison < 0;
-  return compareCodeUnitStrings(authority.bindingDigest, candidate.bindingDigest) < 0;
-}
-
 function withinWindow(resolved: ResolvedBinding, atTime: string): boolean {
   const start = compareCalendarStrictRfc3339Instants(atTime, resolved.effectiveStart);
   if (start === undefined || start < 0) return false;
@@ -264,37 +249,47 @@ function withinWindow(resolved: ResolvedBinding, atTime: string): boolean {
 }
 
 /**
- * Whether a binding stands at the instant it gives authority: in window, its
- * record signed by the key it binds (§7.1), its ceremony verified, its own
- * consent chain holding, and no authorized revocation effective strictly
- * before that instant. Step 5 is not applied: authority is a §7.4 question,
- * and a verifier's trust policy says nothing about who an Agent's keys are.
+ * All of what it takes to give authority at an instant except the consent
+ * chain: in window, record signed by the key it binds (§7.1), ceremony
+ * verified, and no authorized revocation effective strictly before that
+ * instant. Step 5 is not applied: authority is a §7.4 question, and a
+ * verifier's trust policy says nothing about who an Agent's keys are.
  *
  * Revocations count strictly before the instant because an act is judged by
  * the state it was taken in. So a successor can revoke the binding it descends
  * from, and two keys revoking each other at one instant both take effect. It
- * also bounds the recursion: a consent-chain step moves down `precedes` and a
- * revocation step moves strictly back in time, so neither can return to where
- * it started.
+ * also keeps the walk finite: a revocation's signer is always judged at a
+ * strictly earlier instant than the binding it revokes was being judged at.
  */
-async function bindingStands(resolved: ResolvedBinding, atTime: string, walk: AuthorityWalk): Promise<boolean> {
+async function authorityUsable(resolved: ResolvedBinding, atTime: string, walk: AuthorityWalk): Promise<boolean> {
   if (!withinWindow(resolved, atTime)) return false;
-  const sound = await settle(walk, `binding\u001f${resolved.bindingDigest}`, async () => {
+  const sound = await settle(walk, `record\u001f${resolved.bindingDigest}`, async () => {
     const { validSignerKeyids } = walk.dsseVerifier(resolved.envelopeBytes);
     if (!validSignerKeyids.includes(resolved.binding.key.didKey)) return false;
-    const ceremony = await verifyCeremonyLeg(resolved, walk.witnessVerifier);
-    if (!ceremony.verified) return false;
-    return (await checkConsentChain(resolved, walk)).ok;
+    return (await verifyCeremonyLeg(resolved, walk.witnessVerifier)).verified;
   });
-  if (!sound) return false;
-  return (await checkRevocation(resolved, atTime, "before", walk)).ok;
+  return sound && (await checkRevocation(resolved, atTime, "before", walk)).ok;
 }
 
-async function checkConsentChain(
-  resolved: ResolvedBinding,
-  walk: AuthorityWalk,
-): Promise<{ ok: boolean; detail?: string }> {
-  if (resolved.isGenesis) return { ok: true };
+/** Whether a binding stands at the instant it gives authority. */
+async function bindingStands(resolved: ResolvedBinding, atTime: string, walk: AuthorityWalk): Promise<boolean> {
+  return await authorityUsable(resolved, atTime, walk) && chainHolds(resolved, walk);
+}
+
+/** What one binding's record offers §7.4a, before the batch it was sealed in
+ * is settled. */
+interface ChainReading {
+  /** Genesis, or an authority from a strictly earlier instant stands. */
+  readonly rooted: boolean;
+  /** Usable authorities that took effect at this binding's own instant:
+   * they stand or fall with it. */
+  readonly peers: readonly ResolvedBinding[];
+  /** Why the chain fails if nothing roots it. */
+  readonly detail?: string;
+}
+
+async function readChain(resolved: ResolvedBinding, walk: AuthorityWalk): Promise<ChainReading> {
+  if (resolved.isGenesis) return { rooted: true, peers: [] };
 
   const { binding } = resolved;
   // Authority is judged when it was exercised, and §7.3's effective start is
@@ -302,8 +297,19 @@ async function checkConsentChain(
   // minter's claim. Later expiry or revocation of the authority takes nothing
   // back (§7.4b), and a back-dated `validFrom` reaches nothing earlier.
   const mintTime = resolved.effectiveStart;
-  const incumbents = resolved.incumbentControls ?? [];
+  const peers: ResolvedBinding[] = [];
+  /** True when `authority` roots this binding. One from its own instant is
+   * noted as a peer instead: only its batch as a whole can say if it stands. */
+  const roots = async (authority: ResolvedBinding): Promise<boolean> => {
+    if (authority.bindingDigest === resolved.bindingDigest) return false;
+    const order = compareCalendarStrictRfc3339Instants(authority.effectiveStart, mintTime);
+    if (order === undefined || order > 0) return false;
+    if (order < 0) return bindingStands(authority, mintTime, walk);
+    if (await authorityUsable(authority, mintTime, walk)) peers.push(authority);
+    return false;
+  };
 
+  const incumbents = resolved.incumbentControls ?? [];
   for (const incumbent of incumbents) {
     if (!voucherIdentityEquals(incumbent.voucher, binding.voucher)) continue;
     // eslint-disable-next-line no-await-in-loop -- sequential: the first that stands settles it.
@@ -316,12 +322,11 @@ async function checkConsentChain(
     // binding that holds it, so that is the record every check here applies to.
     if (authority === null
       || authority.binding.relationship !== "controls"
-      || !voucherIdentityEquals(authority.binding.voucher, binding.voucher)
-      || !precedes(authority, resolved)) {
+      || !voucherIdentityEquals(authority.binding.voucher, binding.voucher)) {
       continue;
     }
     // eslint-disable-next-line no-await-in-loop -- sequential: the first that stands settles it.
-    if (await bindingStands(authority, mintTime, walk)) return { ok: true }; // self-extension (§7.4a option 1)
+    if (await roots(authority)) return { rooted: true, peers: [] }; // self-extension (§7.4a option 1)
   }
 
   if (binding.consent !== undefined) {
@@ -340,7 +345,7 @@ async function checkConsentChain(
     });
     const { validSignerKeyids } = walk.dsseVerifier(syntheticEnvelope);
     if (!validSignerKeyids.includes(binding.consent.keyid)) {
-      return { ok: false, detail: "consent countersignature does not validate against its declared keyid." };
+      return { rooted: false, peers, detail: "consent countersignature does not validate against its declared keyid." };
     }
     const consentingBinding = await resolveBindingForAgent(
       walk.bindingResolver,
@@ -349,34 +354,88 @@ async function checkConsentChain(
     );
     if (consentingBinding === null || !consentingBinding.binding.scope.includes("bindings")) {
       return {
-        ok: false,
+        rooted: false,
+        peers,
         detail: `consent keyid "${binding.consent.keyid}" did not hold a scope:bindings binding to `
           + `"${binding.agent}" at this binding's effective start "${mintTime}".`,
       };
     }
-    if (!precedes(consentingBinding, resolved) || !(await bindingStands(consentingBinding, mintTime, walk))) {
-      return {
-        ok: false,
-        detail: `consent keyid "${binding.consent.keyid}" holds a binding to "${binding.agent}" that did `
-          + `not stand at this binding's effective start "${mintTime}" (§7.4a).`,
-      };
-    }
-    return { ok: true }; // cross-account consent (§7.4a option 2)
+    if (await roots(consentingBinding)) return { rooted: true, peers: [] }; // cross-account consent (§7.4a option 2)
+    return {
+      rooted: false,
+      peers,
+      detail: `consent keyid "${binding.consent.keyid}" holds a binding to "${binding.agent}" that did `
+        + `not stand at this binding's effective start "${mintTime}" (§7.4a).`,
+    };
   }
 
   if (incumbents.length === 0) {
     return {
-      ok: false,
+      rooted: false,
+      peers,
       detail: "non-genesis binding carries no incumbent controls voucher and no "
         + "bindings-scoped consent countersignature (§7.4a).",
     };
   }
   return {
-    ok: false,
+    rooted: false,
+    peers,
     detail: `no incumbent controls binding (${incumbents.map(({ voucher }) => describeVoucherIdentity(voucher)).join(", ")}) `
       + `stands for the binding's own voucher (${describeVoucherIdentity(binding.voucher)}) and it `
       + "carries no bindings-scoped consent countersignature (§7.4a).",
   };
+}
+
+/**
+ * Whether a chain of authority reaches this binding from the genesis: the
+ * least fixed point, not a walk that gives up on a repeat, so a binding stands
+ * only on something that does. This is the cycle guard. A binding cannot
+ * countersign itself, and a ring of bindings countersigning each other has
+ * nothing under it however it is entered.
+ *
+ * Bindings sealed at one instant may authorize each other in any order, and
+ * no digest may decide which, so a batch is settled together: every binding
+ * reachable through authority at that same instant is read once, then standing
+ * spreads out from the ones rooted at an earlier instant. Everything else the
+ * walk asks about lies at a strictly earlier instant, so the fact settled here
+ * for each member does not depend on which of them asked.
+ */
+async function chainHolds(resolved: ResolvedBinding, walk: AuthorityWalk): Promise<boolean> {
+  const fact = (binding: ResolvedBinding): string => `chain\u001f${binding.bindingDigest}`;
+  const known = walk.settled.get(fact(resolved));
+  if (known !== undefined) return known;
+
+  const batch = new Map<ResolvedBinding["bindingDigest"], ChainReading>();
+  const unread = [resolved];
+  for (let next = unread.pop(); next !== undefined; next = unread.pop()) {
+    if (batch.has(next.bindingDigest)) continue;
+    const settled = walk.settled.get(fact(next));
+    // eslint-disable-next-line no-await-in-loop -- batches are small; sequential is fine.
+    const reading = settled === undefined ? await readChain(next, walk) : { rooted: settled, peers: [] };
+    batch.set(next.bindingDigest, reading);
+    unread.push(...reading.peers);
+  }
+
+  const standing = new Set([...batch].filter(([, { rooted }]) => rooted).map(([digest]) => digest));
+  for (let spread = true; spread;) {
+    spread = false;
+    for (const [digest, { peers }] of batch) {
+      if (standing.has(digest) || !peers.some(({ bindingDigest }) => standing.has(bindingDigest))) continue;
+      standing.add(digest);
+      spread = true;
+    }
+  }
+  for (const digest of batch.keys()) walk.settled.set(`chain\u001f${digest}`, standing.has(digest));
+  return standing.has(resolved.bindingDigest);
+}
+
+async function checkConsentChain(
+  resolved: ResolvedBinding,
+  walk: AuthorityWalk,
+): Promise<{ ok: boolean; detail?: string }> {
+  if (await chainHolds(resolved, walk)) return { ok: true };
+  const { detail } = await readChain(resolved, walk);
+  return { ok: false, ...(detail === undefined ? {} : { detail }) };
 }
 
 async function isRevocationAuthorized(
@@ -421,18 +480,18 @@ async function checkRevocation(
     // §7.4b: never retroactive -- a revocation anchored after the
     // evidence's effective time attributes nothing before it.
     const comparison = compareCalendarStrictRfc3339Instants(entry.effectiveTime, atTime);
-    if (comparison === undefined) {
-      return { ok: false, detail: "revocation effectiveTime is not a calendar-valid RFC 3339 authority time." };
-    }
-    if (comparison > 0 || (comparison === 0 && boundary === "before")) continue;
+    if (comparison !== undefined && (comparison > 0 || (comparison === 0 && boundary === "before"))) continue;
     const fact = `revocation\u001f${resolved.bindingDigest}\u001f${recordDigest(entry.envelopeBytes)}`;
     // eslint-disable-next-line no-await-in-loop -- revocations lists are small; sequential is fine.
-    if (await settle(walk, fact, () => isRevocationAuthorized(resolved, entry, walk))) {
-      return {
-        ok: false,
-        detail: `revoked effective "${entry.effectiveTime}" by "${entry.revocation.revokedBy}".`,
-      };
-    }
+    if (!(await settle(walk, fact, () => isRevocationAuthorized(resolved, entry, walk)))) continue;
+    // Authority comes first: a time nobody can read refuses only when someone
+    // with standing wrote it, or any record naming this binding would revoke it.
+    return {
+      ok: false,
+      detail: comparison === undefined
+        ? "revocation effectiveTime is not a calendar-valid RFC 3339 authority time."
+        : `revoked effective "${entry.effectiveTime}" by "${entry.revocation.revokedBy}".`,
+    };
   }
   return { ok: true };
 }

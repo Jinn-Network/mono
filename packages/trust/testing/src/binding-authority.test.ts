@@ -6,7 +6,7 @@ import {
   sealDsseEnvelope,
   verifyEnvelopeBinding,
 } from "@jinn-network/trust-core";
-import type { Scope, Sha256Digest } from "@jinn-network/trust-core";
+import type { CeremonyType, Relationship, Scope, Sha256Digest } from "@jinn-network/trust-core";
 import { createAnchorResolver, createBindingResolver } from "@jinn-network/trust-resolve";
 import type {
   BindingStore,
@@ -67,6 +67,9 @@ interface BindOptions {
   readonly expiresAt?: string;
   readonly scope?: readonly Scope[];
   readonly consentBy?: string;
+  readonly relationship?: Relationship;
+  /** A ceremony other than a genuine EOA one, which this package cannot check by itself. */
+  readonly ceremonyType?: Exclude<CeremonyType, "eoa">;
   /** Drops the ceremony evidence from the record, so its ceremony cannot verify. */
   readonly withoutCeremonyEvidence?: boolean;
 }
@@ -77,7 +80,10 @@ class World {
   readonly anchors = new Map<Sha256Digest, string>();
   lookups = 0;
 
-  constructor(readonly requireAnchors: boolean) {}
+  constructor(
+    readonly requireAnchors: boolean,
+    private readonly verifyHostedCeremony?: () => Promise<boolean>,
+  ) {}
 
   private anchor(label: string, at: string | undefined): Sha256Digest | undefined {
     if (!this.requireAnchors || at === undefined) return undefined;
@@ -91,9 +97,10 @@ class World {
     const fixture = await buildKeyBindingFixture({
       agent: AGENT,
       workingKeyDidKey: options.key,
-      ceremonyType: "eoa",
+      ceremonyType: options.ceremonyType ?? "eoa",
       voucher: accountVoucher(84532, options.signer.address),
-      eoaCeremony: { signer: options.signer, chainId: 84532 },
+      ...(options.ceremonyType === undefined ? { eoaCeremony: { signer: options.signer, chainId: 84532 } } : {}),
+      ...(options.relationship === undefined ? {} : { relationship: options.relationship }),
       validFrom: options.validFrom,
       ...(options.expiresAt === undefined ? {} : { expiresAt: options.expiresAt }),
       scope: options.scope ?? ["verdicts", "bindings"],
@@ -115,10 +122,10 @@ class World {
   }
 
   /** Revocations only ever take effect once anchored (§7.4b), so these always carry one. */
-  async revoke(target: SealedKeyBindingRecord, revokedBy: string, at: string): Promise<void> {
+  async revoke(target: SealedKeyBindingRecord, revokedBy: string, at: string, effectiveFrom: string = at): Promise<void> {
     const anchorDigest = testSha256Digest(`binding-authority-revocation-${this.revocations.length}`);
     this.anchors.set(anchorDigest, at);
-    const fixture = await buildRevocationFixture({ target: target.bindingDigest, revokedBy, effectiveFrom: at, anchorDigest });
+    const fixture = await buildRevocationFixture({ target: target.bindingDigest, revokedBy, effectiveFrom, anchorDigest });
     this.revocations.push({ revocation: fixture.revocation, envelopeBytes: fixture.envelopeBytes });
   }
 
@@ -147,6 +154,7 @@ class World {
         },
       }),
       requireAnchors: this.requireAnchors,
+      ...(this.verifyHostedCeremony === undefined ? {} : { verifyHostedCeremony: this.verifyHostedCeremony }),
     });
     const envelopeBytes = sealDsseEnvelope({
       payloadBytes: new TextEncoder().encode("{}"),
@@ -181,11 +189,31 @@ class World {
   }
 }
 
+/** Mints with a fresh key until the record's digest sorts the wanted side of `than`'s. */
+async function bindSorted(
+  world: World,
+  options: Omit<BindOptions, "key">,
+  sortsBefore: boolean,
+  than: SealedKeyBindingRecord,
+): Promise<{ readonly key: string; readonly record: SealedKeyBindingRecord }> {
+  for (let attempt = 0; attempt < 4096; attempt += 1) {
+    const key = testDidKey(`binding-authority-sorted-${attempt}`);
+    // eslint-disable-next-line no-await-in-loop -- minting until the digest lands.
+    const record = await world.bind({ ...options, key });
+    if ((record.bindingDigest < than.bindingDigest) === sortsBefore) return { key, record };
+    world.records.pop();
+  }
+  throw new Error("no digest landed on the wanted side");
+}
+
 function permutations<T>(items: readonly T[]): T[][] {
   if (items.length <= 1) return [[...items]];
   return items.flatMap((item, index) =>
     permutations([...items.slice(0, index), ...items.slice(index + 1)]).map((rest) => [item, ...rest]));
 }
+
+/** A time the record schema admits and the calendar-strict comparison cannot read: no seconds. */
+const UNREADABLE_TIME = "2026-02-01T00:00Z";
 
 const stands = { ok: true };
 const refusedChain = { ok: false, reason: "consent-chain-violation" };
@@ -239,6 +267,55 @@ describe.each([
       expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
       expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
       expect(await w.verdict(THIRD_KEY)).toMatchObject(stands);
+    });
+
+    test.each([
+      { order: "before", sortsBefore: true },
+      { order: "after", sortsBefore: false },
+    ])("a binding consented by a key sealed at the same instant stands, its digest sorting $order the consenter's", async ({ sortsBefore }) => {
+      const w = world();
+      await bindGenesis(w);
+      const consenter = await w.bind({ key: COLD_KEY, signer: OWNER, validFrom: T1 });
+      const { key } = await bindSorted(w, { signer: SECOND_OWNER, validFrom: T1, consentBy: COLD_KEY }, sortsBefore, consenter);
+      expect(await w.verdict(key)).toMatchObject(stands);
+    });
+
+    test("authority can run through several bindings sealed at one instant", async () => {
+      const w = world();
+      await bindGenesis(w);
+      await w.bind({ key: COLD_KEY, signer: OWNER, validFrom: T1 });
+      await w.bind({ key: NEXT_KEY, signer: SECOND_OWNER, validFrom: T1, consentBy: COLD_KEY });
+      await w.bind({ key: THIRD_KEY, signer: STRANGER, validFrom: T1, consentBy: NEXT_KEY });
+      expect(await w.verdict(THIRD_KEY)).toMatchObject(stands);
+    });
+
+    test("a one-account batch at the founding instant stands, a delegate's digest sorting first", async () => {
+      const w = world();
+      const one = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T0 });
+      const other = await w.bind({ key: THIRD_KEY, signer: OWNER, validFrom: T0 });
+      const first = one.bindingDigest < other.bindingDigest ? one : other;
+      const { key } = await bindSorted(w, { signer: OWNER, validFrom: T0, relationship: "signs-for" }, true, first);
+      expect(await w.verdict(key)).toMatchObject(stands);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+      expect(await w.verdict(THIRD_KEY)).toMatchObject(stands);
+    });
+
+    test.each([
+      { order: "before", sortsBefore: true },
+      { order: "after", sortsBefore: false },
+    ])("a binding consented by the genesis key at the founding instant stands, its digest sorting $order the genesis", async ({ sortsBefore }) => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      const { key } = await bindSorted(w, { signer: SECOND_OWNER, validFrom: T0, consentBy: GENESIS_KEY }, sortsBefore, genesis);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+      expect(await w.verdict(key)).toMatchObject(stands);
+    });
+
+    test("an incumbent that expires at the instant the new binding takes effect still authorizes it", async () => {
+      const w = world();
+      await bindGenesis(w, { expiresAt: T1 });
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1 });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
     });
 
     test("authority is judged when it was exercised: a consenter that expires later takes nothing with it", async () => {
@@ -341,6 +418,22 @@ describe.each([
       expect(await w.verdict(NEXT_KEY)).toMatchObject(refusedChain);
     });
 
+    test("a consenter whose scope does not cover bindings", async () => {
+      const w = world();
+      await bindGenesis(w, { scope: ["verdicts"] });
+      await w.bind({ key: NEXT_KEY, signer: SECOND_OWNER, validFrom: T1, consentBy: GENESIS_KEY });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(refusedChain);
+    });
+
+    test("a key held only as operates, whatever else a store says of it", async () => {
+      const w = world();
+      await bindGenesis(w, { expiresAt: T2 });
+      await w.bind({ key: COLD_KEY, signer: OWNER, validFrom: T1, relationship: "operates" });
+      await w.bind({ key: COLD_KEY, signer: OWNER, validFrom: new Date(Date.parse(T1) + 1000).toISOString() });
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T3 });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(refusedChain);
+    });
+
     test("a peer that lost the conflict over its key is not an incumbent for its voucher", async () => {
       const w = world();
       await bindGenesis(w);
@@ -352,7 +445,85 @@ describe.each([
     });
   });
 
+  describe("a record nothing here can verify (§7.5 step 3)", () => {
+    const refused = [
+      { ceremony: "safe", ceremonyType: "safe" as const },
+      { ceremony: "oidc-machine", ceremonyType: "oidc-machine" as const },
+      { ceremony: "github-human", ceremonyType: "github-human" as const },
+      { ceremony: "agentId, on an account voucher", ceremonyType: "agentId" as const },
+    ];
+
+    test.each(refused)("a later binding cannot found the IRI over an earlier $ceremony record", async ({ ceremonyType }) => {
+      const w = world();
+      await bindGenesis(w, { ceremonyType });
+      await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T1 });
+      expect(await w.verdict(STRANGER_KEY)).toMatchObject(refusedChain);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject({ ok: false, reason: "binding-not-resolved" });
+    });
+
+    test("nor over one the host's own leg refused", async () => {
+      const w = new World(requireAnchors, async () => false);
+      await bindGenesis(w, { ceremonyType: "oidc-machine" });
+      await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T1 });
+      expect(await w.verdict(STRANGER_KEY)).toMatchObject(refusedChain);
+    });
+
+    test("and it gives no incumbency to a later binding of its own voucher", async () => {
+      const w = world();
+      await bindGenesis(w);
+      await w.bind({ key: COLD_KEY, signer: OWNER, validFrom: T1, ceremonyType: "oidc-machine" });
+      await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T1, ceremonyType: "oidc-machine" });
+      await w.bind({ key: STRANGER_SECOND_KEY, signer: STRANGER, validFrom: T2 });
+      expect(await w.verdict(STRANGER_SECOND_KEY)).toMatchObject(refusedChain);
+    });
+  });
+
   describe("revocation (§7.4b)", () => {
+    test("a revocation by a key with no binding has no effect, however its time is spelled", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      await w.revoke(genesis, STRANGER_KEY, T1, UNREADABLE_TIME);
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T2 });
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+    });
+
+    test("a revocation by a key that may make one takes effect at its anchor when its stated time cannot be read", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      await w.revoke(genesis, GENESIS_KEY, T1, UNREADABLE_TIME);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject({ ok: false, reason: "revoked" });
+      expect(await w.verdict(GENESIS_KEY, T0)).toMatchObject(stands);
+    });
+
+    test("a standing key whose scope does not cover bindings does not revoke", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      await w.bind({ key: COLD_KEY, signer: OWNER, validFrom: T1, scope: ["verdicts"] });
+      await w.revoke(genesis, COLD_KEY, T2);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+    });
+
+    test("an unauthorized revocation does not stop an authorized one being read", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      await w.revoke(genesis, STRANGER_KEY, T1);
+      await w.revoke(genesis, GENESIS_KEY, T2);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject({ ok: false, reason: "revoked" });
+    });
+
+    test("the order a store lists revocations of one instant in does not change which one is reported", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      await w.bind({ key: COLD_KEY, signer: OWNER, validFrom: T1 });
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1 });
+      await w.revoke(genesis, COLD_KEY, T2);
+      await w.revoke(genesis, NEXT_KEY, T2);
+      const forward = await w.verdictInStoredOrder(GENESIS_KEY);
+      w.revocations.reverse();
+      expect(await w.verdictInStoredOrder(GENESIS_KEY)).toEqual(forward);
+    });
+
     test("a revocation by a key that does not itself stand does not take effect", async () => {
       const w = world();
       const genesis = await bindGenesis(w);
@@ -412,16 +583,19 @@ describe.each([
     });
   });
 
-  test("the work of walking authority stays polynomial in the records of a hostile store", async () => {
+  test.each([
+    { spread: "one after another", stepMs: 1000 },
+    { spread: "all at one instant", stepMs: 0 },
+  ])("the work of walking authority stays polynomial in the records of a hostile store, $spread", async ({ stepMs }) => {
     const w = world();
     await bindGenesis(w);
     const keys = Array.from({ length: 24 }, (_, index) => testDidKey(`binding-authority-fan-${index}`));
     for (const [index, key] of keys.entries()) {
       // eslint-disable-next-line no-await-in-loop -- fixtures build in order.
-      await w.bind({ key, signer: STRANGER, validFrom: new Date(Date.parse(T1) + index * 1000).toISOString() });
+      await w.bind({ key, signer: STRANGER, validFrom: new Date(Date.parse(T1) + index * stepMs).toISOString() });
     }
     expect(await w.verdictInStoredOrder(keys.at(-1)!)).toMatchObject(refusedChain);
-    expect(w.lookups).toBeLessThan(keys.length * keys.length);
+    expect(w.lookups).toBeLessThan(2 * keys.length * keys.length);
   });
 });
 

@@ -1,11 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { TRUST_KEY_BINDING_FORMAT, deriveStrength } from "@jinn-network/trust-core";
-import type { AnchorResolver, ChainFactResolver, KeyBinding, Sha256Digest } from "@jinn-network/trust-core";
+import {
+  TRUST_KEY_BINDING_FORMAT,
+  ceremonyEvidenceDigest,
+  deriveStrength,
+  didPkh,
+  serializeCeremonyMessage,
+} from "@jinn-network/trust-core";
+import type {
+  AnchorResolver,
+  ChainFactResolver,
+  EoaCeremonyEvidence,
+  KeyBinding,
+  Sha256Digest,
+} from "@jinn-network/trust-core";
+import { hexToBytes } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it, vi } from "vitest";
 
 import { createBindingResolver } from "./binding-resolver.js";
-import type { BindingStore, SealedKeyBindingRecord } from "./binding-resolver.js";
+import type { BindingStore, CreateBindingResolverOptions, SealedKeyBindingRecord } from "./binding-resolver.js";
 
 const AGENT = "https://spec.jinn.network/agents/1";
 const KEY_A = "did:key:zKeyA";
@@ -259,25 +273,235 @@ describe("createBindingResolver", () => {
       expect(await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at)).toBeNull();
     });
 
-    it("a record whose ceremony cannot be verified cannot take genesis from one whose can", async () => {
-      const unverified = accountBinding({
+    // What this resolver cannot verify it cannot rule out either: the record may be the true
+    // genesis, so leaving it out would make the next record the founder of the IRI.
+    it.each([
+      { ceremony: "safe" as const, label: "safe", options: {} },
+      { ceremony: "oidc-machine" as const, label: "oidc-machine", options: {} },
+      { ceremony: "github-human" as const, label: "github-human", options: {} },
+      { ceremony: "agentId" as const, label: "an agentId ceremony on an account voucher", options: {} },
+      {
+        ceremony: "oidc-machine" as const,
+        label: "a hosted ceremony the host refused",
+        options: { verifyHostedCeremony: async () => false },
+      },
+    ])("counts $label when deciding what came first, and does not resolve it", async ({ ceremony, options }) => {
+      const earlier = accountBinding({
         key: { publicKey: "pk2", keyid: KEY_OWNER, algorithm: "secp256k1", didKey: KEY_OWNER },
-        ceremony: { type: "oidc-machine", digest: CEREMONY_DIGEST },
-        strength: deriveStrength("oidc-machine"),
+        ceremony: { type: ceremony, digest: CEREMONY_DIGEST },
+        strength: deriveStrength(ceremony),
         anchors: [{ digest: DIGEST_B }],
       });
-      const genuine = accountBinding({ validFrom: "2026-01-02T00:00:00.000Z" });
+      const later = accountBinding({ validFrom: "2026-01-02T00:00:00.000Z" });
       const resolver = createBindingResolver({
-        bindings: fakeStore([record(unverified, DIGEST_B), record(genuine, DIGEST_A)]),
+        bindings: fakeStore([record(later, DIGEST_A), record(earlier, DIGEST_B)]),
         anchors: fakeAnchors({
           [DIGEST_A]: "2026-01-02T00:00:00.000Z",
           [DIGEST_B]: "2026-01-01T00:00:00.000Z",
         }),
+        ...options,
       });
 
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(false);
+      expect(await resolver.resolveBinding({ key: KEY_OWNER, agent: AGENT }, at)).toBeNull();
+    });
+  });
+
+  describe("time is compared by instant, not by spelling", () => {
+    const at = "2026-06-01T00:00:00.000Z";
+    const keyed = (didKey: string) => ({ publicKey: "pk", keyid: didKey, algorithm: "secp256k1", didKey });
+
+    it("reads a fractional second after a whole one", async () => {
+      const binding = accountBinding({ validFrom: "2026-01-01T00:00:00.500Z" });
+      const anchors = fakeAnchors({ [DIGEST_A]: "2026-01-01T00:00:00Z" });
+      const resolver = createBindingResolver({ bindings: fakeStore([record(binding, DIGEST_A)]), anchors });
+
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.effectiveStart)
+        .toBe("2026-01-01T00:00:00.500Z");
+    });
+
+    it("takes the earliest anchor of a binding by instant", async () => {
+      const binding = accountBinding({
+        validFrom: "2026-01-01T00:00:00Z",
+        anchors: [{ digest: DIGEST_A }, { digest: DIGEST_B }],
+      });
+      const anchors = fakeAnchors({
+        [DIGEST_A]: "2026-02-01T00:00:00.500Z",
+        [DIGEST_B]: "2026-02-01T00:00:00Z",
+      });
+      const resolver = createBindingResolver({ bindings: fakeStore([record(binding, DIGEST_A)]), anchors });
+
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.effectiveStart)
+        .toBe("2026-02-01T00:00:00Z");
+    });
+
+    it("does not resolve past an expiry spelled without a fraction", async () => {
+      const binding = accountBinding({ expiresAt: "2026-02-01T00:00:00Z" });
+      const anchors = fakeAnchors({ [DIGEST_A]: "2026-01-01T00:00:00.000Z" });
+      const resolver = createBindingResolver({ bindings: fakeStore([record(binding, DIGEST_A)]), anchors });
+
+      expect(await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, "2026-02-01T00:00:00.500Z")).toBeNull();
+    });
+
+    it("opens an effective start spelled with an offset at its instant", async () => {
+      const binding = accountBinding({ validFrom: "2026-02-01T00:00:00+01:00" });
+      const anchors = fakeAnchors({ [DIGEST_A]: "2026-01-01T00:00:00.000Z" });
+      const resolver = createBindingResolver({ bindings: fakeStore([record(binding, DIGEST_A)]), anchors });
+
+      expect(await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, "2026-01-31T22:30:00Z")).toBeNull();
+      expect(await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, "2026-01-31T23:30:00Z")).not.toBeNull();
+    });
+
+    it("gives a conflict over one key to the earlier instant", async () => {
+      const earlier = accountBinding({ validFrom: "2026-01-01T00:00:00Z", anchors: [{ digest: DIGEST_B }] });
+      const later = accountBinding({ validFrom: "2026-01-01T00:00:00.500Z", anchors: [{ digest: DIGEST_A }] });
+      const anchors = fakeAnchors({
+        [DIGEST_A]: "2026-01-01T00:00:00.500Z",
+        [DIGEST_B]: "2026-01-01T00:00:00Z",
+      });
+      const resolver = createBindingResolver({
+        bindings: fakeStore([record(later, DIGEST_A), record(earlier, DIGEST_B)]),
+        anchors,
+      });
+
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.bindingDigest).toBe(DIGEST_B);
+    });
+
+    it("founds the IRI on the earlier instant", async () => {
+      const founder = accountBinding({
+        key: keyed(KEY_OWNER),
+        validFrom: "2026-01-01T00:00:00Z",
+        anchors: [{ digest: DIGEST_B }],
+      });
+      const later = accountBinding({ validFrom: "2026-01-01T00:00:00.500Z", anchors: [{ digest: DIGEST_A }] });
+      const anchors = fakeAnchors({
+        [DIGEST_A]: "2026-01-01T00:00:00.500Z",
+        [DIGEST_B]: "2026-01-01T00:00:00Z",
+      });
+      const resolver = createBindingResolver({
+        bindings: fakeStore([record(later, DIGEST_A), record(founder, DIGEST_B)]),
+        anchors,
+      });
+
+      expect((await resolver.resolveBinding({ key: KEY_OWNER, agent: AGENT }, at))?.isGenesis).toBe(true);
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(false);
+    });
+
+    it("treats one instant spelled two ways as a tie", async () => {
+      const first = accountBinding({ validFrom: "2026-01-01T00:00:00.000Z", anchors: [{ digest: DIGEST_A }] });
+      const second = accountBinding({
+        key: keyed(KEY_OWNER),
+        validFrom: "2026-01-01T01:00:00+01:00",
+        anchors: [{ digest: DIGEST_B }],
+      });
+      const anchors = fakeAnchors({
+        [DIGEST_A]: "2026-01-01T00:00:00.000Z",
+        [DIGEST_B]: "2026-01-01T00:00:00Z",
+      });
+      const resolver = createBindingResolver({
+        bindings: fakeStore([record(second, DIGEST_B), record(first, DIGEST_A)]),
+        anchors,
+      });
+
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(true);
+      expect((await resolver.resolveBinding({ key: KEY_OWNER, agent: AGENT }, at))?.isGenesis).toBe(false);
+    });
+
+    it("orders revocations by instant", async () => {
+      const binding = accountBinding();
+      const revocation = (effectiveFrom: string, digest: Sha256Digest, marker: number) => ({
+        revocation: {
+          protocol: "https://spec.jinn.network/trust/revocation/v1",
+          target: DIGEST_A,
+          revokedBy: KEY_OWNER,
+          anchors: [{ digest }],
+          effectiveFrom,
+        },
+        envelopeBytes: Uint8Array.of(marker),
+      });
+      const store: BindingStore = {
+        ...fakeStore([record(binding, DIGEST_A)]),
+        async listRevocationsForTargets() {
+          return [
+            revocation("2026-03-01T00:00:00.500Z", DIGEST_B, 1),
+            revocation("2026-03-01T00:00:00Z", CEREMONY_DIGEST, 2),
+          ] as never;
+        },
+      };
+      const anchors = fakeAnchors({
+        [DIGEST_A]: "2026-01-01T00:00:00.000Z",
+        [DIGEST_B]: "2026-02-01T00:00:00.000Z",
+        [CEREMONY_DIGEST]: "2026-02-01T00:00:00.000Z",
+      });
+      const resolver = createBindingResolver({ bindings: store, anchors });
+
       const resolved = await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at);
-      expect(resolved?.isGenesis).toBe(true);
-      expect(resolved?.incumbentControls).toBeUndefined();
+      expect(resolved?.revocations.map(({ effectiveTime }) => effectiveTime)).toEqual([
+        "2026-03-01T00:00:00Z",
+        "2026-03-01T00:00:00.500Z",
+      ]);
+    });
+
+    it("takes the anchor alone when a stated time cannot be read", async () => {
+      const binding = accountBinding({ validFrom: "2026-03-01T00:00Z" });
+      const anchors = fakeAnchors({ [DIGEST_A]: "2026-01-01T00:00:00.000Z" });
+      const resolver = createBindingResolver({ bindings: fakeStore([record(binding, DIGEST_A)]), anchors });
+
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.effectiveStart)
+        .toBe("2026-01-01T00:00:00.000Z");
+    });
+
+    it("places a time it cannot read after every time it can, in any stored order", async () => {
+      const unreadable = accountBinding({ key: keyed(KEY_OWNER), validFrom: "2026-01-01T00:00Z", anchors: [] });
+      const genuine = accountBinding({ validFrom: "2026-03-01T00:00:00Z", anchors: [] });
+      const anchors = fakeAnchors({});
+      for (const stored of [
+        [record(unreadable, DIGEST_B), record(genuine, DIGEST_A)],
+        [record(genuine, DIGEST_A), record(unreadable, DIGEST_B)],
+      ]) {
+        const resolver = createBindingResolver({ bindings: fakeStore(stored), anchors, requireAnchors: false });
+        // eslint-disable-next-line no-await-in-loop -- one stored order, then the other.
+        expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(true);
+      }
+    });
+  });
+
+  describe("a tie at the founding instant", () => {
+    const at = "2026-06-01T00:00:00.000Z";
+    const keyed = (didKey: string) => ({ publicKey: "pk", keyid: didKey, algorithm: "secp256k1", didKey });
+    const anchors = fakeAnchors({ [DIGEST_A]: "2026-01-01T00:00:00.000Z", [DIGEST_B]: "2026-01-01T00:00:00.000Z" });
+
+    it.each([
+      { digests: "sorting first", own: DIGEST_A, other: DIGEST_B },
+      { digests: "sorting second", own: DIGEST_B, other: DIGEST_A },
+    ])("does not go to a record that does not claim control, its digest $digests", async ({ own, other }) => {
+      const delegate = accountBinding({ relationship: "signs-for", anchors: [{ digest: own }] });
+      const controller = accountBinding({ key: keyed(KEY_OWNER), anchors: [{ digest: other }] });
+      const resolver = createBindingResolver({ bindings: fakeStore([record(delegate, own), record(controller, other)]), anchors });
+
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(false);
+      expect((await resolver.resolveBinding({ key: KEY_OWNER, agent: AGENT }, at))?.isGenesis).toBe(true);
+    });
+
+    it.each([
+      { digests: "sorting first", own: DIGEST_A, other: DIGEST_B },
+      { digests: "sorting second", own: DIGEST_B, other: DIGEST_A },
+    ])("does not go to a record that names its own authority, its digest $digests", async ({ own, other }) => {
+      const consented = accountBinding({ consent: { keyid: KEY_OWNER, sig: "c2ln" }, anchors: [{ digest: own }] });
+      const founder = accountBinding({ key: keyed(KEY_OWNER), anchors: [{ digest: other }] });
+      const resolver = createBindingResolver({ bindings: fakeStore([record(consented, own), record(founder, other)]), anchors });
+
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(false);
+      expect((await resolver.resolveBinding({ key: KEY_OWNER, agent: AGENT }, at))?.isGenesis).toBe(true);
+    });
+
+    it("goes by digest between records that make the same claim", async () => {
+      const first = accountBinding({ anchors: [{ digest: DIGEST_A }] });
+      const second = accountBinding({ key: keyed(KEY_OWNER), anchors: [{ digest: DIGEST_B }] });
+      const resolver = createBindingResolver({ bindings: fakeStore([record(second, DIGEST_B), record(first, DIGEST_A)]), anchors });
+
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(true);
+      expect((await resolver.resolveBinding({ key: KEY_OWNER, agent: AGENT }, at))?.isGenesis).toBe(false);
     });
   });
 
@@ -313,33 +537,97 @@ describe("createBindingResolver", () => {
     expect(resolved).toBeNull();
   });
 
-  it("resolves an agentId binding when the registry owner holds a valid account-ceremony binding to the same IRI", async () => {
-    const ownerAddress = "0x3333333333333333333333333333333333333333";
-    const ownerDid = "did:pkh:eip155:84532:0x3333333333333333333333333333333333333333";
-    const accountLeg = accountBinding({
-      key: { publicKey: "pk2", keyid: KEY_OWNER, algorithm: "secp256k1", didKey: KEY_OWNER },
-      voucher: { kind: "account", did: ownerDid, contractAccount: false },
-      anchors: [{ digest: DIGEST_B }],
-    });
-    const agentIdBinding = accountBinding({
-      voucher: { kind: "agentId", caip19: AGENT_ASSET },
-      anchors: [{ digest: DIGEST_A }],
-    });
-    const store = fakeStore([record(agentIdBinding, DIGEST_A), record(accountLeg, DIGEST_B)]);
+  describe("the agentId composition leg's account record (§7.2)", () => {
+    const owner = privateKeyToAccount(`0x${"4".repeat(64)}`);
+    const stranger = privateKeyToAccount(`0x${"5".repeat(64)}`);
+    const ownerVoucher = { kind: "account" as const, did: didPkh(84532, owner.address), contractAccount: false };
+    const ownerKey = { publicKey: "pk2", keyid: KEY_OWNER, algorithm: "secp256k1", didKey: KEY_OWNER };
     const anchors = fakeAnchors({
       [DIGEST_A]: "2026-01-01T00:00:00.000Z",
       [DIGEST_B]: "2026-01-01T00:00:00.000Z",
     });
     const chainFacts: ChainFactResolver = {
-      ownerOf: vi.fn(async () => ownerAddress),
+      ownerOf: vi.fn(async () => owner.address),
       getAgentWalletAtBlock: vi.fn(async () => {
         throw new Error("not used in this test");
       }),
     };
-    const resolver = createBindingResolver({ bindings: store, anchors, chainFacts });
+    const agentIdRecord = record(accountBinding({
+      voucher: { kind: "agentId", caip19: AGENT_ASSET },
+      ceremony: { type: "agentId", digest: CEREMONY_DIGEST },
+      strength: deriveStrength("agentId"),
+      anchors: [{ digest: DIGEST_A }],
+    }), DIGEST_A);
 
-    const resolved = await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, "2026-06-01T00:00:00.000Z");
-    expect(resolved?.bindingDigest).toBe(DIGEST_A);
+    /** A genuine EIP-191 ceremony over `[AGENT, KEY_OWNER]`, signed by `signer`. */
+    async function ceremonyBy(signer: typeof owner): Promise<EoaCeremonyEvidence> {
+      const message = {
+        domain: "trust.jinn.network",
+        address: signer.address,
+        uri: "https://trust.jinn.network/ceremony/key-binding",
+        version: "1" as const,
+        chainId: 84532,
+        nonce: "composition-nonce",
+        issuedAt: "2026-01-01T00:00:00.000Z",
+        resources: [AGENT, KEY_OWNER],
+      };
+      const messageBytes = serializeCeremonyMessage("eoa", message);
+      const signature = hexToBytes(await signer.signMessage({ message: { raw: messageBytes } }));
+      return { type: "eoa", message, messageBytes, signature };
+    }
+
+    async function accountLeg(overrides: Partial<KeyBinding> = {}, evidenceBy: typeof owner = owner) {
+      const ceremonyEvidence = await ceremonyBy(evidenceBy);
+      const binding = accountBinding({
+        key: ownerKey,
+        voucher: ownerVoucher,
+        ceremony: { type: "eoa", digest: ceremonyEvidenceDigest(ceremonyEvidence) },
+        anchors: [{ digest: DIGEST_B }],
+        ...overrides,
+      });
+      return { ...record(binding, DIGEST_B), ceremonyEvidence };
+    }
+
+    const composed = async (leg: SealedKeyBindingRecord, options: Pick<CreateBindingResolverOptions, "verifyHostedCeremony"> = {}) =>
+      createBindingResolver({ bindings: fakeStore([agentIdRecord, leg]), anchors, chainFacts, ...options })
+        .resolveBinding({ key: KEY_A, agent: AGENT }, "2026-06-01T00:00:00.000Z");
+
+    it("composes with a genuine ceremony of the registry owner", async () => {
+      expect((await composed(await accountLeg()))?.bindingDigest).toBe(DIGEST_A);
+    });
+
+    it("does not compose with a record that only names the owner", async () => {
+      const { ceremonyEvidence: _ceremonyEvidence, ...unsigned } = await accountLeg();
+      expect(await composed(unsigned)).toBeNull();
+    });
+
+    it("does not compose with evidence the record did not commit to", async () => {
+      expect(await composed(await accountLeg({ ceremony: { type: "eoa", digest: CEREMONY_DIGEST } }))).toBeNull();
+    });
+
+    it("does not compose with a ceremony someone else signed", async () => {
+      expect(await composed(await accountLeg({}, stranger))).toBeNull();
+    });
+
+    it("does not compose with a record whose ceremony nothing here verified", async () => {
+      const type = "oidc-machine";
+      const { ceremonyEvidence: _ceremonyEvidence, ...unverified } = await accountLeg({
+        ceremony: { type, digest: CEREMONY_DIGEST },
+        strength: deriveStrength(type),
+      });
+      expect(await composed(unverified, { verifyHostedCeremony: async () => true })).toBeNull();
+    });
+
+    it("composes with a Safe's account ceremony only on the host's say-so", async () => {
+      const { ceremonyEvidence: _ceremonyEvidence, ...safe } = await accountLeg({
+        voucher: { ...ownerVoucher, contractAccount: true },
+        ceremony: { type: "safe", digest: CEREMONY_DIGEST },
+        strength: deriveStrength("safe"),
+      });
+      expect(await composed(safe)).toBeNull();
+      expect(await composed(safe, { verifyHostedCeremony: async () => false })).toBeNull();
+      expect((await composed(safe, { verifyHostedCeremony: async () => true }))?.bindingDigest).toBe(DIGEST_A);
+    });
   });
 
   it("reports isGenesis for the sole binding of an Agent IRI", async () => {

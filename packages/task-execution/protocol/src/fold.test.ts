@@ -126,6 +126,39 @@ describe("foldObservations", () => {
     expect(() => foldObservations([engaged(), other, one])).toThrow(ConflictingObservationError);
   });
 
+  test("one sequence and one type do not make two observations the same one when the data differs", () => {
+    sequenceCounter = 0;
+    const delivered = terminal("delivered", {}, { id: "evt-terminal", sequence: "0000000000000005" });
+    const failed = terminal("failed", { blame: "task" }, { id: "evt-terminal", sequence: "0000000000000005" });
+    expect(() => foldObservations([engaged(), delivered, failed])).toThrow(ConflictingObservationError);
+    expect(() => foldObservations([engaged(), failed, delivered])).toThrow(ConflictingObservationError);
+  });
+
+  test("one sequence and one payload do not make two observations the same one when the type differs", () => {
+    sequenceCounter = 0;
+    const one = observation("network.jinn.task-execution.progress.v1", {}, { id: "evt-same", sequence: "0000000000000005" });
+    const other = observation("network.jinn.task-execution.attempt-started.v1", {}, { id: "evt-same", sequence: "0000000000000005" });
+    expect(() => foldObservations([engaged(), one, other])).toThrow(ConflictingObservationError);
+    expect(() => foldObservations([engaged(), other, one])).toThrow(ConflictingObservationError);
+  });
+
+  test("an explicit undefined field is not a disagreement", () => {
+    sequenceCounter = 0;
+    const one = terminal("failed", { blame: "task" }, { id: "evt-terminal", sequence: "0000000000000005" });
+    const replay = terminal("failed", { blame: "task", detail: undefined }, { id: "evt-terminal", sequence: "0000000000000005" });
+    expect(foldObservations([engaged(), one, replay])).toEqual(foldObservations([engaged(), one]));
+  });
+
+  test("a payload nested far past any call stack folds and compares", () => {
+    sequenceCounter = 0;
+    let deep: Record<string, unknown> = { leaf: true };
+    for (let depth = 0; depth < 500_000; depth += 1) deep = { deep };
+    const one = terminal("failed", { blame: "task", annotations: deep }, { id: "evt-terminal", sequence: "0000000000000005" });
+    const other = terminal("failed", { blame: "task", annotations: { deep } }, { id: "evt-terminal", sequence: "0000000000000005" });
+    expect(foldObservations([engaged(), one, { ...one }]).state).toBe("failed");
+    expect(() => foldObservations([engaged(), one, other])).toThrow(ConflictingObservationError);
+  });
+
   test("a replay that differs only in what the fold never reads is still a duplicate (§10.1 rebuild)", () => {
     sequenceCounter = 0;
     const one = started({ id: "evt-started" });

@@ -16,7 +16,9 @@ expected here (they are banned everywhere else in `packages/trust/`).
 verified: `@jinn-network/trust-core` takes a resolved binding as the resolver's
 word for the ceremony legs that need I/O. It verifies `eoa` offline and runs the
 `agentId` composition leg itself. `safe`, `oidc-machine` and `github-human`
-bindings resolve only when the host passes `verifyHostedCeremony`.
+bindings resolve only when the host passes `verifyHostedCeremony`. A record
+that does not resolve still counts when deciding which binding came first: it
+may be the true genesis.
 
 See `docs/superpowers/plans/2026-07-28-trust-layer.md` for the implementation
 plan.

@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { compareCodeUnitStrings, recordDigest } from "@jinn-network/trust-core";
+import {
+  ceremonyEvidenceDigest,
+  compareCalendarStrictRfc3339Instants,
+  compareCodeUnitStrings,
+  isCalendarStrictRfc3339,
+  recordDigest,
+  verifyEoaCeremony,
+} from "@jinn-network/trust-core";
 import type {
   AnchorResolver,
   BindingResolver,
@@ -115,11 +122,31 @@ function isObserved<T>(observation: T | null): observation is T {
   return observation !== null;
 }
 
+/**
+ * Instants, not spellings: `...00.500Z` sorts before `...00Z` as text, and one
+ * instant can be written many ways. A time nothing can read sorts after every
+ * time that can be read, so it can found nothing and the order stays total.
+ */
+function compareTimes(left: string, right: string): number {
+  const instants = compareCalendarStrictRfc3339Instants(left, right);
+  if (instants !== undefined) return instants;
+  const leftReadable = isCalendarStrictRfc3339(left);
+  if (leftReadable !== isCalendarStrictRfc3339(right)) return leftReadable ? -1 : 1;
+  return compareCodeUnitStrings(left, right);
+}
+
 function earliestAnchorTime(
   anchorTimes: readonly string[],
 ): string | undefined {
   if (anchorTimes.length === 0) return undefined;
-  return anchorTimes.reduce((min, time) => (time < min ? time : min));
+  return anchorTimes.reduce((min, time) => (compareTimes(time, min) < 0 ? time : min));
+}
+
+/** §7.3's `max(stated, anchorTime)`. A stated time nothing can read claims
+ * nothing, so the anchor stands alone. */
+function laterOf(stated: string, anchorTime: string): string {
+  const comparison = compareCalendarStrictRfc3339Instants(stated, anchorTime);
+  return comparison !== undefined && comparison > 0 ? stated : anchorTime;
 }
 
 // `AnchorReferenceSchema`/`RevocationSchema` (trust-core) infer their
@@ -137,8 +164,7 @@ async function effectiveStartOf(binding: KeyBinding, anchors: AnchorResolver): P
   );
   const anchorTimes = observations.filter(isObserved).map((observation) => observation.anchorTime);
   const earliest = earliestAnchorTime(anchorTimes);
-  if (earliest === undefined) return undefined;
-  return binding.validFrom > earliest ? binding.validFrom : earliest;
+  return earliest === undefined ? undefined : laterOf(binding.validFrom, earliest);
 }
 
 async function effectiveTimeOfRevocation(
@@ -150,13 +176,12 @@ async function effectiveTimeOfRevocation(
   );
   const anchorTimes = observations.filter(isObserved).map((observation) => observation.anchorTime);
   const earliest = earliestAnchorTime(anchorTimes);
-  if (earliest === undefined) return undefined;
-  return revocation.effectiveFrom > earliest ? revocation.effectiveFrom : earliest;
+  return earliest === undefined ? undefined : laterOf(revocation.effectiveFrom, earliest);
 }
 
 function isWithinWindow(binding: KeyBinding, effectiveStart: string, atTime: string): boolean {
-  if (atTime < effectiveStart) return false;
-  if (binding.expiresAt !== undefined && atTime > binding.expiresAt) return false;
+  if (compareTimes(atTime, effectiveStart) < 0) return false;
+  if (binding.expiresAt !== undefined && compareTimes(atTime, binding.expiresAt) > 0) return false;
   return true;
 }
 
@@ -187,6 +212,24 @@ async function ceremonyCanBeVerified(
   }
 }
 
+/** §7.2 asks the composition leg for a valid account-ceremony binding, not a
+ * record naming the account: an agentId ceremony is only as verified as this. */
+async function accountCeremonyVerified(
+  record: SealedKeyBindingRecord,
+  verifyHostedCeremony: CreateBindingResolverOptions["verifyHostedCeremony"],
+): Promise<boolean> {
+  switch (record.binding.ceremony.type) {
+    case "eoa":
+      return record.ceremonyEvidence !== undefined
+        && ceremonyEvidenceDigest(record.ceremonyEvidence) === record.binding.ceremony.digest
+        && verifyEoaCeremony(record.ceremonyEvidence, record.binding).verified;
+    case "safe":
+      return ceremonyCanBeVerified(record, verifyHostedCeremony);
+    default:
+      return false;
+  }
+}
+
 /** §7.2's agentId composition leg: the agentId voucher's registry owner
  * must itself hold a currently-valid account-ceremony binding to the same
  * Agent IRI, valid at `atTime` (see the module's finding re: `ownerOf`
@@ -195,10 +238,11 @@ async function agentIdCompositionHolds(
   candidate: SealedKeyBindingRecord,
   atTime: string,
   peers: readonly EffectiveBinding[],
-  chainFacts: ChainFactResolver | undefined,
+  options: Pick<CreateBindingResolverOptions, "chainFacts" | "verifyHostedCeremony">,
 ): Promise<boolean> {
   const voucher = candidate.binding.voucher;
   if (voucher.kind !== "agentId") return true; // composition applies only to agentId vouchers
+  const { chainFacts } = options;
   if (chainFacts === undefined) return false;
 
   const chainId = parseCaip19ChainId(voucher.caip19);
@@ -212,19 +256,22 @@ async function agentIdCompositionHolds(
   }
   const ownerDid = didPkhFromAddress(chainId, ownerAddress);
 
-  return peers.some(({ record, effectiveStart }) => {
-    if (record.bindingDigest === candidate.bindingDigest) return false;
-    if (record.binding.voucher.kind !== "account") return false;
-    if (record.binding.voucher.did !== ownerDid) return false;
-    return isWithinWindow(record.binding, effectiveStart, atTime);
-  });
+  for (const { record, effectiveStart } of peers) {
+    if (record.bindingDigest === candidate.bindingDigest) continue;
+    if (record.binding.voucher.kind !== "account") continue;
+    if (record.binding.voucher.did !== ownerDid) continue;
+    if (!isWithinWindow(record.binding, effectiveStart, atTime)) continue;
+    // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
+    if (await accountCeremonyVerified(record, options.verifyHostedCeremony)) return true;
+  }
+  return false;
 }
 
 /** The order §7.3 ranks an Agent's bindings by: earliest effective start,
  * ties broken by digest, so that no stored order can decide anything. */
 function compareEffective(a: EffectiveBinding, b: EffectiveBinding): number {
-  if (a.effectiveStart !== b.effectiveStart) return a.effectiveStart < b.effectiveStart ? -1 : 1;
-  return compareCodeUnitStrings(a.record.bindingDigest, b.record.bindingDigest);
+  return compareTimes(a.effectiveStart, b.effectiveStart)
+    || compareCodeUnitStrings(a.record.bindingDigest, b.record.bindingDigest);
 }
 
 /** §7.4a option 1 (self-extension): every `controls`-relationship peer in
@@ -247,14 +294,25 @@ function findIncumbentControls(
     .map(({ record }) => ({ key: record.binding.key.didKey, voucher: record.binding.voucher }));
 }
 
+/** Whether a record could found an IRI at all: it claims control, and names
+ * no authority over itself. A digest must not hand the founding of a batch to
+ * one that does not, and so leave the rest of the batch without an incumbent. */
+function claimsFounding({ binding }: SealedKeyBindingRecord): boolean {
+  return binding.relationship === "controls" && binding.consent === undefined;
+}
+
 /** True only for the founding binding of the Agent IRI (§7.4a): the
- * earliest-effective binding among every binding ever asserted for it,
- * ties broken deterministically by digest. */
+ * earliest-effective binding among every binding ever asserted for it, a tie
+ * going first to one that claims founding and then by digest. */
 function isGenesisAmong(candidate: EffectiveBinding, allForAgent: readonly EffectiveBinding[]): boolean {
-  return allForAgent.every(({ record, effectiveStart }) => {
-    if (record.bindingDigest === candidate.record.bindingDigest) return true;
-    if (effectiveStart !== candidate.effectiveStart) return effectiveStart > candidate.effectiveStart;
-    return compareCodeUnitStrings(record.bindingDigest, candidate.record.bindingDigest) >= 0;
+  return allForAgent.every((other) => {
+    if (other.record.bindingDigest === candidate.record.bindingDigest) return true;
+    const instant = compareTimes(other.effectiveStart, candidate.effectiveStart);
+    if (instant !== 0) return instant > 0;
+    const founding = Number(claimsFounding(candidate.record)) - Number(claimsFounding(other.record));
+    return founding !== 0
+      ? founding > 0
+      : compareCodeUnitStrings(other.record.bindingDigest, candidate.record.bindingDigest) >= 0;
   });
 }
 
@@ -274,8 +332,6 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
       const withEffectiveStart: EffectiveBinding[] = [];
       for (const record of allForAgent) {
         // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
-        if (!(await ceremonyCanBeVerified(record, options.verifyHostedCeremony))) continue;
-        // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
         const effectiveStart = await effectiveStartOf(record.binding, options.anchors);
         if (effectiveStart === undefined) {
           if (requireAnchors) continue; // unanchored -- non-resolvable (§7.3)
@@ -285,17 +341,23 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
         withEffectiveStart.push({ record, effectiveStart });
       }
 
-      const forKeyAtTime = withEffectiveStart.filter(
-        ({ record, effectiveStart }) =>
-          record.binding.key.didKey === query.key
-          && isWithinWindow(record.binding, effectiveStart, atTime),
-      );
+      // The ceremony gate applies to what may resolve, never to the set the
+      // genesis and the incumbents are read from: a record nothing here can
+      // verify may be the true genesis, and leaving it out would make the next
+      // record the founder of the IRI (§7.4a).
+      const forKeyAtTime: EffectiveBinding[] = [];
+      for (const candidate of withEffectiveStart) {
+        if (candidate.record.binding.key.didKey !== query.key) continue;
+        if (!isWithinWindow(candidate.record.binding, candidate.effectiveStart, atTime)) continue;
+        // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
+        if (await ceremonyCanBeVerified(candidate.record, options.verifyHostedCeremony)) forKeyAtTime.push(candidate);
+      }
       if (forKeyAtTime.length === 0) return null;
 
       const withComposition: EffectiveBinding[] = [];
       for (const candidate of forKeyAtTime) {
         // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
-        const holds = await agentIdCompositionHolds(candidate.record, atTime, withEffectiveStart, options.chainFacts);
+        const holds = await agentIdCompositionHolds(candidate.record, atTime, withEffectiveStart, options);
         if (holds) withComposition.push(candidate);
       }
       if (withComposition.length === 0) return null;
@@ -323,11 +385,8 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
           effectiveTime,
         });
       }
-      revocations.sort((a, b) => (
-        a.effectiveTime === b.effectiveTime
-          ? compareCodeUnitStrings(recordDigest(a.envelopeBytes), recordDigest(b.envelopeBytes))
-          : (a.effectiveTime < b.effectiveTime ? -1 : 1)
-      ));
+      revocations.sort((a, b) => compareTimes(a.effectiveTime, b.effectiveTime)
+        || compareCodeUnitStrings(recordDigest(a.envelopeBytes), recordDigest(b.envelopeBytes)));
 
       const incumbentControls = findIncumbentControls(winner, withEffectiveStart);
       const resolved: ResolvedBinding = {
