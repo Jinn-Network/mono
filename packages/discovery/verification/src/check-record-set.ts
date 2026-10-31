@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
-import { ANCHOR_EVIDENCE_KIND, compareCodeUnitStrings } from "@jinn-network/trust-core";
+import { ANCHOR_EVIDENCE_KIND, compareCodeUnitStrings, recordDigest } from "@jinn-network/trust-core";
 import {
   ATTEMPT_OBSERVATION_TYPES,
   ConflictingObservationError,
@@ -41,6 +41,11 @@ export interface CheckRecordSetInput {
   readonly records: readonly RecordSetInputRecord[];
   /** The `sha256:` digests the walk starts from. Pass every digest to walk everything. */
   readonly roots: readonly string[];
+  /**
+   * Bytes a reference may resolve to without being in the set, such as `loadPublishedDocuments()`.
+   * Each answers only to the digest it hashes to. They are not records of the set and are not walked.
+   */
+  readonly published?: readonly Uint8Array[];
   readonly kinds?: RecordKinds;
   readonly trust?: RecordSetTrustOptions;
 }
@@ -52,6 +57,8 @@ export interface ReferencesResult extends CheckResult<"references"> {
   readonly unreached: number;
   /** Citations whose target is held. */
   readonly resolved: number;
+  /** Citations whose target is not held and is one of the `published` documents. */
+  readonly resolvedPublished: number;
   /** Citations of a record the set must hold and does not. */
   readonly dangling: number;
   /** Citations of bytes the family lets a reader lack, not held. */
@@ -124,8 +131,8 @@ function referencesOf(entry: InspectedRecord): readonly RecordReference[] | unde
   }
 }
 
-function checkReferences(roots: readonly string[], held: Held): ReferencesResult {
-  const counts = { reached: 0, unreached: 0, resolved: 0, dangling: 0, unavailable: 0, opaque: 0 };
+function checkReferences(roots: readonly string[], held: Held, published: ReadonlySet<string>): ReferencesResult {
+  const counts = { reached: 0, unreached: 0, resolved: 0, resolvedPublished: 0, dangling: 0, unavailable: 0, opaque: 0 };
   if (roots.length === 0) {
     return { ...skipped("references", "no-roots", "No roots were given, so no reference was followed."), ...counts, unreached: held.size };
   }
@@ -155,6 +162,8 @@ function checkReferences(roots: readonly string[], held: Held): ReferencesResult
           seen.add(reference.digest);
           pending.push(reference.digest);
         }
+      } else if (published.has(reference.digest)) {
+        counts.resolvedPublished += 1;
       } else if (reference.mayBeUnavailable === true) {
         counts.unavailable += 1;
       } else {
@@ -402,7 +411,7 @@ export async function checkRecordSet(input: CheckRecordSetInput): Promise<Record
     summary: summarizeRecords(reports),
     records: reports,
     checks: [
-      checkReferences(input.roots, held),
+      checkReferences(input.roots, held, new Set((input.published ?? []).map((bytes) => recordDigest(bytes)))),
       checkLifecycle(records, held),
       checkAnchors(records, held, input.trust?.anchors),
     ],

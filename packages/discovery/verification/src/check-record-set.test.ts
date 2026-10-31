@@ -124,6 +124,40 @@ describe("references", () => {
     expect(references).toMatchObject({ status: "passed", resolved: 3, unavailable: 0 });
   });
 
+  test("a reference resolves through a published document, which is not a record of the set", async () => {
+    const lone = delivery();
+    const report = await checkRecordSet({ records: records(lone, task), roots: [recordDigest(lone)], published: [PROFILE] });
+    expect(report.checks[0]).toMatchObject({ status: "passed", resolved: 1, resolvedPublished: 1, dangling: 0 });
+    expect(report.summary.records).toBe(2);
+    expect(report.records).toHaveLength(2);
+  });
+
+  test("a published document resolves only the digest its bytes hash to", async () => {
+    const lone = delivery();
+    const tampered = PROFILE.slice();
+    tampered[2] = tampered[2]! ^ 1;
+    const report = await checkRecordSet({ records: records(lone, task), roots: [recordDigest(lone)], published: [tampered] });
+    expect(report.checks[0]).toMatchObject({ status: "failed", resolvedPublished: 0, dangling: 1 });
+  });
+
+  test("a held record is resolved as held even if it is also published", async () => {
+    const lone = delivery();
+    const report = await checkRecordSet({ records: records(lone, task, PROFILE), roots: [recordDigest(lone)], published: [PROFILE] });
+    expect(report.checks[0]).toMatchObject({ resolved: 2, resolvedPublished: 0 });
+  });
+
+  test("a published document is not a root", async () => {
+    const report = await checkRecordSet({ records: records(task), roots: [recordDigest(PROFILE)], published: [PROFILE] });
+    expect(report.checks[0].findings).toEqual(expect.arrayContaining([expect.objectContaining({ code: "root-missing" })]));
+  });
+
+  test("bytes the family lets a reader lack resolve through a published document too", async () => {
+    const artifact = new TextEncoder().encode("published artifact");
+    const closing = delivery({ outputs: [{ name: "patch", mediaType: "text/x-diff", digest: { sha256: hex(artifact) } }] });
+    const report = await checkRecordSet({ records: records(closing, task, PROFILE), roots: [recordDigest(closing)], published: [artifact] });
+    expect(report.checks[0]).toMatchObject({ resolvedPublished: 1, unavailable: 0 });
+  });
+
   test("a root the set does not hold fails", async () => {
     const missing = `sha256:${"7".repeat(64)}`;
     const { references } = await set([missing], task, PROFILE);
