@@ -21,6 +21,9 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "bin": {
+    "jinn-verify": "./dist/bin.js"
+  },
   "files": [
     "dist/",
     "README.md"
