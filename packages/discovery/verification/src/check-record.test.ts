@@ -272,19 +272,32 @@ describe("a signed record's envelope states its media type (§21.2)", () => {
       ["an unsafe pattern, as plain JSON", JSON.stringify({ type: "string", pattern: "(a+)+$" })],
       ["a remote $ref, as base64", base64({ $ref: "https://evil.example/x.json" })],
       ["an unsafe pattern, as base64", base64({ type: "string", pattern: "(a+)+$" })],
+      ["a remote $dynamicRef, as base64 in double quotes", `"${base64({ $dynamicRef: "https://evil.example/x.json#node" })}"`],
     ])("%s is invalid", async (_name, content) => {
       const report = await checkRecord(withSlotSchema({ name: "out.schema.json", content }));
       expect(check(report, "schema")).toMatchObject({ status: "failed", findings: [{ code: "invalid-document", path: SLOT_PATH }] });
     });
 
-    test("content that reads as no schema at all cannot be shown safe, so it is invalid", async () => {
-      const report = await checkRecord(withSlotSchema({ name: "out.schema.json", content: "<<not a schema>>" }));
+    test.each([
+      ["text that is no JSON", "<<not a schema>>"],
+      ["a number", "123"],
+      ["null", "null"],
+      ["a list", "[]"],
+      ["a JSON string", JSON.stringify("https://evil.example/x.json")],
+      ["a JSON string of a schema", JSON.stringify(JSON.stringify({ $ref: "https://evil.example/x.json" }))],
+      ["a number, as base64", base64(123)],
+      ["null, as base64", base64(null)],
+    ])("%s is no schema, so it cannot be shown safe to load", async (_name, content) => {
+      const report = await checkRecord(withSlotSchema({ name: "out.schema.json", content }));
       expect(check(report, "schema")).toMatchObject({ status: "failed", findings: [{ code: "invalid-document", path: SLOT_PATH }] });
     });
 
     test.each([
       ["plain JSON", JSON.stringify({ type: "object" })],
       ["base64", base64({ type: "object" })],
+      ["the boolean true", "true"],
+      ["the boolean false", "false"],
+      ["a boolean, as base64", base64(true)],
     ])("a safe schema as %s passes", async (_name, content) => {
       expect(check(await checkRecord(withSlotSchema({ name: "out.schema.json", content })), "schema").status).toBe("passed");
     });

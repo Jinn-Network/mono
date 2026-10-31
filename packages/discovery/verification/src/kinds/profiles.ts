@@ -92,11 +92,16 @@ function unsafeSchema(schema: unknown, path: string): readonly Finding[] {
   }
 }
 
-/** A descriptor's `content` is base64 elsewhere in the protocol, and the published profiles carry plain JSON. */
+/**
+ * A descriptor's `content` is base64 elsewhere in the protocol, and the published profiles carry
+ * plain JSON. A JSON Schema is an object or a boolean. Anything else that parses is not this
+ * spelling: a decoder skips the quotes around a JSON string, so that string may still be base64.
+ */
 function parseInlineSchema(content: string): { readonly schema: unknown } | undefined {
   for (const text of [content, Buffer.from(content, "base64").toString("utf8")]) {
     try {
-      return { schema: JSON.parse(text) };
+      const schema: unknown = JSON.parse(text);
+      if (isRecordObject(schema) || typeof schema === "boolean") return { schema };
     } catch {
       // Not this spelling.
     }
@@ -116,7 +121,7 @@ function inlineSlotSchemaFindings(view: RecordView): readonly Finding[] {
     const path = `outputConventions.slots.${index}.schema.content`;
     const inline = parseInlineSchema(descriptor["content"]);
     return inline === undefined
-      ? [{ code: "invalid-document", path, detail: "This inline schema is neither JSON nor base64 JSON, so it cannot be shown safe to load." }]
+      ? [{ code: "invalid-document", path, detail: "This inline schema is neither a JSON Schema nor one in base64, so it cannot be shown safe to load." }]
       : unsafeSchema(inline.schema, path);
   });
 }

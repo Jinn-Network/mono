@@ -349,14 +349,134 @@ describe("lifecycle", () => {
     const correction = delivery({ supersedes: `sha256:${"7".repeat(64)}`, createdAt: "2026-07-28T00:06:00Z" });
     const { lifecycle } = await set([], correction);
     expect(lifecycle).toMatchObject({ status: "skipped", attempts: [], deliveriesWithoutObservations: 1 });
-    expect(lifecycle.findings).toEqual([expect.objectContaining({ code: "deliveries-without-observations" })]);
+    expect(lifecycle.findings).toEqual([
+      expect.objectContaining({ code: "supersedes-target-not-held", subject: recordDigest(correction) }),
+      expect.objectContaining({ code: "deliveries-without-observations" }),
+    ]);
+  });
+
+  test("beside an engaged log, a target not held is said, not a bare pass", async () => {
+    const correction = delivery({ supersedes: `sha256:${"7".repeat(64)}`, createdAt: "2026-07-28T00:06:00Z" });
+    const { lifecycle } = await set([], closing, correction, ...log);
+    expect(lifecycle.status).toBe("passed");
+    expect(lifecycle.findings).toEqual([expect.objectContaining({ code: "supersedes-target-not-held", subject: recordDigest(correction) })]);
   });
 
   test("one supersession compared is a check that ran, beside one that could not be", async () => {
     const first = delivery();
     const compared = delivery({ supersedes: recordDigest(first), createdAt: "2026-07-28T00:06:00Z" });
     const unheld = delivery({ supersedes: `sha256:${"7".repeat(64)}`, createdAt: "2026-07-28T00:07:00Z" });
-    expect((await set([], first, compared, unheld)).lifecycle.status).toBe("passed");
+    const { lifecycle } = await set([], first, compared, unheld);
+    expect(lifecycle.status).toBe("passed");
+    expect(lifecycle.findings).toEqual(expect.arrayContaining([expect.objectContaining({ code: "supersedes-target-not-held", subject: recordDigest(unheld) })]));
+  });
+
+  describe("§10.4 rule 3: nothing depends on input order", () => {
+    const FORGED_SOURCE = "urn:jinn:backend:forged";
+    const engaged = observation("attempt-engaged", "evt-1", 1, ENGAGED);
+    const terminals = [
+      observation("attempt-terminal", "evt-4", 4, { state: "delivered" }),
+      observation("attempt-terminal", "evt-5", 5, { state: "failed", blame: "task" }),
+    ];
+    const unheldRecorded = observation("delivery-recorded", "evt-3", 3, { digest: `sha256:${"8".repeat(64)}` });
+
+    test.each<[string, readonly Uint8Array[], Uint8Array, string]>([
+      [
+        "a later engagement reusing the true (source, id)",
+        [engaged, ...terminals],
+        observation("attempt-engaged", "evt-1", 9, { ...ENGAGED, source: FORGED_SOURCE }),
+        "contradictory-terminals",
+      ],
+      [
+        "a later delivery-recorded reusing the true id",
+        [engaged, unheldRecorded, closing],
+        observation("delivery-recorded", "evt-3", 9, { digest: closingDigest }),
+        "recorded-delivery-missing",
+      ],
+      [
+        "a later progress reusing a terminal's id",
+        [engaged, ...terminals],
+        observation("progress", "evt-5", 9, { message: "still going" }),
+        "contradictory-terminals",
+      ],
+      [
+        "a forged engagement tied on sequence",
+        [engaged, ...terminals],
+        observation("attempt-engaged", "evt-0", 1, { ...ENGAGED, source: FORGED_SOURCE }),
+        "first-engagement-tied",
+      ],
+    ])("%s fails the same placed first and placed last", async (_name, genuine, forged, code) => {
+      const first = (await set([], forged, ...genuine)).lifecycle;
+      const last = (await set([], ...genuine, forged)).lifecycle;
+      expect(first.status).toBe("failed");
+      expect(first.findings).toEqual(expect.arrayContaining([expect.objectContaining({ code })]));
+      expect(last).toEqual(first);
+    });
+
+    test("the same bytes twice are one record, not a tie", async () => {
+      const { lifecycle } = await set([], closing, engaged, ...log.slice(1), engaged);
+      expect(lifecycle.status).toBe("passed");
+    });
+
+    test("only a tie on the first engagement is refused", async () => {
+      const later = (id: string) => observation("attempt-engaged", id, 7, { ...ENGAGED, executor: id });
+      const { lifecycle } = await set([], closing, ...log, later("evt-7"), later("evt-8"));
+      expect(lifecycle.status).toBe("passed");
+    });
+
+    test("a tie is refused only among engagements", async () => {
+      const { lifecycle } = await set([], closing, ...log, observation("progress", "evt-9", 1, { message: "at the same sequence" }));
+      expect(lifecycle.status).toBe("passed");
+    });
+
+    /** A seeded Fisher-Yates, so a failing order can be reproduced. */
+    function shuffled<Item>(items: readonly Item[], seed: number): readonly Item[] {
+      const result = [...items];
+      let state = seed;
+      const next = (bound: number) => {
+        state = (Math.imul(state, 1664525) + 1013904223) | 0;
+        return (state >>> 0) % bound;
+      };
+      for (let index = result.length - 1; index > 0; index -= 1) {
+        const other = next(index + 1);
+        [result[index], result[other]] = [result[other]!, result[index]!];
+      }
+      return result;
+    }
+
+    test("the lifecycle result is identical under every shuffle tried", async () => {
+      const onOther = { subject: OTHER_ATTEMPT };
+      const third = { subject: "urn:uuid:dddddddd-dddd-5ddd-8ddd-dddddddddddd" };
+      const first = delivery();
+      const wrongAttempt = delivery({ attempt: OTHER_ATTEMPT, supersedes: recordDigest(first), createdAt: "2026-07-28T00:06:00Z" });
+      const unheld = delivery({ supersedes: `sha256:${"7".repeat(64)}`, createdAt: "2026-07-28T00:07:00Z" });
+      const alsoUnheld = delivery({ supersedes: `sha256:${"6".repeat(64)}`, createdAt: "2026-07-28T00:08:00Z" });
+      const records = [
+        engaged,
+        ...terminals,
+        observation("attempt-engaged", "evt-1", 9, { ...ENGAGED, source: FORGED_SOURCE }),
+        observation("progress", "evt-5", 8, { message: "reusing a terminal's id" }),
+        observation("attempt-engaged", "evt-1", 1, ENGAGED, onOther),
+        observation("delivery-recorded", "evt-3", 3, { digest: `sha256:${"8".repeat(64)}` }, onOther),
+        observation("delivery-recorded", "evt-3", 9, { digest: closingDigest }, onOther),
+        observation("attempt-engaged", "evt-1", 1, ENGAGED, third),
+        observation("attempt-engaged", "evt-0", 1, { ...ENGAGED, source: FORGED_SOURCE }, third),
+        observation("attempt-terminal", "evt-4", 4, { state: "delivered" }, third),
+        closing,
+        first,
+        wrongAttempt,
+        unheld,
+        alsoUnheld,
+        task,
+      ];
+      const expected = (await set([], ...records)).lifecycle;
+      expect(expected.status).toBe("failed");
+      expect(expected.attempts).toHaveLength(3);
+      const seeds = Array.from({ length: 300 }, (_unused, index) => index + 1);
+      await Promise.all(seeds.map(async (seed) => {
+        expect((await set([], ...shuffled(records, seed))).lifecycle).toEqual(expected);
+      }));
+    });
   });
 });
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
-import { ANCHOR_EVIDENCE_KIND, recordDigest } from "@jinn-network/trust-core";
+import { ANCHOR_EVIDENCE_KIND, compareCodeUnitStrings, recordDigest } from "@jinn-network/trust-core";
 import { ATTEMPT_OBSERVATION_TYPES, foldObservations } from "@jinn-network/task-execution-protocol";
 import type { ProtocolObservation } from "@jinn-network/task-execution-protocol";
 
@@ -195,34 +195,43 @@ function documentOf(entry: InspectedRecord): Record<string, unknown> {
   return entry.view.document as Record<string, unknown>;
 }
 
-function attemptLogs(records: readonly InspectedRecord[]): ReadonlyMap<string, readonly ProtocolObservation[]> {
+interface LoggedObservation {
+  readonly observation: ProtocolObservation;
+  readonly digest: string;
+}
+
+/**
+ * Each Attempt's log, in (`sequence`, record digest) order, and the Attempts in code-unit order.
+ * `foldObservations` keeps the first it is handed of a repeated (`source`, `id`), before it sorts,
+ * and a stable sort leaves a tie on `sequence` in the order it was handed, so the order handed to it
+ * decides the result unless it is fixed here (§10.4 rule 3).
+ */
+function attemptLogs(records: readonly InspectedRecord[]): ReadonlyMap<string, readonly LoggedObservation[]> {
   const attemptTypes: readonly string[] = ATTEMPT_OBSERVATION_TYPES;
-  const logs = new Map<string, ProtocolObservation[]>();
+  const logs = new Map<string, LoggedObservation[]>();
   for (const entry of records) {
     if (!isKind(entry, OBSERVATION_KIND)) continue;
     const observation = entry.view.document as ProtocolObservation;
     if (!attemptTypes.includes(observation.type)) continue;
+    const logged = { observation, digest: entry.report.digest };
     const log = logs.get(observation.subject);
-    if (log === undefined) logs.set(observation.subject, [observation]);
-    else log.push(observation);
+    if (log === undefined) logs.set(observation.subject, [logged]);
+    else log.push(logged);
   }
-  return logs;
+  for (const log of logs.values()) {
+    log.sort((left, right) =>
+      compareCodeUnitStrings(left.observation.sequence, right.observation.sequence)
+      || compareCodeUnitStrings(left.digest, right.digest));
+  }
+  return new Map([...logs].sort(([left], [right]) => compareCodeUnitStrings(left, right)));
 }
 
-/** §10.4: the first engagement in `sequence` order is the engagement, wherever it sits in the input. */
-function engagedTask(log: readonly ProtocolObservation[]): string | undefined {
-  const engaged = log
-    .filter(({ type }) => type === "network.jinn.task-execution.attempt-engaged.v1")
-    .reduce<ProtocolObservation | undefined>(
-      (earliest, candidate) => (earliest === undefined || candidate.sequence < earliest.sequence ? candidate : earliest),
-      undefined,
-    );
-  return (engaged?.data as { readonly task?: string } | undefined)?.task;
-}
 
 function checkLifecycle(records: readonly InspectedRecord[], held: Held): LifecycleResult {
   const deliveries = records.filter((entry) => isKind(entry, RECORD_KINDS.delivery));
-  const superseding = deliveries.filter((entry) => typeof documentOf(entry)["supersedes"] === "string");
+  const superseding = deliveries
+    .filter((entry) => typeof documentOf(entry)["supersedes"] === "string")
+    .sort((left, right) => compareCodeUnitStrings(left.report.digest, right.report.digest));
   const logs = attemptLogs(records);
   if (logs.size === 0 && superseding.length === 0) {
     const reason = "The set holds no Lifecycle Observations and no superseding Delivery, so no lifecycle was folded.";
@@ -251,10 +260,12 @@ function checkLifecycle(records: readonly InspectedRecord[], held: Held): Lifecy
   const attempts: AttemptLifecycle[] = [];
   const unattributed: Finding[] = [];
   for (const [attempt, log] of logs) {
-    const derived = foldObservations(log);
+    const derived = foldObservations(log.map(({ observation }) => observation));
     const recorded = derived.deliveries.map(({ digest }) => digest);
     // §10.1: "Consumers establish authority from the engagement event". Without one, any source counts.
-    const engaged = log.some(({ type }) => type === "network.jinn.task-execution.attempt-engaged.v1");
+    const engagements = log.filter(({ observation }) => observation.type === "network.jinn.task-execution.attempt-engaged.v1");
+    const [first] = engagements;
+    const engaged = first !== undefined;
     if (!engaged) {
       unattributed.push({ code: "attempt-not-engaged", subject: attempt, detail: "The set holds no attempt-engaged for this Attempt, so nothing pins whose observations these are." });
     }
@@ -262,7 +273,11 @@ function checkLifecycle(records: readonly InspectedRecord[], held: Held): Lifecy
     if (derived.contradictory) {
       refusals.push({ code: "contradictory-terminals", subject: attempt, detail: `The authoritative log holds contradictory terminals; the first in sequence is ${derived.state} (§10.4 rule 4).` });
     }
-    const task = engagedTask(log);
+    // §10.4 orders engagements by `sequence`, and a tie gives it nothing to order them by.
+    if (engagements.some(({ observation, digest }) => observation.sequence === first?.observation.sequence && digest !== first.digest)) {
+      refusals.push({ code: "first-engagement-tied", subject: attempt, detail: `More than one attempt-engaged holds the first sequence, ${first!.observation.sequence}, so nothing says which is the engagement (§10.4).` });
+    }
+    const task = (first?.observation.data as { readonly task?: string } | undefined)?.task;
     for (const digest of recorded) {
       const delivery = held.get(digest);
       if (delivery === undefined || !isKind(delivery, RECORD_KINDS.delivery)) {
@@ -280,12 +295,18 @@ function checkLifecycle(records: readonly InspectedRecord[], held: Held): Lifecy
   }
 
   const deliveriesWithoutObservations = deliveries.filter((entry) => !logs.has(documentOf(entry)["attempt"] as string)).length;
-  const notes: Finding[] = [...unattributed, ...(deliveriesWithoutObservations === 0 ? [] : [{
+  const uncompared = superseding.flatMap((entry): readonly Finding[] => {
+    const target = documentOf(entry)["supersedes"] as string;
+    return held.has(target)
+      ? []
+      : [{ code: "supersedes-target-not-held", subject: entry.report.digest, detail: `This Delivery supersedes ${target}, which the set does not hold, so §11.3 rule 1 was not compared.` }];
+  });
+  const notes: Finding[] = [...unattributed, ...uncompared, ...(deliveriesWithoutObservations === 0 ? [] : [{
     code: "deliveries-without-observations",
     detail: `${deliveriesWithoutObservations} Deliveries belong to Attempts with no observation in the set, so no lifecycle covers them.`,
   }])];
   // With no log, the only thing to compare is a supersession both of whose records are held.
-  const supersessionCompared = superseding.some((entry) => held.has(documentOf(entry)["supersedes"] as string));
+  const supersessionCompared = uncompared.length < superseding.length;
   if (refusals.length === 0 && attempts.every(({ engaged }) => !engaged) && (attempts.length > 0 || !supersessionCompared)) {
     return { id: "lifecycle", status: "skipped", findings: notes, attempts, deliveriesWithoutObservations };
   }
