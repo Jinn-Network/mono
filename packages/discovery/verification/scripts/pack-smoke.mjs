@@ -173,9 +173,8 @@ try {
   await run(process.execPath, ["smoke.mjs"], consumer);
 
   // A visitor's first run happens on whatever npm Node ships, and Node 22 ships 10.9.9. That npm
-  // crashes on a conflict among vitest's peers, reached here through evidence-offer's optional peer
-  // (#5087). It installs today only because a vitest release closed the conflict, so a red `edgesOut`
-  // here means the conflict is back, and a visitor's first run would crash the same way.
+  // crashed on a conflict among vitest's peers while `evidence-offer` declared vitest as an optional
+  // peer (#5087). No package here does now, so a red `edgesOut` here means such a peer came back.
   await rm(join(consumer, "node_modules"), { recursive: true, force: true });
   await rm(join(consumer, "package-lock.json"), { force: true });
   await run("npx", ["--yes", "npm@10.9.9", "install", "--ignore-scripts", "--no-audit", "--no-fund"], consumer);
