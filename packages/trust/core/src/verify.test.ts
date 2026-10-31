@@ -1197,6 +1197,9 @@ describe("verifyEnvelopeBinding", () => {
 });
 
 describe("settlementJoinCheck (§7.5a)", () => {
+  const sealedLeg = (overrides: Partial<ResolvedBinding> & Pick<ResolvedBinding, "binding">): ResolvedBinding =>
+    resolvedBinding({ envelopeBytes: sealedEnvelope(overrides.binding, TRUST_KEY_BINDING_MEDIA_TYPE, overrides.binding.key.didKey), ...overrides });
+
   const VERDICT_KEY = "did:key:z6MkfVERDICT111111111111111111111111111111";
   const SETTLEMENT_KEY = "did:key:z6MkfSETTLE1111111111111111111111111111111";
 
@@ -1222,7 +1225,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
   test("(e) both legs resolving to the same Agent IRI, valid at both the envelope and claim time, joins", async () => {
     const resolver = new FakeBindingResolver()
       .register({ key: VERDICT_KEY, agent: AGENT, resolved: resolvedBinding({ binding: verdictBinding() }) })
-      .register({ key: SETTLEMENT_KEY, agent: AGENT, resolved: resolvedBinding({ binding: settlementBinding() }) });
+      .register({ key: SETTLEMENT_KEY, agent: AGENT, resolved: sealedLeg({ binding: settlementBinding() }) });
 
     const outcome = await settlementJoinCheck(
       {
@@ -1263,7 +1266,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
       .register({
         key: SETTLEMENT_KEY,
         agent: AGENT,
-        resolved: resolvedBinding({ binding: settlementBinding() }),
+        resolved: sealedLeg({ binding: settlementBinding() }),
         validUntil: "2026-03-02T00:00:00Z",
       });
 
@@ -1291,7 +1294,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
         if (query.key === VERDICT_KEY) {
           return resolvedBinding({ binding: { ...verdictBinding(), agent: OTHER_AGENT } });
         }
-        return resolvedBinding({ binding: settlementBinding() });
+        return sealedLeg({ binding: settlementBinding() });
       },
     };
 
@@ -1337,7 +1340,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
     const expiringResolver: BindingResolver = {
       async resolveBinding(query, atTime) {
         if (query.key === VERDICT_KEY) return resolvedBinding({ binding: verdictBinding() });
-        if (atTime === "2026-03-01T00:00:00Z") return resolvedBinding({ binding: settlementBinding() });
+        if (atTime === "2026-03-01T00:00:00Z") return sealedLeg({ binding: settlementBinding() });
         return null;
       },
     };
@@ -1361,7 +1364,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
     const keyOnlyResolver: BindingResolver = {
       async resolveBinding(query, atTime) {
         if (query.key === VERDICT_KEY) return resolvedBinding({ binding: verdictBinding() });
-        if (atTime === "2026-03-01T00:00:00Z") return resolvedBinding({ binding: settlementBinding() });
+        if (atTime === "2026-03-01T00:00:00Z") return sealedLeg({ binding: settlementBinding() });
         return resolvedBinding({ binding: { ...settlementBinding(), agent: OTHER_AGENT } });
       },
     };
@@ -1394,7 +1397,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
     const keyOnlyResolver: BindingResolver = {
       async resolveBinding(query, atTime) {
         if (query.key === VERDICT_KEY) return resolvedBinding({ binding: verdictBinding() });
-        if (atTime === "2026-03-01T00:00:00Z") return resolvedBinding({ binding: settlementBinding() });
+        if (atTime === "2026-03-01T00:00:00Z") return sealedLeg({ binding: settlementBinding() });
         return resolvedBinding({ binding: { ...settlementBinding(), agent: OTHER_AGENT, scope: ["deliveries"] } });
       },
     };
@@ -1420,7 +1423,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
     const timeVaryingResolver: BindingResolver = {
       async resolveBinding(query, atTime) {
         if (query.key === VERDICT_KEY) return resolvedBinding({ binding: verdictBinding() });
-        if (atTime === "2026-03-01T00:00:00Z") return resolvedBinding({ binding: settlementBinding() });
+        if (atTime === "2026-03-01T00:00:00Z") return sealedLeg({ binding: settlementBinding() });
         return resolvedBinding({ binding: { ...settlementBinding(), scope: ["deliveries"] } });
       },
     };
@@ -1440,13 +1443,58 @@ describe("settlementJoinCheck (§7.5a)", () => {
     expect(outcome.reason).toBe("settlement leg lost scope:settlements at claim time.");
   });
 
+  describe("a settlement leg with no standing of its own", () => {
+    const joinWith = (settlement: ResolvedBinding, witnessVerifier: WitnessVerifier = fakeWitnessVerifier) => settlementJoinCheck(
+      {
+        verdictKey: VERDICT_KEY,
+        settlementDeclarationKey: SETTLEMENT_KEY,
+        claimedEvaluatorAgent: AGENT,
+        family: "verdicts",
+        envelopeEffectiveTime: "2026-03-01T00:00:00Z",
+        claimTime: "2026-03-05T00:00:00Z",
+      },
+      {
+        bindingResolver: new FakeBindingResolver()
+          .register({ key: VERDICT_KEY, agent: AGENT, resolved: resolvedBinding({ binding: verdictBinding() }) })
+          .register({ key: SETTLEMENT_KEY, agent: AGENT, resolved: settlement }),
+        witnessVerifier,
+        dsseVerifier: trustingDsseVerifier,
+      },
+    );
+
+    test("(e) a leg with no chain to the genesis fails the join", async () => {
+      expect(await joinWith(sealedLeg({ binding: settlementBinding(), isGenesis: false })))
+        .toMatchObject({ ok: false, reason: expect.stringMatching(/settlement leg does not stand/) });
+    });
+
+    test("(e) a leg its key never signed fails the join", async () => {
+      expect(await joinWith(resolvedBinding({ binding: settlementBinding() })))
+        .toMatchObject({ ok: false, reason: expect.stringMatching(/settlement leg does not stand/) });
+    });
+
+    test("(e) a leg whose ceremony fails fails the join", async () => {
+      const binding: KeyBinding = { ...settlementBinding(), ceremony: { type: "safe", digest: `sha256:${"e".repeat(64)}` } };
+      const refusing: WitnessVerifier = { verify1271Witness: async () => ({ verified: false }) };
+      const witness = {
+        chainId: 8453,
+        blockNumber: 1,
+        blockHash: `0x${"c".repeat(64)}`,
+        verifier: AGENT,
+        envelopeBytes: Uint8Array.of(1),
+      };
+      expect(await joinWith(sealedLeg({ binding, witness }), refusing))
+        .toMatchObject({ ok: false, reason: expect.stringMatching(/settlement leg does not stand/) });
+      expect(await joinWith(sealedLeg({ binding, witness }))).toMatchObject({ ok: true });
+    });
+  });
+
   describe("a revocation the resolver lists", () => {
     const CLAIM_TIME = "2026-03-05T00:00:00Z";
     const ENVELOPE_TIME = "2026-03-01T00:00:00Z";
 
     function joinOver(legs: { verdict?: ResolvedBinding; settlement?: ResolvedBinding; claimLeg?: ResolvedBinding }) {
       const verdict = legs.verdict ?? resolvedBinding({ binding: verdictBinding() });
-      const settlement = legs.settlement ?? resolvedBinding({ binding: settlementBinding() });
+      const settlement = legs.settlement ?? sealedLeg({ binding: settlementBinding() });
       const claimLeg = legs.claimLeg ?? settlement;
       return settlementJoinCheck(
         {
@@ -1471,7 +1519,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
     }
 
     function settlementRevokedBy(revokedBy: string, effectiveTime: string): ResolvedBinding {
-      return resolvedBinding({ binding: settlementBinding(), revocations: [revocationEntry(revokedBy, effectiveTime)] });
+      return sealedLeg({ binding: settlementBinding(), revocations: [revocationEntry(revokedBy, effectiveTime)] });
     }
 
     test("(e) a settlement leg its voucher revoked by claim time fails the join", async () => {
@@ -1493,7 +1541,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
     test("(e) a leg revoked by the envelope's time is named as that", async () => {
       expect(await joinOver({
         settlement: settlementRevokedBy(OTHER_VOUCHER_DID, "2026-02-01T00:00:00Z"),
-        claimLeg: resolvedBinding({ binding: settlementBinding() }),
+        claimLeg: sealedLeg({ binding: settlementBinding() }),
       })).toMatchObject({ ok: false, reason: expect.stringMatching(/settlement leg is revoked at the envelope's time/) });
     });
 
@@ -1520,7 +1568,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
   test("(e) a successful join reports the resolved verdict leg's Agent IRI", async () => {
     const resolver = new FakeBindingResolver()
       .register({ key: VERDICT_KEY, agent: AGENT, resolved: resolvedBinding({ binding: verdictBinding() }) })
-      .register({ key: SETTLEMENT_KEY, agent: AGENT, resolved: resolvedBinding({ binding: settlementBinding() }) });
+      .register({ key: SETTLEMENT_KEY, agent: AGENT, resolved: sealedLeg({ binding: settlementBinding() }) });
 
     const outcome = await settlementJoinCheck(
       {
@@ -1564,6 +1612,45 @@ describe("checkBindingRevocation (§7.5 step 4, §7.4b)", () => {
   test("a revocation with no authority has no effect", async () => {
     const resolved = resolvedBinding({ binding, revocations: [revocationEntry(OTHER_VOUCHER_DID, "2026-02-01T00:00:00Z")] });
     expect(await checkBindingRevocation(resolved, "2026-03-01T00:00:00Z", deps)).toEqual({ ok: true });
+  });
+
+  describe("by a revoker whose ceremony only the witness leg can verify", () => {
+    const COLD_KEY = "did:key:z6MkfCOLD1111111111111111111111111111111";
+    const coldBinding = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: COLD_KEY, algorithm: "ed25519", didKey: COLD_KEY },
+      voucher: { kind: "account", did: VOUCHER_DID, contractAccount: true },
+      scope: ["bindings"],
+      ceremony: { type: "safe", digest: `sha256:${"e".repeat(64)}` },
+    });
+    const coldResolver = new FakeBindingResolver().register({
+      key: COLD_KEY,
+      agent: AGENT,
+      resolved: authorityBinding(coldBinding, {
+        witness: {
+          chainId: 8453,
+          blockNumber: 1,
+          blockHash: `0x${"c".repeat(64)}`,
+          verifier: AGENT,
+          envelopeBytes: Uint8Array.of(1),
+        },
+      }),
+    });
+    const revoked = resolvedBinding({ binding, revocations: [revocationEntry(COLD_KEY, "2026-02-01T00:00:00Z")] });
+    const witnessSays = (verified: boolean): WitnessVerifier => ({ verify1271Witness: async () => ({ verified }) });
+    const over = (verified: boolean) => ({
+      bindingResolver: coldResolver,
+      witnessVerifier: witnessSays(verified),
+      dsseVerifier: trustingDsseVerifier,
+    });
+
+    test("counts when the injected witness verifier passes that ceremony", async () => {
+      expect(await checkBindingRevocation(revoked, "2026-03-01T00:00:00Z", over(true))).toMatchObject({ ok: false });
+    });
+
+    test("does not count when it fails that ceremony", async () => {
+      expect(await checkBindingRevocation(revoked, "2026-03-01T00:00:00Z", over(false))).toEqual({ ok: true });
+    });
   });
 });
 

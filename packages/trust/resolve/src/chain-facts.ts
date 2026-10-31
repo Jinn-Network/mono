@@ -51,6 +51,14 @@ export interface ChainFactResolverOptions {
   readonly fallbackRpcUrls?: readonly string[];
 }
 
+/** An agent id wider than `uint256` names nothing, and no read can be made for it. */
+const MAX_AGENT_ID = 2n ** 256n - 1n;
+const MAX_AGENT_ID_DIGITS = MAX_AGENT_ID.toString().length;
+
+function fitsUint256(agentId: string): boolean {
+  return agentId.length <= MAX_AGENT_ID_DIGITS && BigInt(agentId) <= MAX_AGENT_ID;
+}
+
 const CAIP19_AGENT_PATTERN = /^eip155:([0-9]+)\/erc721:(0x[0-9a-fA-F]{40})\/([1-9][0-9]*)$/;
 
 /**
@@ -132,6 +140,7 @@ export function createChainFactResolver(options: ChainFactResolverOptions): Chai
       if (!/^[1-9][0-9]*$/.test(agentId)) {
         invalidInput(`agentId must be a positive decimal: "${agentId}".`);
       }
+      if (!fitsUint256(agentId)) invalidInput(`agentId does not fit a uint256: "${agentId}".`);
       if (!Number.isSafeInteger(block) || block <= 0) {
         invalidInput(`block must be a positive safe integer: ${block}.`);
       }
@@ -182,6 +191,8 @@ export function createChainFactResolver(options: ChainFactResolverOptions): Chai
           `CAIP-19 registry "${claimedRegistry}" does not match this resolver's registry "${registry}".`,
         );
       }
+
+      if (!fitsUint256(agentId!)) invalidInput(`agentId does not fit a uint256: "${agentId}".`);
 
       return memoize(ownerCache, agentId!, () => readAcrossProviders(async (client) => {
         const raw = await client.readContract({

@@ -57,10 +57,12 @@ export interface ResolvedBinding {
    * check (option 1) tests. Data, like the rest of this record: `verify.ts`
    * re-resolves the one it relies on and requires that binding to stand. */
   readonly incumbentControls?: readonly IncumbentControl[];
-  /** Every anchored revocation naming this binding's digest as `target`,
+  /** Every anchored revocation naming as `target` this binding's digest, or
+   * the digest of another record in window for this key under this voucher,
    * whether or not its signer authority holds -- `verify.ts` (not the
    * resolver) determines authority (§7.4b), consistent with §7.5 step 4
-   * being `core`'s job. */
+   * being `core`'s job. A revocation ends a key's standing under a voucher,
+   * so it must not stay behind on a record a later one replaced. */
   readonly revocations: readonly ResolvedRevocation[];
 }
 

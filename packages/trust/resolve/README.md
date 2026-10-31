@@ -30,8 +30,16 @@ A resolve that could not find out is not a refusal. `resolveBinding` answers `nu
 when nothing resolves, and throws when a store, an anchor read, the registry or a
 `verifyHostedCeremony` leg failed, so a caller can tell the two apart. Both fail
 closed. A leg must answer `false` for a record it cannot read: a store may hold
-anything, and a throw reads as an outage. `createWitnessVerifier` does the same: an
-archive read that fails throws, and a contract that reverts is an answer.
+anything, and a throw reads as an outage. The same line runs through the chain reads.
+A read no node took is an outage. What a record chose, or what a node said about it,
+is an answer: a token id no read can be made for, a registry that reverted, or a
+witness naming a block or contract no read can use.
+
+A revocation ends a key's standing under a voucher, not one record of it. A resolved
+binding lists the revocations of every record in window for that key under that
+voucher, so revoking any of them ends all of them, and a replacement cannot leave a
+revocation behind. A record that has left its window shares nothing with a later one,
+and neither does a record under another voucher, which stands on its own §7.4a chain.
 
 See `docs/superpowers/plans/2026-07-28-trust-layer.md` for the implementation
 plan.

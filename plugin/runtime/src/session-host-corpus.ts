@@ -121,7 +121,7 @@ function declaredSigningKeys(
  * `createTrustAdapter` resolves against.
  *
  * The adapter reads a resolved binding's SCOPE, KEY, EFFECTIVE START and
- * REVOCATIONS, of which these have none, and nothing else —
+ * REVOCATIONS, of which these have none, and nothing else.
  * `isActiveForDiscoverySigning` in `trust-adapter.ts` records that narrowing
  * and why. The remaining §7.1 fields below therefore describe
  * the config declaration itself and carry no independent proof: this

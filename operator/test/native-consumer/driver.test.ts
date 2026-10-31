@@ -24,7 +24,13 @@ import {
   serializeCanonicalJson,
 } from '@jinn-network/task-execution-protocol';
 import { RESULT_EVALUATION_PREDICATE_TYPE, canonicalJsonBytes, type ResultEvaluationStatement } from '@jinn-network/task-execution-profiles';
-import { DSSE_ENVELOPE_MEDIA_TYPE } from '@jinn-network/trust-core';
+import {
+  DSSE_ENVELOPE_MEDIA_TYPE,
+  TRUST_REVOCATION_FORMAT,
+  TRUST_REVOCATION_MEDIA_TYPE,
+  type BindingResolver,
+  type Revocation,
+} from '@jinn-network/trust-core';
 import { ADMISSION_RECEIPT_TRUST_SCOPE, VerdictCode } from '@jinn-network/marketplace-binding';
 import type { Transport } from '@jinn-network/record-discovery-client';
 import { createNativeRequester, type NativeRequesterRoles } from '../../src/native-requester/requester.js';
@@ -480,6 +486,47 @@ describe('native consumer driver', () => {
 
         const bytes = await readFile(result.reportPath);
         expect(documentDigest(bytes)).toBe(result.reportDigest);
+      } finally {
+        await producer.solutionPublisher.close();
+        await producer.evaluatorPublisher.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('judges a revocation of a source key against the whole catalog, not the family resolver', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jinn-native-consumer-driver-revocation-'));
+    try {
+      const producer = await buildPublicVerticalFixture({ root });
+      try {
+        const ports = fakePorts(producer);
+        const catalog = ports.trust.bindingResolver;
+        const sourceKey = producer.identities.requesterSource.keyId;
+        // Signed for real by a key that holds no binding to this Agent, so it has no authority here.
+        const revocation: Revocation = {
+          protocol: TRUST_REVOCATION_FORMAT,
+          target: `sha256:${'2'.repeat(64)}`,
+          revokedBy: producer.identities.admission.keyId,
+          anchors: [],
+          effectiveFrom: '2026-02-01T00:00:00Z',
+        };
+        const envelopeBytes = signedEnvelope(canonicalJsonBytes(revocation), TRUST_REVOCATION_MEDIA_TYPE, producer.identities.admission);
+        // Answers as `resolverFor` does: a key outside the family is a refusal, which throws.
+        const familyResolver: BindingResolver = {
+          async resolveBinding(query, atTime) {
+            if (query.key === producer.identities.admission.keyId) throw new Error('refused outside the family');
+            const resolved = await catalog.resolveBinding(query, atTime);
+            return resolved === null || query.key !== sourceKey
+              ? resolved
+              : { ...resolved, revocations: [{ revocation, envelopeBytes, effectiveTime: revocation.effectiveFrom }] };
+          },
+        };
+        const result = await runNativeConsumer(config(join(root, 'consumer-only'), producer), {
+          ...ports,
+          trust: { ...ports.trust, resolverFor: () => familyResolver },
+        });
+        expect(result.report.decisionGrade).toBe(true);
       } finally {
         await producer.solutionPublisher.close();
         await producer.evaluatorPublisher.close();

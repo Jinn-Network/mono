@@ -31,9 +31,10 @@ A resolver lists every revocation that names a binding, whoever signed it, and a
 revoked binding still resolves. Only §7.4b's authority decides whether one counts,
 so a consumer that reads a resolved binding without the whole §7.5 procedure calls
 `checkBindingRevocation`, and never reads `revocations` itself. `settlementJoinCheck`
-applies the same rule to both legs. Its `deps` and `checkBindingRevocation`'s need a
-resolver that answers for every key of an Agent: a revoker's key is rarely in the
-family the binding it revokes signs.
+applies the same rule to both legs, and requires the settlement leg to stand at the
+envelope's time. Its `deps` and `checkBindingRevocation`'s need a resolver that
+answers for every key of an Agent: a revoker's key is rarely in the family the binding
+it revokes signs.
 
 ## What a ceremony does not show
 
@@ -44,12 +45,13 @@ account signs nothing about the record that relies on the ceremony. So a record'
 the account, and the bound §14 puts on a stolen key through `expiresAt` and `scope`
 is only as strong as that.
 
-The specification gives no rule to enforce here. §7.2 names the content match and
-validity windows as the replay defense and rules out nonce tracking, and the window
-§7.5 step 4 checks is the record's. A ceremony may state an expiration, but no rule
-says what to compare it with: `verifyEnvelopeBinding` reads no time from a ceremony,
-whose evidence verifies offline forever, and the native profile leaves it out. The
-other two rules in this area cannot be checked here either. A revocation has no field
-for §7.4b's "fresh ceremony", and §7.4c's rule on a witness older than an owner change
-needs a chain fact no interface here carries, so it falls to the host behind
-`verifyHostedCeremony` in `@jinn-network/trust-resolve`.
+The specification states no comparison for a ceremony's own times. §7.2 names the
+content match and validity windows as the replay defense, rules out nonce tracking,
+and lists expiration among the EOA ceremony's fields, but the window §7.5 step 4
+checks is the record's, and no text says what to compare a ceremony's times with.
+`verifyEnvelopeBinding` reads no time from a ceremony, whose evidence verifies offline
+forever, and the native profile leaves expiration out. Two other rules in this area
+cannot be checked here either. A revocation has no field for §7.4b's "fresh ceremony".
+§7.4c's rule on a witness older than an owner change needs a chain fact and the
+evidence's time, and neither reaches any interface here: `verifyHostedCeremony` is
+handed only the record. So nothing applies that rule yet.

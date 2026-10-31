@@ -5,7 +5,7 @@ import type { Eip1271Witness, WitnessResult, WitnessVerifier } from "@jinn-netwo
 import { isAddress, isHex, size } from "viem";
 
 import { ERC1271_IS_VALID_SIGNATURE_ABI, ERC1271_MAGIC_VALUE } from "./abis.js";
-import { isContractAnswer } from "./contract-answer.js";
+import { isReadAnswered } from "./contract-answer.js";
 
 // ---------------------------------------------------------------------------
 // §7.2a's 1271 witness: "A witness is not bare data. It is a DSSE-signed
@@ -65,9 +65,9 @@ export interface CreateWitnessVerifierOptions {
    * this decision itself). */
   readonly acceptedVerifiers?: readonly string[];
   /** Archive re-execution fallback (§7.2a). Omit to fail closed when the
-   * witness author is not policy-accepted. A read that fails throws: that is an
-   * outage, and says nothing about the witness. A contract that reverts has
-   * answered. */
+   * witness author is not policy-accepted. A read no node took throws: that is an
+   * outage, and says nothing about the witness. Anything a node said about the
+   * block and contract the statement chose is an answer. */
   readonly archiveClient?: ArchiveReadClient;
 }
 
@@ -111,7 +111,7 @@ function contentMatches(payload: WitnessStatementPayload, witness: Eip1271Witnes
 /** Whether a statement can be put to the archive at all. A read that fails is an
  * outage, so what a store holds must be turned away before one is made. */
 function canBeReexecuted(payload: WitnessStatementPayload): boolean {
-  return isAddress(payload.safe, { strict: false })
+  return isAddress(payload.safe)
     && isHex(payload.hash) && size(payload.hash) === 32
     && isHex(payload.signature)
     && Number.isSafeInteger(payload.blockNumber) && payload.blockNumber >= 0;
@@ -176,7 +176,7 @@ export function createWitnessVerifier(options: CreateWitnessVerifierOptions = {}
           blockNumber: BigInt(witness.blockNumber),
         });
       } catch (cause) {
-        if (!isContractAnswer(cause)) throw cause; // an outage, not a verdict on the witness
+        if (!isReadAnswered(cause)) throw cause; // an outage, not a verdict on the witness
         return {
           verified: false,
           reason: `archive re-execution of isValidSignature failed: `

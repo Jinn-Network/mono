@@ -796,6 +796,59 @@ describe("createBindingResolver", () => {
     });
   });
 
+  describe("revocations of the records that share a key's standing", () => {
+    const at = "2026-06-01T00:00:00.000Z";
+    const ACCOUNT = "did:pkh:eip155:84532:0x1111111111111111111111111111111111111111";
+    const OTHER_ACCOUNT = "did:pkh:eip155:84532:0x2222222222222222222222222222222222222222";
+    const DIGEST_C = ("sha256:" + "d".repeat(64)) as Sha256Digest;
+    const anchors = fakeAnchors({
+      [DIGEST_A]: "2026-01-01T00:00:00.000Z",
+      [DIGEST_B]: "2026-01-02T00:00:00.000Z",
+      [DIGEST_C]: "2026-01-03T00:00:00.000Z",
+    });
+    const first = record(accountBinding(), DIGEST_A);
+
+    /** The targets a resolve asked the store about, with `first` beside `others`. */
+    async function targetsAsked(...others: readonly SealedKeyBindingRecord[]) {
+      const asked = vi.fn(async (_targets: readonly Sha256Digest[]) => []);
+      const bindings: BindingStore = { ...fakeStore([...others, first]), listRevocationsForTargets: asked };
+      const resolved = await createBindingResolver({ bindings, anchors }).resolveBinding({ key: KEY_A, agent: AGENT }, at);
+      expect(resolved?.bindingDigest).toBe(DIGEST_A);
+      return [...asked.mock.calls[0]![0]].sort();
+    }
+
+    it("asks for every record in window for this key under this voucher", async () => {
+      const later = record(accountBinding({ anchors: [{ digest: DIGEST_B }] }), DIGEST_B);
+      expect(await targetsAsked(later)).toEqual([DIGEST_A, DIGEST_B]);
+    });
+
+    it("reads a voucher as an identity, so restating what else a record says about it changes nothing", async () => {
+      const later = record(accountBinding({
+        voucher: { kind: "account", did: ACCOUNT, contractAccount: true },
+        anchors: [{ digest: DIGEST_B }],
+      }), DIGEST_B);
+      expect(await targetsAsked(later)).toEqual([DIGEST_A, DIGEST_B]);
+    });
+
+    it("leaves out a record for this key under another voucher", async () => {
+      const other = record(accountBinding({
+        voucher: { kind: "account", did: OTHER_ACCOUNT, contractAccount: false },
+        anchors: [{ digest: DIGEST_B }],
+      }), DIGEST_B);
+      expect(await targetsAsked(other)).toEqual([DIGEST_A]);
+    });
+
+    it("leaves out a record for this key out of window at the time asked", async () => {
+      const ended = record(accountBinding({ expiresAt: "2026-02-01T00:00:00.000Z", anchors: [{ digest: DIGEST_B }] }), DIGEST_B);
+      expect(await targetsAsked(ended)).toEqual([DIGEST_A]);
+    });
+
+    it("leaves out a record of another key under this voucher", async () => {
+      const key = { publicKey: "pk", keyid: KEY_OWNER, algorithm: "secp256k1", didKey: KEY_OWNER };
+      expect(await targetsAsked(record(accountBinding({ key, anchors: [{ digest: DIGEST_B }] }), DIGEST_B))).toEqual([DIGEST_A]);
+    });
+  });
+
   it("does not resolve an agentId binding without a valid account-ceremony composition leg", async () => {
     const agentIdBinding = accountBinding({
       voucher: { kind: "agentId", caip19: AGENT_ASSET },

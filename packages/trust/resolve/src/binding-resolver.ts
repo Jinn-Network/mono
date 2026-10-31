@@ -10,6 +10,7 @@ import {
   isCalendarStrictRfc3339,
   recordDigest,
   verifyEoaCeremony,
+  voucherIdentityEquals,
 } from "@jinn-network/trust-core";
 import type {
   AnchorResolver,
@@ -483,7 +484,15 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
         });
       }
 
-      const revocationRecords = await options.bindings.listRevocationsForTargets([winner.record.bindingDigest]);
+      // A revocation ends a key's standing under a voucher, not one spelling of it: whoever
+      // holds a key can seal it again, and the record that wins must not leave a revocation
+      // of the one it replaced behind. So revoking any of these ends all of them.
+      const sameStanding = withComposition.filter(
+        ({ record }) => voucherIdentityEquals(record.binding.voucher, winner.record.binding.voucher),
+      );
+      const revocationRecords = await options.bindings.listRevocationsForTargets(
+        sameStanding.map(({ record }) => record.bindingDigest),
+      );
       const revocations: ResolvedRevocation[] = [];
       for (const revocationRecord of revocationRecords) {
         if (!isReadableRevocation(revocationRecord)) continue;

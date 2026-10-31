@@ -203,6 +203,37 @@ describe('#3470 — production verifyHead over genuinely signed heads', () => {
   });
 });
 
+describe('a revocation of a discovery key, judged by the production wiring (#5144)', () => {
+  const current = headAt('2026-08-02T01:00:00.000Z', '2026-08-03T01:00:00.000Z');
+
+  it('finds a revoker the family resolver does not answer for', async () => {
+    const COLD_KEY = 'did:key:zNativeRequesterCold';
+    const coldEnvelope = new TextEncoder().encode('fixture cold binding');
+    const revocationEnvelope = new TextEncoder().encode('fixture cold revocation');
+    const revokedByCold: ResolvedRevocation = {
+      ...oldKeyRevocation(),
+      revocation: { ...oldKeyRevocation().revocation, revokedBy: COLD_KEY },
+      envelopeBytes: revocationEnvelope,
+    };
+    const answersForDiscoveryKeys: BindingResolver['resolveBinding'] = async (query) => {
+      if (query.key === NEW_KEY) return bindingFor(NEW_KEY, []);
+      return query.key === OLD_KEY ? bindingFor(OLD_KEY, [revokedByCold]) : null;
+    };
+    const cold = bindingFor(COLD_KEY, []);
+    const catalog: BindingResolver['resolveBinding'] = async (query, atTime) => (query.key === COLD_KEY
+      ? { ...cold, binding: { ...cold.binding, scope: ['bindings'] }, envelopeBytes: coldEnvelope }
+      : answersForDiscoveryKeys(query, atTime));
+    const trust: NativeTrustAuthority = {
+      ...signingTrustAuthority(catalog),
+      dsseVerifier: (bytes) => ({ validSignerKeyids: bytes === coldEnvelope || bytes === revocationEnvelope ? [COLD_KEY] : [] }),
+      resolverFor() { return { resolveBinding: answersForDiscoveryKeys }; },
+    };
+    await expect(productionSource(trust).verifyHead({
+      source: { agent: AGENT, name: SOURCE_NAME }, head: current, signature: signHead(current, OLD.privateKey, OLD_KEY),
+    })).resolves.toEqual({ status: 'unauthorized-signer' });
+  });
+});
+
 describe('#3470 — a throwing key resolve leaves pollSource untranslated', () => {
   const genesis: AnnouncementEntry = {
     protocol: RECORD_DISCOVERY_VERSION,

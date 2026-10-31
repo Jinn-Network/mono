@@ -906,6 +906,36 @@ describe.each([
       expect(await w.join(THIRD_KEY, NEXT_KEY, ENVELOPE, CLAIM)).toEqual(joined);
     });
 
+    test("§7.5a refuses a settlement leg with no chain to the genesis", async () => {
+      const w = world();
+      await bindGenesis(w);
+      await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T1, scope: ["settlements"] });
+      expect(await w.join(GENESIS_KEY, STRANGER_KEY, ENVELOPE, CLAIM))
+        .toMatchObject({ ok: false, reason: expect.stringMatching(/settlement leg does not stand/) });
+    });
+
+    test("§7.5a refuses a settlement leg whose ceremony does not verify", async () => {
+      const w = world();
+      await settlementLeg(w, { withoutCeremonyEvidence: true });
+      expect(await joinOf(w)).toMatchObject({ ok: false, reason: expect.stringMatching(/settlement leg does not stand/) });
+    });
+
+    test("§7.5a joins a settlement leg a standing key consented to another account", async () => {
+      const w = world();
+      await bindGenesis(w);
+      await w.bind({ key: NEXT_KEY, signer: SECOND_OWNER, validFrom: T1, scope: ["settlements"], consentBy: GENESIS_KEY });
+      expect(await joinOf(w)).toEqual(joined);
+    });
+
+    test("§7.5a joins a settlement leg the founding account bound after a working key revoked its genesis binding", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      await w.bind({ key: COLD_KEY, signer: OWNER, validFrom: T1 });
+      await w.revoke(genesis, COLD_KEY, BEFORE_ENVELOPE);
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: BEFORE_ENVELOPE, anchoredAt: "2026-02-20T00:00:00.000Z", scope: ["settlements"] });
+      expect(await w.join(COLD_KEY, NEXT_KEY, ENVELOPE, CLAIM)).toEqual(joined);
+    });
+
     test("checkBindingRevocation counts a revocation from its effective time, and only one with authority", async () => {
       const w = world();
       const genesis = await bindGenesis(w);
@@ -918,6 +948,56 @@ describe.each([
       await w.revoke(target, GENESIS_KEY, T3);
       expect(await w.notRevoked(NEXT_KEY, T2)).toBe(true);
       expect(await w.notRevoked(NEXT_KEY, T3)).toBe(false);
+    });
+  });
+
+  describe("a key's standing under a voucher (§7.4b)", () => {
+    /** Binds `key` again at `validFrom` until the record's digest sorts before `than`'s, as a tie goes to the lower. */
+    async function bindAgainSortingBefore(w: World, key: string, signer: EoaTestSigner, validFrom: string, than: SealedKeyBindingRecord) {
+      for (let attempt = 0; attempt < 4096; attempt += 1) {
+        // eslint-disable-next-line no-await-in-loop -- minting until the digest lands.
+        const record = await w.bind({ key, signer, validFrom, expiresAt: new Date(Date.parse(NOW) + attempt * 1000).toISOString() });
+        if (record.bindingDigest < than.bindingDigest) return record;
+        w.records.pop();
+      }
+      throw new Error("no digest landed on the wanted side");
+    }
+
+    test("a replacement that takes the key's tie does not leave a revocation of the original behind", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const original = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1 });
+      await w.revoke(original, GENESIS_KEY, T2);
+      await bindAgainSortingBefore(w, NEXT_KEY, OWNER, T1, original);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject({ ok: false, reason: "revoked" });
+      expect(await w.verdict(NEXT_KEY, T1)).toMatchObject(stands);
+    });
+
+    test("revoking the later of two records for a key ends the earlier one too", async () => {
+      const w = world();
+      await bindGenesis(w);
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1 });
+      const later = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T2 });
+      await w.revoke(later, GENESIS_KEY, T3);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject({ ok: false, reason: "revoked" });
+    });
+
+    test("a revocation stays with a voucher: another account's record for the key is not ended by it", async () => {
+      const w = world();
+      await bindGenesis(w);
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1 });
+      const other = await w.bind({ key: NEXT_KEY, signer: SECOND_OWNER, validFrom: T2, consentBy: GENESIS_KEY });
+      await w.revoke(other, GENESIS_KEY, T3);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+    });
+
+    test("a revocation stays with what is in window: the voucher can bind the key again once that record has ended", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const ended = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1, expiresAt: T2 });
+      await w.revoke(ended, GENESIS_KEY, "2026-02-15T00:00:00.000Z");
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T3 });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
     });
   });
 

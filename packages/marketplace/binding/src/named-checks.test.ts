@@ -96,7 +96,11 @@ function resolvedBinding(
   revocations: readonly ResolvedRevocation[] = [],
 ): ResolvedBinding {
   return {
-    envelopeBytes: new TextEncoder().encode("fixture-binding"),
+    envelopeBytes: sealDsseEnvelope({
+      payloadBytes: new TextEncoder().encode("fixture-binding"),
+      payloadType: "application/vnd.jinn.trust.key-binding.v1+json",
+      signatures: [{ signature: Uint8Array.of(1), keyid: key }],
+    }),
     bindingDigest: `sha256:${"8".repeat(64)}`,
     effectiveStart: "2026-01-01T00:00:00Z",
     isGenesis: true,
@@ -634,6 +638,49 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
     expect(await gateVerdictObservation(fixture.input, ports)).toEqual({
       decisionGrade: false,
       failures: [{ check: "settlement-join", detail: expect.stringContaining("settlement leg is revoked at claim time") }],
+    });
+  });
+
+  describe("over a resolver holding more than the fixture's keys", () => {
+    const COLD_KEY = "did:key:z6MkfCOLD1111111111111111111111111111111";
+
+    function withBinding(ports: VerdictObservationGatePorts, key: string, binding: ResolvedBinding): VerdictObservationGatePorts {
+      return {
+        ...ports,
+        bindingResolver: {
+          resolveBinding: async (query, atTime) => (query.key === key ? binding : ports.bindingResolver.resolveBinding(query, atTime)),
+        },
+      };
+    }
+
+    test("counts a revocation by a revoker whose ceremony only the witness leg verifies", async () => {
+      const cold = resolvedBinding(COLD_KEY, EVALUATOR_AGENT, ["bindings"]);
+      const ports = withBinding(
+        makePorts(undefined, SOLVER_AGENT, [], [revocationEntry(COLD_KEY, CLAIM_BLOCK_TIME)]),
+        COLD_KEY,
+        {
+          ...cold,
+          bindingDigest: `sha256:${"9".repeat(64)}`,
+          binding: { ...cold.binding, ceremony: { type: "safe", digest: `sha256:${"7".repeat(64)}` } },
+          witness: { chainId: 84532, blockNumber: 1, blockHash: `0x${"c".repeat(64)}`, verifier: EVALUATOR_AGENT, envelopeBytes: Uint8Array.of(1) },
+        },
+      );
+      expect(await gateVerdictObservation(makeFixture().input, ports)).toEqual({
+        decisionGrade: false,
+        failures: [{ check: "settlement-join", detail: expect.stringContaining("settlement leg is revoked at claim time") }],
+      });
+    });
+
+    test("fails closed when the settlement declaration has no chain to the genesis", async () => {
+      const ports = withBinding(
+        makePorts(),
+        SETTLEMENT_KEY,
+        { ...resolvedBinding(SETTLEMENT_KEY, EVALUATOR_AGENT, ["settlements"]), isGenesis: false },
+      );
+      expect(await gateVerdictObservation(makeFixture().input, ports)).toEqual({
+        decisionGrade: false,
+        failures: [{ check: "settlement-join", detail: expect.stringContaining("settlement leg does not stand") }],
+      });
     });
   });
 

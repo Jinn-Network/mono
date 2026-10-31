@@ -144,6 +144,33 @@ describe("createChainFactResolver", () => {
       await expect(resolver.ownerOf("not-a-caip19")).rejects.toThrow(/CAIP-19/);
     });
 
+    describe("a token id no read can be made for", () => {
+      const WIDEST = (2n ** 256n - 1n).toString();
+      const asking = (readContract: () => Promise<unknown>) => createChainFactResolver({
+        rpcUrl: "http://unused.test",
+        expectedChainId: 84532,
+        identityRegistry: REGISTRY,
+        client: { getChainId: async () => 84532, readContract },
+      });
+
+      it.each([
+        ["one past the widest", (2n ** 256n).toString()],
+        ["far wider than that", "9".repeat(90)],
+      ])("refuses %s before any read, as the record's fault and not an outage", async (_label, token) => {
+        const readContract = vi.fn(async () => OWNER);
+        await expect(asking(readContract).ownerOf(`eip155:84532/erc721:${REGISTRY}/${token}`))
+          .rejects.toMatchObject({ code: "INVALID_INPUT" });
+        await expect(asking(readContract).getAgentWalletAtBlock(token, 1)).rejects.toMatchObject({ code: "INVALID_INPUT" });
+        expect(readContract).not.toHaveBeenCalled();
+      });
+
+      it("reads the widest token id there is", async () => {
+        const readContract = vi.fn(async () => OWNER);
+        await expect(asking(readContract).ownerOf(`eip155:84532/erc721:${REGISTRY}/${WIDEST}`)).resolves.toBe(OWNER);
+        expect(readContract).toHaveBeenCalledWith(expect.objectContaining({ args: [2n ** 256n - 1n] }));
+      });
+    });
+
     describe("when no provider returns an owner", () => {
       const AGENT_ASSET = `eip155:84532/erc721:${REGISTRY}/101`;
       const reverted = new ContractFunctionExecutionError(
@@ -173,6 +200,11 @@ describe("createChainFactResolver", () => {
         const foreign = Object.assign(new Error("execution reverted"), { name: "ContractFunctionRevertedError" });
         await expect(resolverOver(failing(new Error("call failed", { cause: foreign }))).ownerOf(AGENT_ASSET))
           .rejects.toMatchObject({ code: "INVALID_INPUT" });
+      });
+
+      it("finds a revert however deep the client wrapped it", async () => {
+        const wrapped = new Error("outer", { cause: new Error("middle", { cause: new Error("inner", { cause: reverted }) }) });
+        await expect(resolverOver(failing(wrapped)).ownerOf(AGENT_ASSET)).rejects.toMatchObject({ code: "INVALID_INPUT" });
       });
 
       it("reads a contract with no code as the same answer", async () => {

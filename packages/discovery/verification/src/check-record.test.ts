@@ -985,6 +985,29 @@ describe("trust binding", () => {
     expect(unreached.outcome).toBe("checked");
   });
 
+  test("a refusal for one signer and an outage for the next is an outage: the record could still bind", async () => {
+    const first = ed25519();
+    const second = ed25519();
+    const payloadBytes = encoder.encode(JSON.stringify(evaluationStatement(), null, 2));
+    const encoded = dssePreAuthEncoding(DSSE_PAYLOAD_TYPE, payloadBytes);
+    const twoSigners = encoder.encode(JSON.stringify({
+      payloadType: DSSE_PAYLOAD_TYPE,
+      payload: Buffer.from(payloadBytes).toString("base64"),
+      signatures: [first, second].map(({ keyid, privateKey }) => ({ keyid, sig: sign(null, encoded, privateKey).toString("base64") })),
+    }, null, 2));
+    let asked = 0;
+    const bindingResolver: BindingResolver = {
+      resolveBinding: async () => {
+        asked += 1;
+        if (asked === 1) return null;
+        throw new Error("no route to host");
+      },
+    };
+    const report = await checkRecord(twoSigners, { trust: { bindingResolver } });
+    expect(asked).toBe(2);
+    expect(check(report, "trust-binding")).toMatchObject({ status: "skipped", findings: [{ code: "binding-dependency-failed" }] });
+  });
+
   describe("over the real resolver", () => {
     const CEREMONY = `sha256:${"c".repeat(64)}` as const;
 

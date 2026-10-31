@@ -44,7 +44,8 @@ function decodeBase64(value: string): Uint8Array {
   return bytes;
 }
 
-function voucherIdentityEquals(a: VoucherIdentity, b: VoucherIdentity): boolean {
+/** Whether two vouchers are one identity, whatever else a record says about it. */
+export function voucherIdentityEquals(a: VoucherIdentity, b: VoucherIdentity): boolean {
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
     case "account":
@@ -767,9 +768,11 @@ export interface SettlementJoinOutcome {
  * stand (not revoked) at the later claim time. Divergent times or a
  * missing leg fail the join -- no partial credit.
  *
- * A resolver does not judge revocations: a revoked binding still resolves,
- * carrying what names it (`interfaces.ts`). So a revoked leg fails here, by
- * §7.4b's authority, and a revocation with no authority has no effect.
+ * A resolver does not judge what it returns: a revoked binding still resolves,
+ * carrying what names it, and so does one with no standing (`interfaces.ts`).
+ * So a revoked leg fails here, by §7.4b's authority, and a revocation with no
+ * authority has no effect. The settlement leg must also stand at the envelope's
+ * time. The verdict leg's standing is `verifyEnvelopeBinding`'s to establish.
  */
 export async function settlementJoinCheck(
   input: SettlementJoinInput,
@@ -815,6 +818,11 @@ export async function settlementJoinCheck(
   const envelopeTimeRevocation = await checkRevocation(settlementLegAtEnvelopeTime, input.envelopeEffectiveTime, "at", walk);
   if (!envelopeTimeRevocation.ok) {
     return { ok: false, reason: `settlement leg is revoked at the envelope's time: ${envelopeTimeRevocation.detail}` };
+  }
+  // §7.5a: "valid at the envelope's time". A resolved binding is data, so the leg must
+  // stand: its own signature, its ceremony (§7.5 step 3) and its §7.4a chain (step 4).
+  if (!(await bindingStands(settlementLegAtEnvelopeTime, input.envelopeEffectiveTime, walk))) {
+    return { ok: false, reason: "settlement leg does not stand at the envelope's time (§7.5 steps 3 and 4)." };
   }
 
   // "not revoked at claim time" -- a distinct, later check from the

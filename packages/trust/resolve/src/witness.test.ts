@@ -160,10 +160,30 @@ describe("createWitnessVerifier", () => {
         },
       },
     });
+    /** A viem client's failure of the shape it wraps every contract read in, naming what went wrong. */
+    const failedRead = (...causes: readonly string[]): Error => {
+      const inner = causes.reduceRight<Error | undefined>(
+        (cause, name) => Object.assign(new Error(name, cause === undefined ? {} : { cause }), { name }),
+        undefined,
+      );
+      return new ContractFunctionExecutionError(inner as never, {
+        abi: ERC1271_IS_VALID_SIGNATURE_ABI,
+        args: [HASH, SIGNATURE],
+        functionName: "isValidSignature",
+      });
+    };
 
-    it("lets a read that failed out as an outage", async () => {
-      await expect(verifierFailingWith(new Error("no route to host")).verify1271Witness(witness))
-        .rejects.toThrow("no route to host");
+    it.each([
+      ["a client that says nothing of what failed", new Error("no route to host")],
+      ["an unreachable node", failedRead("CallExecutionError", "HttpRequestError")],
+      ["a node that timed out", failedRead("CallExecutionError", "TimeoutError")],
+      ["a socket that failed", failedRead("CallExecutionError", "WebSocketRequestError")],
+      ["a socket that closed", failedRead("CallExecutionError", "SocketClosedError")],
+      ["a rate limit", failedRead("CallExecutionError", "LimitExceededRpcError")],
+      ["a node with no capacity", failedRead("CallExecutionError", "ResourceUnavailableRpcError")],
+      ["an unreachable node, whatever wraps it", failedRead("ContractFunctionRevertedError", "HttpRequestError")],
+    ])("lets %s out as an outage: no node took the read", async (_label, cause) => {
+      await expect(verifierFailingWith(cause).verify1271Witness(witness)).rejects.toBe(cause);
     });
 
     it.each([
@@ -171,8 +191,14 @@ describe("createWitnessVerifier", () => {
         new ContractFunctionRevertedError({ abi: ERC1271_IS_VALID_SIGNATURE_ABI, functionName: "isValidSignature", message: "GS026" }),
         { abi: ERC1271_IS_VALID_SIGNATURE_ABI, args: [HASH, SIGNATURE], functionName: "isValidSignature" },
       )],
+      ["reverted, however deep the client wrapped it", new Error("outer", {
+        cause: new Error("middle", { cause: new Error("inner", { cause: failedRead("ContractFunctionRevertedError") }) }),
+      })],
       ["has no code at that block", new ContractFunctionZeroDataError({ functionName: "isValidSignature" })],
-    ])("takes a contract that %s as its answer", async (_label, cause) => {
+      ["returned too few bytes", failedRead("AbiDecodingDataSizeTooSmallError")],
+      ["ran out of gas", failedRead("CallExecutionError", "ExecutionRevertedError")],
+      ["is at a block the node does not hold", failedRead("CallExecutionError", "InvalidInputRpcError")],
+    ])("takes a contract that %s as an answer: a statement chooses both, so it cannot read as an outage", async (_label, cause) => {
       const result = await verifierFailingWith(cause).verify1271Witness(witness);
       expect(result.verified).toBe(false);
       expect(result.reason).toMatch(/archive re-execution/);
@@ -181,10 +207,13 @@ describe("createWitnessVerifier", () => {
 
   it.each([
     ["an address that is not one", { safe: "0xnot-an-address" }],
+    ["an address whose checksum is wrong", { safe: "0x4444444444444444444444444444444444444AaA" }],
     ["a hash that is not 32 bytes", { hash: "0xaa" }],
+    ["a hash of the right length that is not hex", { hash: `0x${"zz".repeat(32)}` }],
     ["a signature that is not hex", { signature: "bytes" }],
     ["a block that is not a number on the chain", { blockNumber: 1.5 }],
     ["a block below the first", { blockNumber: -1 }],
+    ["a block too far past what a number holds exactly", { blockNumber: 2 ** 53 }],
   ])("answers for a statement holding %s, before any read", async (_label, overrides) => {
     const payload = witnessPayload(overrides);
     const readContract = vi.fn(async () => {
@@ -194,6 +223,18 @@ describe("createWitnessVerifier", () => {
     const result = await verifier.verify1271Witness(outerWitness(payload, sealWitnessPayload(payload)));
     expect(result.verified).toBe(false);
     expect(readContract).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["the first block", { blockNumber: 0 }],
+    ["an address in lower case", { safe: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd" }],
+    ["an empty signature", { signature: "0x" }],
+  ])("puts a statement naming %s to the archive", async (_label, overrides) => {
+    const payload = witnessPayload(overrides);
+    const readContract = vi.fn(async () => ERC1271_MAGIC_VALUE);
+    const verifier = createWitnessVerifier({ acceptedVerifiers: [], archiveClient: { readContract } });
+    await expect(verifier.verify1271Witness(outerWitness(payload, sealWitnessPayload(payload)))).resolves.toEqual({ verified: true });
+    expect(readContract).toHaveBeenCalledOnce();
   });
 
   it("fails when the witness-attested result itself is not the magic value (even if policy-accepted)", async () => {
