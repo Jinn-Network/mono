@@ -369,12 +369,27 @@ describe("a file over the limit", () => {
     expect((await run(path)).stdout.split("\n")[0]).toBe(`Read 1 file from ${path}.`);
   });
 
+  test("named alone at the limit is read", async () => {
+    const path = join(directory({}), "exact.bin");
+    writeFileSync(path, "x");
+    truncateSync(path, MAX_FILE_BYTES);
+    expect((await run(path)).stdout.split("\n")[0]).toBe(`Read 1 file from ${path}.`);
+  });
+
   test("named alone fails, with nothing to report about records", async () => {
     const path = oversized(join(directory({}), "huge.bin"));
     const { code, stdout } = await run(path);
     expect(code).toBe(1);
     expect(stdout).toContain("Digest         nothing read");
     expect(stdout).toContain("1 file too large to read.");
+  });
+
+  test("as the keys file at the limit is read", async () => {
+    const { publicKey } = generateKeyPairSync("ed25519");
+    const keys = join(directory({ "keys.json": keysFile([{ keyId: "evaluator-key-1", publicKey }]).padEnd(MAX_FILE_BYTES, " ") }), "keys.json");
+    const { code, stderr } = await run(directory(Object.fromEntries([named(task)])), "--keys", keys);
+    expect(stderr).toBe("");
+    expect(code).toBe(0);
   });
 
   test("as the keys file is an environment error", async () => {
@@ -1116,7 +1131,7 @@ describe("--root", () => {
       return { file: "big.dat", bytes: Buffer.alloc(MAX_FILE_BYTES + 1, "x") };
     }
 
-    test("that a record cites dangles, because it was not parsed, and that fails the run", async () => {
+    test("that a record must hold dangles, because it was not parsed, and that fails the run", async () => {
       const bigTask = sealTask({
         protocol: TASK_EXECUTION_PROTOCOL_URI,
         profile: { uri: "https://spec.jinn.network/task-profiles/binary-judgment/2.0", digest: { sha256: BINARY_JUDGMENT_PROFILE } },
@@ -1129,6 +1144,16 @@ describe("--root", () => {
       expect(code).toBe(1);
       expect(stdout).toContain("Completeness   passed: 2 listed files present and unchanged, no others");
       expect(stdout).toContain("References     failed: 1 dangling");
+    });
+
+    test("that a family lets a reader lack reads unavailable, and that does not fail the run", async () => {
+      const { bytes } = big();
+      const citing = delivery({ outputs: [{ name: "patch", mediaType: "text/x-diff", digest: { sha256: sha256(bytes) } }] });
+      const { path, root } = published({ "records/artifact.bin": bytes, "records/citing.bin": citing, "records/task.bin": task });
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(0);
+      expect(stdout).toContain("Completeness   passed: 3 listed files present and unchanged, no others");
+      expect(stdout).toContain("1 unavailable");
     });
 
     test("is compared and not parsed, and does not fail the run", async () => {
@@ -1305,5 +1330,6 @@ describe("--root", () => {
     expect(code).toBe(0);
     expect(stdout).toContain("--root sha256:<hex>");
     expect(stdout).toContain("somewhere you trust");
+    expect(stdout).toContain("and that alone is not a failure");
   });
 });

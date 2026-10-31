@@ -37,10 +37,12 @@ The command reads at most 2,097,152 bytes of any one file. A record's worst case
 size, because each signature hashes the whole payload: about 3 s for a hostile file at this limit,
 and 12 s at twice it. The largest record in the public claim below is 436,248 bytes, and this is also
 the one limit the specification states for a stored object, in the IPFS repository profile. A larger
-file is not read. It is named in the report and fails the run, and anything citing it dangles. A
-keys file over the limit is exit code 2. The limit is per file, so a directory of many such files
+file is not read. It is named in the report and fails the run. A record that must hold it dangles,
+and a citation the family lets a reader lack reads `unavailable`. A keys file over the limit is exit
+code 2. The limit is per file, so a directory of many such files
 still takes as long as it takes. With `--root` a listed file over the limit is still hashed, and that
-alone does not fail the run, though a record citing it dangles, which does.
+alone does not fail the run: a record that must hold it dangles, and that does; a citation the family
+lets a reader lack reads `unavailable` and does not.
 
 File names, list paths, `keyid` values and details printed from a record have control and formatting
 characters escaped, so a record cannot add a line to the report or move the cursor.
@@ -97,7 +99,7 @@ specification defines no container format, so this format is this package's own:
 
 - The list is UTF-8 I-JSON of at most 67,108,864 bytes. The real list below is 8,156,179 bytes for
   46,016 files, and that size is over the limit for a record, so a list has its own limit. It does not
-  keep memory small: a hostile list at that size took up to 4.1 GiB here, and a smaller Node heap than
+  keep memory small: a hostile list at that size took about 5 GiB here, and a smaller Node heap than
   that stops the command with no report.
 - `files` holds at least one entry. Other top-level members are not read, and the root still commits
   to them. That is why a Colophon `bundle.json` works as it is. The list does not name itself.
@@ -122,8 +124,9 @@ An empty directory holds no bytes and is ignored. A path in a list is only ever 
 names found on disk and is never opened, so a list cannot aim a read.
 
 A listed file over 2,097,152 bytes is hashed in pieces, with no size limit, and is not parsed: the
-first line counts it and `--json` names it under `root.notParsed`. That alone does not fail the run,
-but a record citing it dangles, and that does. A smaller file is read whole, once, and the record
+first line counts it and `--json` names it under `root.notParsed`. That alone does not fail the run:
+a record that must hold it dangles, and that does; a citation the family lets a reader lack reads
+`unavailable` and does not. A smaller file is read whole, once, and the record
 checks see the bytes that were hashed, with the list's digest as their claimed digest. Those bytes
 stay in memory for the whole run: about 640 MB for the claim below, and 3.2 GiB for 1,500 files of
 2 MiB.

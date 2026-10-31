@@ -51,8 +51,8 @@ const USAGE = `Usage: npx @jinn-network/verify <path> [--root sha256:<hex>] [--k
 
 Exits 0 when nothing failed, 1 when a record, a set check or the root failed, 2 on usage or environment
 errors, including a file that matches the root and cannot be read as a list.
-A file over ${MAX_FILE_BYTES} bytes is not read, and counts as a failure. With --root it is still hashed
-and compared, and it is not parsed.
+A file over ${MAX_FILE_BYTES} bytes is not read, and counts as a failure. With --root a listed file over
+that size is hashed and compared and not parsed, and that alone is not a failure.
 `;
 
 /** The caller's input or environment is wrong. Nothing was checked. */

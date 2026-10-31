@@ -15,7 +15,7 @@ import { describeError, escapeUnprintable } from "./results.js";
 /**
  * The most bytes the command will parse as a file list. The list of the public claim this was sized
  * against is 8,156,179 bytes for 46,016 files, so this holds about 370,000. It stops a list growing
- * without end and it does not keep memory small: a hostile list at this size took up to 4.1 GiB to
+ * without end and it does not keep memory small: a hostile list at this size took about 5 GiB to
  * parse, and a smaller heap than that stops Node. Files a list names have no limit of their own.
  */
 export const MAX_LIST_BYTES = 67_108_864;
