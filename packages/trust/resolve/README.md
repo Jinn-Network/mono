@@ -37,9 +37,10 @@ witness naming a block or contract no read can use.
 
 A revocation ends a key's standing under a voucher, not one record of it. A resolved
 binding lists the revocations of every record in window for that key under that
-voucher, so revoking any of them ends all of them, and a replacement cannot leave a
-revocation behind. A record that has left its window shares nothing with a later one,
-and neither does a record under another voucher, which stands on its own §7.4a chain.
+voucher, so revoking any of them ends all of them, and a replacement in window beside
+a revoked record cannot leave the revocation behind. A record that has left its window
+shares nothing with a later one, and neither does a record under another voucher,
+which stands on its own §7.4a chain.
 
 See `docs/superpowers/plans/2026-07-28-trust-layer.md` for the implementation
 plan.
