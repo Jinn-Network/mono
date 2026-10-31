@@ -10,12 +10,13 @@ import type { RecordSetInputRecord } from "./check-record-set.js";
 import { parseFileList } from "./file-list.js";
 import type { FileListEntry } from "./file-list.js";
 import type { RootProblem, RootProblemCode, UnreadFile } from "./render-report.js";
-import { describeError, printable } from "./results.js";
+import { describeError, escapeUnprintable } from "./results.js";
 
 /**
- * The most bytes the command will parse as a file list. A list parses in linear time, so this bounds
- * memory rather than time. The list of the public claim this was sized against is 8,156,179 bytes for
- * 46,016 files, so this holds about 370,000. Files a list names have no limit of their own.
+ * The most bytes the command will parse as a file list. The list of the public claim this was sized
+ * against is 8,156,179 bytes for 46,016 files, so this holds about 370,000. It stops a list growing
+ * without end and it does not keep memory small: a hostile list at this size took up to 4.1 GiB to
+ * parse, and a smaller heap than that stops Node. Files a list names have no limit of their own.
  */
 export const MAX_LIST_BYTES = 67_108_864;
 
@@ -23,6 +24,8 @@ const HASH_CHUNK_BYTES = 1_048_576;
 
 export interface TargetFile extends RecordSetInputRecord {
   readonly file: string;
+  /** What these exact bytes hashed to, when that is already known. `digest` is only a claim. */
+  readonly hashed?: string;
 }
 
 interface HashedFile {
@@ -35,9 +38,11 @@ interface HashedFile {
 
 /** Opens without following a final link. Anything kept is the same read that was hashed. */
 function readHashed(path: string, keepUpTo: number): HashedFile {
-  const descriptor = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  // O_NONBLOCK and the type check are for a file swapped after the walk: a pipe would block this open.
+  const descriptor = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
   try {
     const file = fstatSync(descriptor);
+    if (!file.isFile()) throw new Error("not a regular file");
     const hardLinked = file.nlink > 1;
     const hash = createHash("sha256");
     if (file.size <= keepUpTo) {
@@ -104,7 +109,7 @@ export interface RootTarget {
 }
 
 function problem(code: RootProblemCode, file: string, detail: string): RootProblem {
-  return { code, file: printable(file), detail: printable(detail) };
+  return { code, file: escapeUnprintable(file), detail: escapeUnprintable(detail) };
 }
 
 function compare(path: string, entry: FileListEntry, parseUpTo: number): {
@@ -127,8 +132,8 @@ function compare(path: string, entry: FileListEntry, parseUpTo: number): {
         : []),
   ];
   return read.bytes === undefined
-    ? { notParsed: { file: printable(entry.path), bytes: read.size }, problems }
-    : { file: { file: entry.path, bytes: read.bytes, digest: `sha256:${entry.sha256}` }, problems };
+    ? { notParsed: { file: escapeUnprintable(entry.path), bytes: read.size }, problems }
+    : { file: { file: entry.path, bytes: read.bytes, digest: `sha256:${entry.sha256}`, hashed: `sha256:${read.sha256}` }, problems };
 }
 
 /**
@@ -156,11 +161,16 @@ export function readRootTarget(directory: string, sha256: string, parseUpTo: num
     };
   }
 
-  const regular = new Set(tree.files);
+  const regular = new Set<string>();
   const listed = new Set(entries.map(({ path }) => path));
   const files: TargetFile[] = [];
   const notParsed: UnreadFile[] = [];
   const problems: RootProblem[] = [...listProblems];
+  for (const file of tree.files) {
+    // Node decodes a name that is not UTF-8 lossily, so a second file could pass as the listed one.
+    if (regular.has(file)) problems.push(problem("name-collision", file, "two names on disk read as this text"));
+    regular.add(file);
+  }
   for (const entry of entries) {
     if (tree.others.has(entry.path)) continue;
     if (!regular.has(entry.path)) {

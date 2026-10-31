@@ -56,8 +56,8 @@ describe("an entry breaking the format", () => {
     ["not an object", "a", "is not an object"],
     ["null", null, "is not an object"],
     ["an array", [], "is not an object"],
-    ["a path that is not a string", entry(5), "is not relative and normalized"],
-    ["a missing path", { bytes: 1, sha256: digest }, "is not relative and normalized"],
+    ["a path that is not a string", entry(5), "path is not a string"],
+    ["a missing path", { bytes: 1, sha256: digest }, "path is not a string"],
     ["an empty path", entry(""), "is not relative and normalized"],
     ["an absolute path", entry("/etc/passwd"), "is not relative and normalized"],
     ["a dot", entry("."), "is not relative and normalized"],
@@ -82,6 +82,18 @@ describe("an entry breaking the format", () => {
     expect(problems).toHaveLength(1);
     expect(problems[0]).toMatch(/^entry 1: /u);
     expect(problems[0]).toContain(expected);
+  });
+
+  test("a path nested a million deep is reported, not a stack overflow", () => {
+    const deep = `{"files":[{"path":${"[".repeat(1_000_000)}${"]".repeat(1_000_000)}}]}`;
+    expect(parse(deep).problems).toEqual(["entry 1: path is not a string"]);
+  });
+
+  test("reading stops at a bound, and the first of a million is still reported", () => {
+    const problems = problemsOf(...new Array(1_000).fill({}));
+    expect(problems).toHaveLength(100);
+    expect(problems[0]).toBe("entry 1: path is not a string");
+    expect(problems[99]).toBe("entry 100: path is not a string");
   });
 
   test("a repeated path", () => {

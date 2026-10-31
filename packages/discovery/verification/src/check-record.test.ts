@@ -273,6 +273,10 @@ describe("a signed record's envelope states its media type (§21.2)", () => {
       ["a remote $ref, as base64", base64({ $ref: "https://evil.example/x.json" })],
       ["an unsafe pattern, as base64", base64({ type: "string", pattern: "(a+)+$" })],
       ["a remote $dynamicRef, as base64 in double quotes", `"${base64({ $dynamicRef: "https://evil.example/x.json#node" })}"`],
+      ["a remote $ref as base64, in the key of a harmless object", `{"${base64({ $ref: "https://evil.example/x.json" })}":{}}`],
+      ["an unsafe pattern as base64, in the key of a harmless object", `{"${base64({ type: "string", pattern: "(a+)+$" })}":{}}`],
+      // Its letters decode to `{"a":"..."}`, so here the plain reading is the unsafe one of the two.
+      ["a remote $ref as plain JSON, whose base64 reading is a harmless object", '{"eyJhIjoi":{},"$ref":"https://evil.example/10","In0=":{}}'],
     ])("%s is invalid", async (_name, content) => {
       const report = await checkRecord(withSlotSchema({ name: "out.schema.json", content }));
       expect(check(report, "schema")).toMatchObject({ status: "failed", findings: [{ code: "invalid-document", path: SLOT_PATH }] });

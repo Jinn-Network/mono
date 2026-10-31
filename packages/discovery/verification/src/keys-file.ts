@@ -15,12 +15,22 @@ export class KeysFileError extends Error {
   }
 }
 
-function keyEntries(value: unknown): readonly { readonly keyId: string; readonly spkiDerBase64: string }[] {
-  if (Array.isArray(value)) return value.flatMap(keyEntries);
-  if (!isRecordObject(value)) return [];
-  const { keyId, spkiDerBase64 } = value;
-  const own = typeof keyId === "string" && typeof spkiDerBase64 === "string" ? [{ keyId, spkiDerBase64 }] : [];
-  return [...own, ...Object.values(value).flatMap(keyEntries)];
+/** In document order, and with a stack of its own, so a deeply nested file reads like any other. */
+function keyEntries(document: unknown): readonly { readonly keyId: string; readonly spkiDerBase64: string }[] {
+  const entries: { readonly keyId: string; readonly spkiDerBase64: string }[] = [];
+  const pending: unknown[] = [document];
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (isRecordObject(value)) {
+      const { keyId, spkiDerBase64 } = value;
+      if (typeof keyId === "string" && typeof spkiDerBase64 === "string") entries.push({ keyId, spkiDerBase64 });
+    }
+    if (Array.isArray(value) || isRecordObject(value)) {
+      const children = Object.values(value);
+      for (let index = children.length - 1; index >= 0; index -= 1) pending.push(children[index]);
+    }
+  }
+  return entries;
 }
 
 /**

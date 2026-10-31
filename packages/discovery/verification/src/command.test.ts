@@ -712,7 +712,7 @@ describe("--root", () => {
       expect(stdout).toBe([
         `Read 3 files from ${path}.`,
         "",
-        `Root           matched: bundle.json is ${root}`,
+        `Root           matched the digest you gave: bundle.json is ${root}`,
         "Kinds          2 known, 0 unknown naming a type, 1 naming no type",
         "Digest         3 passed, compared with the list",
         "Encoding       2 passed, 1 skipped (not records)",
@@ -735,7 +735,7 @@ describe("--root", () => {
       const path = directory({ ...files, "whatever.manifest": list });
       const { code, stdout } = await run(path, "--root", `sha256:${sha256(list)}`);
       expect(code).toBe(0);
-      expect(stdout).toContain("Root           matched: whatever.manifest is sha256:");
+      expect(stdout).toContain("Root           matched the digest you gave: whatever.manifest is sha256:");
     });
 
     test("reads a list over the size limit for a record", async () => {
@@ -847,7 +847,7 @@ describe("--root", () => {
       const { path, root } = withEntries([{ ...good, ...overrides }]);
       const { code, stdout } = await run(path, "--root", root);
       expect(code).toBe(1);
-      expect(stdout).toContain(`Root           matched: bundle.json is ${root}`);
+      expect(stdout).toContain(`Root           matched the digest you gave: bundle.json is ${root}`);
       expect(stdout).toContain("Completeness   failed: 1 breaking the list format");
       expect(stdout).toContain(expected);
       expect(stdout).toContain("The list broke its format, so nothing else was checked.");
@@ -895,7 +895,7 @@ describe("--root", () => {
       writeFileSync(join(path, "notes/readme.txt"), "hellO");
       const { code, stdout } = await run(path, "--root", root);
       expect(code).toBe(1);
-      expect(stdout).toContain("Root           matched");
+      expect(stdout).toContain("Root           matched the digest you gave");
       expect(stdout).toContain("Digest         2 passed, compared with the list, 1 failed");
       expect(stdout).toContain("Completeness   failed: 1 changed");
       expect(stdout).toContain("notes/readme.txt: changed: does not hash to the digest in the list");
@@ -978,6 +978,15 @@ describe("--root", () => {
   });
 
   describe("a file the list does not name", () => {
+    test.each([".hidden", "records/.hidden", ".git/config"])("fails on an unlisted %s", async (name) => {
+      const { path, root } = published(tree);
+      mkdirSync(dirname(join(path, name)), { recursive: true });
+      writeFileSync(join(path, name), "added");
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toContain(`${name}: not-listed`);
+    });
+
     test.each([["at the top", "extra.txt"], ["in a subdirectory", "deep/er/extra.txt"]])("%s fails", async (_name, file) => {
       const { path, root } = published(tree);
       mkdirSync(dirname(join(path, file)), { recursive: true });
@@ -1081,17 +1090,53 @@ describe("--root", () => {
     });
   });
 
+  describe("a listed file at the size limit for a record", () => {
+    test("is parsed, and one byte more is not", async () => {
+      const notParsed = async (size: number) => {
+        const { path, root } = published({ "file.dat": Buffer.alloc(size, "x") });
+        return (JSON.parse((await run(path, "--root", root, "--json")).stdout) as { root: { notParsed: unknown[] } }).root.notParsed;
+      };
+      expect(await notParsed(MAX_FILE_BYTES)).toEqual([]);
+      expect(await notParsed(MAX_FILE_BYTES + 1)).toEqual([{ file: "file.dat", bytes: MAX_FILE_BYTES + 1 }]);
+    });
+  });
+
+  describe("a list with far more bad entries than are worth reading", () => {
+    test("stops at a bound, and is refused", async () => {
+      const list = `{"files":[${new Array(1000).fill("{}").join(",")}]}`;
+      const path = directory({ "bundle.json": list });
+      const { code, stdout } = await run(path, "--root", `sha256:${sha256(list)}`, "--json");
+      expect(code).toBe(1);
+      expect((JSON.parse(stdout) as { root: { problems: unknown[] } }).root.problems).toHaveLength(100);
+    });
+  });
+
   describe("a listed file over the size limit for a record", () => {
     function big(): { bytes: Uint8Array; file: string } {
       return { file: "big.dat", bytes: Buffer.alloc(MAX_FILE_BYTES + 1, "x") };
     }
+
+    test("that a record cites dangles, because it was not parsed, and that fails the run", async () => {
+      const bigTask = sealTask({
+        protocol: TASK_EXECUTION_PROTOCOL_URI,
+        profile: { uri: "https://spec.jinn.network/task-profiles/binary-judgment/2.0", digest: { sha256: BINARY_JUDGMENT_PROFILE } },
+        instructions: "x".repeat(MAX_FILE_BYTES),
+        outputs: [],
+      });
+      const citing = delivery({ task: recordDigest(bigTask) });
+      const { path, root } = published({ "records/big.bin": bigTask, "records/citing.bin": citing });
+      const { code, stdout } = await run(path, "--root", root);
+      expect(code).toBe(1);
+      expect(stdout).toContain("Completeness   passed: 2 listed files present and unchanged, no others");
+      expect(stdout).toContain("References     failed: 1 dangling");
+    });
 
     test("is compared and not parsed, and does not fail the run", async () => {
       const { file, bytes } = big();
       const { path, root } = published({ ...tree, [file]: bytes });
       const { code, stdout } = await run(path, "--root", root);
       expect(code).toBe(0);
-      expect(stdout.split("\n")[0]).toBe(`Read 4 files from ${path}, and did not parse 1 file over the size limit.`);
+      expect(stdout.split("\n")[0]).toBe(`Read 3 files from ${path}, and hashed 1 file over the size limit without parsing it.`);
       expect(stdout).toContain("Digest         3 passed, compared with the list");
       expect(stdout).toContain("Completeness   passed: 4 listed files present and unchanged, no others");
     });
@@ -1130,6 +1175,14 @@ describe("--root", () => {
   describe("keys", () => {
     const { publicKey } = generateKeyPairSync("ed25519");
     const keys = keysFile([{ keyId: "evaluator-key-1", publicKey }]);
+
+    test("nested a million deep say so in plain words", async () => {
+      const deep = join(directory({ "keys.json": `${"[".repeat(1_000_000)}${"]".repeat(1_000_000)}` }), "keys.json");
+      const { code, stderr } = await run(directory(Object.fromEntries([named(task)])), "--keys", deep);
+      expect(code).toBe(2);
+      expect(stderr).toContain("the keys file holds no keys");
+      expect(stderr).not.toContain("call stack");
+    });
 
     test("in the list are covered by the root, and still tied to no identity", async () => {
       const { path, root } = published({ ...tree, "trust/keys.json": keys });
@@ -1202,11 +1255,41 @@ describe("--root", () => {
     const path = directory({ ...files, "list\u202e.json": list, "extra\u202e.txt": "x" });
     const argv = [path, "--root", `sha256:${sha256(list)}`, "--keys", join(path, "trust/keys\u202e.json")];
     const { stdout } = await run(...argv);
-    expect(stdout).toContain("Root           matched: list\\u{202e}.json is sha256:");
+    expect(stdout).toContain("Root           matched the digest you gave: list\\u{202e}.json is sha256:");
     expect(stdout).toContain("covered by the root: trust/keys\\u{202e}.json is in the list");
     expect(stdout).toContain("extra\\u{202e}.txt: not-listed");
     const report = JSON.parse((await run(...argv, "--json")).stdout) as { root: unknown };
     expect(JSON.stringify(report.root)).not.toContain("\u202e");
+  });
+
+  test("a long name is cut in the report and whole in the root's --json", async () => {
+    const deep = Array.from({ length: 6 }, (_unused, index) => `${index}`.repeat(100)).join("/");
+    const { publicKey } = generateKeyPairSync("ed25519");
+    const keys = keysFile([{ keyId: "evaluator-key-1", publicKey }]);
+    const files: Tree = { [`${deep}/big.dat`]: Buffer.alloc(MAX_FILE_BYTES + 1, "x"), [`${deep}/keys.json`]: keys };
+    const list = listOf(files);
+    const path = directory({ ...files, "bundle.json": list, [`${deep}/extra.txt`]: "x" });
+    const argv = [path, "--root", `sha256:${sha256(list)}`, "--keys", join(path, deep, "keys.json")];
+    const report = JSON.parse((await run(...argv, "--json")).stdout) as {
+      root: { notParsed: { file: string }[]; problems: { file: string }[]; keys: { listedAs: string } };
+    };
+    expect(report.root.notParsed[0]!.file).toBe(`${deep}/big.dat`);
+    expect(report.root.problems[0]!.file).toBe(`${deep}/extra.txt`);
+    expect(report.root.keys.listedAs).toBe(`${deep}/keys.json`);
+    const { stdout } = await run(...argv);
+    expect(stdout).not.toContain(`${deep}/extra.txt`);
+    expect(stdout).not.toContain(`${deep}/keys.json`);
+    expect(stdout.split("\n").every((line) => line.length < 600)).toBe(true);
+  });
+
+  test("a list's own name is cut in the report and whole in --json, however it is escaped", async () => {
+    const name = "\u0001".repeat(150);
+    const list = listOf({ "a.txt": "a" });
+    const path = directory({ "a.txt": "a", [name]: list });
+    const argv = [path, "--root", `sha256:${sha256(list)}`];
+    const report = JSON.parse((await run(...argv, "--json")).stdout) as { root: { list: string } };
+    expect(report.root.list).toHaveLength(750);
+    expect((await run(...argv)).stdout.split("\n").find((line) => line.startsWith("Root "))).toContain("... is sha256:");
   });
 
   test("lists at most five failures, and points to --json for the rest", async () => {

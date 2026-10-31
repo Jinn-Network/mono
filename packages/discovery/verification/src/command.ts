@@ -14,7 +14,7 @@ import { KeysFileError, parseKeysFile } from "./keys-file.js";
 import { loadPublishedDocuments } from "./published-documents.js";
 import { renderReport, reportFailed } from "./render-report.js";
 import type { CommandReport, RootReport, UnreadFile } from "./render-report.js";
-import { describeError, printable } from "./results.js";
+import { describeError, escapeUnprintable, printable } from "./results.js";
 import { MAX_LIST_BYTES, readRootTarget } from "./root-target.js";
 import type { RootTarget, TargetFile } from "./root-target.js";
 
@@ -132,7 +132,7 @@ function checkSet(files: readonly TargetFile[], supplied: SuppliedKeys | undefin
   return checkRecordSet({
     records: files,
     // A directory has no entry point of its own, so every record is one.
-    roots: files.map(({ bytes }) => recordDigest(bytes)),
+    roots: files.map(({ bytes, hashed }) => hashed ?? recordDigest(bytes)),
     published: loadPublishedDocuments(),
     ...trustFrom(supplied),
   });
@@ -148,14 +148,14 @@ function readRoot(target: string, sha256: string): RootTarget {
 
 function keysCoverage(read: RootTarget, supplied: SuppliedKeys): NonNullable<RootReport["keys"]> {
   const entry = read.entries.find(({ sha256 }) => sha256 === supplied.sha256);
-  return entry === undefined ? { covered: false } : { covered: true, listedAs: printable(entry.path) };
+  return entry === undefined ? { covered: false } : { covered: true, listedAs: escapeUnprintable(entry.path) };
 }
 
 async function checkRoot(target: string, sha256: string, supplied: SuppliedKeys | undefined): Promise<CommandReport> {
   const read = readRoot(target, sha256);
   const root: RootReport = {
     digest: `sha256:${sha256}`,
-    ...(read.list === undefined ? {} : { list: printable(read.list) }),
+    ...(read.list === undefined ? {} : { list: escapeUnprintable(read.list) }),
     listed: read.entries.length,
     checked: read.checked,
     problems: read.problems,

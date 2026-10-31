@@ -13,7 +13,7 @@ export interface FileListEntry {
 
 export interface FileList {
   readonly entries: readonly FileListEntry[];
-  /** Each entry that breaks the format. One is enough to refuse the whole list. */
+  /** The entries that break the format, up to a bound. One is enough to refuse the whole list. */
   readonly problems: readonly string[];
 }
 
@@ -22,6 +22,9 @@ export class FileListError extends Error {}
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 
+/** One bad entry refuses a list, so stop here: a hostile list under its size limit holds millions. */
+const MAX_LIST_PROBLEMS = 100;
+
 function isRelativeAndNormalized(path: string): boolean {
   return !path.includes("\\") && path.split("/").every((part) => part !== "" && part !== "." && part !== "..");
 }
@@ -29,9 +32,8 @@ function isRelativeAndNormalized(path: string): boolean {
 function entryProblem(entry: unknown, listName: string): string | undefined {
   if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return "is not an object";
   const { path, bytes, sha256 } = entry as Record<string, unknown>;
-  if (typeof path !== "string" || !isRelativeAndNormalized(path)) {
-    return `path ${JSON.stringify(path)} is not relative and normalized`;
-  }
+  if (typeof path !== "string") return "path is not a string";
+  if (!isRelativeAndNormalized(path)) return `path ${JSON.stringify(path)} is not relative and normalized`;
   if (path === listName) return "names the list itself";
   if (typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes < 0) return `${path}: bytes is not a length`;
   if (typeof sha256 !== "string" || !SHA256_HEX.test(sha256)) return `${path}: sha256 is not a SHA-256 in lowercase hex`;
@@ -62,6 +64,7 @@ export function parseFileList(bytes: Uint8Array, listName: string): FileList {
   const problems: string[] = [];
   let previous: string | undefined;
   for (const [index, entry] of files.entries()) {
+    if (problems.length >= MAX_LIST_PROBLEMS) break;
     const problem = entryProblem(entry, listName);
     if (problem !== undefined) {
       problems.push(`entry ${index + 1}: ${problem}`);

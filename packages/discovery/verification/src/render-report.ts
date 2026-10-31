@@ -10,7 +10,15 @@ export interface UnreadFile {
   readonly bytes: number;
 }
 
-export type RootProblemCode = "changed" | "missing" | "not-listed" | "not-regular" | "hard-link" | "unreadable" | "list-format";
+export type RootProblemCode =
+  | "changed"
+  | "missing"
+  | "not-listed"
+  | "not-regular"
+  | "hard-link"
+  | "name-collision"
+  | "unreadable"
+  | "list-format";
 
 /** One way the directory is not what the root commits to. */
 export interface RootProblem {
@@ -19,7 +27,7 @@ export interface RootProblem {
   readonly detail: string;
 }
 
-/** What `--root` found, with every name from the input already printable. It says nothing about who published the digest. */
+/** What `--root` found, with every name from the input escaped and whole. It says nothing about who published the digest. */
 export interface RootReport {
   /** The digest given. */
   readonly digest: string;
@@ -65,6 +73,7 @@ const ROOT_PROBLEM_PHRASES: Readonly<Record<RootProblemCode, string>> = {
   "not-listed": "not listed",
   "not-regular": "not regular",
   "hard-link": "hard-linked",
+  "name-collision": "reading as another name",
   unreadable: "unreadable",
   "list-format": "breaking the list format",
 };
@@ -174,7 +183,7 @@ function anchorsLine(result: AnchorsResult): string {
 }
 
 function failureLines(report: CommandReport): readonly string[] {
-  const fromRoot = (report.root?.problems ?? []).map(({ code, file, detail }) => `  ${file}: ${code}: ${detail}`);
+  const fromRoot = (report.root?.problems ?? []).map(({ code, file, detail }) => `  ${printable(`${file}: ${code}: ${detail}`)}`);
   const unread = report.tooLarge.map(({ file, bytes }) =>
     `  ${printable(`${file}: too-large: ${number(bytes)} bytes is over the limit, so it was not read.`)}`);
   const fromRecords = report.records.flatMap((record, index) => record.checks
@@ -232,12 +241,12 @@ function completenessLine(report: CommandReport): string {
 function keysLine({ keys }: RootReport): readonly string[] {
   if (keys === undefined) return [];
   return [line("Keys", keys.covered
-    ? `covered by the root: ${keys.listedAs} is in the list`
+    ? `covered by the root: ${printable(keys.listedAs)} is in the list`
     : "not covered by the root: their bytes are not in the list")];
 }
 
 function rootMatchedLine(root: RootReport): string {
-  return line("Root", `matched: ${root.list!} is ${root.digest}`);
+  return line("Root", `matched the digest you gave: ${printable(root.list!)} is ${root.digest}`);
 }
 
 /** The whole report when the root gave nothing to compare the files with: only what was decided. */
@@ -281,9 +290,9 @@ export function renderReport(report: CommandReport): string {
   const notParsed = root?.notParsed.length ?? 0;
   const failures = failureLines(report);
   return [
-    `Read ${count(summary.records + notParsed, "file")} from ${printable(report.target)}${
+    `Read ${count(summary.records, "file")} from ${printable(report.target)}${
       unread.length === 0 ? "" : `, and did not read ${unread.join(" or ")}`
-    }${notParsed === 0 ? "" : `, and did not parse ${count(notParsed, "file")} over the size limit`}.`,
+    }${notParsed === 0 ? "" : `, and hashed ${count(notParsed, "file")} over the size limit without parsing ${notParsed === 1 ? "it" : "them"}`}.`,
     "",
     ...(root === undefined ? [] : [rootMatchedLine(root)]),
     line("Kinds", `${number(summary.records - unknown)} known, ${number(unknown - summary.namingNoType)} unknown naming a type, ${number(summary.namingNoType)} naming no type`),

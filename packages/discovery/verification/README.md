@@ -39,8 +39,8 @@ and 12 s at twice it. The largest record in the public claim below is 436,248 by
 the one limit the specification states for a stored object, in the IPFS repository profile. A larger
 file is not read. It is named in the report and fails the run, and anything citing it dangles. A
 keys file over the limit is exit code 2. The limit is per file, so a directory of many such files
-still takes as long as it takes. With `--root` a listed file over the limit is still hashed, and
-does not fail the run.
+still takes as long as it takes. With `--root` a listed file over the limit is still hashed, and that
+alone does not fail the run, though a record citing it dangles, which does.
 
 File names, list paths, `keyid` values and details printed from a record have control and formatting
 characters escaped, so a record cannot add a line to the report or move the cursor.
@@ -96,13 +96,16 @@ specification defines no container format, so this format is this package's own:
 ```
 
 - The list is UTF-8 I-JSON of at most 67,108,864 bytes. The real list below is 8,156,179 bytes for
-  46,016 files, and that size is over the limit for a record, so a list has its own limit.
+  46,016 files, and that size is over the limit for a record, so a list has its own limit. It does not
+  keep memory small: a hostile list at that size took up to 4.1 GiB here, and a smaller Node heap than
+  that stops the command with no report.
 - `files` holds at least one entry. Other top-level members are not read, and the root still commits
   to them. That is why a Colophon `bundle.json` works as it is. The list does not name itself.
 - An entry holds exactly `path`, `bytes` and `sha256`, which is 64 lowercase hex digits.
 - A `path` is relative and normalized: separated by `/`, with no empty, `.` or `..` segment and no
   backslash.
 - Entries are sorted by `path` in UTF-16 code-unit order, and no path repeats.
+- Reading stops at 100 broken entries, so the count of them is a floor.
 
 | What the command finds | Exit code | Then |
 | --- | --- | --- |
@@ -113,14 +116,17 @@ specification defines no container format, so this format is this package's own:
 | A file under `<path>` is not listed, apart from the list | `1` | It is not read. |
 | A symbolic link or a special file anywhere under `<path>`, listed or not | `1` | It is not followed or opened. |
 | A listed file, or the list, has more than one hard link | `1` | The rest are still checked. |
+| Two names on disk read as the same text, which a name that is not UTF-8 can do | `1` | The rest are still checked. |
 
 An empty directory holds no bytes and is ignored. A path in a list is only ever compared with the
 names found on disk and is never opened, so a list cannot aim a read.
 
-Every listed file is hashed in pieces, with no size limit. Files of at most 2,097,152 bytes then go
-through the record checks, on the same bytes that were hashed, with the list's digest as their
-claimed digest. A larger file is compared and not parsed: the first line counts it, `--json` names it
-under `root.notParsed`, and it does not fail the run.
+A listed file over 2,097,152 bytes is hashed in pieces, with no size limit, and is not parsed: the
+first line counts it and `--json` names it under `root.notParsed`. That alone does not fail the run,
+but a record citing it dangles, and that does. A smaller file is read whole, once, and the record
+checks see the bytes that were hashed, with the list's digest as their claimed digest. Those bytes
+stay in memory for the whole run: about 640 MB for the claim below, and 3.2 GiB for 1,500 files of
+2 MiB.
 
 All listed files go through the record checks, not a subset, because the list is the only thing here
 that says which files matter, and a path is no evidence of what a file is. A file that is not a
@@ -136,9 +142,9 @@ This is the output on the same claim, with `--root` set to the ID it publishes a
 `records/` run above, because `report-envelope.json` and the anchor are now in the set:
 
 ```text
-Read 46,016 files from ./bundle, and did not parse 6 files over the size limit.
+Read 46,010 files from ./bundle, and hashed 6 files over the size limit without parsing them.
 
-Root           matched: bundle.json is sha256:de169c04a24bbb4d9d5b52e398b8bfe92e939ba4d8a8c9e6e3e551cf10aa3774
+Root           matched the digest you gave: bundle.json is sha256:de169c04a24bbb4d9d5b52e398b8bfe92e939ba4d8a8c9e6e3e551cf10aa3774
 Kinds          26,402 known, 4,818 unknown naming a type, 14,790 naming no type
 Digest         46,010 passed, compared with the list
 Encoding       31,891 passed, 14,119 skipped (9,799 not records, 4,320 not required by family)
@@ -155,7 +161,7 @@ Nothing failed. Skipped and unknown are not passes.
 ```
 
 `--json` adds a `root` object with `digest`, `list`, `listed`, `checked`, `problems`, `notParsed`, and
-`keys` when keys were supplied.
+`keys` when keys were supplied. Names in it are escaped and not cut.
 
 ### Keys
 
@@ -256,7 +262,7 @@ Add a kind by spreading it into the `kinds` option.
 | Execution evidence | Offer | Sealed envelope and payload | Required |
 | Trust | Key binding, Revocation, Authorization, Trust policy | Sealed envelope and payload | Required. A key binding must be signed by the key it binds, and a Revocation by its `revokedBy`. A `did:pkh` is no key this can verify, so that signature says `skipped`. |
 | Trust | Anchor evidence | RFC 8785 | Sealed, not signed: the proof is the authority's signature |
-| Task profiles | Evaluation specification, Profile document | RFC 8785 | Unsigned. An envelope states the kind's media type. A profile's payload schema and any schema carried inline in an output slot must be safe to load (§6.4). |
+| Task profiles | Evaluation specification, Profile document | RFC 8785 | Unsigned. An envelope states the kind's media type. A profile's payload schema and any schema carried inline in an output slot must be safe to load (§6.4). Inline content is read both as plain JSON and as base64, and each reading that yields a schema must pass. |
 | Record discovery | Facts profile | Not required: see below | Unsigned |
 
 The Execution Evidence Profile applies conformance "to the exact bytes supplied to a validator" and
