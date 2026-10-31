@@ -369,6 +369,23 @@ describe.each([
       expect(await w.verdict(NEXT_KEY)).toMatchObject(refusedChain);
     });
 
+    test("a consenter sealed at the same instant whose own ceremony cannot be verified", async () => {
+      const w = world();
+      await bindGenesis(w);
+      await w.bind({ key: COLD_KEY, signer: OWNER, validFrom: T1, withoutCeremonyEvidence: true });
+      await w.bind({ key: NEXT_KEY, signer: SECOND_OWNER, validFrom: T1, consentBy: COLD_KEY });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(refusedChain);
+    });
+
+    test("a consenter sealed at the same instant and already revoked", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const cold = await w.bind({ key: COLD_KEY, signer: OWNER, validFrom: T1 });
+      await w.revoke(cold, GENESIS_KEY, "2026-01-15T00:00:00.000Z");
+      await w.bind({ key: NEXT_KEY, signer: SECOND_OWNER, validFrom: T1, consentBy: COLD_KEY });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(refusedChain);
+    });
+
     test("a consenter revoked before the binding it consents", async () => {
       const w = world();
       await bindGenesis(w);
@@ -403,10 +420,27 @@ describe.each([
       expect(await w.verdict(STRANGER_SECOND_KEY)).toMatchObject(refusedChain);
     });
 
-    test("an incumbent revoked before the new binding", async () => {
+    test("an incumbent revoked before the new binding, once it is not the founding one", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const consented = await w.bind({ key: NEXT_KEY, signer: SECOND_OWNER, validFrom: T1, consentBy: GENESIS_KEY });
+      await w.revoke(consented, GENESIS_KEY, T2);
+      await w.bind({ key: THIRD_KEY, signer: SECOND_OWNER, validFrom: T3 });
+      expect(await w.verdict(THIRD_KEY)).toMatchObject(refusedChain);
+    });
+
+    test("a founding key revoked before the binding it consents", async () => {
       const w = world();
       const genesis = await bindGenesis(w);
       await w.revoke(genesis, GENESIS_KEY, T1);
+      await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T2, consentBy: GENESIS_KEY });
+      expect(await w.verdict(STRANGER_KEY)).toMatchObject(refusedChain);
+    });
+
+    test("a founding binding the founding account itself revoked", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      await w.revoke(genesis, accountVoucher(84532, OWNER.address).did, T1);
       await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T2 });
       expect(await w.verdict(NEXT_KEY)).toMatchObject(refusedChain);
     });
@@ -440,6 +474,38 @@ describe.each([
       // Claims the genesis key for another voucher. The earlier binding wins the key, so this
       // record never holds it, and what resolves for that key is not this voucher's.
       await w.bind({ key: GENESIS_KEY, signer: STRANGER, validFrom: T1 });
+      await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T2 });
+      expect(await w.verdict(STRANGER_KEY)).toMatchObject(refusedChain);
+    });
+  });
+
+  describe("the founding account after a working key's revocation (§7.4b)", () => {
+    test("an owner who revokes their only key can recover by minting a new one", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      await w.revoke(genesis, GENESIS_KEY, T1);
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T2 });
+      await w.bind({ key: THIRD_KEY, signer: OWNER, validFrom: T3 });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+      expect(await w.verdict(THIRD_KEY)).toMatchObject(stands);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject({ ok: false, reason: "revoked" });
+    });
+
+    test("it recovers after a bindings key has revoked every binding it holds, including that key's own", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      const cold = await w.bind({ key: COLD_KEY, signer: OWNER, validFrom: T1 });
+      await w.revoke(genesis, COLD_KEY, T2);
+      await w.revoke(cold, COLD_KEY, T2);
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T3 });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+      expect(await w.verdict(COLD_KEY)).toMatchObject({ ok: false, reason: "revoked" });
+    });
+
+    test("recovery needs that account: another voucher gains nothing from the revoked binding", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      await w.revoke(genesis, GENESIS_KEY, T1);
       await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T2 });
       expect(await w.verdict(STRANGER_KEY)).toMatchObject(refusedChain);
     });

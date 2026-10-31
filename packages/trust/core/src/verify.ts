@@ -223,6 +223,10 @@ export async function resolveBindingForAgent(
 
 type AuthorityDeps = Pick<VerifyEnvelopeBindingDeps, "bindingResolver" | "witnessVerifier" | "dsseVerifier">;
 
+/** Which revocations end a binding's use as an authority. Every one that is
+ * authorized, except for the founding account's own incumbency: see `readChain`. */
+type RevocationsThatCount = "all" | "voucher-signed";
+
 /** One verification's walk. `settled` holds each fact the walk has decided,
  * because a store full of peers would otherwise be re-walked along every path
  * through it. Every fact is decided at a fixed instant -- a binding's own
@@ -261,19 +265,29 @@ function withinWindow(resolved: ResolvedBinding, atTime: string): boolean {
  * also keeps the walk finite: a revocation's signer is always judged at a
  * strictly earlier instant than the binding it revokes was being judged at.
  */
-async function authorityUsable(resolved: ResolvedBinding, atTime: string, walk: AuthorityWalk): Promise<boolean> {
+async function authorityUsable(
+  resolved: ResolvedBinding,
+  atTime: string,
+  walk: AuthorityWalk,
+  revocationsThatCount: RevocationsThatCount = "all",
+): Promise<boolean> {
   if (!withinWindow(resolved, atTime)) return false;
   const sound = await settle(walk, `record\u001f${resolved.bindingDigest}`, async () => {
     const { validSignerKeyids } = walk.dsseVerifier(resolved.envelopeBytes);
     if (!validSignerKeyids.includes(resolved.binding.key.didKey)) return false;
     return (await verifyCeremonyLeg(resolved, walk.witnessVerifier)).verified;
   });
-  return sound && (await checkRevocation(resolved, atTime, "before", walk)).ok;
+  return sound && (await checkRevocation(resolved, atTime, "before", walk, revocationsThatCount)).ok;
 }
 
 /** Whether a binding stands at the instant it gives authority. */
-async function bindingStands(resolved: ResolvedBinding, atTime: string, walk: AuthorityWalk): Promise<boolean> {
-  return await authorityUsable(resolved, atTime, walk) && chainHolds(resolved, walk);
+async function bindingStands(
+  resolved: ResolvedBinding,
+  atTime: string,
+  walk: AuthorityWalk,
+  revocationsThatCount: RevocationsThatCount = "all",
+): Promise<boolean> {
+  return await authorityUsable(resolved, atTime, walk, revocationsThatCount) && chainHolds(resolved, walk);
 }
 
 /** What one binding's record offers §7.4a, before the batch it was sealed in
@@ -300,12 +314,12 @@ async function readChain(resolved: ResolvedBinding, walk: AuthorityWalk): Promis
   const peers: ResolvedBinding[] = [];
   /** True when `authority` roots this binding. One from its own instant is
    * noted as a peer instead: only its batch as a whole can say if it stands. */
-  const roots = async (authority: ResolvedBinding): Promise<boolean> => {
+  const roots = async (authority: ResolvedBinding, revocationsThatCount: RevocationsThatCount = "all"): Promise<boolean> => {
     if (authority.bindingDigest === resolved.bindingDigest) return false;
     const order = compareCalendarStrictRfc3339Instants(authority.effectiveStart, mintTime);
     if (order === undefined || order > 0) return false;
-    if (order < 0) return bindingStands(authority, mintTime, walk);
-    if (await authorityUsable(authority, mintTime, walk)) peers.push(authority);
+    if (order < 0) return bindingStands(authority, mintTime, walk, revocationsThatCount);
+    if (await authorityUsable(authority, mintTime, walk, revocationsThatCount)) peers.push(authority);
     return false;
   };
 
@@ -325,8 +339,14 @@ async function readChain(resolved: ResolvedBinding, walk: AuthorityWalk): Promis
       || !voucherIdentityEquals(authority.binding.voucher, binding.voucher)) {
       continue;
     }
+    // §7.4a: "the account is the incumbent authority", and §7.4b keeps what a
+    // bindings key revokes recoverable through that account. So a working key
+    // can retire the founding binding but not the founding account: only the
+    // account's own revocation ends that binding's self-extension authority.
+    // Every other account stays removable, by any authorized revocation.
+    const counting: RevocationsThatCount = authority.isGenesis ? "voucher-signed" : "all";
     // eslint-disable-next-line no-await-in-loop -- sequential: the first that stands settles it.
-    if (await roots(authority)) return { rooted: true, peers: [] }; // self-extension (§7.4a option 1)
+    if (await roots(authority, counting)) return { rooted: true, peers: [] }; // self-extension (§7.4a option 1)
   }
 
   if (binding.consent !== undefined) {
@@ -475,8 +495,10 @@ async function checkRevocation(
   atTime: string,
   boundary: "at" | "before",
   walk: AuthorityWalk,
+  revocationsThatCount: RevocationsThatCount = "all",
 ): Promise<{ ok: boolean; detail?: string }> {
   for (const entry of resolved.revocations) {
+    if (revocationsThatCount === "voucher-signed" && !entry.revocation.revokedBy.startsWith("did:pkh:")) continue;
     // §7.4b: never retroactive -- a revocation anchored after the
     // evidence's effective time attributes nothing before it.
     const comparison = compareCalendarStrictRfc3339Instants(entry.effectiveTime, atTime);
