@@ -63,7 +63,11 @@ const PUBLICATION_FORBIDDEN_PACKAGES = [
 // verification holds the general checks for a record of any kind, so its production source is an
 // allowlist rather than a forbidden list: every other first-party package is refused, including
 // any Colophon package, whose checker takes these checks from here and never the reverse.
-const VERIFICATION_ALLOWED_PACKAGES = ['@jinn-network/trust-core'];
+const VERIFICATION_ALLOWED_PACKAGES = [
+  '@jinn-network/evidence-offer', '@jinn-network/evidence-protocol',
+  '@jinn-network/record-discovery-protocol', '@jinn-network/task-execution-profiles',
+  '@jinn-network/task-execution-protocol', '@jinn-network/trust-core',
+];
 // client depends on protocol (production) + trust-core (production, the
 // verification driver) + testing (dev, conformance kit only); no serve, no
 // facts/* leaves (host-assembled runtime injection only, Task 18 note), no

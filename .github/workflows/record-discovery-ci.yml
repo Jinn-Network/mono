@@ -188,19 +188,6 @@ jobs:
           yarn test
           yarn build
           yarn pack:smoke
-      - name: Build cross-tree portal dependency from source (trust-testing, §7.8)
-        working-directory: packages/trust/testing
-        run: |
-          yarn install --immutable
-          yarn build
-      - name: Verify Record Checks (@jinn-network/verify)
-        working-directory: packages/discovery/verification
-        run: |
-          yarn install --immutable
-          yarn typecheck
-          yarn test
-          yarn build
-          yarn pack:smoke
       - name: Verify Record Discovery Client
         working-directory: packages/discovery/client
         run: |
@@ -262,6 +249,19 @@ jobs:
         run: |
           yarn install --immutable
           yarn build
+      - name: Build cross-tree portal dependency from source (trust-testing, §7.8)
+        working-directory: packages/trust/testing
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Verify Record Checks (@jinn-network/verify)
+        working-directory: packages/discovery/verification
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
       - name: Verify Record Discovery Facts (Evidence)
         working-directory: packages/discovery/facts/evidence
         run: |

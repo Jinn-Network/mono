@@ -50,12 +50,15 @@ function checkPatternBearingKeywords(node: Record<string, unknown>, path: string
 }
 
 function checkRef(node: Record<string, unknown>, path: string): void {
-  if (typeof node.$ref === "string" && !node.$ref.startsWith("#")) {
-    throw new ProfilesError(
-      "invalid-document",
-      `payloadSchema contains a non-local $ref at ${path}: "${node.$ref}". Validators MUST NOT `
-        + "perform network retrieval during validation (§6.4).",
-    );
+  for (const keyword of ["$ref", "$dynamicRef", "$recursiveRef"]) {
+    const reference = node[keyword];
+    if (typeof reference === "string" && !reference.startsWith("#")) {
+      throw new ProfilesError(
+        "invalid-document",
+        `payloadSchema contains a non-local ${keyword} at ${path}: "${reference}". Validators MUST NOT `
+          + "perform network retrieval during validation (§6.4).",
+      );
+    }
   }
 }
 
@@ -81,8 +84,8 @@ function walkSchema(node: unknown, depth: number, path: string): void {
 
 /**
  * Admission-time static pre-filter (§6.4): because anyone may publish a profile, `payloadSchema`
- * is validator input from an untrusted source. Rejects: any `$ref` that is not a local `#…`
- * fragment; more than `PROFILE_SCHEMA_MAX_BYTES` bytes; nesting depth beyond
+ * is validator input from an untrusted source. Rejects: any `$ref`, `$dynamicRef` or
+ * `$recursiveRef` that is not a local `#…` fragment; more than `PROFILE_SCHEMA_MAX_BYTES` bytes; nesting depth beyond
  * `PROFILE_SCHEMA_MAX_DEPTH`; any pattern-bearing string (`pattern`, `patternProperties` keys,
  * `propertyNames.pattern`) longer than `PROFILE_SCHEMA_MAX_PATTERN_LENGTH` or that `safe-regex`
  * flags as vulnerable to catastrophic backtracking.
