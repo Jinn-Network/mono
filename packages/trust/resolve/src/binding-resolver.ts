@@ -105,6 +105,12 @@ export interface CreateBindingResolverOptions {
    * bindings simply fail to resolve: `verify.ts` takes a resolved binding as
    * this resolver's word that its ceremony was checked. */
   readonly verifyHostedCeremony?: (record: SealedKeyBindingRecord) => Promise<boolean>;
+  /** §7.1: a binding is DSSE-signed by the key it binds. Given this, a record
+   * that key never signed does not resolve and cannot win a conflict over the
+   * key. It still counts when deciding what came first, like any other record
+   * that does not resolve. Omit it only where a store's envelopes are not DSSE
+   * envelopes: without it a record can claim a key it does not hold. */
+  readonly recordSignedByItsKey?: (record: SealedKeyBindingRecord) => boolean;
   /** Under an anchor-requiring profile an unanchored binding never
    * resolves (§7.3). Defaults to `true`, the safer default. */
   readonly requireAnchors?: boolean;
@@ -212,17 +218,30 @@ async function ceremonyCanBeVerified(
   }
 }
 
+const eoaCeremonyVerdicts = new WeakMap<SealedKeyBindingRecord, boolean>();
+
+/** `trust-core`'s offline leg, once per record: recovering a signer is the
+ * dearest step of a resolve, and the answer is a fact about the record. */
+function eoaCeremonyVerified(record: SealedKeyBindingRecord): boolean {
+  const known = eoaCeremonyVerdicts.get(record);
+  if (known !== undefined) return known;
+  const verified = record.ceremonyEvidence !== undefined
+    && ceremonyEvidenceDigest(record.ceremonyEvidence) === record.binding.ceremony.digest
+    && verifyEoaCeremony(record.ceremonyEvidence, record.binding).verified;
+  eoaCeremonyVerdicts.set(record, verified);
+  return verified;
+}
+
 /** §7.2 asks the composition leg for a valid account-ceremony binding, not a
- * record naming the account: an agentId ceremony is only as verified as this. */
+ * record naming the account: an agentId ceremony is only as verified as this.
+ * This reads that record's ceremony, not its own chain or revocations. */
 async function accountCeremonyVerified(
   record: SealedKeyBindingRecord,
   verifyHostedCeremony: CreateBindingResolverOptions["verifyHostedCeremony"],
 ): Promise<boolean> {
   switch (record.binding.ceremony.type) {
     case "eoa":
-      return record.ceremonyEvidence !== undefined
-        && ceremonyEvidenceDigest(record.ceremonyEvidence) === record.binding.ceremony.digest
-        && verifyEoaCeremony(record.ceremonyEvidence, record.binding).verified;
+      return eoaCeremonyVerified(record);
     case "safe":
       return ceremonyCanBeVerified(record, verifyHostedCeremony);
     default:
@@ -324,6 +343,15 @@ function isGenesisAmong(candidate: EffectiveBinding, allForAgent: readonly Effec
  */
 export function createBindingResolver(options: CreateBindingResolverOptions): BindingResolver {
   const requireAnchors = options.requireAnchors ?? true;
+  const signatureVerdicts = new WeakMap<SealedKeyBindingRecord, boolean>();
+  const signedByItsKey = (record: SealedKeyBindingRecord): boolean => {
+    if (options.recordSignedByItsKey === undefined) return true;
+    const known = signatureVerdicts.get(record);
+    if (known !== undefined) return known;
+    const signed = options.recordSignedByItsKey(record);
+    signatureVerdicts.set(record, signed);
+    return signed;
+  };
 
   return {
     async resolveBinding(query: BindingResolverQuery, atTime: string): Promise<ResolvedBinding | null> {
@@ -349,6 +377,7 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
       for (const candidate of withEffectiveStart) {
         if (candidate.record.binding.key.didKey !== query.key) continue;
         if (!isWithinWindow(candidate.record.binding, candidate.effectiveStart, atTime)) continue;
+        if (!signedByItsKey(candidate.record)) continue;
         // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
         if (await ceremonyCanBeVerified(candidate.record, options.verifyHostedCeremony)) forKeyAtTime.push(candidate);
       }
@@ -362,7 +391,13 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
       }
       if (withComposition.length === 0) return null;
 
-      const winner = [...withComposition].sort(compareEffective)[0]!;
+      // §7.3's conflict is between bindings, and a record whose own ceremony fails
+      // is not one: it cannot beat a record that verifies, whatever its time. Alone
+      // it still resolves, so that verification can name what failed.
+      const verified = withComposition.filter(
+        ({ record }) => record.binding.ceremony.type !== "eoa" || eoaCeremonyVerified(record),
+      );
+      const winner = [...(verified.length > 0 ? verified : withComposition)].sort(compareEffective)[0]!;
       if (withComposition.length > 1 && options.onConflict) {
         options.onConflict({
           key: query.key,

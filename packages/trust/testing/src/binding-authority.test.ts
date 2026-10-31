@@ -67,6 +67,8 @@ interface BindOptions {
   readonly expiresAt?: string;
   readonly scope?: readonly Scope[];
   readonly consentBy?: string;
+  /** A countersignature that does not decode. */
+  readonly consentSig?: string;
   readonly relationship?: Relationship;
   /** A ceremony other than a genuine EOA one, which this package cannot check by itself. */
   readonly ceremonyType?: Exclude<CeremonyType, "eoa">;
@@ -83,6 +85,7 @@ class World {
   constructor(
     readonly requireAnchors: boolean,
     private readonly verifyHostedCeremony?: () => Promise<boolean>,
+    private readonly recordSignedByItsKey?: (record: SealedKeyBindingRecord) => boolean,
   ) {}
 
   private anchor(label: string, at: string | undefined): Sha256Digest | undefined {
@@ -106,7 +109,7 @@ class World {
       scope: options.scope ?? ["verdicts", "bindings"],
       ...(options.consentBy === undefined
         ? {}
-        : { consent: { keyid: options.consentBy, sig: btoa("kit-dsse-checks-the-declared-keyid") } }),
+        : { consent: { keyid: options.consentBy, sig: options.consentSig ?? btoa("kit-dsse-checks-the-declared-keyid") } }),
       ...(anchorDigest === undefined ? {} : { anchorDigest }),
     });
     const record: SealedKeyBindingRecord = {
@@ -155,6 +158,7 @@ class World {
       }),
       requireAnchors: this.requireAnchors,
       ...(this.verifyHostedCeremony === undefined ? {} : { verifyHostedCeremony: this.verifyHostedCeremony }),
+      ...(this.recordSignedByItsKey === undefined ? {} : { recordSignedByItsKey: this.recordSignedByItsKey }),
     });
     const envelopeBytes = sealDsseEnvelope({
       payloadBytes: new TextEncoder().encode("{}"),
@@ -369,6 +373,29 @@ describe.each([
       expect(await w.verdict(NEXT_KEY)).toMatchObject(refusedChain);
     });
 
+    test("a countersignature that does not decode, and an honest key's verification still ends in a verdict", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T1, consentBy: GENESIS_KEY, consentSig: "%" });
+      await w.revoke(genesis, STRANGER_KEY, T2);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+      expect(await w.verdict(STRANGER_KEY)).toMatchObject(refusedChain);
+    });
+
+    test("a binding read in another's batch keeps its own verdict", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const OTHER = createEoaTestSigner("binding-authority-other");
+      await w.bind({ key: COLD_KEY, signer: SECOND_OWNER, validFrom: T1, consentBy: GENESIS_KEY });
+      await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T1 });
+      await w.bind({ key: NEXT_KEY, signer: SECOND_OWNER, validFrom: T1, consentBy: STRANGER_KEY });
+      const earlier = await w.bind({ key: THIRD_KEY, signer: OTHER, validFrom: T2, consentBy: GENESIS_KEY });
+      await w.revoke(earlier, NEXT_KEY, T3);
+      await w.bind({ key: STRANGER_SECOND_KEY, signer: OTHER, validFrom: T4, consentBy: STRANGER_KEY });
+      expect(await w.verdictInStoredOrder(NEXT_KEY)).toMatchObject(stands);
+      expect(await w.verdictInStoredOrder(STRANGER_SECOND_KEY)).toMatchObject(refusedChain);
+    });
+
     test("a consenter sealed at the same instant whose own ceremony cannot be verified", async () => {
       const w = world();
       await bindGenesis(w);
@@ -511,6 +538,38 @@ describe.each([
     });
   });
 
+  describe("a conflict over one key (§7.1, §7.3)", () => {
+    test("a record whose own ceremony fails does not win the key from one whose ceremony verifies", async () => {
+      const w = world();
+      await bindGenesis(w);
+      await w.bind({ key: NEXT_KEY, signer: STRANGER, validFrom: T1, withoutCeremonyEvidence: true });
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T2 });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+    });
+
+    test("a record its key never signed does not resolve when the host can tell", async () => {
+      const w = new World(requireAnchors, undefined, (record) => record.binding.validFrom !== T1);
+      await bindGenesis(w);
+      await w.bind({ key: NEXT_KEY, signer: STRANGER, validFrom: T1 });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject({ ok: false, reason: "binding-not-resolved" });
+    });
+
+    test("and it does not win the key from one its key signed", async () => {
+      const w = new World(requireAnchors, undefined, (record) => record.binding.validFrom !== T1);
+      await bindGenesis(w);
+      await w.bind({ key: NEXT_KEY, signer: STRANGER, validFrom: T1 });
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T2 });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+    });
+
+    test("but it still counts when deciding what came first", async () => {
+      const w = new World(requireAnchors, undefined, (record) => record.binding.validFrom !== T0);
+      await bindGenesis(w);
+      await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T1 });
+      expect(await w.verdict(STRANGER_KEY)).toMatchObject(refusedChain);
+    });
+  });
+
   describe("a record nothing here can verify (§7.5 step 3)", () => {
     const refused = [
       { ceremony: "safe", ceremonyType: "safe" as const },
@@ -560,6 +619,14 @@ describe.each([
       await w.revoke(genesis, GENESIS_KEY, T1, UNREADABLE_TIME);
       expect(await w.verdict(GENESIS_KEY)).toMatchObject({ ok: false, reason: "revoked" });
       expect(await w.verdict(GENESIS_KEY, T0)).toMatchObject(stands);
+    });
+
+    test("a key whose scope does not cover bindings cannot revoke even its own binding", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const own = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1, scope: ["verdicts"] });
+      await w.revoke(own, NEXT_KEY, T2);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
     });
 
     test("a standing key whose scope does not cover bindings does not revoke", async () => {

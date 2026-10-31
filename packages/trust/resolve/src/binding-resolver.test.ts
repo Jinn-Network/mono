@@ -155,6 +155,93 @@ describe("createBindingResolver", () => {
     expect((await reversed.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.bindingDigest).toBe(DIGEST_A);
   });
 
+  describe("a conflict over one key", () => {
+    const owner = privateKeyToAccount(`0x${"6".repeat(64)}`);
+    const voucher = { kind: "account" as const, did: didPkh(84532, owner.address), contractAccount: false };
+    const anchors = fakeAnchors({
+      [DIGEST_A]: "2026-01-01T00:00:00.000Z",
+      [DIGEST_B]: "2026-02-01T00:00:00.000Z",
+    });
+    const at = "2026-06-01T00:00:00.000Z";
+
+    async function signedByOwner(): Promise<SealedKeyBindingRecord> {
+      const message = {
+        domain: "trust.jinn.network",
+        address: owner.address,
+        uri: "https://trust.jinn.network/ceremony/key-binding",
+        version: "1" as const,
+        chainId: 84532,
+        nonce: "conflict-nonce",
+        issuedAt: "2026-02-01T00:00:00.000Z",
+        resources: [AGENT, KEY_A],
+      };
+      const messageBytes = serializeCeremonyMessage("eoa", message);
+      const signature = hexToBytes(await owner.signMessage({ message: { raw: messageBytes } }));
+      const ceremonyEvidence: EoaCeremonyEvidence = { type: "eoa", message, messageBytes, signature };
+      const binding = accountBinding({
+        voucher,
+        validFrom: "2026-02-01T00:00:00.000Z",
+        ceremony: { type: "eoa", digest: ceremonyEvidenceDigest(ceremonyEvidence) },
+        anchors: [{ digest: DIGEST_B }],
+      });
+      return { ...record(binding, DIGEST_B), ceremonyEvidence };
+    }
+
+    const unverified = record(accountBinding({ voucher, anchors: [{ digest: DIGEST_A }] }), DIGEST_A);
+
+    it("goes to the record whose ceremony verifies, in any stored order, however early the other", async () => {
+      const verified = await signedByOwner();
+      for (const stored of [[unverified, verified], [verified, unverified]]) {
+        const resolver = createBindingResolver({ bindings: fakeStore(stored), anchors });
+        // eslint-disable-next-line no-await-in-loop -- one stored order, then the other.
+        expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.bindingDigest).toBe(DIGEST_B);
+      }
+    });
+
+    it("still resolves a lone record whose ceremony fails, so verification can name the failure", async () => {
+      const resolver = createBindingResolver({ bindings: fakeStore([unverified]), anchors });
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.bindingDigest).toBe(DIGEST_A);
+    });
+
+    it("does not resolve a record its key never signed, and gives the key to one it did", async () => {
+      const verified = await signedByOwner();
+      const earlier = { ...verified, bindingDigest: DIGEST_A, binding: { ...verified.binding, anchors: [{ digest: DIGEST_A }] } };
+      const recordSignedByItsKey = vi.fn((candidate: SealedKeyBindingRecord) => candidate.bindingDigest !== DIGEST_A);
+      const resolver = createBindingResolver({ bindings: fakeStore([earlier, verified]), anchors, recordSignedByItsKey });
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.bindingDigest).toBe(DIGEST_B);
+
+      const alone = createBindingResolver({ bindings: fakeStore([earlier]), anchors, recordSignedByItsKey });
+      expect(await alone.resolveBinding({ key: KEY_A, agent: AGENT }, at)).toBeNull();
+    });
+
+    it("checks a record once however often it is resolved", async () => {
+      const verified = await signedByOwner();
+      const evidence = verified.ceremonyEvidence!;
+      let ceremonyReads = 0;
+      const counted: SealedKeyBindingRecord = {
+        ...verified,
+        ceremonyEvidence: {
+          ...evidence,
+          get signature() {
+            ceremonyReads += 1;
+            return evidence.signature;
+          },
+        },
+      };
+      const recordSignedByItsKey = vi.fn(() => true);
+      const resolver = createBindingResolver({ bindings: fakeStore([counted]), anchors, recordSignedByItsKey });
+
+      await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at);
+      const afterFirst = ceremonyReads;
+      await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at);
+      await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, "2026-07-01T00:00:00.000Z");
+
+      expect(afterFirst).toBeGreaterThan(0);
+      expect(ceremonyReads).toBe(afterFirst);
+      expect(recordSignedByItsKey).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("surfaces every in-window controls peer as an incumbent, in an order the store cannot change", async () => {
     const voucherOf = (address: string) => ({
       kind: "account" as const,

@@ -156,6 +156,11 @@ async function buildCatalog(options: {
   readonly ceremonyMode?: 'valid' | 'bad-signature' | 'bad-content' | 'digest-mismatch';
   readonly revoked?: boolean;
   readonly conflict?: boolean;
+  /**
+   * Founds the Agent on an earlier binding of the same account, and adds a record claiming the
+   * working key that the key never signed, anchored before the genuine binding of that key.
+   */
+  readonly claimedByAnotherSigner?: boolean;
   readonly forgeBindingEnvelope?: boolean;
   /** Strips the binding envelope's signatures entirely — an UNSIGNED binding, not a forged one. */
   readonly unsignBindingEnvelope?: boolean;
@@ -240,6 +245,40 @@ async function buildCatalog(options: {
     catalogBindings.push({
       digest: secondBinding.recordDigest,
       envelope: b64(secondBinding.envelopeBytes),
+      ceremony: catalogBindings[0]!.ceremony,
+    });
+  }
+  if (options.claimedByAnotherSigner === true) {
+    const founder = ed25519Signer(generateKeyPairSync('ed25519'));
+    const foundingCeremony = await eoaCeremony(AGENT, founder.id);
+    const foundingAnchor = recordDigest(new TextEncoder().encode('founding-binding-anchor'));
+    const founding = await sealKeyBinding({
+      ...binding,
+      key: { publicKey: founder.id, keyid: founder.id, algorithm: 'Ed25519', didKey: founder.id },
+      ceremony: { type: 'eoa', digest: ceremonyEvidenceDigest(foundingCeremony) },
+      anchors: [{ digest: foundingAnchor }],
+    }, founder.signer);
+    anchors.set(foundingAnchor, observation(foundingAnchor, { anchorTime: '2026-07-31T23:00:00.000Z' }));
+    catalogBindings.push({
+      digest: founding.recordDigest,
+      envelope: b64(founding.envelopeBytes),
+      ceremony: {
+        type: 'eoa',
+        message: foundingCeremony.message,
+        messageBytes: b64(foundingCeremony.messageBytes),
+        signature: b64(foundingCeremony.signature),
+      },
+    });
+    const claimantAnchor = recordDigest(new TextEncoder().encode('claimant-binding-anchor'));
+    const claimant = ed25519Signer(generateKeyPairSync('ed25519'));
+    const claimed = await sealKeyBinding({ ...binding, anchors: [{ digest: claimantAnchor }] }, async (input) => {
+      const [signature] = await claimant.signer(input);
+      return [{ ...signature!, keyid: working.id }];
+    });
+    anchors.set(claimantAnchor, observation(claimantAnchor, { anchorTime: '2026-07-31T23:30:00.000Z' }));
+    catalogBindings.push({
+      digest: claimed.recordDigest,
+      envelope: b64(claimed.envelopeBytes),
       ceremony: catalogBindings[0]!.ceremony,
     });
   }
@@ -365,6 +404,13 @@ describe('native trust catalog authority', () => {
     expect(opened.count).toBe(0);
   });
 
+  it('does not let a record its key never signed take that key from the genuine binding (§7.1)', async () => {
+    const fixture = await buildCatalog({ claimedByAnotherSigner: true });
+    const opened = { count: 0 };
+    await openAndVerifyRole(fixture, anchorClient(fixture, []), opened);
+    expect(opened.count).toBe(1);
+  });
+
   it.each([
     ['ceremony commitment digest mismatch', { ceremonyMode: 'digest-mismatch' as const }, /ceremony evidence digest/u],
     ['ceremony signature mismatch', { ceremonyMode: 'bad-signature' as const }, /ceremony-verification-failed/u],
@@ -374,7 +420,8 @@ describe('native trust catalog authority', () => {
     ['expired binding', { expiresAt: '2026-08-02T00:00:00.000Z' }, /binding did not resolve/u],
     ['revoked binding', { revoked: true }, /revoked/u],
     ['conflicting bindings', { conflict: true }, /conflicting bindings/u],
-    ['forged binding envelope', { forgeBindingEnvelope: true }, /envelope-signature-invalid/u],
+    // A record its key never signed does not resolve (§7.1), so it never reaches step 1.
+    ['forged binding envelope', { forgeBindingEnvelope: true }, /binding did not resolve/u],
   ])('refuses %s and never opens the role', async (_label, options, expected) => {
     const fixture = await buildCatalog(options);
     const opened = { count: 0 };
@@ -471,7 +518,7 @@ describe('family-scoped resolver skip-vs-refuse boundary (#2525)', () => {
   });
 
   it.each([
-    ['a forged binding signature', { forgeBindingEnvelope: true as const }, /envelope-signature-invalid/u],
+    ['a forged binding signature', { forgeBindingEnvelope: true as const }, /binding did not resolve/u],
     ['a ceremony signature mismatch', { ceremonyMode: 'bad-signature' as const }, /ceremony-verification-failed/u],
     ['a ceremony that signed a different identity', { ceremonyMode: 'bad-content' as const }, /ceremony-verification-failed/u],
     ['a ceremony commitment digest mismatch', { ceremonyMode: 'digest-mismatch' as const }, /ceremony evidence digest/u],

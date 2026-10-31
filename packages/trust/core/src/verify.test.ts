@@ -809,6 +809,94 @@ describe("verifyEnvelopeBinding", () => {
     });
   });
 
+  describe("a countersignature that cannot be read is an invalid consent, not an exception", () => {
+    const consentCase = async (sig: string, extra: Record<string, unknown> = {}) => {
+      const binding = keyBinding({
+        agent: AGENT,
+        key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+        voucher: { kind: "account", did: OTHER_VOUCHER_DID, contractAccount: false },
+        consent: { keyid: CONSENT_KEY, sig },
+        ...extra,
+      });
+      const consenter = keyBinding({
+        agent: AGENT,
+        key: { publicKey: "0x00", keyid: CONSENT_KEY, algorithm: "ed25519", didKey: CONSENT_KEY },
+        voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+        scope: ["bindings"],
+      });
+      const resolver = new FakeBindingResolver()
+        .register({ key: KEY_2, agent: AGENT, resolved: resolvedBinding({ binding, isGenesis: false }) })
+        .register({ key: CONSENT_KEY, agent: AGENT, resolved: authorityBinding(consenter) });
+      return verifyEnvelopeBinding(
+        {
+          envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+          key: KEY_2,
+          agent: AGENT,
+          family: "deliveries",
+          atTime: "2026-03-01T00:00:00Z",
+        },
+        { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
+      );
+    };
+
+    test("a signature that is not base64", async () => {
+      expect(await consentCase("%")).toMatchObject({
+        ok: false,
+        reason: "consent-chain-violation",
+        detail: expect.stringContaining("does not validate"),
+      });
+    });
+
+    test("a record whose payload cannot be canonicalized", async () => {
+      expect(await consentCase(btoa("signature"), { "x-example/fraction": 1.5 })).toMatchObject({
+        ok: false,
+        reason: "consent-chain-violation",
+        detail: expect.stringContaining("does not validate"),
+      });
+    });
+  });
+
+  describe("an agentId voucher (§7.2)", () => {
+    const voucher = { kind: "agentId" as const, caip19: "eip155:84532/erc721:0x2222222222222222222222222222222222222222/7" };
+    const peer = (keyid: string, scope: KeyBinding["scope"]) => keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid, algorithm: "ed25519", didKey: keyid },
+      voucher,
+      scope,
+      ceremony: { type: "agentId", digest: `sha256:${"a".repeat(64)}` },
+    });
+    const verifyNew = (binding: KeyBinding, consenter: KeyBinding) => verifyEnvelopeBinding(
+      {
+        envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+        key: KEY_2,
+        agent: AGENT,
+        family: "deliveries",
+        atTime: "2026-03-01T00:00:00Z",
+      },
+      {
+        bindingResolver: new FakeBindingResolver()
+          .register({
+            key: KEY_2,
+            agent: AGENT,
+            resolved: resolvedBinding({ binding, isGenesis: false, incumbentControls: [{ key: CONSENT_KEY, voucher }] }),
+          })
+          .register({ key: CONSENT_KEY, agent: AGENT, resolved: authorityBinding(consenter) }),
+        witnessVerifier: fakeWitnessVerifier,
+        dsseVerifier: trustingDsseVerifier,
+      },
+    );
+
+    test("does not extend from a standing binding of the same agentId: registry facts vouch nothing", async () => {
+      const outcome = await verifyNew(peer(KEY_2, ["deliveries"]), peer(CONSENT_KEY, ["bindings"]));
+      expect(outcome).toMatchObject({ ok: false, reason: "consent-chain-violation" });
+    });
+
+    test("still joins by consent", async () => {
+      const consented = { ...peer(KEY_2, ["deliveries"]), consent: { keyid: CONSENT_KEY, sig: btoa("consent") } };
+      expect(await verifyNew(consented, peer(CONSENT_KEY, ["bindings"]))).toMatchObject({ ok: true });
+    });
+  });
+
   test("a revocation whose time cannot be read has no effect unless its signer has authority (§7.4b)", async () => {
     const binding = keyBinding({
       agent: AGENT,

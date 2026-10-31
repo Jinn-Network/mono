@@ -234,6 +234,18 @@ type RevocationsThatCount = "all" | "voucher-signed";
  * not depend on which path asked. */
 interface AuthorityWalk extends AuthorityDeps {
   readonly settled: Map<string, boolean>;
+  /** One resolve per (agent, key, instant): a store of n peers would otherwise
+   * resolve each of them once per candidate. */
+  readonly resolved: Map<string, Promise<ResolvedBinding | null>>;
+}
+
+function resolveOnce(walk: AuthorityWalk, key: string, agent: string, atTime: string): Promise<ResolvedBinding | null> {
+  const fact = `${agent}\u001f${key}\u001f${atTime}`;
+  const known = walk.resolved.get(fact);
+  if (known !== undefined) return known;
+  const resolved = resolveBindingForAgent(walk.bindingResolver, { key, agent }, atTime);
+  walk.resolved.set(fact, resolved);
+  return resolved;
 }
 
 async function settle(walk: AuthorityWalk, fact: string, decide: () => Promise<boolean>): Promise<boolean> {
@@ -302,6 +314,33 @@ interface ChainReading {
   readonly detail?: string;
 }
 
+/**
+ * The consent countersignature's target bytes are not specified by the design
+ * (§7.4a names the rule, not the wire format). This implementation defines them
+ * as the DSSE PAE of the binding's own canonical payload with the `consent`
+ * field itself omitted (avoiding the self-reference a signature-over-itself
+ * would create) -- a documented convention, flagged as a finding for design
+ * ratification. A store may hold anything, and a walk over someone else's
+ * record must end in a verdict: what cannot be read is no signature.
+ */
+function consentSignatureValid(
+  binding: ResolvedBinding["binding"],
+  consent: NonNullable<ResolvedBinding["binding"]["consent"]>,
+  walk: AuthorityWalk,
+): boolean {
+  try {
+    const { consent: _consent, ...bindingWithoutConsent } = binding;
+    const syntheticEnvelope = sealDsseEnvelope({
+      payloadBytes: canonicalJsonBytes(bindingWithoutConsent),
+      payloadType: TRUST_KEY_BINDING_MEDIA_TYPE,
+      signatures: [{ signature: decodeBase64(consent.sig), keyid: consent.keyid }],
+    });
+    return walk.dsseVerifier(syntheticEnvelope).validSignerKeyids.includes(consent.keyid);
+  } catch {
+    return false;
+  }
+}
+
 async function readChain(resolved: ResolvedBinding, walk: AuthorityWalk): Promise<ChainReading> {
   if (resolved.isGenesis) return { rooted: true, peers: [] };
 
@@ -315,23 +354,23 @@ async function readChain(resolved: ResolvedBinding, walk: AuthorityWalk): Promis
   /** True when `authority` roots this binding. One from its own instant is
    * noted as a peer instead: only its batch as a whole can say if it stands. */
   const roots = async (authority: ResolvedBinding, revocationsThatCount: RevocationsThatCount = "all"): Promise<boolean> => {
-    if (authority.bindingDigest === resolved.bindingDigest) return false;
     const order = compareCalendarStrictRfc3339Instants(authority.effectiveStart, mintTime);
     if (order === undefined || order > 0) return false;
     if (order < 0) return bindingStands(authority, mintTime, walk, revocationsThatCount);
-    if (await authorityUsable(authority, mintTime, walk, revocationsThatCount)) peers.push(authority);
+    // Nothing that could revoke the genesis exists before it, so the founding
+    // exception has no work to do at the genesis's own instant.
+    if (await authorityUsable(authority, mintTime, walk)) peers.push(authority);
     return false;
   };
 
-  const incumbents = resolved.incumbentControls ?? [];
+  // §7.2: registry facts alone never vouch an IRI, and an agentId ceremony signs
+  // no key, so an agentId voucher is no incumbent (§7.4a option 1). It joins only
+  // by consent.
+  const incumbents = binding.voucher.kind === "agentId" ? [] : resolved.incumbentControls ?? [];
   for (const incumbent of incumbents) {
     if (!voucherIdentityEquals(incumbent.voucher, binding.voucher)) continue;
     // eslint-disable-next-line no-await-in-loop -- sequential: the first that stands settles it.
-    const authority = await resolveBindingForAgent(
-      walk.bindingResolver,
-      { key: incumbent.key, agent: binding.agent },
-      mintTime,
-    );
+    const authority = await resolveOnce(walk, incumbent.key, binding.agent, mintTime);
     // What the store listed is a candidate; what resolves for that key is the
     // binding that holds it, so that is the record every check here applies to.
     if (authority === null
@@ -350,28 +389,10 @@ async function readChain(resolved: ResolvedBinding, walk: AuthorityWalk): Promis
   }
 
   if (binding.consent !== undefined) {
-    // The consent countersignature's target bytes are not specified by the
-    // design (§7.4a names the rule, not the wire format). This
-    // implementation defines them as the DSSE PAE of the binding's own
-    // canonical payload with the `consent` field itself omitted (avoiding
-    // the self-reference a signature-over-itself would create) -- a
-    // documented convention, flagged as a finding for design ratification.
-    const { consent: _consent, ...bindingWithoutConsent } = binding;
-    const consentTargetPayload = canonicalJsonBytes(bindingWithoutConsent);
-    const syntheticEnvelope = sealDsseEnvelope({
-      payloadBytes: consentTargetPayload,
-      payloadType: TRUST_KEY_BINDING_MEDIA_TYPE,
-      signatures: [{ signature: decodeBase64(binding.consent.sig), keyid: binding.consent.keyid }],
-    });
-    const { validSignerKeyids } = walk.dsseVerifier(syntheticEnvelope);
-    if (!validSignerKeyids.includes(binding.consent.keyid)) {
+    if (!consentSignatureValid(binding, binding.consent, walk)) {
       return { rooted: false, peers, detail: "consent countersignature does not validate against its declared keyid." };
     }
-    const consentingBinding = await resolveBindingForAgent(
-      walk.bindingResolver,
-      { key: binding.consent.keyid, agent: binding.agent },
-      mintTime,
-    );
+    const consentingBinding = await resolveOnce(walk, binding.consent.keyid, binding.agent, mintTime);
     if (consentingBinding === null || !consentingBinding.binding.scope.includes("bindings")) {
       return {
         rooted: false,
@@ -468,21 +489,18 @@ async function isRevocationAuthorized(
 
   const revokedBy = entry.revocation.revokedBy;
   if (revokedBy.startsWith("did:pkh:")) {
-    // The binding's voucher account, via a fresh ceremony (§7.4b).
+    // The binding's voucher account (§7.4b). The injected verifier decides
+    // whether that account signed; nothing here checks that the ceremony is new.
     return resolved.binding.voucher.kind === "account" && resolved.binding.voucher.did === revokedBy;
   }
   // A currently-valid working key of the same Agent with scope: bindings.
   // Valid means it stands, not that a record for it resolves: otherwise any
   // bindings-scoped record for this Agent could revoke its genesis.
-  const revokerBinding = await resolveBindingForAgent(
-    walk.bindingResolver,
-    { key: revokedBy, agent: resolved.binding.agent },
-    entry.effectiveTime,
-  );
+  const revokerBinding = await resolveOnce(walk, revokedBy, resolved.binding.agent, entry.effectiveTime);
   if (revokerBinding === null || !revokerBinding.binding.scope.includes("bindings")) return false;
-  // A key giving up its own binding gives no authority to anyone, so there is
-  // nothing for it to stand on: the signature above is all this act needs, and
-  // refusing it would keep alive a binding its own holder has retired.
+  // A key giving up its own binding gives no authority to anyone, so it needs no
+  // chain to stand on: the signature above and `bindings` scope are all this act
+  // takes, and refusing it would keep alive a binding its own holder has retired.
   if (revokerBinding.bindingDigest === resolved.bindingDigest) return true;
   return bindingStands(revokerBinding, entry.effectiveTime, walk);
 }
@@ -643,6 +661,7 @@ export async function verifyEnvelopeBinding(
     witnessVerifier: deps.witnessVerifier,
     dsseVerifier: deps.dsseVerifier,
     settled: new Map(),
+    resolved: new Map(),
   };
   const consentResult = await checkConsentChain(resolved, walk);
   if (!consentResult.ok) {

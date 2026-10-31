@@ -142,6 +142,14 @@ describe("foldObservations", () => {
     expect(() => foldObservations([engaged(), other, one])).toThrow(ConflictingObservationError);
   });
 
+  test("array boundaries are content: [1, 23] and [12, 3] disagree", () => {
+    sequenceCounter = 0;
+    const one = observation("network.jinn.task-execution.progress.v1", { a: [1, 23] }, { id: "evt-same", sequence: "0000000000000005" });
+    const other = observation("network.jinn.task-execution.progress.v1", { a: [12, 3] }, { id: "evt-same", sequence: "0000000000000005" });
+    expect(() => foldObservations([engaged(), one, other])).toThrow(ConflictingObservationError);
+    expect(() => foldObservations([engaged(), other, one])).toThrow(ConflictingObservationError);
+  });
+
   test("an explicit undefined field is not a disagreement", () => {
     sequenceCounter = 0;
     const one = terminal("failed", { blame: "task" }, { id: "evt-terminal", sequence: "0000000000000005" });
