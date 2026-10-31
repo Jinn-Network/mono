@@ -242,9 +242,9 @@ const fakeLauncher = makeFakeLauncher({
 if (typeof fakeLauncher.plan !== "function") throw new Error("packed fake launcher missing plan()");
 
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
-if (packageJson.peerDependencies?.vitest !== "^4.1.8"
-    || packageJson.peerDependenciesMeta?.vitest?.optional !== true) {
-  throw new Error("packed optional Vitest peer contract changed");
+if (packageJson.peerDependencies?.vitest !== undefined
+    || packageJson.peerDependenciesMeta?.vitest !== undefined) {
+  throw new Error("packed manifest must not declare a vitest peer");
 }
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();
 const expected = [

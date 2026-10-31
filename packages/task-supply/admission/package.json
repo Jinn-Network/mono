@@ -50,14 +50,6 @@
     "@jinn-network/trust-core": "0.1.0",
     "zod": "4.4.3"
   },
-  "peerDependencies": {
-    "vitest": "^4.1.8"
-  },
-  "peerDependenciesMeta": {
-    "vitest": {
-      "optional": true
-    }
-  },
   "resolutions": {
     "@jinn-network/environment-record": "portal:../../environments/record",
     "@jinn-network/task-execution-profiles": "portal:../../task-execution/profiles",

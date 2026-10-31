@@ -213,11 +213,6 @@ __metadata:
     "@types/node": "npm:^22.0.0"
     typescript: "npm:^5.9.3"
     vitest: "npm:^4.1.8"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: unknown
   linkType: soft
 
@@ -230,11 +225,6 @@ __metadata:
     "@noble/hashes": "npm:2.2.0"
     ajv: "npm:8.17.1"
     zod: "npm:4.4.3"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 

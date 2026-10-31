@@ -71,8 +71,8 @@ try {
       },
     }),
   );
-  // No `vitest` in the consumer: the ./testing kit declares it as an OPTIONAL peer, so a
-  // root-only consumer must install and import cleanly without it.
+  // No `vitest` in the consumer: only the ./testing kit imports it, so a root-only consumer
+  // must install and import cleanly without it.
   await run(
     "npm",
     ["install", "--ignore-scripts", "--no-audit", "--no-fund"],
@@ -106,9 +106,9 @@ const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoo
 if (Object.keys(packageJson.dependencies ?? {}).some((name) => name.startsWith('@jinn-network/'))) {
   throw new Error('the record package must ship with zero Jinn runtime dependencies');
 }
-if (packageJson.peerDependencies?.vitest !== '^4.1.8'
-    || packageJson.peerDependenciesMeta?.vitest?.optional !== true) {
-  throw new Error('the ./testing kit must declare vitest as an exact optional peer');
+if (packageJson.peerDependencies?.vitest !== undefined
+    || packageJson.peerDependenciesMeta?.vitest !== undefined) {
+  throw new Error('the ./testing kit must not declare a vitest peer');
 }
 const distFiles = await readdir(${JSON.stringify(join(installedRoot, "dist"))});
 if (distFiles.some((name) => name.includes(".test."))) throw new Error("test output leaked into dist");

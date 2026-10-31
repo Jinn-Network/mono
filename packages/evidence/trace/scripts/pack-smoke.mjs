@@ -385,12 +385,8 @@ assert.equal(typeof Ajv2020, "function");
       "utf8",
     ),
   );
-  assert.deepEqual(installedManifest.peerDependencies, {
-    vitest: "^4.1.8",
-  });
-  assert.deepEqual(installedManifest.peerDependenciesMeta, {
-    vitest: { optional: true },
-  });
+  assert.equal(installedManifest.peerDependencies, undefined);
+  assert.equal(installedManifest.peerDependenciesMeta, undefined);
   const forbiddenDependencies = [
     "@jinn-network/attestation-issuer",
     "@huggingface/transformers",

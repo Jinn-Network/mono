@@ -77,3 +77,7 @@ The kit pins both directions: that negative, and a positive variant whose
 omitting it as DER prescribes. Producers emit both encodings and the attribute
 binds the same certificate under the same digest either way, so refusing one
 would enforce an encoding preference rather than the rule.
+
+## Vitest
+
+This package needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project.

@@ -41,14 +41,6 @@
     "@jinn-network/record-discovery-protocol": "0.1.0",
     "zod": "4.4.3"
   },
-  "peerDependencies": {
-    "vitest": "^4.1.8"
-  },
-  "peerDependenciesMeta": {
-    "vitest": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@jinn-network/trust-core": "0.1.0",
     "@types/node": "^22.0.0",

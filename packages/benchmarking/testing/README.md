@@ -47,3 +47,7 @@ See `docs/superpowers/specs/2026-07-28-benchmarking-application-design.md` §16 
 `docs/superpowers/plans/2026-07-28-benchmarking-application.md` M2.
 
 Shipped-surface record: `docs/superpowers/specs/2026-07-28-benchmarking-implementation-addendum.md`.
+
+## Vitest
+
+This package needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project.

@@ -55,11 +55,6 @@ __metadata:
   dependencies:
     "@noble/hashes": "npm:^2.2.0"
     zod: "npm:4.4.3"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
@@ -77,11 +72,6 @@ __metadata:
     typescript: "npm:^5.9.3"
     vitest: "npm:^4.1.8"
     zod: "npm:4.4.3"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: unknown
   linkType: soft
 
@@ -112,11 +102,6 @@ __metadata:
     "@jinn-network/trust-resolve": "npm:0.1.0"
     "@noble/curves": "npm:^2.0.0"
     "@noble/hashes": "npm:^2.2.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
