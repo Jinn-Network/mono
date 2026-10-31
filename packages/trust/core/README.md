@@ -41,13 +41,15 @@ Nothing here shows that a ceremony is current. A ceremony (§7.2) shows that an
 account vouched a key for an Agent IRI. The content match covers those two, and the
 account signs nothing about the record that relies on the ceremony. So a record's
 `scope`, `validFrom` and `expiresAt` carry the word of the key being bound, not of
-the account, and `verifyEnvelopeBinding` reads no time from a ceremony: its evidence
-verifies offline forever.
+the account, and the bound §14 puts on a stolen key through `expiresAt` and `scope`
+is only as strong as that.
 
 The specification gives no rule to enforce here. §7.2 names the content match and
-validity windows as the replay defense, and rules out nonce tracking. The windows it
-can mean are the record's, which are checked, and a ceremony states none that a
-verifier is told to compare. The other uses of the word are not checkable either:
-a revocation has no field for §7.4b's "fresh ceremony", and §7.4c's rule on a witness
-older than an owner change needs a chain fact no interface here carries, so it falls
-to the host behind `verifyHostedCeremony`.
+validity windows as the replay defense and rules out nonce tracking, and the window
+§7.5 step 4 checks is the record's. A ceremony may state an expiration, but no rule
+says what to compare it with: `verifyEnvelopeBinding` reads no time from a ceremony,
+whose evidence verifies offline forever, and the native profile leaves it out. The
+other two rules in this area cannot be checked here either. A revocation has no field
+for §7.4b's "fresh ceremony", and §7.4c's rule on a witness older than an owner change
+needs a chain fact no interface here carries, so it falls to the host behind
+`verifyHostedCeremony` in `@jinn-network/trust-resolve`.

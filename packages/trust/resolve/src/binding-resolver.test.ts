@@ -20,7 +20,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createBindingResolver as createResolverWithAllOptions } from "./binding-resolver.js";
 import type { BindingStore, CreateBindingResolverOptions, SealedKeyBindingRecord } from "./binding-resolver.js";
-import { invalidInput } from "./errors.js";
+import { invalidInput, resolutionFailed } from "./errors.js";
 
 const AGENT = "https://spec.jinn.network/agents/1";
 const KEY_A = "did:key:zKeyA";
@@ -940,6 +940,11 @@ describe("createBindingResolver", () => {
         await expect(asking(async () => {
           throw new Error("no route to host");
         })).rejects.toThrow("no route to host");
+      });
+
+      it("lets a registry no provider could reach out as an outage", async () => {
+        await expect(asking(async () => resolutionFailed("every provider failed")))
+          .rejects.toMatchObject({ code: "RESOLUTION_FAILED" });
       });
 
       it("takes a registry's answer that it holds no such agent as a failed composition", async () => {

@@ -174,9 +174,10 @@ describe("createChainFactResolver", () => {
           .rejects.toMatchObject({ code: "INVALID_INPUT" });
       });
 
-      it("takes a revert as the answer even if another provider was down", async () => {
-        await expect(resolverOver(failing(new Error("no route to host")), failing(reverted)).ownerOf(AGENT_ASSET))
-          .rejects.toMatchObject({ code: "INVALID_INPUT" });
+      it("takes a revert as the answer even if another provider was down, in either order", async () => {
+        const down = failing(new Error("no route to host"));
+        await expect(resolverOver(down, failing(reverted)).ownerOf(AGENT_ASSET)).rejects.toMatchObject({ code: "INVALID_INPUT" });
+        await expect(resolverOver(failing(reverted), down).ownerOf(AGENT_ASSET)).rejects.toMatchObject({ code: "INVALID_INPUT" });
       });
 
       it("reads every provider failing as an outage", async () => {

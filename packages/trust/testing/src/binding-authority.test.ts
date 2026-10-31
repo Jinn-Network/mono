@@ -219,7 +219,7 @@ class World {
   }
 
   /** §7.4b's rule on its own, over what the real resolver lists for `key` at `atTime`. */
-  revocationHolds(key: string, atTime: string) {
+  notRevoked(key: string, atTime: string) {
     return this.inEveryOrder(async (records) => {
       const deps = this.authorityOver(records);
       const resolved = await resolveBindingForAgent(deps.bindingResolver, { key, agent: AGENT }, atTime);
@@ -912,12 +912,12 @@ describe.each([
       const target = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1 });
       await w.revoke(target, STRANGER_KEY, T2);
       await w.revoke(genesis, STRANGER_KEY, T2);
-      expect(await w.revocationHolds(NEXT_KEY, T3)).toBe(true);
-      expect(await w.revocationHolds(GENESIS_KEY, T3)).toBe(true);
+      expect(await w.notRevoked(NEXT_KEY, T3)).toBe(true);
+      expect(await w.notRevoked(GENESIS_KEY, T3)).toBe(true);
 
       await w.revoke(target, GENESIS_KEY, T3);
-      expect(await w.revocationHolds(NEXT_KEY, T2)).toBe(true);
-      expect(await w.revocationHolds(NEXT_KEY, T3)).toBe(false);
+      expect(await w.notRevoked(NEXT_KEY, T2)).toBe(true);
+      expect(await w.notRevoked(NEXT_KEY, T3)).toBe(false);
     });
   });
 
