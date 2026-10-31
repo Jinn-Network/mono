@@ -521,7 +521,9 @@ async function isRevocationAuthorized(
   // A key giving up its own binding gives no authority to anyone, so it needs no
   // chain to stand on: the signature above and `bindings` scope are all this act
   // takes, and refusing it would keep alive a binding its own holder has retired.
-  if (revokerBinding.bindingDigest === resolved.bindingDigest) return true;
+  // Its own means its standing under this voucher: records of it share revocations.
+  if (revokedBy === resolved.binding.key.didKey
+    && voucherIdentityEquals(revokerBinding.binding.voucher, resolved.binding.voucher)) return true;
   return bindingStands(revokerBinding, entry.effectiveTime, walk);
 }
 

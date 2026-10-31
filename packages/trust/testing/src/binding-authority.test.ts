@@ -982,6 +982,25 @@ describe.each([
       expect(await w.verdict(NEXT_KEY)).toMatchObject({ ok: false, reason: "revoked" });
     });
 
+    test("a key can give up its standing through any record of it, whichever answered for the key at that instant", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const first = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1, expiresAt: T3 });
+      const second = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T2 });
+      await w.revoke(first, GENESIS_KEY, "2026-02-15T00:00:00.000Z");
+      await w.revoke(second, NEXT_KEY, "2026-03-15T00:00:00.000Z");
+      expect(await w.verdict(NEXT_KEY)).toMatchObject({ ok: false, reason: "revoked" });
+    });
+
+    test("a key's record under another voucher, with no standing, does not give up this voucher's", async () => {
+      const w = world();
+      await bindGenesis(w);
+      await w.bind({ key: NEXT_KEY, signer: STRANGER, validFrom: T1, expiresAt: T4, scope: ["bindings"] });
+      const own = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T2, scope: ["verdicts"] });
+      await w.revoke(own, NEXT_KEY, T3);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+    });
+
     test("a revocation stays with a voucher: another account's record for the key is not ended by it", async () => {
       const w = world();
       await bindGenesis(w);

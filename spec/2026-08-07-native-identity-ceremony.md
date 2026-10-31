@@ -796,11 +796,10 @@ the record it superseded. It now reads the revocations of every record in window
 that voucher (issue #5144), so revoking any of them ends all of them. Two cases remain outside
 that. A record that has left its window shares nothing with a later one, and a replacement under
 another voucher needs its own §7.4a chain, which it is judged on. This text previously named the
-catalog author as the only actor, "not the key's thief". That was wrong: a replacement under the same
-voucher needs the key's signature and the ceremony evidence, which is public, and §7.4a's
-self-extension exit is met by the voucher's standing incumbent, not by anything the actor proves.
-Getting the record in front of a verifier still takes a way into the catalog, which is the bound
-this section names, so the shared-catalog case stays the sharp one.
+catalog author as the only actor, "not the key's thief". That was wrong: §7.4a's self-extension exit
+asks about the voucher's incumbent, not about who holds the replacement, so a thief who can reach
+the catalog stands where its author does. Reaching the catalog is still the bound this section
+names, so the shared-catalog case stays the sharp one.
 
 The foreign-IRI lever above also has a **denial limb**, and it is the worse of the two. The
 attacker's record is `relationship: "controls"` unconditionally
