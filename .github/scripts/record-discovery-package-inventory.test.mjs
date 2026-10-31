@@ -233,6 +233,13 @@ test('record discovery package Jinn dependencies and portal resolutions match th
   }
 });
 
+test('the general record checker ships one command, built from its bin source', () => {
+  const manifest = readPackage('verification');
+  assert.deepEqual(manifest.bin, { 'jinn-verify': './dist/bin.js' });
+  const source = readFileSync(join(packageRoot, 'verification', 'src', 'bin.ts'), 'utf8');
+  assert.equal(source.startsWith('#!/usr/bin/env node\n'), true);
+});
+
 test('the general record checker has no Colophon dependency in any section', () => {
   const manifest = readPackage('verification');
   const declared = DEPENDENCY_SECTIONS.flatMap((section) => Object.keys(manifest[section] ?? {}));
