@@ -3,8 +3,9 @@
 /**
  * Seeded inputs for the equivalence suite. The corpus holds what someone thought of; these hold the
  * combinations nobody did: envelopes built from every spelling the parsers tell apart, signed by
- * the right and wrong keys of every type `node:crypto` can verify with, then damaged. A run is
- * fixed by its seed.
+ * the right and wrong keys of every type `node:crypto` can verify with, then damaged. The choices
+ * in a run are fixed by its seed. The foreign key pairs are generated per run, so their signature
+ * bytes are not.
  */
 
 import { createHash } from "node:crypto";

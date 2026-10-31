@@ -333,7 +333,7 @@ describe("everything the corpus carries, through every site", () => {
     clearTheLedger();
   });
 
-  test("every DSSE envelope, under every key, at all five signature sites", async () => {
+  test("every DSSE envelope at all five signature sites, under every key where the site takes one", async () => {
     const { envelopes, keys } = seenSoFar();
     const { role, keyId } = captured.keys.trust.admission.authorities[0]!;
     for (const envelope of envelopes.values()) {
