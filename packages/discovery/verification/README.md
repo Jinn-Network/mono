@@ -41,7 +41,7 @@ finding is `{ code, subject?, path?, detail }`. A check that did not run says `s
 | Check | What it does |
 | --- | --- |
 | `references` | Walks from `roots` and follows every digest a known record cites. A record that must be held and is not is `dangling`. Bytes the family lets a reader lack are `unavailable`, not a failure. If every record reached was opaque it says `skipped`. |
-| `lifecycle` | Folds each Attempt's observations with `foldObservations`, holds the log against the Deliveries in the set, and applies §11.3 rule 1 to `supersedes`. An Attempt with no `attempt-engaged` has no authoritative source, so it is reported, and a set of only those says `skipped`, as does a set whose only lifecycle record is a superseding Delivery with its target not held. It reads no clock, so the provisional `expired` of §10.4 rule 5 is not derived. |
+| `lifecycle` | Folds each Attempt's observations with `foldObservations`, in (`sequence`, record digest) order so the input's order decides nothing, holds the log against the Deliveries in the set, and applies §11.3 rule 1 to `supersedes`. A tie on the first engagement fails. An Attempt with no `attempt-engaged` has no authoritative source, so it is reported, and a set of only those says `skipped`, as does a set whose only lifecycle record is a superseding Delivery with its target not held. Such a target is reported in any set. It reads no clock, so the provisional `expired` of §10.4 rule 5 is not derived. |
 | `anchors` | Evaluates each AnchorEvidence record over the record it names. |
 
 `report.signatures` counts each signature a record carries: `total`, `verified`,
@@ -112,8 +112,11 @@ they claim to be signed, so they fail.
   One `pending` has no attestation yet.
 - **A closed reference walk covers known kinds.** Records of unknown kind are opaque to it, and
   anything `unavailable` was not looked at.
-- **A lifecycle folds the log it is given.** Between implementations with no venue, nothing yet says
-  who mints an attempt number, so a fold cannot show that two operators did not collide.
+- **A lifecycle folds the log it is given.** Observations are unsigned in core, so under §10.4 a
+  forged engagement with an earlier `sequence` wins: it is the engagement, and it pins the
+  authoritative source. A fold shows what a log says, not who wrote it. Between implementations with
+  no venue, nothing yet says who mints an attempt number, so a fold cannot show that two operators did
+  not collide.
 - **Passing these vectors here is not interoperability.** One implementation exists, and some
   expectations still live in its tests rather than in the vector corpus. See
   [What is not yet proven](https://github.com/Jinn-Network/spec#what-is-not-yet-proven).
