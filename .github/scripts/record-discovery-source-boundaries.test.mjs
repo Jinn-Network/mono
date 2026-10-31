@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'discovery');
-const discoveryDirectories = ['protocol', 'testing', 'serve', 'publication', 'client', 'facts/evidence', 'facts/trust', 'facts/task-execution', 'facts/environments', 'facts/chain-environments', 'facts/offers', 'sources/evidence-journal', 'transport-http'];
+const discoveryDirectories = ['protocol', 'testing', 'serve', 'publication', 'verification', 'client', 'facts/evidence', 'facts/trust', 'facts/task-execution', 'facts/environments', 'facts/chain-environments', 'facts/offers', 'sources/evidence-journal', 'transport-http'];
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'), join(root, 'operator'),
   ...['core', 'indexer', 'indexer-enrichment', 'layer', 'plugin', 'sdk']
@@ -59,6 +59,14 @@ const PUBLICATION_FORBIDDEN_PACKAGES = [
   '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository', '@jinn-network/evidence-discovery',
   '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-profiles', '@jinn-network/benchmarking-records',
   '@jinn-network/record-discovery-facts-offers',
+];
+// verification holds the general checks for a record of any kind, so its production source is an
+// allowlist rather than a forbidden list: every other first-party package is refused, including
+// any Colophon package, whose checker takes these checks from here and never the reverse.
+const VERIFICATION_ALLOWED_PACKAGES = [
+  '@jinn-network/evidence-offer', '@jinn-network/evidence-protocol',
+  '@jinn-network/record-discovery-protocol', '@jinn-network/task-execution-profiles',
+  '@jinn-network/task-execution-protocol', '@jinn-network/trust-core',
 ];
 // client depends on protocol (production) + trust-core (production, the
 // verification driver) + testing (dev, conformance kit only); no serve, no
@@ -429,6 +437,15 @@ test('record-discovery-serve production source stays within its architecture bou
 
 test('record-publication production source stays within its kind-neutral architecture boundary', () => {
   assertBoundary(join(packages, 'publication', 'src'), PUBLICATION_FORBIDDEN_PACKAGES);
+});
+
+test('verify production source imports only its allowlisted first-party packages', () => {
+  const source = files(join(packages, 'verification', 'src'));
+  const production = source.filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
+  const crossings = forbiddenImportsInFiles(production, ['@colophon-claims/', '@jinn-network/'])
+    .filter((finding) => !VERIFICATION_ALLOWED_PACKAGES.includes(finding.split(' -> ')[1]));
+  assert.deepEqual(crossings, []);
+  assert.deepEqual(forbiddenImportsInFiles(source, ['@colophon-claims/']), []);
 });
 
 test('record-discovery-client production source stays within its architecture boundary', () => {

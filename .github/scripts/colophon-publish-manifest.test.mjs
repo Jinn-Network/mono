@@ -536,7 +536,7 @@ test('the alias may not borrow a receipt for a publish run that never happened',
 
 test('Colophon trusted publishing is a separate workflow and never joins the stack', () => {
   const stack = buildRegistrationList(repoRoot);
-  assert.equal(stack.length, 75);
+  assert.equal(stack.length, 76);
   assert.equal(stack.some((row) => row.package.startsWith('@colophon-claims/')), false);
   assert.equal(COLOPHON_PUBLISH_WORKFLOW, 'colophon-npm-publish.yml');
   const workflow = readFileSync(join(repoRoot, '.github/workflows', COLOPHON_PUBLISH_WORKFLOW), 'utf8');

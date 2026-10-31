@@ -14,6 +14,7 @@ const DISCOVERY_PACKAGES = [
   ['testing', '@jinn-network/record-discovery-testing'],
   ['serve', '@jinn-network/record-discovery-serve'],
   ['publication', '@jinn-network/record-publication'],
+  ['verification', '@jinn-network/verify'],
   ['client', '@jinn-network/record-discovery-client'],
   ['facts/evidence', '@jinn-network/record-discovery-facts-evidence'],
   ['facts/trust', '@jinn-network/record-discovery-facts-trust'],
@@ -25,9 +26,14 @@ const DISCOVERY_PACKAGES = [
   ['transport-http', '@jinn-network/record-discovery-transport-http'],
 ];
 
+// Discovery-tree packages whose npm name does not carry the record-discovery- prefix.
+const NAMED_EXCEPTIONS = ['@jinn-network/record-publication', '@jinn-network/verify'];
+
 // Cross-tree Jinn dependencies live outside packages/discovery; map name -> absolute dir.
 const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
+  ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
+  ['@jinn-network/trust-testing', join(root, 'packages', 'trust', 'testing')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
@@ -64,6 +70,12 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   // publication is the kind-neutral tier-3 coordinator. It composes the
   // durable source writer but deliberately has no record-kind dependency.
   ['publication', { dependencies: ['@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve'], devDependencies: ['@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
+  // verification checks records by the spec's rules, so it imports each family's validators and
+  // the record-kind identifiers discovery owns. It reads no feed: record discovery's own entries
+  // and heads stay with client. trust-testing is the anchor-kit contract suite run against
+  // nodeCryptoAnchorPorts, and trust-resolve is the shadow entry yarn's per-project resolution
+  // needs for trust-testing's own dependency.
+  ['verification', { dependencies: ['@jinn-network/evidence-offer', '@jinn-network/evidence-protocol', '@jinn-network/record-discovery-protocol', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol', '@jinn-network/trust-core'], devDependencies: ['@jinn-network/trust-resolve', '@jinn-network/trust-testing'], optionalDependencies: [], peerDependencies: [] }],
   // client's own source imports protocol + trust-core (plan Task 18: the
   // verification driver wires trust-core key-binding resolution). It
   // declares no facts/* dependency -- the facts leaves are reached only
@@ -194,7 +206,7 @@ test('the record discovery package inventory is explicit and has one manifest pe
   const actual = packageManifests(join(root, 'packages'))
     .flatMap((packageJson) => {
       const { name } = JSON.parse(readFileSync(packageJson, 'utf8'));
-      return (/^@jinn-network\/record-discovery-/.test(name) || name === '@jinn-network/record-publication')
+      return (/^@jinn-network\/record-discovery-/.test(name) || NAMED_EXCEPTIONS.includes(name))
         ? [[relative(packageRoot, dirname(packageJson)), name]]
         : [];
     }).sort(([left], [right]) => left.localeCompare(right));
@@ -219,4 +231,10 @@ test('record discovery package Jinn dependencies and portal resolutions match th
         `${directory} must resolve ${dependencyName} through its matching portal`);
     }
   }
+});
+
+test('the general record checker has no Colophon dependency in any section', () => {
+  const manifest = readPackage('verification');
+  const declared = DEPENDENCY_SECTIONS.flatMap((section) => Object.keys(manifest[section] ?? {}));
+  assert.deepEqual(declared.filter((name) => name.startsWith('@colophon-claims/')), []);
 });
