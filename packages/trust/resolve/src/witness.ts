@@ -65,7 +65,9 @@ export interface CreateWitnessVerifierOptions {
    * this decision itself). */
   readonly acceptedVerifiers?: readonly string[];
   /** Archive re-execution fallback (§7.2a). Omit to fail closed when the
-   * witness author is not policy-accepted. */
+   * witness author is not policy-accepted. A read that fails throws: that is an
+   * outage, and says nothing about the witness. A contract that reverts has
+   * answered. */
   readonly archiveClient?: ArchiveReadClient;
 }
 
