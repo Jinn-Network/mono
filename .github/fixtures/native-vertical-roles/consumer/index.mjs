@@ -59,7 +59,7 @@ const CLAIM_TIME = '2026-08-02T10:35:00Z';
 function roleKey(label) {
   const pair = generateKeyPairSync('ed25519');
   return {
-    keyid: `did:key:z6MkPacked${label}111111111111111111111111`,
+    keyid: `did:key:z6MkPacked${label.replace(/[0OIl]/gu, '1')}111111111111111111111111`,
     privateKey: pair.privateKey,
     publicKey: pair.publicKey,
   };
@@ -118,7 +118,7 @@ function addBinding(agent, key, scope, relationship, order) {
       algorithm: 'ed25519',
       didKey: key.keyid,
     },
-    voucher: { kind: 'oidc-machine', subject: `machine:${agent}` },
+    voucher: { kind: 'oidc-machine', subject: `repo:fixture/${agent.replace(/\W/gu, '-')}:ref:refs/heads/main` },
     relationship,
     scope,
     validFrom: `2026-01-${String(order).padStart(2, '0')}T00:00:00Z`,
@@ -154,6 +154,10 @@ const bindingResolver = createBindingResolver({
     },
   },
   requireAnchors: true,
+  // These fixture bindings carry a placeholder machine ceremony; the fixture is the host vouching for it.
+  verifyHostedCeremony: async () => true,
+  recordSignedByItsKey: ({ binding, envelopeBytes }) =>
+    dsseVerifier(envelopeBytes).validSignerKeyids.includes(binding.key.didKey),
 });
 const witnessVerifier = { async verify1271Witness() { return { verified: false, reason: 'not used' }; } };
 

@@ -364,21 +364,23 @@ export function describeTrustVerificationContract(createContext: TrustVerificati
         const agent = testAgentIri("rotation-agent");
         const oldKey = testDidKey("rotation-old-key");
         const newKey = testDidKey("rotation-new-key");
+        const voucher = { kind: "github-human" as const, profile: "https://github.com/rotation", id: 6 };
         const oldFixture = await buildResolvedBindingFixture({
           agent,
           workingKeyDidKey: oldKey,
           ceremonyType: "github-human",
-          voucher: { kind: "github-human", profile: "https://github.com/rotation", id: 6 },
+          voucher,
           validFrom: "2026-01-01T00:00:00.000Z",
         });
+        // Minted while the old binding still stands: the old one is what authorizes it (§7.4a).
         const newFixture = await buildResolvedBindingFixture({
           agent,
           workingKeyDidKey: newKey,
           ceremonyType: "github-human",
-          voucher: { kind: "github-human", profile: "https://github.com/rotation", id: 6 },
-          validFrom: "2026-06-01T00:00:00.000Z",
+          voucher,
+          validFrom: "2026-05-01T00:00:00.000Z",
           isGenesis: false,
-          incumbentControlVoucher: { kind: "github-human", profile: "https://github.com/rotation", id: 6 },
+          incumbentControls: [{ key: oldKey, voucher }],
         });
         context.seedBinding({
           key: oldKey,
@@ -391,7 +393,7 @@ export function describeTrustVerificationContract(createContext: TrustVerificati
           key: newKey,
           agent,
           resolved: newFixture.resolved,
-          validFrom: "2026-06-01T00:00:00.000Z",
+          validFrom: "2026-05-01T00:00:00.000Z",
         });
 
         const oldOutcome = await verify({
@@ -446,17 +448,26 @@ export function describeTrustVerificationContract(createContext: TrustVerificati
         expect(outcome.ok).toBe(true);
       });
 
-      test("self-extension: an incumbent controls voucher matching the new binding's own voucher passes", async () => {
+      test("self-extension: a standing incumbent controls binding of the new binding's own voucher passes", async () => {
         const agent = testAgentIri("consent-self-extension");
         const key = testDidKey("consent-self-extension-key");
+        const incumbentKey = testDidKey("consent-self-extension-incumbent");
         const voucher = { kind: "github-human" as const, profile: "https://github.com/consent-self-extension", id: 8 };
+        const incumbent = await buildResolvedBindingFixture({
+          agent,
+          workingKeyDidKey: incumbentKey,
+          ceremonyType: "github-human",
+          voucher,
+        });
+        context.seedBinding({ key: incumbentKey, agent, resolved: incumbent.resolved, validFrom: incumbent.binding.validFrom });
         const fixture = await buildResolvedBindingFixture({
           agent,
           workingKeyDidKey: key,
           ceremonyType: "github-human",
           voucher,
+          validFrom: "2026-02-01T00:00:00.000Z",
           isGenesis: false,
-          incumbentControlVoucher: voucher,
+          incumbentControls: [{ key: incumbentKey, voucher }],
         });
         context.seedBinding({ key, agent, resolved: fixture.resolved, validFrom: fixture.binding.validFrom });
 
@@ -488,6 +499,7 @@ export function describeTrustVerificationContract(createContext: TrustVerificati
           workingKeyDidKey: newKey,
           ceremonyType: "github-human",
           voucher: { kind: "github-human", profile: "https://github.com/consent-cross-account-new", id: 10 },
+          validFrom: "2026-02-01T00:00:00.000Z",
           isGenesis: false,
           consent: { keyid: consentKey, sig: btoa("fixture-consent-signature") },
         });
@@ -500,6 +512,74 @@ export function describeTrustVerificationContract(createContext: TrustVerificati
           atTime: "2026-06-01T00:00:00.000Z",
         });
         expect(outcome.ok).toBe(true);
+      });
+
+      test("an incumbent that does not itself stand gives no authority", async () => {
+        const agent = testAgentIri("consent-unchained-incumbent");
+        const key = testDidKey("consent-unchained-incumbent-new");
+        const incumbentKey = testDidKey("consent-unchained-incumbent-key");
+        const voucher = { kind: "github-human" as const, profile: "https://github.com/consent-unchained-incumbent", id: 13 };
+        const incumbent = await buildResolvedBindingFixture({
+          agent,
+          workingKeyDidKey: incumbentKey,
+          ceremonyType: "github-human",
+          voucher,
+          isGenesis: false,
+        });
+        context.seedBinding({ key: incumbentKey, agent, resolved: incumbent.resolved, validFrom: incumbent.binding.validFrom });
+        const fixture = await buildResolvedBindingFixture({
+          agent,
+          workingKeyDidKey: key,
+          ceremonyType: "github-human",
+          voucher,
+          validFrom: "2026-02-01T00:00:00.000Z",
+          isGenesis: false,
+          incumbentControls: [{ key: incumbentKey, voucher }],
+        });
+        context.seedBinding({ key, agent, resolved: fixture.resolved, validFrom: fixture.binding.validFrom });
+
+        const outcome = await verify({
+          envelopeBytes: fixture.envelopeBytes,
+          key,
+          agent,
+          atTime: "2026-06-01T00:00:00.000Z",
+        });
+        expect(outcome.ok).toBe(false);
+        expect(outcome.reason).toBe("consent-chain-violation");
+      });
+
+      test("a bindings-scoped consenter that does not itself stand gives no authority", async () => {
+        const agent = testAgentIri("consent-unchained-consenter");
+        const consentKey = testDidKey("consent-unchained-consenter-key");
+        const newKey = testDidKey("consent-unchained-consenter-new");
+        const consenting = await buildResolvedBindingFixture({
+          agent,
+          workingKeyDidKey: consentKey,
+          ceremonyType: "github-human",
+          voucher: { kind: "github-human", profile: "https://github.com/consent-unchained-consenter", id: 14 },
+          scope: ["bindings"],
+          isGenesis: false,
+        });
+        context.seedBinding({ key: consentKey, agent, resolved: consenting.resolved, validFrom: consenting.binding.validFrom });
+        const fixture = await buildResolvedBindingFixture({
+          agent,
+          workingKeyDidKey: newKey,
+          ceremonyType: "github-human",
+          voucher: { kind: "github-human", profile: "https://github.com/consent-unchained-consenter-new", id: 15 },
+          validFrom: "2026-02-01T00:00:00.000Z",
+          isGenesis: false,
+          consent: { keyid: consentKey, sig: btoa("fixture-consent-signature") },
+        });
+        context.seedBinding({ key: newKey, agent, resolved: fixture.resolved, validFrom: fixture.binding.validFrom });
+
+        const outcome = await verify({
+          envelopeBytes: fixture.envelopeBytes,
+          key: newKey,
+          agent,
+          atTime: "2026-06-01T00:00:00.000Z",
+        });
+        expect(outcome.ok).toBe(false);
+        expect(outcome.reason).toBe("consent-chain-violation");
       });
 
       test("missing consent: a non-genesis binding with neither an incumbent voucher nor a consent countersignature is rejected", async () => {
@@ -609,6 +689,45 @@ export function describeTrustVerificationContract(createContext: TrustVerificati
         const revocation = await buildRevocationFixture({
           target: fixture.bindingDigest,
           revokedBy: "did:pkh:eip155:84532:0x9999999999999999999999999999999999999999", // not the voucher
+          effectiveFrom: "2026-02-01T00:00:00.000Z",
+        });
+        const resolvedWithRevocation = {
+          ...fixture.resolved,
+          revocations: [resolvedRevocation(revocation, "2026-02-01T00:00:00.000Z")],
+        };
+        context.seedBinding({ key, agent, resolved: resolvedWithRevocation, validFrom: fixture.binding.validFrom });
+
+        const outcome = await verify({
+          envelopeBytes: fixture.envelopeBytes,
+          key,
+          agent,
+          atTime: "2026-06-01T00:00:00.000Z",
+        });
+        expect(outcome.ok).toBe(true);
+      });
+
+      test("a scope:bindings key that does not itself stand does not revoke", async () => {
+        const agent = testAgentIri("revocation-unchained-revoker-agent");
+        const key = testDidKey("revocation-unchained-revoker-target");
+        const revokerKey = testDidKey("revocation-unchained-revoker");
+        const revoker = await buildResolvedBindingFixture({
+          agent,
+          workingKeyDidKey: revokerKey,
+          ceremonyType: "github-human",
+          voucher: { kind: "github-human", profile: "https://github.com/revocation-unchained-revoker", id: 16 },
+          scope: ["bindings"],
+          isGenesis: false,
+        });
+        context.seedBinding({ key: revokerKey, agent, resolved: revoker.resolved, validFrom: revoker.binding.validFrom });
+        const fixture = await buildResolvedBindingFixture({
+          agent,
+          workingKeyDidKey: key,
+          ceremonyType: "github-human",
+          voucher: { kind: "github-human", profile: "https://github.com/revocation-unchained-target", id: 17 },
+        });
+        const revocation = await buildRevocationFixture({
+          target: fixture.bindingDigest,
+          revokedBy: revokerKey,
           effectiveFrom: "2026-02-01T00:00:00.000Z",
         });
         const resolvedWithRevocation = {

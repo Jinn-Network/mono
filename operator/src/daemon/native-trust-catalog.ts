@@ -378,6 +378,8 @@ export async function openNativeTrustCatalog(input: {
     bindings: store,
     anchors: anchorResolver,
     requireAnchors: true,
+    recordSignedByItsKey: ({ binding, envelopeBytes }) =>
+      verifyNativeDsse(envelopeBytes).validSignerKeyids.includes(binding.key.didKey),
     onConflict: (conflict) => conflicts.push(conflict),
   });
   const policyFor = (purpose: string): PolicyCheckInput => {

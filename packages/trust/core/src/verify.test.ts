@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { generateKeyPairSync, sign, verify as verifySignature } from "node:crypto";
+import type { KeyObject } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -8,7 +10,7 @@ import { describe, expect, test } from "vitest";
 import { canonicalJsonBytes } from "./canonical-json.js";
 import { ceremonyEvidenceDigest } from "./ceremony.js";
 import type { EoaCeremonyEvidence } from "./ceremony.js";
-import { parseDsseEnvelope, sealDsseEnvelope } from "./dsse.js";
+import { dssePreAuthEncoding, parseDsseEnvelope, sealDsseEnvelope } from "./dsse.js";
 import {
   TRUST_KEY_BINDING_FORMAT,
   TRUST_KEY_BINDING_MEDIA_TYPE,
@@ -133,6 +135,50 @@ function resolvedBinding(
     revocations: [],
     ...overrides,
   };
+}
+
+/** A binding fit to give authority (§7.4a): sealed by the key it binds, and in place before the
+ * default `resolvedBinding` candidate took effect. */
+function authorityBinding(binding: KeyBinding, overrides: Partial<ResolvedBinding> = {}): ResolvedBinding {
+  return resolvedBinding({
+    binding,
+    envelopeBytes: sealedEnvelope(binding, TRUST_KEY_BINDING_MEDIA_TYPE, binding.key.didKey),
+    bindingDigest: `sha256:${"a".repeat(64)}`,
+    effectiveStart: "2025-12-01T00:00:00Z",
+    ...overrides,
+  });
+}
+
+/**
+ * Real Ed25519 signatures over the DSSE pre-authentication encoding. `trustingDsseVerifier` echoes
+ * every declared keyid, so a signature check cannot fail under it: the cases that turn on who
+ * actually signed use this instead.
+ */
+function signingKeys(...keyids: readonly string[]) {
+  const pairs = new Map(keyids.map((keyid) => [keyid, generateKeyPairSync("ed25519")]));
+  const signWith = (keyid: string, bytes: Uint8Array): Uint8Array =>
+    new Uint8Array(sign(null, bytes, pairs.get(keyid)!.privateKey));
+  const verifier: DsseChainVerifier = (envelopeBytes) => {
+    const envelope = parseDsseEnvelope(envelopeBytes);
+    const encoded = dssePreAuthEncoding(envelope.payloadType, envelope.payloadBytes);
+    return {
+      validSignerKeyids: envelope.signatures.flatMap(({ keyid, sig }) => {
+        const publicKey: KeyObject | undefined = keyid === undefined ? undefined : pairs.get(keyid)?.publicKey;
+        return keyid !== undefined && publicKey !== undefined
+          && verifySignature(null, encoded, publicKey, Buffer.from(sig, "base64")) ? [keyid] : [];
+      }),
+    };
+  };
+  /** Sealed declaring `keyid`, and actually signed by `signedBy`. */
+  const seal = (payload: unknown, payloadType: string, keyid: string, signedBy: string = keyid): Uint8Array => {
+    const payloadBytes = canonicalJsonBytes(payload);
+    return sealDsseEnvelope({
+      payloadBytes,
+      payloadType,
+      signatures: [{ keyid, signature: signWith(signedBy, dssePreAuthEncoding(payloadType, payloadBytes)) }],
+    });
+  };
+  return { verifier, seal, signWith };
 }
 
 function revocationEntry(revokedBy: string, effectiveTime: string): ResolvedRevocation {
@@ -409,7 +455,9 @@ describe("verifyEnvelopeBinding", () => {
       resolved: resolvedBinding({
         binding,
         isGenesis: false,
-        incumbentControlVoucher: { kind: "account", did: OTHER_VOUCHER_DID, contractAccount: false },
+        incumbentControls: [
+          { key: CONSENT_KEY, voucher: { kind: "account", did: OTHER_VOUCHER_DID, contractAccount: false } },
+        ],
       }),
     });
     const envelopeBytes = sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2);
@@ -424,21 +472,29 @@ describe("verifyEnvelopeBinding", () => {
     expect(outcome.detail).toContain(VOUCHER_DID);
   });
 
-  test("self-extension succeeds when the binding's own voucher already holds the incumbent controls binding (§7.4a option 1)", async () => {
+  test("self-extension succeeds when the binding's own voucher already holds a standing incumbent controls binding (§7.4a option 1)", async () => {
+    const voucher = { kind: "account" as const, did: VOUCHER_DID, contractAccount: false };
     const binding = keyBinding({
       agent: AGENT,
       key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
-      voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+      voucher,
     });
-    const resolver = new FakeBindingResolver().register({
-      key: KEY_2,
+    const incumbent = keyBinding({
       agent: AGENT,
-      resolved: resolvedBinding({
-        binding,
-        isGenesis: false,
-        incumbentControlVoucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
-      }),
+      key: { publicKey: "0x00", keyid: CONSENT_KEY, algorithm: "ed25519", didKey: CONSENT_KEY },
+      voucher,
     });
+    const resolver = new FakeBindingResolver()
+      .register({
+        key: KEY_2,
+        agent: AGENT,
+        resolved: resolvedBinding({
+          binding,
+          isGenesis: false,
+          incumbentControls: [{ key: CONSENT_KEY, voucher }],
+        }),
+      })
+      .register({ key: CONSENT_KEY, agent: AGENT, resolved: authorityBinding(incumbent) });
     const envelopeBytes = sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2);
 
     const outcome = await verifyEnvelopeBinding(
@@ -446,6 +502,44 @@ describe("verifyEnvelopeBinding", () => {
       { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
     expect(outcome.ok).toBe(true);
+  });
+
+  test("an incumbent whose record is not signed by the key it binds gives no authority (§7.1, §7.4a)", async () => {
+    const voucher = { kind: "account" as const, did: VOUCHER_DID, contractAccount: false };
+    const binding = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+      voucher,
+    });
+    const incumbent = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: CONSENT_KEY, algorithm: "ed25519", didKey: CONSENT_KEY },
+      voucher,
+    });
+    const resolver = new FakeBindingResolver()
+      .register({
+        key: KEY_2,
+        agent: AGENT,
+        resolved: resolvedBinding({
+          binding,
+          isGenesis: false,
+          incumbentControls: [{ key: CONSENT_KEY, voucher }],
+        }),
+      })
+      .register({
+        key: CONSENT_KEY,
+        agent: AGENT,
+        resolved: authorityBinding(incumbent, {
+          envelopeBytes: sealedEnvelope(incumbent, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+        }),
+      });
+    const envelopeBytes = sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2);
+
+    const outcome = await verifyEnvelopeBinding(
+      { envelopeBytes, key: KEY_2, agent: AGENT, family: "deliveries", atTime: "2026-03-01T00:00:00Z" },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
+    );
+    expect(outcome).toMatchObject({ ok: false, reason: "consent-chain-violation" });
   });
 
   test("cross-account consent succeeds when the consenting key currently holds scope:bindings (§7.4a option 2)", async () => {
@@ -468,13 +562,15 @@ describe("verifyEnvelopeBinding", () => {
         resolved: resolvedBinding({
           binding,
           isGenesis: false,
-          incumbentControlVoucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+          incumbentControls: [
+            { key: CONSENT_KEY, voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false } },
+          ],
         }),
       })
       .register({
         key: CONSENT_KEY,
         agent: AGENT,
-        resolved: resolvedBinding({ binding: consentingBinding }),
+        resolved: authorityBinding(consentingBinding),
       });
     const envelopeBytes = sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2);
 
@@ -535,6 +631,424 @@ describe("verifyEnvelopeBinding", () => {
     expect(outcome).toMatchObject({ ok: false, reason: "revoked" });
   });
 
+  describe("who actually signed, under real signatures", () => {
+    const voucher = { kind: "account" as const, did: VOUCHER_DID, contractAccount: false };
+    const otherVoucher = { kind: "account" as const, did: OTHER_VOUCHER_DID, contractAccount: false };
+
+    function consentCase(consentSignedBy: string) {
+      const keys = signingKeys(KEY_2, CONSENT_KEY);
+      const unsigned = keyBinding({
+        agent: AGENT,
+        key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+        voucher: otherVoucher,
+      });
+      const target = dssePreAuthEncoding(TRUST_KEY_BINDING_MEDIA_TYPE, canonicalJsonBytes(unsigned));
+      const binding = keyBinding({
+        ...unsigned,
+        consent: { keyid: CONSENT_KEY, sig: Buffer.from(keys.signWith(consentSignedBy, target)).toString("base64") },
+      });
+      const consenter = keyBinding({
+        agent: AGENT,
+        key: { publicKey: "0x00", keyid: CONSENT_KEY, algorithm: "ed25519", didKey: CONSENT_KEY },
+        voucher,
+        scope: ["bindings"],
+      });
+      const resolver = new FakeBindingResolver()
+        .register({ key: KEY_2, agent: AGENT, resolved: resolvedBinding({ binding, isGenesis: false }) })
+        .register({
+          key: CONSENT_KEY,
+          agent: AGENT,
+          resolved: authorityBinding(consenter, {
+            envelopeBytes: keys.seal(consenter, TRUST_KEY_BINDING_MEDIA_TYPE, CONSENT_KEY),
+          }),
+        });
+      return verifyEnvelopeBinding(
+        {
+          envelopeBytes: keys.seal({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+          key: KEY_2,
+          agent: AGENT,
+          family: "deliveries",
+          atTime: "2026-03-01T00:00:00Z",
+        },
+        { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: keys.verifier },
+      );
+    }
+
+    test("a countersignature made by the key it names gives consent", async () => {
+      expect(await consentCase(CONSENT_KEY)).toMatchObject({ ok: true });
+    });
+
+    test("a countersignature naming a bindings-scoped key, made by another, gives none", async () => {
+      expect(await consentCase(KEY_2)).toMatchObject({ ok: false, reason: "consent-chain-violation" });
+    });
+
+    function revocationCase(revocationSignedBy: string) {
+      const keys = signingKeys(KEY_2, CONSENT_KEY);
+      const binding = keyBinding({
+        agent: AGENT,
+        key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+        voucher,
+      });
+      const revoker = keyBinding({
+        agent: AGENT,
+        key: { publicKey: "0x00", keyid: CONSENT_KEY, algorithm: "ed25519", didKey: CONSENT_KEY },
+        voucher: otherVoucher,
+        scope: ["bindings"],
+      });
+      const entry = revocationEntry(CONSENT_KEY, "2026-02-01T00:00:00Z");
+      const resolver = new FakeBindingResolver()
+        .register({
+          key: KEY_2,
+          agent: AGENT,
+          resolved: resolvedBinding({
+            binding,
+            revocations: [{
+              ...entry,
+              envelopeBytes: keys.seal(entry.revocation, TRUST_REVOCATION_MEDIA_TYPE, CONSENT_KEY, revocationSignedBy),
+            }],
+          }),
+        })
+        .register({
+          key: CONSENT_KEY,
+          agent: AGENT,
+          resolved: authorityBinding(revoker, {
+            envelopeBytes: keys.seal(revoker, TRUST_KEY_BINDING_MEDIA_TYPE, CONSENT_KEY),
+          }),
+        });
+      return verifyEnvelopeBinding(
+        {
+          envelopeBytes: keys.seal({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+          key: KEY_2,
+          agent: AGENT,
+          family: "deliveries",
+          atTime: "2026-03-01T00:00:00Z",
+        },
+        { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: keys.verifier },
+      );
+    }
+
+    test("a revocation signed by the key it names takes effect", async () => {
+      expect(await revocationCase(CONSENT_KEY)).toMatchObject({ ok: false, reason: "revoked" });
+    });
+
+    test("a revocation naming a bindings-scoped key, signed by another, does not", async () => {
+      expect(await revocationCase(KEY_2)).toMatchObject({ ok: true });
+    });
+  });
+
+  describe("an authority outside its own window, under a resolver that does not window it", () => {
+    const voucher = { kind: "account" as const, did: VOUCHER_DID, contractAccount: false };
+    const unwindowed = (entries: Readonly<Record<string, ResolvedBinding>>): BindingResolver => ({
+      async resolveBinding(query) {
+        return entries[query.key] ?? null;
+      },
+    });
+
+    test("an incumbent that expired before the new binding took effect gives nothing", async () => {
+      const incumbent = keyBinding({
+        agent: AGENT,
+        key: { publicKey: "0x00", keyid: CONSENT_KEY, algorithm: "ed25519", didKey: CONSENT_KEY },
+        voucher,
+        expiresAt: "2025-12-15T00:00:00Z",
+      });
+      const binding = keyBinding({
+        agent: AGENT,
+        key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+        voucher,
+      });
+      const outcome = await verifyEnvelopeBinding(
+        {
+          envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+          key: KEY_2,
+          agent: AGENT,
+          family: "deliveries",
+          atTime: "2026-03-01T00:00:00Z",
+        },
+        {
+          bindingResolver: unwindowed({
+            [KEY_2]: resolvedBinding({ binding, isGenesis: false, incumbentControls: [{ key: CONSENT_KEY, voucher }] }),
+            [CONSENT_KEY]: authorityBinding(incumbent),
+          }),
+          witnessVerifier: fakeWitnessVerifier,
+          dsseVerifier: trustingDsseVerifier,
+        },
+      );
+      expect(outcome).toMatchObject({ ok: false, reason: "consent-chain-violation" });
+    });
+
+    test("a revoker that took effect after its own revocation revokes nothing", async () => {
+      const revoker = keyBinding({
+        agent: AGENT,
+        key: { publicKey: "0x00", keyid: CONSENT_KEY, algorithm: "ed25519", didKey: CONSENT_KEY },
+        voucher,
+        scope: ["bindings"],
+      });
+      const binding = keyBinding({
+        agent: AGENT,
+        key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+        voucher,
+      });
+      const outcome = await verifyEnvelopeBinding(
+        {
+          envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+          key: KEY_2,
+          agent: AGENT,
+          family: "deliveries",
+          atTime: "2026-03-01T00:00:00Z",
+        },
+        {
+          bindingResolver: unwindowed({
+            [KEY_2]: resolvedBinding({ binding, revocations: [revocationEntry(CONSENT_KEY, "2026-02-01T00:00:00Z")] }),
+            [CONSENT_KEY]: authorityBinding(revoker, { effectiveStart: "2026-02-15T00:00:00Z" }),
+          }),
+          witnessVerifier: fakeWitnessVerifier,
+          dsseVerifier: trustingDsseVerifier,
+        },
+      );
+      expect(outcome).toMatchObject({ ok: true });
+    });
+  });
+
+  describe("a countersignature that cannot be read is an invalid consent, not an exception", () => {
+    const consentCase = async (sig: string, extra: Record<string, unknown> = {}) => {
+      const binding = keyBinding({
+        agent: AGENT,
+        key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+        voucher: { kind: "account", did: OTHER_VOUCHER_DID, contractAccount: false },
+        consent: { keyid: CONSENT_KEY, sig },
+        ...extra,
+      });
+      const consenter = keyBinding({
+        agent: AGENT,
+        key: { publicKey: "0x00", keyid: CONSENT_KEY, algorithm: "ed25519", didKey: CONSENT_KEY },
+        voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+        scope: ["bindings"],
+      });
+      const resolver = new FakeBindingResolver()
+        .register({ key: KEY_2, agent: AGENT, resolved: resolvedBinding({ binding, isGenesis: false }) })
+        .register({ key: CONSENT_KEY, agent: AGENT, resolved: authorityBinding(consenter) });
+      return verifyEnvelopeBinding(
+        {
+          envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+          key: KEY_2,
+          agent: AGENT,
+          family: "deliveries",
+          atTime: "2026-03-01T00:00:00Z",
+        },
+        { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
+      );
+    };
+
+    test("a signature that is not base64", async () => {
+      expect(await consentCase("%")).toMatchObject({
+        ok: false,
+        reason: "consent-chain-violation",
+        detail: expect.stringContaining("does not validate"),
+      });
+    });
+
+    test("a record whose payload cannot be canonicalized", async () => {
+      expect(await consentCase(btoa("signature"), { "x-example/fraction": 1.5 })).toMatchObject({
+        ok: false,
+        reason: "consent-chain-violation",
+        detail: expect.stringContaining("does not validate"),
+      });
+    });
+  });
+
+  describe("what a store can hold ends in a verdict", () => {
+    const voucher = { kind: "account" as const, did: VOUCHER_DID, contractAccount: false };
+    const verifyKey2 = (resolver: BindingResolver) =>
+      verifyEnvelopeBinding(
+        {
+          envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+          key: KEY_2,
+          agent: AGENT,
+          family: "deliveries",
+          atTime: "2026-03-01T00:00:00Z",
+        },
+        { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
+      );
+    const own = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+      voucher,
+    });
+    const peer = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: CONSENT_KEY, algorithm: "ed25519", didKey: CONSENT_KEY },
+      voucher,
+      scope: ["bindings"],
+    });
+
+    test.each([
+      ["a lone surrogate", (evidence: EoaCeremonyEvidence) => ({ ...evidence, message: { ...evidence.message, nonce: "a\ud800b" } })],
+      ["an unsafe integer", (evidence: EoaCeremonyEvidence) => ({ ...evidence, message: { ...evidence.message, chainId: 1e21 } })],
+      ["no message", (evidence: EoaCeremonyEvidence) => ({ ...evidence, message: undefined })],
+      ["resources that are not a list", (evidence: EoaCeremonyEvidence) => ({ ...evidence, message: { ...evidence.message, resources: 7 } })],
+      ["message bytes that are not bytes", (evidence: EoaCeremonyEvidence) => ({ ...evidence, messageBytes: "bytes" })],
+      ["no signature", (evidence: EoaCeremonyEvidence) => ({ ...evidence, signature: undefined })],
+      ["evidence that is not an object", () => null],
+    ])("ceremony evidence with %s is a failed ceremony", async (_label, mangle) => {
+      const resolver = new FakeBindingResolver().register({
+        key: KEY_2,
+        agent: AGENT,
+        resolved: resolvedBinding({
+          binding: keyBinding({ ...own, ceremony: { type: "eoa", digest: `sha256:${"a".repeat(64)}` } }),
+          ceremonyEvidence: mangle(eoaCeremonyEvidence()) as never,
+        }),
+      });
+      expect(await verifyKey2(resolver)).toMatchObject({ ok: false, reason: "ceremony-verification-failed" });
+    });
+
+    test("evidence the record commits to fails the same way when it cannot be read past its digest", async () => {
+      const evidence = eoaCeremonyEvidence();
+      const committed = { ...evidence, message: { ...evidence.message, resources: 7 } } as never;
+      const resolver = new FakeBindingResolver().register({
+        key: KEY_2,
+        agent: AGENT,
+        resolved: resolvedBinding({
+          binding: keyBinding({
+            ...own,
+            voucher: { kind: "account", did: didPkh(1, evidence.message.address as `0x${string}`), contractAccount: false },
+            ceremony: { type: "eoa", digest: ceremonyEvidenceDigest(committed) },
+          }),
+          ceremonyEvidence: committed,
+        }),
+      });
+      expect(await verifyKey2(resolver)).toMatchObject({
+        ok: false,
+        reason: "ceremony-verification-failed",
+        detail: "ceremony evidence cannot be read.",
+      });
+    });
+
+    test("an authority whose envelope cannot be read gives nothing", async () => {
+      const resolver = new FakeBindingResolver()
+        .register({
+          key: KEY_2,
+          agent: AGENT,
+          resolved: resolvedBinding({ binding: own, isGenesis: false, incumbentControls: [{ key: CONSENT_KEY, voucher }] }),
+        })
+        .register({
+          key: CONSENT_KEY,
+          agent: AGENT,
+          resolved: authorityBinding(keyBinding({ ...peer, scope: ["deliveries"] }), {
+            envelopeBytes: new TextEncoder().encode("not an envelope"),
+          }),
+        });
+      expect(await verifyKey2(resolver)).toMatchObject({ ok: false, reason: "consent-chain-violation" });
+    });
+
+    test("a revocation whose envelope cannot be read has no effect", async () => {
+      const resolver = new FakeBindingResolver()
+        .register({
+          key: KEY_2,
+          agent: AGENT,
+          resolved: resolvedBinding({
+            binding: own,
+            revocations: [{
+              ...revocationEntry(CONSENT_KEY, "2026-02-01T00:00:00Z"),
+              envelopeBytes: new TextEncoder().encode("not an envelope"),
+            }],
+          }),
+        })
+        .register({ key: CONSENT_KEY, agent: AGENT, resolved: authorityBinding(peer) });
+      expect(await verifyKey2(resolver)).toMatchObject({ ok: true });
+    });
+  });
+
+  describe("an agentId voucher (§7.2)", () => {
+    const voucher = { kind: "agentId" as const, caip19: "eip155:84532/erc721:0x2222222222222222222222222222222222222222/7" };
+    const peer = (keyid: string, scope: KeyBinding["scope"]) => keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid, algorithm: "ed25519", didKey: keyid },
+      voucher,
+      scope,
+      ceremony: { type: "agentId", digest: `sha256:${"a".repeat(64)}` },
+    });
+    const verifyNew = (binding: KeyBinding, consenter: KeyBinding) => verifyEnvelopeBinding(
+      {
+        envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+        key: KEY_2,
+        agent: AGENT,
+        family: "deliveries",
+        atTime: "2026-03-01T00:00:00Z",
+      },
+      {
+        bindingResolver: new FakeBindingResolver()
+          .register({
+            key: KEY_2,
+            agent: AGENT,
+            resolved: resolvedBinding({ binding, isGenesis: false, incumbentControls: [{ key: CONSENT_KEY, voucher }] }),
+          })
+          .register({ key: CONSENT_KEY, agent: AGENT, resolved: authorityBinding(consenter) }),
+        witnessVerifier: fakeWitnessVerifier,
+        dsseVerifier: trustingDsseVerifier,
+      },
+    );
+
+    test("does not extend from a standing binding of the same agentId: registry facts vouch nothing", async () => {
+      const outcome = await verifyNew(peer(KEY_2, ["deliveries"]), peer(CONSENT_KEY, ["bindings"]));
+      expect(outcome).toMatchObject({ ok: false, reason: "consent-chain-violation" });
+    });
+
+    test("still joins by consent", async () => {
+      const consented = { ...peer(KEY_2, ["deliveries"]), consent: { keyid: CONSENT_KEY, sig: btoa("consent") } };
+      expect(await verifyNew(consented, peer(CONSENT_KEY, ["bindings"]))).toMatchObject({ ok: true });
+    });
+  });
+
+  test("a revocation whose time cannot be read has no effect unless its signer has authority (§7.4b)", async () => {
+    const binding = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+      voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+    });
+    const verifyWith = (revokedBy: string) => {
+      const resolver = new FakeBindingResolver().register({
+        key: KEY_2,
+        agent: AGENT,
+        resolved: resolvedBinding({ binding, revocations: [revocationEntry(revokedBy, "2026-02-01T00:00Z")] }),
+      });
+      return verifyEnvelopeBinding(
+        {
+          envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+          key: KEY_2,
+          agent: AGENT,
+          family: "deliveries",
+          atTime: "2026-03-01T00:00:00Z",
+        },
+        { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
+      );
+    };
+
+    expect(await verifyWith(OTHER_VOUCHER_DID)).toMatchObject({ ok: true });
+    expect(await verifyWith(VOUCHER_DID)).toMatchObject({ ok: false, reason: "revoked" });
+  });
+
+  test("a key revoking its own binding takes effect even when that record could not stand as an authority", async () => {
+    const binding = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+      voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+      scope: ["deliveries", "bindings"],
+    });
+    const resolved = resolvedBinding({
+      binding,
+      envelopeBytes: sealedEnvelope(binding, TRUST_KEY_BINDING_MEDIA_TYPE, CONSENT_KEY),
+      revocations: [revocationEntry(KEY_2, "2026-02-01T00:00:00Z")],
+    });
+    const resolver = new FakeBindingResolver().register({ key: KEY_2, agent: AGENT, resolved });
+    const envelopeBytes = sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2);
+
+    const outcome = await verifyEnvelopeBinding(
+      { envelopeBytes, key: KEY_2, agent: AGENT, family: "deliveries", atTime: "2026-03-01T00:00:00Z" },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
+    );
+    expect(outcome).toMatchObject({ ok: false, reason: "revoked" });
+  });
+
   test("a revocation signed by a key with no authority over the binding does not revoke", async () => {
     const binding = keyBinding({
       agent: AGENT,
@@ -582,7 +1096,9 @@ describe("verifyEnvelopeBinding", () => {
         return resolvedBinding({
           binding,
           isGenesis: false,
-          incumbentControlVoucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+          incumbentControls: [
+            { key: CONSENT_KEY, voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false } },
+          ],
         });
       },
     };

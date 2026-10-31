@@ -91,7 +91,7 @@ export { ATTEMPT_STATES, TERMINAL_STATES } from "./states.js";
 export type { AttemptState, FailureBlame } from "./states.js";
 
 // --- the observation fold (§10.4) + the Attempt projection (§9/§22) ---
-export { foldObservations } from "./fold.js";
+export { ConflictingObservationError, foldObservations } from "./fold.js";
 export type { AttemptDescriptor, DerivedAttemptState, FoldObservationsOptions } from "./fold.js";
 
 // --- sealing entry points (§6.1) ---

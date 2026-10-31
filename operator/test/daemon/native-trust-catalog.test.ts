@@ -156,6 +156,13 @@ async function buildCatalog(options: {
   readonly ceremonyMode?: 'valid' | 'bad-signature' | 'bad-content' | 'digest-mismatch';
   readonly revoked?: boolean;
   readonly conflict?: boolean;
+  /**
+   * Founds the Agent on an earlier binding of the same account, and adds a record claiming the
+   * working key that the key never signed, anchored before the genuine binding of that key.
+   */
+  readonly claimedByAnotherSigner?: boolean;
+  /** Adds a stranger's record whose ceremony message cannot be read, and its revocation of the binding. */
+  readonly strangerWithUnreadableEvidence?: Readonly<Record<string, unknown>>;
   readonly forgeBindingEnvelope?: boolean;
   /** Strips the binding envelope's signatures entirely — an UNSIGNED binding, not a forged one. */
   readonly unsignBindingEnvelope?: boolean;
@@ -243,11 +250,85 @@ async function buildCatalog(options: {
       ceremony: catalogBindings[0]!.ceremony,
     });
   }
+  if (options.claimedByAnotherSigner === true) {
+    const founder = ed25519Signer(generateKeyPairSync('ed25519'));
+    const foundingCeremony = await eoaCeremony(AGENT, founder.id);
+    const foundingAnchor = recordDigest(new TextEncoder().encode('founding-binding-anchor'));
+    const founding = await sealKeyBinding({
+      ...binding,
+      key: { publicKey: founder.id, keyid: founder.id, algorithm: 'Ed25519', didKey: founder.id },
+      validFrom: '2026-07-31T23:00:00.000Z',
+      ceremony: { type: 'eoa', digest: ceremonyEvidenceDigest(foundingCeremony) },
+      anchors: [{ digest: foundingAnchor }],
+    }, founder.signer);
+    anchors.set(foundingAnchor, observation(foundingAnchor, { anchorTime: '2026-07-31T23:00:00.000Z' }));
+    catalogBindings.push({
+      digest: founding.recordDigest,
+      envelope: b64(founding.envelopeBytes),
+      ceremony: {
+        type: 'eoa',
+        message: foundingCeremony.message,
+        messageBytes: b64(foundingCeremony.messageBytes),
+        signature: b64(foundingCeremony.signature),
+      },
+    });
+    const claimantAnchor = recordDigest(new TextEncoder().encode('claimant-binding-anchor'));
+    const claimant = ed25519Signer(generateKeyPairSync('ed25519'));
+    const claimed = await sealKeyBinding({
+      ...binding,
+      validFrom: '2026-07-31T23:30:00.000Z',
+      anchors: [{ digest: claimantAnchor }],
+    }, async (input) => {
+      const [signature] = await claimant.signer(input);
+      return [{ ...signature!, keyid: working.id }];
+    });
+    anchors.set(claimantAnchor, observation(claimantAnchor, { anchorTime: '2026-07-31T23:30:00.000Z' }));
+    catalogBindings.push({
+      digest: claimed.recordDigest,
+      envelope: b64(claimed.envelopeBytes),
+      ceremony: catalogBindings[0]!.ceremony,
+    });
+  }
+  const unreadableMessage = options.strangerWithUnreadableEvidence;
+  const strangerRevocations: Record<string, unknown>[] = [];
+  if (unreadableMessage !== undefined) {
+    const stranger = ed25519Signer(generateKeyPairSync('ed25519'));
+    const strangerCeremony = await eoaCeremony(AGENT, stranger.id);
+    const strangerAnchor = recordDigest(new TextEncoder().encode('stranger-binding-anchor'));
+    const strangerRevocationAnchor = recordDigest(new TextEncoder().encode('stranger-revocation-anchor'));
+    const strangerBinding = await sealKeyBinding({
+      ...binding,
+      key: { publicKey: stranger.id, keyid: stranger.id, algorithm: 'Ed25519', didKey: stranger.id },
+      voucher: { kind: 'account', did: didPkh(84532, OTHER_ACCOUNT.address), contractAccount: false },
+      ceremony: { type: 'eoa', digest: ceremonyEvidenceDigest(strangerCeremony) },
+      anchors: [{ digest: strangerAnchor }],
+    }, stranger.signer);
+    anchors.set(strangerAnchor, observation(strangerAnchor, { anchorTime: '2026-08-01T01:00:00.000Z' }));
+    catalogBindings.push({
+      digest: strangerBinding.recordDigest,
+      envelope: b64(strangerBinding.envelopeBytes),
+      ceremony: {
+        type: 'eoa',
+        message: { ...strangerCeremony.message, ...unreadableMessage },
+        messageBytes: b64(strangerCeremony.messageBytes),
+        signature: b64(strangerCeremony.signature),
+      },
+    });
+    const revocation = await sealRevocation({
+      protocol: 'https://spec.jinn.network/trust/revocation/v1',
+      target: recordDigest(bindingEnvelope),
+      revokedBy: stranger.id,
+      anchors: [{ digest: strangerRevocationAnchor }],
+      effectiveFrom: '2026-08-02T00:00:00.000Z',
+    }, stranger.signer);
+    anchors.set(strangerRevocationAnchor, observation(strangerRevocationAnchor, { anchorTime: '2026-08-02T00:01:00.000Z' }));
+    strangerRevocations.push({ digest: revocation.recordDigest, envelope: b64(revocation.envelopeBytes) });
+  }
   const catalogAnchors = [...anchors.keys()].map((digest, index) => ({
     digest,
     locator: anchorLocator(digest, index),
   }));
-  const revocations: Record<string, unknown>[] = [];
+  const revocations: Record<string, unknown>[] = [...strangerRevocations];
   if (options.revoked === true) {
     const revocationAnchor = recordDigest(new TextEncoder().encode('revocation-anchor'));
     const revocation = await sealRevocation({
@@ -366,6 +447,24 @@ describe('native trust catalog authority', () => {
   });
 
   it.each([
+    ['a lone surrogate', { nonce: 'a\ud800b' }],
+    ['an unsafe integer', { chainId: 1e21 }],
+    ['resources that do not match the signed bytes', { resources: [] }],
+  ])('keeps its verdict when a stranger holds evidence with %s and revokes the genuine key', async (_label, message) => {
+    const fixture = await buildCatalog({ strangerWithUnreadableEvidence: message });
+    const opened = { count: 0 };
+    await openAndVerifyRole(fixture, anchorClient(fixture, []), opened);
+    expect(opened.count).toBe(1);
+  });
+
+  it('does not let a record its key never signed take that key from the genuine binding (§7.1)', async () => {
+    const fixture = await buildCatalog({ claimedByAnotherSigner: true });
+    const opened = { count: 0 };
+    await openAndVerifyRole(fixture, anchorClient(fixture, []), opened);
+    expect(opened.count).toBe(1);
+  });
+
+  it.each([
     ['ceremony commitment digest mismatch', { ceremonyMode: 'digest-mismatch' as const }, /ceremony evidence digest/u],
     ['ceremony signature mismatch', { ceremonyMode: 'bad-signature' as const }, /ceremony-verification-failed/u],
     ['ceremony signed-content mismatch', { ceremonyMode: 'bad-content' as const }, /ceremony-verification-failed/u],
@@ -374,7 +473,8 @@ describe('native trust catalog authority', () => {
     ['expired binding', { expiresAt: '2026-08-02T00:00:00.000Z' }, /binding did not resolve/u],
     ['revoked binding', { revoked: true }, /revoked/u],
     ['conflicting bindings', { conflict: true }, /conflicting bindings/u],
-    ['forged binding envelope', { forgeBindingEnvelope: true }, /envelope-signature-invalid/u],
+    // A record its key never signed does not resolve (§7.1), so it never reaches step 1.
+    ['forged binding envelope', { forgeBindingEnvelope: true }, /binding did not resolve/u],
   ])('refuses %s and never opens the role', async (_label, options, expected) => {
     const fixture = await buildCatalog(options);
     const opened = { count: 0 };
@@ -471,7 +571,7 @@ describe('family-scoped resolver skip-vs-refuse boundary (#2525)', () => {
   });
 
   it.each([
-    ['a forged binding signature', { forgeBindingEnvelope: true as const }, /envelope-signature-invalid/u],
+    ['a forged binding signature', { forgeBindingEnvelope: true as const }, /binding did not resolve/u],
     ['a ceremony signature mismatch', { ceremonyMode: 'bad-signature' as const }, /ceremony-verification-failed/u],
     ['a ceremony that signed a different identity', { ceremonyMode: 'bad-content' as const }, /ceremony-verification-failed/u],
     ['a ceremony commitment digest mismatch', { ceremonyMode: 'digest-mismatch' as const }, /ceremony evidence digest/u],
