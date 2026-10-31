@@ -45,3 +45,7 @@ yarn pack:smoke
 ```
 
 See `docs/superpowers/plans/2026-07-28-record-discovery.md` for the implementation plan.
+
+## Vitest
+
+This package needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project.

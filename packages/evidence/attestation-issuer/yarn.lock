@@ -51,11 +51,6 @@ __metadata:
     "@types/node": "npm:^22.0.0"
     typescript: "npm:^5.9.3"
     vitest: "npm:^4.1.8"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: unknown
   linkType: soft
 
@@ -73,11 +68,6 @@ __metadata:
   resolution: "@jinn-network/evidence-repository@portal:../repository::locator=%40jinn-network%2Fattestation-issuer%40workspace%3A."
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 

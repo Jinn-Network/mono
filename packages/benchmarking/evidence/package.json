@@ -41,14 +41,6 @@
     "@jinn-network/evidence-protocol": "0.1.0",
     "@jinn-network/trust-core": "0.1.0"
   },
-  "peerDependencies": {
-    "vitest": "^4.1.8"
-  },
-  "peerDependenciesMeta": {
-    "vitest": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@jinn-network/execution-evidence-builder": "0.1.0",
     "@types/node": "^22.0.0",

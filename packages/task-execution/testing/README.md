@@ -45,8 +45,8 @@ describeTaskExecutionBackendContract(() => createMyBinding());
 ```
 
 Both are ordinary vitest `describe` blocks — run them from any `.test.ts` file under the
-consumer's own vitest configuration. `vitest` is an optional peer dependency of this package: a
-consumer already running vitest need not install anything extra.
+consumer's own vitest configuration. This package needs `vitest` installed. `vitest` is not a
+dependency of this package, so add it to your own project.
 
 ## The kit-precedes-bindings rule (design §26)
 

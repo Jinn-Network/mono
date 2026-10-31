@@ -21,3 +21,7 @@ Message content is not carried into spans. Each span points at the region of the
 digest-bound source it was derived from, and consumers resolve content there.
 
 See `../../../docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md` §7.1.
+
+## Vitest
+
+`@jinn-network/evidence-trace-decode/testing` needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project. The other entry points do not need it.

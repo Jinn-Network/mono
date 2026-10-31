@@ -83,8 +83,9 @@ The producer remains responsible for:
   is required, and applying its own deletion policy;
 - reusing the same repository after interruption and independently validating
   or verifying retrieved evidence before relying on it; and
-- installing the optional `vitest` peer only when using the producer contract
-  test export.
+- installing `vitest` in its own project when using the producer contract test
+  export. `@jinn-network/execution-recorder/testing` needs `vitest` installed,
+  and `vitest` is not a dependency of this package.
 
 For path-backed sources, the recorder rejects symbolic links and snapshots the
 regular file visible during capture. Producers should still prevent concurrent

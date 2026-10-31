@@ -46,14 +46,6 @@
     "@jinn-network/evidence-repository": "0.1.0",
     "@jinn-network/execution-evidence-builder": "0.1.0"
   },
-  "peerDependencies": {
-    "vitest": "^4.1.8"
-  },
-  "peerDependenciesMeta": {
-    "vitest": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.9.3",

@@ -54,3 +54,7 @@ Regenerate both with `yarn generate:schemas`.
 See [`../../../docs/superpowers/plans/2026-07-30-plugin-c1-trajectory-record.md`](../../../docs/superpowers/plans/2026-07-30-plugin-c1-trajectory-record.md),
 [`../../../docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md`](../../../docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md), and
 [`../../../docs/superpowers/specs/2026-07-23-jinn-execution-evidence-protocol-design.md`](../../../docs/superpowers/specs/2026-07-23-jinn-execution-evidence-protocol-design.md).
+
+## Vitest
+
+`@jinn-network/evidence-trace/testing` needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project. The other entry points do not need it.
