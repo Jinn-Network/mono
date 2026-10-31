@@ -1705,7 +1705,7 @@
       "name": "@jinn-network/verify",
       "path": "packages/discovery/verification",
       "domain": "discovery",
-      "role": "general checking primitives for Jinn records",
+      "role": "checks Jinn records by the rules in the specification",
       "tier": 3,
       "classification": "platform",
       "stability": "experimental",

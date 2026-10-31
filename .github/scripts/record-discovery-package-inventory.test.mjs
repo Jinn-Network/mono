@@ -70,12 +70,12 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   // publication is the kind-neutral tier-3 coordinator. It composes the
   // durable source writer but deliberately has no record-kind dependency.
   ['publication', { dependencies: ['@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve'], devDependencies: ['@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
-  // verification holds the general record checks and stays neutral about record kinds: its
-  // production source imports trust-core alone. trust-testing is the anchor-kit
-  // contract suite run against nodeCryptoAnchorPorts, trust-resolve is the shadow entry yarn's
-  // per-project resolution needs for trust-testing's own dependency, and evidence-protocol
-  // supplies the two golden DSSE claims read as vectors.
-  ['verification', { dependencies: ['@jinn-network/trust-core'], devDependencies: ['@jinn-network/evidence-protocol', '@jinn-network/trust-resolve', '@jinn-network/trust-testing'], optionalDependencies: [], peerDependencies: [] }],
+  // verification checks records by the spec's rules, so it imports each family's validators and
+  // the record-kind identifiers discovery owns. It reads no feed: record discovery's own entries
+  // and heads stay with client. trust-testing is the anchor-kit contract suite run against
+  // nodeCryptoAnchorPorts, and trust-resolve is the shadow entry yarn's per-project resolution
+  // needs for trust-testing's own dependency.
+  ['verification', { dependencies: ['@jinn-network/evidence-offer', '@jinn-network/evidence-protocol', '@jinn-network/record-discovery-protocol', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol', '@jinn-network/trust-core'], devDependencies: ['@jinn-network/trust-resolve', '@jinn-network/trust-testing'], optionalDependencies: [], peerDependencies: [] }],
   // client's own source imports protocol + trust-core (plan Task 18: the
   // verification driver wires trust-core key-binding resolution). It
   // declares no facts/* dependency -- the facts leaves are reached only
