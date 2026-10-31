@@ -169,6 +169,12 @@ describe("createChainFactResolver", () => {
           .rejects.toMatchObject({ code: "INVALID_INPUT" });
       });
 
+      it("reads a revert the same way from a client built on another copy of viem", async () => {
+        const foreign = Object.assign(new Error("execution reverted"), { name: "ContractFunctionRevertedError" });
+        await expect(resolverOver(failing(new Error("call failed", { cause: foreign }))).ownerOf(AGENT_ASSET))
+          .rejects.toMatchObject({ code: "INVALID_INPUT" });
+      });
+
       it("reads a contract with no code as the same answer", async () => {
         await expect(resolverOver(failing(new ContractFunctionZeroDataError({ functionName: "ownerOf" }))).ownerOf(AGENT_ASSET))
           .rejects.toMatchObject({ code: "INVALID_INPUT" });

@@ -66,6 +66,8 @@ function didKeyOf(publicKey: KeyObject): string {
 
 const OLD_KEY = didKeyOf(OLD.publicKey);
 const NEW_KEY = didKeyOf(NEW.publicKey);
+const VOUCHER = 'did:pkh:eip155:1:0x5A5A5a5A5a5A5A5a5A5a5a5a5A5a5A5A5a5A5A5a';
+const REVOCATION_ENVELOPE = new TextEncoder().encode('fixture revocation');
 const PUBLIC_KEYS = new Map([[OLD_KEY, OLD.publicKey], [NEW_KEY, NEW.publicKey]]);
 
 function b64(value: Uint8Array): string {
@@ -97,11 +99,11 @@ function oldKeyRevocation(): ResolvedRevocation {
     revocation: {
       protocol: TRUST_REVOCATION_FORMAT,
       target: `sha256:${'c'.repeat(64)}`,
-      revokedBy: OLD_KEY,
+      revokedBy: VOUCHER,
       anchors: [],
       effectiveFrom: OLD_REVOKED_AT,
     },
-    envelopeBytes: new TextEncoder().encode('fixture revocation'),
+    envelopeBytes: REVOCATION_ENVELOPE,
     effectiveTime: OLD_REVOKED_AT,
   };
 }
@@ -112,7 +114,7 @@ function bindingFor(didKey: string, revocations: readonly ResolvedRevocation[]):
       protocol: TRUST_KEY_BINDING_FORMAT,
       agent: AGENT,
       key: { keyid: didKey, didKey, publicKey: didKey, algorithm: 'ed25519' },
-      voucher: { kind: 'account', did: 'did:pkh:eip155:1:0x5A5A5a5A5a5A5A5a5A5a5a5a5A5a5A5A5a5A5A5a', contractAccount: false },
+      voucher: { kind: 'account', did: VOUCHER, contractAccount: false },
       relationship: 'controls',
       scope: [DISCOVERY_SIGNING_SCOPE],
       validFrom: BOUND_FROM,
@@ -142,7 +144,8 @@ function signingTrustAuthority(
   const witnessVerifier: WitnessVerifier = {
     async verify1271Witness() { return { verified: false, reason: 'fixture never verifies' }; },
   };
-  const dsseVerifier: DsseChainVerifier = () => ({ validSignerKeyids: [] });
+  // Only the voucher's revocation of OLD is ever read: the rule needs to see who signed it.
+  const dsseVerifier: DsseChainVerifier = (bytes) => ({ validSignerKeyids: bytes === REVOCATION_ENVELOPE ? [VOUCHER] : [] });
   return {
     bindingResolver,
     dsseVerifier,

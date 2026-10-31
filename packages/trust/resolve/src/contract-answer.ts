@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { BaseError, ContractFunctionRevertedError, ContractFunctionZeroDataError } from "viem";
+/** By name, not class: the client that threw may be built on another copy of viem. */
+const CONTRACT_ANSWERS = new Set(["ContractFunctionRevertedError", "ContractFunctionZeroDataError"]);
 
 /**
  * Whether a failed contract read is the chain's answer rather than an outage: the
@@ -8,6 +9,8 @@ import { BaseError, ContractFunctionRevertedError, ContractFunctionZeroDataError
  * retried will change it, and it says something about what was asked.
  */
 export function isContractAnswer(cause: unknown): boolean {
-  return cause instanceof BaseError && cause.walk((error) =>
-    error instanceof ContractFunctionRevertedError || error instanceof ContractFunctionZeroDataError) !== null;
+  for (let error = cause; error instanceof Error; error = error.cause) {
+    if (CONTRACT_ANSWERS.has(error.name)) return true;
+  }
+  return false;
 }
