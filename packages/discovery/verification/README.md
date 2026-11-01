@@ -316,9 +316,11 @@ they claim to be signed, so they fail.
   came with the records shows nothing against whoever handed you both. Under a root you trust, it
   shows these are the keys that were published, not whose they are.
 - **`trust-binding: passed` means only what the resolver decided.** This package ships no resolver,
-  so the check says `skipped` until a caller injects a `bindingResolver`. A refusal from it fails, and
-  an outage says `skipped`. Its soundness is the caller's responsibility, including what it treats as
-  a genesis, which ceremonies it ran, and which revocations it sees.
+  so the check says `skipped` until a caller injects a `bindingResolver`. A refusal from it fails. An
+  outage, which it reports by throwing, says `skipped` with `binding-dependency-failed`, and so does a
+  witness verifier's: neither is a finding about the record, and neither passes. Its soundness is the
+  caller's responsibility, including what it treats as a genesis, which ceremonies it ran, and which
+  revocations it sees.
 - **Distinct keys are distinct keys.** Nothing here shows they belong to distinct parties.
 - **An anchor that is `present` was not evaluated.** Without trust material its time is unchecked.
   One `pending` has no attestation yet.

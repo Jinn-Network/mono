@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  ContractFunctionExecutionError,
+  ContractFunctionRevertedError,
+  ContractFunctionZeroDataError,
+} from "viem";
 import { describe, expect, it, vi } from "vitest";
 
+import { ERC721_OWNER_OF_ABI } from "./abis.js";
 import { createChainFactResolver } from "./chain-facts.js";
 
 const REGISTRY = "0x1111111111111111111111111111111111111111";
@@ -136,6 +142,86 @@ describe("createChainFactResolver", () => {
       });
 
       await expect(resolver.ownerOf("not-a-caip19")).rejects.toThrow(/CAIP-19/);
+    });
+
+    describe("a token id no read can be made for", () => {
+      const WIDEST = (2n ** 256n - 1n).toString();
+      const asking = (readContract: () => Promise<unknown>) => createChainFactResolver({
+        rpcUrl: "http://unused.test",
+        expectedChainId: 84532,
+        identityRegistry: REGISTRY,
+        client: { getChainId: async () => 84532, readContract },
+      });
+
+      it.each([
+        ["one past the widest", (2n ** 256n).toString()],
+        ["far wider than that", "9".repeat(90)],
+      ])("refuses %s before any read, as the record's fault and not an outage", async (_label, token) => {
+        const readContract = vi.fn(async () => OWNER);
+        await expect(asking(readContract).ownerOf(`eip155:84532/erc721:${REGISTRY}/${token}`))
+          .rejects.toMatchObject({ code: "INVALID_INPUT" });
+        await expect(asking(readContract).getAgentWalletAtBlock(token, 1)).rejects.toMatchObject({ code: "INVALID_INPUT" });
+        expect(readContract).not.toHaveBeenCalled();
+      });
+
+      it("reads the widest token id there is", async () => {
+        const readContract = vi.fn(async () => OWNER);
+        await expect(asking(readContract).ownerOf(`eip155:84532/erc721:${REGISTRY}/${WIDEST}`)).resolves.toBe(OWNER);
+        expect(readContract).toHaveBeenCalledWith(expect.objectContaining({ args: [2n ** 256n - 1n] }));
+      });
+    });
+
+    describe("when no provider returns an owner", () => {
+      const AGENT_ASSET = `eip155:84532/erc721:${REGISTRY}/101`;
+      const reverted = new ContractFunctionExecutionError(
+        new ContractFunctionRevertedError({ abi: ERC721_OWNER_OF_ABI, functionName: "ownerOf", message: "ERC721NonexistentToken" }),
+        { abi: ERC721_OWNER_OF_ABI, args: [101n], functionName: "ownerOf" },
+      );
+      const failing = (cause: unknown) => ({
+        getChainId: async () => 84532,
+        readContract: async () => {
+          throw cause;
+        },
+      });
+      const resolverOver = (client: ReturnType<typeof failing>, ...fallbackClients: ReturnType<typeof failing>[]) => createChainFactResolver({
+        rpcUrl: "http://unused.test",
+        expectedChainId: 84532,
+        identityRegistry: REGISTRY,
+        client,
+        fallbackClients,
+      });
+
+      it("reads a revert as the registry's answer that it holds no such agent", async () => {
+        await expect(resolverOver(failing(reverted)).ownerOf(AGENT_ASSET))
+          .rejects.toMatchObject({ code: "INVALID_INPUT" });
+      });
+
+      it("reads a revert the same way from a client built on another copy of viem", async () => {
+        const foreign = Object.assign(new Error("execution reverted"), { name: "ContractFunctionRevertedError" });
+        await expect(resolverOver(failing(new Error("call failed", { cause: foreign }))).ownerOf(AGENT_ASSET))
+          .rejects.toMatchObject({ code: "INVALID_INPUT" });
+      });
+
+      it("finds a revert however deep the client wrapped it", async () => {
+        const wrapped = new Error("outer", { cause: new Error("middle", { cause: new Error("inner", { cause: reverted }) }) });
+        await expect(resolverOver(failing(wrapped)).ownerOf(AGENT_ASSET)).rejects.toMatchObject({ code: "INVALID_INPUT" });
+      });
+
+      it("reads a contract with no code as the same answer", async () => {
+        await expect(resolverOver(failing(new ContractFunctionZeroDataError({ functionName: "ownerOf" }))).ownerOf(AGENT_ASSET))
+          .rejects.toMatchObject({ code: "INVALID_INPUT" });
+      });
+
+      it("takes a revert as the answer even if another provider was down, in either order", async () => {
+        const down = failing(new Error("no route to host"));
+        await expect(resolverOver(down, failing(reverted)).ownerOf(AGENT_ASSET)).rejects.toMatchObject({ code: "INVALID_INPUT" });
+        await expect(resolverOver(failing(reverted), down).ownerOf(AGENT_ASSET)).rejects.toMatchObject({ code: "INVALID_INPUT" });
+      });
+
+      it("reads every provider failing as an outage", async () => {
+        await expect(resolverOver(failing(new Error("no route to host"))).ownerOf(AGENT_ASSET))
+          .rejects.toMatchObject({ code: "RESOLUTION_FAILED" });
+      });
     });
   });
 });

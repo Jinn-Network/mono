@@ -28,6 +28,7 @@ import { createTrustAdapter, createVerifyDriver } from "@jinn-network/record-dis
 import { DISCOVERY_SIGNING_SCOPE } from "@jinn-network/record-discovery-protocol";
 import { createHttpTransport, type FetchLike } from "@jinn-network/record-discovery-transport-http";
 import type {
+  BindingAuthorityDeps,
   BindingResolver,
   BindingResolverQuery,
   DsseChainVerifier,
@@ -119,9 +120,10 @@ function declaredSigningKeys(
  * Turns a declared `(agent, did:key, validFrom)` triple into the binding
  * `createTrustAdapter` resolves against.
  *
- * The adapter reads a resolved binding's SCOPE, KEY and EFFECTIVE START and
- * nothing else — `isActiveForDiscoverySigning` in `trust-adapter.ts` records
- * that narrowing and why. The remaining §7.1 fields below therefore describe
+ * The adapter reads a resolved binding's SCOPE, KEY, EFFECTIVE START and
+ * REVOCATIONS, of which these have none, and nothing else.
+ * `isActiveForDiscoverySigning` in `trust-adapter.ts` records that narrowing
+ * and why. The remaining §7.1 fields below therefore describe
  * the config declaration itself and carry no independent proof: this
  * composition resolves NO key-binding records and performs no ceremony or
  * consent-chain check. Do not feed these bindings to trust-core's full §7.5
@@ -196,6 +198,13 @@ function createDeclaredBindingResolver(
   };
 }
 
+/** A config file holds no revocations (`declaredBinding`), so nothing is ever asked who may make one. */
+const noRevocationAuthority: BindingAuthorityDeps = {
+  bindingResolver: { resolveBinding: async () => null },
+  witnessVerifier: { verify1271Witness: async () => ({ verified: false }) },
+  dsseVerifier: () => ({ validSignerKeyids: [] }),
+};
+
 /** Real Ed25519 over the DSSE pre-auth encoding, keyed off the self-describing did:key. */
 const declaredSignatureVerifier: RawSignatureVerifier = {
   async verify(pae, sig, key) {
@@ -214,6 +223,7 @@ function createDeclaredVerifyDriver(
       bindingResolver: createDeclaredBindingResolver(byAgent),
       keyCatalog: createDeclaredKeyCatalog(byAgent),
       verifier: declaredSignatureVerifier,
+      revocationAuthority: noRevocationAuthority,
     }),
     // Deliberately the mirror's own state FILE, which is what the two
     // actually share: `verifySourceChain` reads and advances the same mark the

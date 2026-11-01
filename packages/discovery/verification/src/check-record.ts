@@ -24,7 +24,9 @@ export interface RecordTrustOptions {
   readonly keys?: readonly DsseVerificationKey[];
   /**
    * Without one, `trust-binding` is skipped. Its soundness is the caller's responsibility:
-   * `trust-binding: passed` means only what this resolver decided.
+   * `trust-binding: passed` means only what this resolver decided. `null` is its refusal, and fails
+   * the check. A throw says it could not find out, and the check says `skipped`, so a resolver that
+   * answers `null` for an outage reports one as a refusal.
    */
   readonly bindingResolver?: BindingResolver;
   /** Needed only for a `safe` ceremony. Without one, such a binding fails its ceremony. */

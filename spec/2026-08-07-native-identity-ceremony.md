@@ -1,10 +1,12 @@
 # Native Identity Ceremony — production trust-artifact provisioning
 
-**Version:** 0.5 (sharpens §3.2b's and §10 (e)'s statement of the fresh-anchor coverage gap —
-wholesale across every role, which both left implicit — and points §3.2b and
+**Version:** 0.6 (corrects §3.2b's and §7's statement of the escaped-revocation residual after
+issue #5144: records for one key under one voucher now share revocations, and the residual's actor
+was never only the catalog author. v0.5 sharpened §3.2b's and §10 (e)'s statement of the fresh-anchor
+coverage gap — wholesale across every role, which both left implicit — and pointed §3.2b and
 §10 (e)/(f) at the proposed successor preimage, trigger, and ruling in
 [`2026-09-09-recoverable-binding-anchor.md`](2026-09-09-recoverable-binding-anchor.md); no rule
-here is retired and nothing there is adopted. v0.4 was the §3.2b amendment — the anchor target
+there was adopted. v0.4 was the §3.2b amendment — the anchor target
 policy and anchor digest content, per DR-2026-09-06; v0.3 added §3.2a — the authored role → scope
 map and the #2527 announce-plane ruling; v0.2 revised v0.1 per independent design review, see §10
 review record)
@@ -785,15 +787,22 @@ own binding and de-attribute their own past evidence, which is exactly the non-r
 §7.4b forbids and law 6 exists to protect. The rule it breaks is **R1**, which requires an anchor
 "newly submitted for that act" — a pre-existing transaction is exactly not that, so calling such an
 anchor "fresh" uses the word against R1's own meaning. R2, which bans cross-act *reuse*, does not
-reach it. Neither rule is checked: both are authoring convention, per the table above. And
-because the resolver looks up revocations for the
-winning binding's digest alone (`binding-resolver.ts:279`), an earlier-anchored replacement
-binding for the same `(key, agent)` escapes every revocation bound to the record it supersedes —
-revocation defeated, entirely inside the author's own IRI. The actor there is the **catalog
-author**, not the key's thief: a non-genesis replacement still needs §7.4a's self-extension exit,
-which `voucherIdentityEquals` against the incumbent voucher gates (`verify.ts:225-230`). That makes
-the shared-catalog case the sharp one, where whoever holds the file can defeat another party's
-revocation.
+reach it. Neither rule is checked: both are authoring convention, per the table above.
+
+**A replacement binding no longer leaves a revocation behind while both records are in window.**
+The resolver used to look up revocations for the winning binding's digest alone, so an
+earlier-anchored or tied replacement for the same `(key, agent)` escaped every revocation bound to
+the record it superseded. A revocation now ends every record for that key under that voucher in
+window at its effective time, and the resolver reads that at the revocation's time, not at the time
+asked, so a record ending later lifts nothing (issue #5144). Two cases remain outside that. A record
+that first takes effect after the revocation shares nothing with it, so a voucher can bind the key
+again once every record the revocation reached has ended. A replacement under another voucher needs
+its own §7.4a chain, which it is judged on.
+This text previously named the
+catalog author as the only actor, "not the key's thief". That was wrong: §7.4a's self-extension exit
+asks about the voucher's incumbent, not about who holds the replacement, so a thief who can reach
+the catalog stands where its author does. Reaching the catalog is still the bound this section
+names, so the shared-catalog case stays the sharp one.
 
 The foreign-IRI lever above also has a **denial limb**, and it is the worse of the two. The
 attacker's record is `relationship: "controls"` unconditionally
@@ -1112,7 +1121,8 @@ per-relationship model has no consumer, and would multiply the §6 sequencing pe
 > section: it is that no verifier checks what an anchor digest is a digest of, so an anchor's
 > timestamp can be borrowed from any pre-existing transaction. §3.2b states it, its one real
 > bound (catalog write authority), and both directions it runs in — foreign-IRI takeover and
-> denial via the §7.4a genesis exemption, and retroactive or escaped revocation. §10 (f) carries
+> denial via the §7.4a genesis exemption, and retroactive or escaped revocation, the second now
+> narrower as §3.2b states. §10 (f) carries
 > what closes it.
 
 **Clobber and fork risk.** Store creation is exclusive (hard-link `EEXIST` settles races,

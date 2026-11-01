@@ -574,7 +574,7 @@ describe("§16 adversarial battery", () => {
           envelopeEffectiveTime: "2026-06-01T00:00:00.000Z",
           claimTime: "2026-06-02T00:00:00.000Z",
         },
-        { bindingResolver: fakes.bindingResolver },
+        { bindingResolver: fakes.bindingResolver, witnessVerifier: fakes.witnessVerifier, dsseVerifier: fakes.dsseVerifier },
       );
       expect(outcome.ok).toBe(true);
       expect(outcome.agent).toBe(evaluatorAgent);
@@ -628,7 +628,7 @@ describe("§16 adversarial battery", () => {
           envelopeEffectiveTime: "2026-06-01T00:00:00.000Z",
           claimTime: "2026-06-02T00:00:00.000Z",
         },
-        { bindingResolver: fakes.bindingResolver },
+        { bindingResolver: fakes.bindingResolver, witnessVerifier: fakes.witnessVerifier, dsseVerifier: fakes.dsseVerifier },
       );
       expect(outcome.ok).toBe(false);
     });
@@ -704,16 +704,12 @@ describe("§16 adversarial battery", () => {
           claimedEvaluatorAgent: evaluatorAgent,
           family: "verdicts",
           envelopeEffectiveTime: "2026-06-01T00:00:00.000Z", // pre-revocation window: resolves fine
-          claimTime: "2026-06-02T00:00:00.000Z", // post-revocation window: the fake still resolves it (revocation
-          // authority is verify.ts's own concern, not the resolver's) --
-          // settlementJoinCheck itself only checks non-null resolution at
-          // claim time, so this asserts the two-resolution SHAPE, not a
-          // revocation-authority rejection (that is `verifyEnvelopeBinding`'s
-          // job, already covered in the "revocation" battery, T14).
+          claimTime: "2026-06-02T00:00:00.000Z", // post-revocation window: the resolver still resolves it, as a real
+          // one does (it lists revocations; it does not judge them), so the join reads the list itself
         },
-        { bindingResolver: fakes.bindingResolver },
+        { bindingResolver: fakes.bindingResolver, witnessVerifier: fakes.witnessVerifier, dsseVerifier: fakes.dsseVerifier },
       );
-      expect(outcome.ok).toBe(true);
+      expect(outcome).toMatchObject({ ok: false, reason: expect.stringMatching(/settlement leg is revoked at claim time/) });
     });
   });
 

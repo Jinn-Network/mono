@@ -20,6 +20,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createBindingResolver as createResolverWithAllOptions } from "./binding-resolver.js";
 import type { BindingStore, CreateBindingResolverOptions, SealedKeyBindingRecord } from "./binding-resolver.js";
+import { invalidInput, resolutionFailed } from "./errors.js";
 
 const AGENT = "https://spec.jinn.network/agents/1";
 const KEY_A = "did:key:zKeyA";
@@ -240,6 +241,58 @@ describe("createBindingResolver", () => {
       expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(false);
     });
 
+    it("keeps an entry with no digest out of the count of what came first", async () => {
+      const first = { ...record(accountBinding(), DIGEST_B), bindingDigest: "not-a-digest" as Sha256Digest };
+      const later = record(accountBinding({ anchors: [{ digest: DIGEST_B }] }), DIGEST_B);
+      const resolver = createBindingResolver({ bindings: storeHolding([first, later]), anchors });
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(true);
+    });
+
+    it("does not list an entry that is not a key binding as an incumbent", async () => {
+      const key = { publicKey: "pk", keyid: KEY_OWNER, algorithm: "secp256k1", didKey: KEY_OWNER };
+      const first = record(accountBinding({ key, ceremony: { type: "passkey", digest: CEREMONY_DIGEST } } as never), DIGEST_A);
+      const later = record(accountBinding({ anchors: [{ digest: DIGEST_B }] }), DIGEST_B);
+      const resolver = createBindingResolver({ bindings: storeHolding([later, first]), anchors });
+      const resolved = await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at);
+      expect(resolved).toMatchObject({ bindingDigest: DIGEST_B, isGenesis: false });
+      expect(resolved?.incumbentControls).toBeUndefined();
+    });
+
+    it("leaves out of the order an unanchored entry whose stated time is not text", async () => {
+      // Sorts before any date as text, and only two times the calendar cannot read fall back to text.
+      const unplaced = record(accountBinding({ anchors: [], validFrom: ["0"] } as never), DIGEST_B);
+      const honest = record(accountBinding({ anchors: [], validFrom: "2026-01-01T00:00Z" }), DIGEST_A);
+      const resolver = createBindingResolver({ bindings: storeHolding([unplaced, honest]), anchors, requireAnchors: false });
+      const resolved = await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, "2026-06-01T00:00Z");
+      expect(resolved).toMatchObject({ bindingDigest: DIGEST_A, isGenesis: true });
+    });
+
+    it.each([
+      ["no signer", { revokedBy: undefined }],
+      ["a signer that is not text", { revokedBy: 7 }],
+      ["anchors that are not a list", { anchors: "soon" }],
+      ["an anchor that names no digest", { anchors: [{ digest: "not-a-digest" }] }],
+    ])("ignores a revocation with %s", async (_label, overrides) => {
+      const bindings: BindingStore = {
+        ...fakeStore([genuine]),
+        async listRevocationsForTargets() {
+          return [{
+            revocation: {
+              protocol: "https://spec.jinn.network/trust/revocation/v1",
+              target: DIGEST_A,
+              revokedBy: KEY_A,
+              anchors: [{ digest: DIGEST_B }],
+              effectiveFrom: "2026-02-01T00:00:00.000Z",
+              ...overrides,
+            },
+            envelopeBytes: Uint8Array.of(1),
+          } as never];
+        },
+      };
+      const resolved = await createBindingResolver({ bindings, anchors }).resolveBinding({ key: KEY_A, agent: AGENT }, at);
+      expect(resolved?.revocations).toEqual([]);
+    });
+
     it("keeps a revocation whose stated time cannot be read, at its anchor", async () => {
       const bindings: BindingStore = {
         ...fakeStore([genuine]),
@@ -274,16 +327,18 @@ describe("createBindingResolver", () => {
       expect(resolved?.revocations).toEqual([]);
     });
 
-    it("takes a host's ceremony leg that throws as a ceremony it did not verify", async () => {
+    it("lets a host's outage out as an outage, so a caller can tell it from a refusal", async () => {
       const binding = accountBinding({ ceremony: { type: "oidc-machine", digest: CEREMONY_DIGEST } });
-      const resolver = createBindingResolver({
+      const resolverWith = (verifyHostedCeremony: () => Promise<boolean>) => createBindingResolver({
         bindings: fakeStore([record(binding, DIGEST_A)]),
         anchors,
-        verifyHostedCeremony: async () => {
-          throw new Error("cannot read this record");
-        },
+        verifyHostedCeremony,
       });
-      expect(await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at)).toBeNull();
+      const down = resolverWith(async () => {
+        throw new Error("no route to host");
+      });
+      await expect(down.resolveBinding({ key: KEY_A, agent: AGENT }, at)).rejects.toThrow("no route to host");
+      expect(await resolverWith(async () => false).resolveBinding({ key: KEY_A, agent: AGENT }, at)).toBeNull();
     });
 
     it("takes a signature check that throws as a record its key did not sign", async () => {
@@ -741,6 +796,66 @@ describe("createBindingResolver", () => {
     });
   });
 
+  describe("revocations of the records that share a key's standing", () => {
+    const at = "2026-06-01T00:00:00.000Z";
+    const ACCOUNT = "did:pkh:eip155:84532:0x1111111111111111111111111111111111111111";
+    const OTHER_ACCOUNT = "did:pkh:eip155:84532:0x2222222222222222222222222222222222222222";
+    const DIGEST_C = ("sha256:" + "d".repeat(64)) as Sha256Digest;
+    const anchors = fakeAnchors({
+      [DIGEST_A]: "2026-01-01T00:00:00.000Z",
+      [DIGEST_B]: "2026-01-02T00:00:00.000Z",
+      [DIGEST_C]: "2026-01-03T00:00:00.000Z",
+    });
+    const first = record(accountBinding(), DIGEST_A);
+
+    /** The targets a resolve asked the store about, with `first` beside `others`. */
+    async function targetsAsked(...others: readonly SealedKeyBindingRecord[]) {
+      const asked = vi.fn(async (_targets: readonly Sha256Digest[]) => []);
+      const bindings: BindingStore = { ...fakeStore([...others, first]), listRevocationsForTargets: asked };
+      const resolved = await createBindingResolver({ bindings, anchors }).resolveBinding({ key: KEY_A, agent: AGENT }, at);
+      expect(resolved?.bindingDigest).toBe(DIGEST_A);
+      return [...asked.mock.calls[0]![0]].sort();
+    }
+
+    it("asks for every record for this key under this voucher, in window or not", async () => {
+      const later = record(accountBinding({ anchors: [{ digest: DIGEST_B }] }), DIGEST_B);
+      const ended = record(accountBinding({ expiresAt: "2026-02-01T00:00:00.000Z", anchors: [{ digest: DIGEST_C }] }), DIGEST_C);
+      expect(await targetsAsked(later, ended)).toEqual([DIGEST_A, DIGEST_B, DIGEST_C]);
+    });
+
+    it("reads a voucher as an identity, so restating what else a record says about it changes nothing", async () => {
+      const later = record(accountBinding({
+        voucher: { kind: "account", did: ACCOUNT, contractAccount: true },
+        anchors: [{ digest: DIGEST_B }],
+      }), DIGEST_B);
+      expect(await targetsAsked(later)).toEqual([DIGEST_A, DIGEST_B]);
+    });
+
+    it("leaves out a record for this key under another voucher", async () => {
+      const other = record(accountBinding({
+        voucher: { kind: "account", did: OTHER_ACCOUNT, contractAccount: false },
+        anchors: [{ digest: DIGEST_B }],
+      }), DIGEST_B);
+      expect(await targetsAsked(other)).toEqual([DIGEST_A]);
+    });
+
+    it("leaves out a record its key never signed", async () => {
+      const other = record(accountBinding({ anchors: [{ digest: DIGEST_B }] }), DIGEST_B);
+      const asked = vi.fn(async (_targets: readonly Sha256Digest[]) => []);
+      await createBindingResolver({
+        bindings: { ...fakeStore([other, first]), listRevocationsForTargets: asked },
+        anchors,
+        recordSignedByItsKey: ({ bindingDigest }) => bindingDigest !== DIGEST_B,
+      }).resolveBinding({ key: KEY_A, agent: AGENT }, at);
+      expect(asked).toHaveBeenCalledWith([DIGEST_A]);
+    });
+
+    it("leaves out a record of another key under this voucher", async () => {
+      const key = { publicKey: "pk", keyid: KEY_OWNER, algorithm: "secp256k1", didKey: KEY_OWNER };
+      expect(await targetsAsked(record(accountBinding({ key, anchors: [{ digest: DIGEST_B }] }), DIGEST_B))).toEqual([DIGEST_A]);
+    });
+  });
+
   it("does not resolve an agentId binding without a valid account-ceremony composition leg", async () => {
     const agentIdBinding = accountBinding({
       voucher: { kind: "agentId", caip19: AGENT_ASSET },
@@ -854,6 +969,10 @@ describe("createBindingResolver", () => {
       expect(await composed(unverified, { verifyHostedCeremony: async () => true })).toBeNull();
     });
 
+    it("does not compose with an entry that is not a key binding, however genuine its ceremony", async () => {
+      expect(await composed(await accountLeg({ relationship: "owns" } as never))).toBeNull();
+    });
+
     it("composes with a Safe's account ceremony only on the host's say-so", async () => {
       const { ceremonyEvidence: _ceremonyEvidence, ...safe } = await accountLeg({
         voucher: { ...ownerVoucher, contractAccount: true },
@@ -863,6 +982,34 @@ describe("createBindingResolver", () => {
       expect(await composed(safe)).toBeNull();
       expect(await composed(safe, { verifyHostedCeremony: async () => false })).toBeNull();
       expect((await composed(safe, { verifyHostedCeremony: async () => true }))?.bindingDigest).toBe(DIGEST_A);
+      await expect(composed(safe, {
+        verifyHostedCeremony: async () => {
+          throw new Error("no route to host");
+        },
+      })).rejects.toThrow("no route to host");
+    });
+
+    describe("when the registry cannot be read", () => {
+      const asking = (ownerOf: ChainFactResolver["ownerOf"]) => createBindingResolver({
+        bindings: fakeStore([agentIdRecord]),
+        anchors,
+        chainFacts: { ...chainFacts, ownerOf },
+      }).resolveBinding({ key: KEY_A, agent: AGENT }, "2026-06-01T00:00:00.000Z");
+
+      it("lets an outage out as an outage", async () => {
+        await expect(asking(async () => {
+          throw new Error("no route to host");
+        })).rejects.toThrow("no route to host");
+      });
+
+      it("lets a registry no provider could reach out as an outage", async () => {
+        await expect(asking(async () => resolutionFailed("every provider failed")))
+          .rejects.toMatchObject({ code: "RESOLUTION_FAILED" });
+      });
+
+      it("takes a registry's answer that it holds no such agent as a failed composition", async () => {
+        expect(await asking(async () => invalidInput("no such agent"))).toBeNull();
+      });
     });
   });
 

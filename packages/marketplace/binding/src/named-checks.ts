@@ -744,7 +744,11 @@ export async function gateVerdictObservation(
               envelopeEffectiveTime: evaluatedAt,
               claimTime: input.verdict.claimBlockTime,
             },
-            { bindingResolver: ports.bindingResolver },
+            {
+              bindingResolver: ports.bindingResolver,
+              witnessVerifier: ports.witnessVerifier,
+              dsseVerifier: ports.dsseVerifier,
+            },
           );
         } catch (cause) {
           failures.push({
