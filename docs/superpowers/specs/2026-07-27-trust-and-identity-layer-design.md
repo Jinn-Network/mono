@@ -332,7 +332,7 @@ effect starts at its own anchor time; evidence signed before revocation stays at
 (and the stolen-key residual is stated in §14).
 
 A revocation ends a key's standing under a voucher, not one record of it: it ends every
-record for that key under that voucher in window at its effective time, whichever record it
+record for that key under that voucher in window at its effective time, whichever of them it
 names. A record that first takes effect after the revocation is a new binding, and a record
 under another voucher stands on its own consent. A key revoking its own binding draws on the
 record it names, which must have held `bindings` scope and been in window at that time.

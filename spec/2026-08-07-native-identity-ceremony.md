@@ -795,8 +795,9 @@ earlier-anchored or tied replacement for the same `(key, agent)` escaped every r
 the record it superseded. A revocation now ends every record for that key under that voucher in
 window at its effective time, and the resolver reads that at the revocation's time, not at the time
 asked, so a record ending later lifts nothing (issue #5144). Two cases remain outside that. A record
-that first takes effect after the revocation shares nothing with it, which is how a voucher binds
-a key again. A replacement under another voucher needs its own §7.4a chain, which it is judged on.
+that first takes effect after the revocation shares nothing with it, so a voucher can bind the key
+again once every record the revocation reached has ended. A replacement under another voucher needs
+its own §7.4a chain, which it is judged on.
 This text previously named the
 catalog author as the only actor, "not the key's thief". That was wrong: §7.4a's self-extension exit
 asks about the voucher's incumbent, not about who holds the replacement, so a thief who can reach

@@ -500,7 +500,8 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
       // holds a key can seal it again, and the record that wins must not leave a revocation
       // of the one it replaced behind. Which records one reaches is read at its effective
       // time, not at `atTime`, so a record ending later lifts nothing, and a record that
-      // first takes effect after it shares nothing, which is how a voucher binds a key again.
+      // first takes effect after it shares nothing, so a voucher can bind the key again once
+      // what it reached has ended.
       const standing = readable.filter(({ record }) => record.binding.key.didKey === query.key
         && voucherIdentityEquals(record.binding.voucher, winner.record.binding.voucher)
         && signedByItsKey(record));

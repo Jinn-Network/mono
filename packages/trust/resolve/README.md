@@ -41,9 +41,9 @@ A revocation ends a key's standing under a voucher, not one record of it. It end
 record for that key under that voucher in window at its effective time, read at that
 time and not at the time asked, so a replacement beside a revoked record cannot leave
 the revocation behind, and a record ending later lifts nothing. A record that first
-takes effect after the revocation shares nothing with it, which is how a voucher binds
-a key again. Neither does a record under another voucher, which stands on its own
-§7.4a chain. A key's own revocation draws on the record it names: that record must have
+takes effect after the revocation shares nothing with it, so a voucher can bind the key
+again once every record the revocation reached has ended. Neither does a record under
+another voucher, which stands on its own §7.4a chain. A key's own revocation draws on the record it names: that record must have
 held `bindings` scope, in window at the revocation's effective time, with its ceremony
 verified. `ResolvedRevocation.targetScope` carries this, because only the resolver
 sees the record named.
