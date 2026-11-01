@@ -55,3 +55,7 @@ const artifactStore = {
 Scalar digest fields are `sha256:<64 lowercase hex>`. in-toto DigestSet values — subjects
 and ResourceDescriptors — are **bare** hex. `toDigestSet` / `fromDigestSet` are the only
 sanctioned crossings; the schemas reject each other's form.
+
+## Vitest
+
+`@jinn-network/environment-verification/testing` needs `vitest` installed and a run with `globals: true`. `vitest` is not a dependency of this package, so add it to your own project. The other entry points do not need it.

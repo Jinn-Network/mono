@@ -205,10 +205,8 @@ test("packed evidence-retrieval performs a known-reference retrieval and a query
     "@jinn-network/evidence-protocol": "0.1.0",
     "@jinn-network/evidence-repository": "0.1.0",
   });
-  assert.deepEqual(packageJson.peerDependencies, { vitest: "^4.1.8" });
-  assert.deepEqual(packageJson.peerDependenciesMeta, {
-    vitest: { optional: true },
-  });
+  assert.equal(packageJson.peerDependencies, undefined);
+  assert.equal(packageJson.peerDependenciesMeta, undefined);
   await readFile(${JSON.stringify(join(installedRoot, "README.md"))});
   await readFile(${JSON.stringify(join(installedRoot, "specification.md"))});
 });

@@ -104,3 +104,7 @@ the derivation design's
 [§10, Determinism and content addressing](https://github.com/Jinn-Network/mono/blob/main/docs/superpowers/specs/2026-07-26-evidence-derivation-design.md#10-determinism-and-content-addressing),
 and its
 [source audit](https://github.com/Jinn-Network/mono/blob/main/docs/superpowers/specs/2026-07-26-evidence-derivation-design.md#175-source-audit).
+
+## Vitest
+
+`@jinn-network/evidence-derivation/testing` needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project. The other entry points do not need it.

@@ -13,7 +13,7 @@ name: Benchmark Product CI
 # filtered paths above -- a repo-wide stall, not a lane-local cost. The "fast subset" alternative
 # is not actually fast: anything that runs the verifier suite must first build the verifier's own
 # `portal:` closure from source, and that build is most of the job: for scale, the `product` job
-# below prebuilds 35 packages before it reaches the first `yarn test`. No measured number exists
+# below prebuilds 37 packages before it reaches the first `yarn test`. No measured number exists
 # for a split lane, and turning an unmeasured guess into a required check is how a merge queue
 # wedges.
 #
@@ -45,11 +45,13 @@ on:
       - "packages/discovery/publication/**"
       - "packages/discovery/serve/**"
       - "packages/discovery/transport-http/**"
+      - "packages/discovery/verification/**"
       - "packages/environments/record/**"
       - "packages/evidence/attestation-issuer/**"
       - "packages/evidence/discovery/**"
       - "packages/evidence/execution-evidence-builder/**"
       - "packages/evidence/execution-recorder/**"
+      - "packages/evidence/offer/**"
       - "packages/evidence/protocol/**"
       - "packages/evidence/repository/**"
       - "packages/task-supply/admission/**"
@@ -110,11 +112,13 @@ on:
       - "packages/discovery/publication/**"
       - "packages/discovery/serve/**"
       - "packages/discovery/transport-http/**"
+      - "packages/discovery/verification/**"
       - "packages/environments/record/**"
       - "packages/evidence/attestation-issuer/**"
       - "packages/evidence/discovery/**"
       - "packages/evidence/execution-evidence-builder/**"
       - "packages/evidence/execution-recorder/**"
+      - "packages/evidence/offer/**"
       - "packages/evidence/protocol/**"
       - "packages/evidence/repository/**"
       - "packages/task-supply/admission/**"
@@ -214,6 +218,8 @@ jobs:
             packages/task-supply/admission/yarn.lock
             packages/benchmarking/interop/yarn.lock
             packages/evidence/protocol/yarn.lock
+            packages/evidence/offer/yarn.lock
+            packages/discovery/verification/yarn.lock
             packages/evidence/repository/yarn.lock
             packages/evidence/discovery/yarn.lock
             packages/evidence/execution-evidence-builder/yarn.lock
@@ -290,6 +296,11 @@ jobs:
           (cd packages/task-supply/admission && yarn install --immutable && yarn build)
           (cd packages/benchmarking/interop && yarn install --immutable && yarn build)
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          # A devDependency of check, never a runtime dependency yet: the equivalence test runs the
+          # checker's own signature and anchor code beside this package (#5120). It needs
+          # task-execution/profiles and evidence/protocol built, so it comes after them.
+          (cd packages/evidence/offer && yarn install --immutable && yarn build)
+          (cd packages/discovery/verification && yarn install --immutable && yarn build)
           (cd packages/evidence/repository && yarn install --immutable && yarn build)
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
           (cd packages/evidence/execution-evidence-builder && yarn install --immutable && yarn build)
@@ -445,7 +456,7 @@ jobs:
   # qualify Docker/Inspect or paid provider-agent execution on macOS.
   macos_arm64_qualification:
     needs: [architecture, product]
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

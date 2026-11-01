@@ -49,14 +49,6 @@
     "@jinn-network/task-execution-supervisor": "0.1.0",
     "@jinn-network/task-execution-workspace": "0.1.0"
   },
-  "peerDependencies": {
-    "vitest": "^4.1.8"
-  },
-  "peerDependenciesMeta": {
-    "vitest": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@jinn-network/evidence-discovery": "0.1.0",
     "@jinn-network/evidence-protocol": "0.1.0",

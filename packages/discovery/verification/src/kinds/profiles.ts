@@ -94,19 +94,19 @@ function unsafeSchema(schema: unknown, path: string): readonly Finding[] {
 
 /**
  * A descriptor's `content` is base64 elsewhere in the protocol, and the published profiles carry
- * plain JSON. A JSON Schema is an object or a boolean. Anything else that parses is not this
- * spelling: a decoder skips the quotes around a JSON string, so that string may still be base64.
+ * plain JSON, so a consumer may read it either way, and every reading that yields a schema counts. A
+ * JSON Schema is an object or a boolean. A base64 decoder skips what it cannot read, so the quotes of
+ * a JSON string, or the punctuation of an object around one key, can hide a second reading.
  */
-function parseInlineSchema(content: string): { readonly schema: unknown } | undefined {
-  for (const text of [content, Buffer.from(content, "base64").toString("utf8")]) {
+function inlineSchemaReadings(content: string): readonly unknown[] {
+  return [content, Buffer.from(content, "base64").toString("utf8")].flatMap((text) => {
     try {
       const schema: unknown = JSON.parse(text);
-      if (isRecordObject(schema) || typeof schema === "boolean") return { schema };
+      return isRecordObject(schema) || typeof schema === "boolean" ? [schema] : [];
     } catch {
-      // Not this spelling.
+      return [];
     }
-  }
-  return undefined;
+  });
 }
 
 /** A slot may pin its schema by digest, which is bytes this does not hold, or carry it inline. */
@@ -119,10 +119,10 @@ function inlineSlotSchemaFindings(view: RecordView): readonly Finding[] {
     const descriptor = slot["schema"];
     if (!isRecordObject(descriptor) || typeof descriptor["content"] !== "string") return [];
     const path = `outputConventions.slots.${index}.schema.content`;
-    const inline = parseInlineSchema(descriptor["content"]);
-    return inline === undefined
+    const readings = inlineSchemaReadings(descriptor["content"]);
+    return readings.length === 0
       ? [{ code: "invalid-document", path, detail: "This inline schema is neither a JSON Schema nor one in base64, so it cannot be shown safe to load." }]
-      : unsafeSchema(inline.schema, path);
+      : readings.flatMap((schema) => unsafeSchema(schema, path));
   });
 }
 

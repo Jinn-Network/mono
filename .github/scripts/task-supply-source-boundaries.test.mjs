@@ -423,8 +423,8 @@ test('the attestation and verification bans hold by exact name and by wildcard f
 test('task-supply source boundaries remain one-way across the approved graph', () => {
   // admission imports environments/record, trust-core, and the portable protocol/profile pair
   // used to build and validate its deterministic prediction receipt fixture.
-  // `src/testing.ts` is production source under this same boundary: its `vitest` import is an
-  // optional peer (not a Jinn package), and its only Jinn import is the approved
+  // `src/testing.ts` is production source under this same boundary: its `vitest` import is
+  // supplied by the consumer (not a Jinn package), and its only Jinn import is the approved
   // `@jinn-network/environment-record`.
   assertBoundary(
     join(packages, 'admission', 'src'),

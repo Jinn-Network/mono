@@ -66,6 +66,10 @@ const CHECK_JINN = [
   // ports. The source-boundaries guard pins it to `src/**/*.test.ts`, which `tsconfig.build.json`
   // excludes from `dist/`, so it never reaches the published package.
   '@jinn-network/trust-core', '@jinn-network/trust-testing',
+  // A devDependency until the checker's general record checks finish moving (#5120): the
+  // equivalence test runs the checker's own code and this package side by side. The
+  // source-boundaries guard pins it to test sources, as it does `trust-testing`.
+  '@jinn-network/verify',
 ];
 const TRANSITIVE_PORTALS = [
   '@jinn-network/attestation-issuer', '@jinn-network/benchmarking-aggregate',
@@ -99,6 +103,9 @@ const CHECK_PORTALS = [
   // of the `trust-testing` devDependency, and a portal resolution is what keeps it pointed at the
   // live tree rather than at a registry version that does not exist.
   '@jinn-network/trust-core', '@jinn-network/trust-resolve', '@jinn-network/trust-testing',
+  // The same again for the `verify` devDependency's own declared dependencies.
+  '@jinn-network/evidence-offer', '@jinn-network/record-discovery-protocol',
+  '@jinn-network/verify',
 ];
 
 const APPROVED = new Map([
@@ -141,6 +148,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/benchmarking-run', join(root, 'packages/benchmarking/run')],
   ['@jinn-network/environment-record', join(root, 'packages/environments/record')],
   ['@jinn-network/evidence-discovery', join(root, 'packages/evidence/discovery')],
+  ['@jinn-network/evidence-offer', join(root, 'packages/evidence/offer')],
   ['@jinn-network/execution-evidence-builder', join(root, 'packages/evidence/execution-evidence-builder')],
   ['@jinn-network/evidence-protocol', join(root, 'packages/evidence/protocol')],
   ['@jinn-network/evidence-repository', join(root, 'packages/evidence/repository')],
@@ -164,6 +172,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/trust-core', join(root, 'packages/trust/core')],
   ['@jinn-network/trust-resolve', join(root, 'packages/trust/resolve')],
   ['@jinn-network/trust-testing', join(root, 'packages/trust/testing')],
+  ['@jinn-network/verify', join(root, 'packages/discovery/verification')],
 ]);
 
 function readPackage(directory) {

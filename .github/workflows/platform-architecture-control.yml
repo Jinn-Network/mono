@@ -46,7 +46,8 @@ jobs:
             .github/scripts/hermetic-gate-workflow.test.mjs \
             .github/scripts/portal-path-filters.test.mjs \
             .github/scripts/required-check-set.test.mjs \
-            .github/scripts/stack-package-graph.test.mjs
+            .github/scripts/stack-package-graph.test.mjs \
+            .github/scripts/vitest-optional-peer.test.mjs
           node .github/scripts/architecture-control.mjs \
             --out .architecture-control/coverage.json
           node .github/scripts/generate-architecture.mjs --check

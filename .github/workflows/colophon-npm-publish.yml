@@ -106,6 +106,8 @@ jobs:
             packages/task-supply/admission/yarn.lock
             packages/benchmarking/interop/yarn.lock
             packages/evidence/protocol/yarn.lock
+            packages/evidence/offer/yarn.lock
+            packages/discovery/verification/yarn.lock
             packages/evidence/repository/yarn.lock
             packages/evidence/discovery/yarn.lock
             packages/evidence/execution-evidence-builder/yarn.lock
@@ -156,6 +158,8 @@ jobs:
           (cd packages/task-supply/admission && yarn install --immutable && yarn build)
           (cd packages/benchmarking/interop && yarn install --immutable && yarn build)
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/offer && yarn install --immutable && yarn build)
+          (cd packages/discovery/verification && yarn install --immutable && yarn build)
           (cd packages/evidence/repository && yarn install --immutable && yarn build)
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
           (cd packages/evidence/execution-evidence-builder && yarn install --immutable && yarn build)

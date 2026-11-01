@@ -41,7 +41,11 @@ function run(command, args, cwd) {
 }
 
 const CONSUMER = `
+import { spawnSync } from "node:child_process";
 import { generateKeyPairSync, sign } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { dssePreAuthEncoding, sealDsseEnvelope } from "@jinn-network/trust-core";
 import { TASK_EXECUTION_PROTOCOL_URI, sealTask } from "@jinn-network/task-execution-protocol";
 import {
@@ -72,7 +76,10 @@ const envelope = sealDsseEnvelope({ payloadType, payloadBytes, signatures: [{ ke
 
 const task = sealTask({
   protocol: TASK_EXECUTION_PROTOCOL_URI,
-  profile: { uri: "https://example.test/profile", digest: { sha256: "1".repeat(64) } },
+  profile: {
+    uri: "https://spec.jinn.network/task-profiles/binary-judgment/2.0",
+    digest: { sha256: "ebb34d8362e2cc3135847a5ad6f3ee3d9c2d9922a2b827aa9dfcbaf440b22557" },
+  },
   instructions: "Do the work.",
   outputs: [],
 });
@@ -81,7 +88,43 @@ const taskReport = await checkRecord(task, { digest: taskDigest });
 const setReport = await checkRecordSet({ records: [{ bytes: task }], roots: [taskDigest] });
 const anchors = evaluateAnchors({ records: [], subjects: [{ id: "task", sha256: taskDigest.slice("sha256:".length) }] });
 
+// The installed command, over a record whose only citation is a published document it carries.
+const records = mkdtempSync(join(tmpdir(), "jinn-verify-records-"));
+const jinnVerify = (...args) => spawnSync(join("node_modules", ".bin", "jinn-verify"), args, { encoding: "utf8" });
+writeFileSync(join(records, taskDigest.slice("sha256:".length) + ".bin"), task);
+const clean = jinnVerify(records);
+writeFileSync(join(records, "0".repeat(64) + ".bin"), task);
+const corrupted = jinnVerify(records);
+const usage = jinnVerify();
+rmSync(records, { recursive: true, force: true });
+
+// The installed command against a root: a directory that is exactly the list, then one that is not.
+const bundle = mkdtempSync(join(tmpdir(), "jinn-verify-bundle-"));
+const taskPath = "records/" + taskDigest.slice("sha256:".length) + ".bin";
+mkdirSync(join(bundle, "records"));
+writeFileSync(join(bundle, taskPath), task);
+const list = new TextEncoder().encode(JSON.stringify({
+  files: [{ path: taskPath, bytes: task.length, sha256: taskDigest.slice("sha256:".length) }],
+}));
+writeFileSync(join(bundle, "bundle.json"), list);
+const rooted = jinnVerify(bundle, "--root", recordDigest(list));
+writeFileSync(join(bundle, "added.txt"), "not listed");
+const unlisted = jinnVerify(bundle, "--root", recordDigest(list));
+const noRoot = jinnVerify(bundle, "--root", recordDigest(task));
+rmSync(bundle, { recursive: true, force: true });
+
 const results = [
+  clean.status === 0,
+  clean.stdout.includes("1 by a published document"),
+  clean.stdout.includes("Nothing failed."),
+  corrupted.status === 1,
+  usage.status === 2,
+  rooted.status === 0,
+  rooted.stdout.includes("Completeness   passed: 1 listed file present and unchanged, no others"),
+  unlisted.status === 1,
+  unlisted.stdout.includes("added.txt: not-listed"),
+  noRoot.status === 1,
+  noRoot.stdout.includes("Root           failed"),
   taskReport.outcome === "checked",
   taskReport.kind in defaultRecordKinds,
   setReport.summary.records === 1,
@@ -113,7 +156,7 @@ try {
   await run("corepack", ["yarn@4.13.0", "pack", "--out", archive], root);
 
   const entries = (await run("tar", ["-tzf", archive], root)).split(/\r?\n/u).filter(Boolean);
-  for (const required of ["package/README.md", "package/dist/index.js", "package/dist/index.d.ts"]) {
+  for (const required of ["package/README.md", "package/dist/index.js", "package/dist/index.d.ts", "package/dist/bin.js"]) {
     if (!entries.includes(required)) throw new Error(`packed package is missing ${required}`);
   }
   const leakedTests = entries.filter((entry) => /\.test\./u.test(entry));
@@ -127,6 +170,14 @@ try {
   }));
   await run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], consumer);
   await writeFile(join(consumer, "smoke.mjs"), CONSUMER);
+  await run(process.execPath, ["smoke.mjs"], consumer);
+
+  // A visitor's first run happens on whatever npm Node ships, and Node 22 ships 10.9.9. That npm
+  // crashed on a conflict among vitest's peers while `evidence-offer` declared vitest as an optional
+  // peer (#5087). No package here does now, so a red `edgesOut` here means such a peer came back.
+  await rm(join(consumer, "node_modules"), { recursive: true, force: true });
+  await rm(join(consumer, "package-lock.json"), { force: true });
+  await run("npx", ["--yes", "npm@10.9.9", "install", "--ignore-scripts", "--no-audit", "--no-fund"], consumer);
   await run(process.execPath, ["smoke.mjs"], consumer);
   console.log("Packed @jinn-network/verify distribution and archive shape verified.");
 } finally {

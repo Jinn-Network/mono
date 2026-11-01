@@ -219,7 +219,9 @@ kits:
   `createSyntheticRetrievalFixture` — fixtures for building test contexts
   quickly.
 
-`vitest` is an optional peer dependency required only by this entrypoint.
+`@jinn-network/evidence-retrieval/testing` needs `vitest` installed. `vitest` is
+not a dependency of this package, so add it to your own project. The other entry
+points do not need it.
 
 ## Non-goals
 

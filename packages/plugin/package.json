@@ -37,14 +37,6 @@
   "dependencies": {
     "zod": "4.4.3"
   },
-  "peerDependencies": {
-    "vitest": "^4.1.8"
-  },
-  "peerDependenciesMeta": {
-    "vitest": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@types/node": "^26.1.0",
     "typescript": "^5.4.0",

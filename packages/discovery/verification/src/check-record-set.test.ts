@@ -124,6 +124,40 @@ describe("references", () => {
     expect(references).toMatchObject({ status: "passed", resolved: 3, unavailable: 0 });
   });
 
+  test("a reference resolves through a published document, which is not a record of the set", async () => {
+    const lone = delivery();
+    const report = await checkRecordSet({ records: records(lone, task), roots: [recordDigest(lone)], published: [PROFILE] });
+    expect(report.checks[0]).toMatchObject({ status: "passed", resolved: 1, resolvedPublished: 1, dangling: 0 });
+    expect(report.summary.records).toBe(2);
+    expect(report.records).toHaveLength(2);
+  });
+
+  test("a published document resolves only the digest its bytes hash to", async () => {
+    const lone = delivery();
+    const tampered = PROFILE.slice();
+    tampered[2] = tampered[2]! ^ 1;
+    const report = await checkRecordSet({ records: records(lone, task), roots: [recordDigest(lone)], published: [tampered] });
+    expect(report.checks[0]).toMatchObject({ status: "failed", resolvedPublished: 0, dangling: 1 });
+  });
+
+  test("a held record is resolved as held even if it is also published", async () => {
+    const lone = delivery();
+    const report = await checkRecordSet({ records: records(lone, task, PROFILE), roots: [recordDigest(lone)], published: [PROFILE] });
+    expect(report.checks[0]).toMatchObject({ resolved: 2, resolvedPublished: 0 });
+  });
+
+  test("a published document is not a root", async () => {
+    const report = await checkRecordSet({ records: records(task), roots: [recordDigest(PROFILE)], published: [PROFILE] });
+    expect(report.checks[0].findings).toEqual(expect.arrayContaining([expect.objectContaining({ code: "root-missing" })]));
+  });
+
+  test("bytes the family lets a reader lack resolve through a published document too", async () => {
+    const artifact = new TextEncoder().encode("published artifact");
+    const closing = delivery({ outputs: [{ name: "patch", mediaType: "text/x-diff", digest: { sha256: hex(artifact) } }] });
+    const report = await checkRecordSet({ records: records(closing, task, PROFILE), roots: [recordDigest(closing)], published: [artifact] });
+    expect(report.checks[0]).toMatchObject({ resolvedPublished: 1, unavailable: 0 });
+  });
+
   test("a root the set does not hold fails", async () => {
     const missing = `sha256:${"7".repeat(64)}`;
     const { references } = await set([missing], task, PROFILE);
@@ -351,19 +385,19 @@ describe("lifecycle", () => {
         "a later engagement reusing the true (source, id)",
         [engaged, ...terminals],
         observation("attempt-engaged", "evt-1", 9, { ...ENGAGED, source: FORGED_SOURCE }),
-        "contradictory-terminals",
+        "conflicting-observations",
       ],
       [
         "a later delivery-recorded reusing the true id",
         [engaged, unheldRecorded, closing],
         observation("delivery-recorded", "evt-3", 9, { digest: closingDigest }),
-        "recorded-delivery-missing",
+        "conflicting-observations",
       ],
       [
         "a later progress reusing a terminal's id",
         [engaged, ...terminals],
         observation("progress", "evt-5", 9, { message: "still going" }),
-        "contradictory-terminals",
+        "conflicting-observations",
       ],
       [
         "a forged engagement tied on sequence",
@@ -377,6 +411,21 @@ describe("lifecycle", () => {
       expect(first.status).toBe("failed");
       expect(first.findings).toEqual(expect.arrayContaining([expect.objectContaining({ code })]));
       expect(last).toEqual(first);
+    });
+
+    test("a log the fold refuses is a finding on that Attempt, and the others still fold", async () => {
+      const onOther = { subject: OTHER_ATTEMPT };
+      const { lifecycle } = await set(
+        [],
+        ...[engaged, ...terminals],
+        observation("progress", "evt-5", 9, { message: "still going" }),
+        observation("attempt-engaged", "evt-1", 1, ENGAGED, onOther),
+      );
+      expect(lifecycle.status).toBe("failed");
+      expect(lifecycle.findings).toEqual([
+        expect.objectContaining({ code: "conflicting-observations", subject: ATTEMPT }),
+      ]);
+      expect(lifecycle.attempts.map(({ attempt }) => attempt)).toEqual([OTHER_ATTEMPT]);
     });
 
     test("the same bytes twice are one record, not a tie", async () => {
@@ -437,7 +486,9 @@ describe("lifecycle", () => {
       ];
       const expected = (await set([], ...records)).lifecycle;
       expect(expected.status).toBe("failed");
-      expect(expected.attempts).toHaveLength(3);
+      // Two of the three logs hold a disagreeing pair, so only the third is folded.
+      expect(expected.attempts).toHaveLength(1);
+      expect(expected.findings.filter(({ code }) => code === "conflicting-observations")).toHaveLength(2);
       const seeds = Array.from({ length: 300 }, (_unused, index) => index + 1);
       await Promise.all(seeds.map(async (seed) => {
         expect((await set([], ...shuffled(records, seed))).lifecycle).toEqual(expected);
