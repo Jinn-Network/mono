@@ -19,16 +19,3 @@
 @source '../app';
 @source '../components';
 @source '../lib';
-
-/* The landing page's checker run reveals its rows in turn
-   (`motion-safe:` only, so reduced-motion visitors see them at once). */
-@keyframes jinn-reveal {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}

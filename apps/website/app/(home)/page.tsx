@@ -19,8 +19,9 @@ import { links, repoFile } from '@/lib/shared';
  *   - Record, holder, offer and price: GLOSSARY.md "Records and offers", which
  *     points at Jinn-Network/spec as the authority.
  *   - Colophon: the root README.md "What you can do here".
- *   - The checker run: the passing output printed on /docs/check-a-claim, for
- *     the public claim that page checks.
+ *   - The checker run: the output of `npx @jinn-network/verify`, abridged, for
+ *     the public claim /docs/check-a-claim checks, with the claim's published
+ *     digest as the root.
  *   - The caveats: the specification's own list of what is still open,
  *     THESIS.md §4, and the limits Colophon's checker prints.
  *   - The verb rules are CLAUDE.md "External Communication"; the protocol
@@ -40,14 +41,16 @@ import { links, repoFile } from '@/lib/shared';
  * second ask. There is exactly one button on this page.
  */
 
-const checks = [
-  'manifest',
-  'evidence-closure',
-  'trust',
-  'matrix-rederivation',
-  'report-verification',
-  'claim-consistency',
-  'integrity-anchors',
+const checkRun = [
+  { name: 'Root', result: 'matched the digest you gave', passed: true },
+  { name: 'Digest', result: '46,010 passed, compared with the list', passed: true },
+  { name: 'Signatures', result: '4,323 verified against keys you supplied', passed: true },
+  { name: 'Trust binding', result: 'skipped: no key was tied to an identity', passed: false },
+  {
+    name: 'Completeness',
+    result: 'passed: 46,016 listed files present and unchanged, no others',
+    passed: true,
+  },
 ];
 
 const steps = [
@@ -102,22 +105,21 @@ function CheckRun() {
       </div>
       <div className="px-5 py-5">
         <p className="text-foreground break-all">
-          <span className="text-dim select-none">$ </span>npx @colophon-claims/verify@0.2.1 ./bundle
+          <span className="text-dim select-none">$ </span>npx @jinn-network/verify ./bundle
         </p>
-        <p className="text-vow mt-4">Verified: 7 of 7 checks passed</p>
-        <p className="text-dim truncate">Bundle: sha256:de169c04a24bbb4d9d5b52e398b8bfe92e939ba4d8a8c9e6e3e551cf10aa3774</p>
-        <ul className="mt-4">
-          {checks.map((check, i) => (
-            <li
-              key={check}
-              className="flex justify-between gap-6 motion-safe:animate-[jinn-reveal_420ms_ease-out_both]"
-              style={{ animationDelay: `${250 + i * 110}ms` }}
-            >
-              <span>{check}</span>
-              <span className="text-vow">passed</span>
-            </li>
+        <p className="text-foreground pl-4 break-all">
+          --root sha256:de169c04a24bbb4d9d5b52e398b8bfe92e939ba4d8a8c9e6e3e551cf10aa3774
+        </p>
+        <p className="text-foreground pl-4 break-all">--keys ./bundle/trust/public-keys.json</p>
+        <dl className="mt-4">
+          {checkRun.map((row) => (
+            <div key={row.name} className="grid grid-cols-[7rem_1fr] gap-x-3">
+              <dt className="text-dim">{row.name}</dt>
+              <dd className={row.passed ? 'text-vow' : 'text-muted-foreground'}>{row.result}</dd>
+            </div>
           ))}
-        </ul>
+        </dl>
+        <p className="text-foreground mt-4">Nothing failed. Skipped and unknown are not passes.</p>
       </div>
     </figure>
   );
@@ -166,35 +168,35 @@ export default function HomePage() {
               className="bg-border absolute top-6 right-[10%] left-[10%] hidden h-px lg:block"
             />
             <ol className="grid gap-7 sm:grid-cols-2 lg:grid-cols-5 lg:gap-6">
-            {steps.map(({ name, icon: Icon, body, direction }) => (
-              <li
-                key={name}
-                className="relative flex items-start gap-5 lg:flex-col lg:items-center lg:gap-0 lg:text-center"
-              >
-                <span
-                  className={
-                    direction
-                      ? 'border-gold/50 text-gold bg-background flex size-12 shrink-0 items-center justify-center rounded-md border border-dashed'
-                      : 'border-border text-accent-sky bg-background flex size-12 shrink-0 items-center justify-center rounded-md border'
-                  }
+              {steps.map(({ name, icon: Icon, body, direction }) => (
+                <li
+                  key={name}
+                  className="relative flex items-start gap-5 lg:flex-col lg:items-center lg:gap-0 lg:text-center"
                 >
-                  <Icon aria-hidden="true" className="size-5" />
-                </span>
-                <div className="lg:mt-5">
-                  <p className="flex items-center gap-2 text-sm lg:justify-center">
-                    {name}
-                    {direction ? (
-                      <span className="border-gold/40 text-gold rounded-full border px-2 py-0.5 text-[10px] tracking-[0.14em] uppercase">
-                        Direction
-                      </span>
-                    ) : null}
-                  </p>
-                  <p className="text-muted-foreground mt-1 max-w-[24ch] text-sm leading-relaxed lg:mx-auto lg:mt-2">
-                    {body}
-                  </p>
-                </div>
-              </li>
-            ))}
+                  <span
+                    className={
+                      direction
+                        ? 'border-gold/50 text-gold bg-background flex size-12 shrink-0 items-center justify-center rounded-md border border-dashed'
+                        : 'border-border text-accent-sky bg-background flex size-12 shrink-0 items-center justify-center rounded-md border'
+                    }
+                  >
+                    <Icon aria-hidden="true" className="size-5" />
+                  </span>
+                  <div className="lg:mt-5">
+                    <p className="flex items-center gap-2 text-sm lg:justify-center">
+                      {name}
+                      {direction ? (
+                        <span className="border-gold/40 text-gold rounded-full border px-2 py-0.5 text-[10px] tracking-[0.14em] uppercase">
+                          Direction
+                        </span>
+                      ) : null}
+                    </p>
+                    <p className="text-muted-foreground mt-1 max-w-[24ch] text-sm leading-relaxed lg:mx-auto lg:mt-2">
+                      {body}
+                    </p>
+                  </div>
+                </li>
+              ))}
             </ol>
           </div>
         </div>
@@ -270,7 +272,7 @@ export default function HomePage() {
                   <a href={links.spec}>The protocol</a>, release v0.1.0
                 </li>
                 <li>
-                  <a href={links.verifier}>Colophon&rsquo;s checker</a>, on npm
+                  <a href={links.verifier}>The checker</a>, on npm
                 </li>
                 <li>
                   <a href={links.colophon}>Colophon</a>&rsquo;s sealed claims
@@ -334,7 +336,7 @@ export default function HomePage() {
               Sources: <a href={links.specOpenQuestions}>the specification</a>,{' '}
               <a href={repoFile('THESIS.md')}>the thesis</a>,{' '}
               <a href={links.colophonLimits}>the limits of a Colophon report</a> and{' '}
-              <a href={links.explorer}>the record of what ran</a>.
+              <a href={links.explorer}>the record of what ran on the parked network</a>.
             </p>
           </div>
         </div>

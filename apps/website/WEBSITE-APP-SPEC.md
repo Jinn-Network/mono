@@ -83,8 +83,9 @@ The apex page (`/`). Its job is to say what Jinn is today, to a visitor who has 
 heard of it, and route them to one of three doors. It persuades; it does not transact.
 
 It shows one line per idea and leaves the detail to the docs. A release date, a runtime
-version or a test network's history belongs on a docs page, not in a visible line here. Where
-the page needs more than a line, the line stays visible and the detail opens beneath it.
+version or a test network's history belongs on a docs page, not in a visible line here.
+Where the page needs more than a line, the line stays visible and the detail opens beneath
+it.
 
 - **Static**
   - the hero: one headline that leads from the gap (BRAND.md "Lead from structure, not
@@ -92,10 +93,13 @@ the page needs more than a line, the line stays visible and the detail opens ben
     for work and the data it produces", what anyone can do with a record (check it from
     its own bytes, with their own tools), and that the protocol takes no fee and there is no
     Jinn token
-  - the checker run: the passing output the published checker prints for the public claim
-    that `/docs/check-a-claim` checks, abridged from that page, with the claim named. It is
-    the page's one picture of a record being checked. When the docs page changes its
-    claim or its pinned checker version, this changes with it
+  - the checker run: the output of `npx @jinn-network/verify` over the public claim that
+    `/docs/check-a-claim` checks, with the claim's published digest as the root, abridged,
+    with the claim named. It keeps the `Trust binding` line and the closing line, because
+    a pass here means the files are the ones that digest commits to, not who published
+    them. It is the page's one picture of a record being checked. The checker is Jinn's;
+    Colophon's benchmark checks stay in `/docs/check-a-claim`. When the claim or the
+    command's report changes, this changes with it
   - how a record moves: five steps (Record, Check, Offer, Find, Buy), one line and one
     icon each. The first four are in the protocol today. The fifth is marked as direction
     and says, in its own line, that buying records is the direction, not a working market.
@@ -103,7 +107,7 @@ the page needs more than a line, the line stays visible and the detail opens ben
   - the first application: Colophon, named and linked, with what it does and what it does
     not offer (no hosted service, account or billing)
   - where things stand: three short lists, kept apart. *Exists today* (the protocol,
-    Colophon's checker, Colophon's sealed claims), *Direction* (a market in records; the
+    the checker, Colophon's sealed claims), *Direction* (a market in records; the
     next application's records) and *Parked* (the task marketplace)
   - the caveats: the "what this does not yet prove" list. Every caveat is always visible
     as a one-line statement; its explanation and its linked source open beneath it. One
