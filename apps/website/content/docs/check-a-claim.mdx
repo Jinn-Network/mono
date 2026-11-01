@@ -1,6 +1,6 @@
 ---
 title: Check a claim
-description: Run the published checker over a sealed benchmark claim, on your own machine.
+description: Run a published checker over a sealed benchmark claim, on your own machine.
 ---
 
 A sealed Colophon claim is a Jinn record, and anyone can check one from its own bytes. This page checks the public claim [Judging the LoCoMo judges](https://colophon.claims/reports/locomo-judge-report/). Checking is free and needs no account.
@@ -37,6 +37,18 @@ integrity-anchors       passed
 ```
 
 The archive is named by the bundle's evidence ID, which is the SHA-256 of its file list, `bundle.json`. `shasum -a 256 bundle/bundle.json` prints the same value.
+
+## Check it with Jinn's checker
+
+Jinn's checker reads any Jinn record, not only a Colophon bundle. Give it the published digest as the root:
+
+```bash
+npx @jinn-network/verify ./bundle \
+  --root sha256:de169c04a24bbb4d9d5b52e398b8bfe92e939ba4d8a8c9e6e3e551cf10aa3774 \
+  --keys ./bundle/trust/public-keys.json
+```
+
+A pass means these are exactly the files that digest commits to, the records follow Jinn's rules, and the signatures verify under the keys in the bundle. It does not recompute the benchmark, which is what Colophon's checker adds, and it does not show who published the claim. The digest has to come from somewhere you trust.
 
 ## What a passing check shows
 

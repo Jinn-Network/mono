@@ -44,8 +44,19 @@ import { links, repoFile } from '@/lib/shared';
 const checkRun = [
   { name: 'Root', result: 'matched the digest you gave', passed: true },
   { name: 'Digest', result: '46,010 passed, compared with the list', passed: true },
-  { name: 'Signatures', result: '4,323 verified against keys you supplied', passed: true },
-  { name: 'Trust binding', result: 'skipped: no key was tied to an identity', passed: false },
+  { name: 'Schema', result: '26,402 passed, 19,608 skipped (kind unknown)', passed: false },
+  {
+    name: 'Signatures',
+    result: '4,323 verified against keys you supplied, none unverified',
+    passed: true,
+  },
+  {
+    name: 'Trust binding',
+    result:
+      'skipped: no key was tied to an identity, and a root pins what was published, not who published it',
+    passed: false,
+  },
+  { name: 'Anchors', result: '1 pending', passed: false },
   {
     name: 'Completeness',
     result: 'passed: 46,016 listed files present and unchanged, no others',
@@ -70,7 +81,7 @@ const doors = [
   {
     title: 'Check a claim',
     href: '/docs/check-a-claim',
-    body: 'Run the checker on a sealed claim, on your own machine.',
+    body: 'Run the Colophon checker on a sealed claim, on your own machine.',
     status: 'Free, no account',
   },
   {
@@ -101,14 +112,14 @@ function CheckRun() {
     <figure className="border-border bg-sunken overflow-hidden rounded-lg border font-mono text-[12px] leading-6">
       <div className="border-border text-dim flex items-center justify-between gap-4 border-b px-5 py-3">
         <span className="truncate">Judging the LoCoMo judges</span>
-        <span className="shrink-0">Colophon claim</span>
+        <span className="shrink-0">Colophon claim, abridged</span>
       </div>
       <div className="px-5 py-5">
         <p className="text-foreground break-all">
-          <span className="text-dim select-none">$ </span>npx @jinn-network/verify ./bundle
+          <span className="text-dim select-none">$ </span>npx @jinn-network/verify ./bundle \
         </p>
         <p className="text-foreground pl-4 break-all">
-          --root sha256:de169c04a24bbb4d9d5b52e398b8bfe92e939ba4d8a8c9e6e3e551cf10aa3774
+          --root sha256:de169c04a24bbb4d9d5b52e398b8bfe92e939ba4d8a8c9e6e3e551cf10aa3774 \
         </p>
         <p className="text-foreground pl-4 break-all">--keys ./bundle/trust/public-keys.json</p>
         <dl className="mt-4">
@@ -317,7 +328,7 @@ export default function HomePage() {
               <AccordionItem value="check" className="border-border">
                 <AccordionTrigger>A check covers the bundle, not the machine.</AccordionTrigger>
                 <AccordionContent className="text-muted-foreground leading-relaxed">
-                  A passing check covers a bundle&rsquo;s integrity, evidence, calculations and
+                  A passing Colophon check covers a bundle&rsquo;s integrity, evidence, calculations and
                   report. It does not show that the machine that produced the bundle was honest,
                   or that distinct signing keys belong to distinct parties. Source:{' '}
                   <a href={links.colophonLimits}>the limits of a Colophon report</a>.
@@ -328,7 +339,7 @@ export default function HomePage() {
                 <AccordionContent className="text-muted-foreground leading-relaxed">
                   It stays parked until demand for it exists. Its network on Base Sepolia has
                   recorded no attempt or verdict since 13 August 2026. Source:{' '}
-                  <a href={links.explorer}>the record of what ran</a>.
+                  <a href={links.explorer}>the record of what ran on the parked network</a>.
                 </AccordionContent>
               </AccordionItem>
             </Accordion>

@@ -25,7 +25,7 @@
 > [`../../DESIGN.md`](../../DESIGN.md). Deploy facts are [`README.md`](README.md).
 >
 > **The story the site tells (2026-10-12).** Jinn is an open protocol and network for work
-> and the data it produces. The protocol, the published checker and Colophon's sealed
+> and the data it produces. The protocol, Jinn's published checker and Colophon's sealed
 > benchmark claims exist today. Buying and selling records is the direction, not a working
 > market. The task marketplace is parked. The site says each of these as what it is, and
 > offers a visitor only what exists: no stub pages and no notice of something to come.
@@ -95,7 +95,8 @@ it.
     Jinn token
   - the checker run: the output of `npx @jinn-network/verify` over the public claim that
     `/docs/check-a-claim` checks, with the claim's published digest as the root, abridged,
-    with the claim named. It keeps the `Trust binding` line and the closing line, because
+    with the claim named and marked abridged. Rows it shows are word for word. It keeps the
+    skipped and pending rows beside the passes, the `Trust binding` line and the closing line, because
     a pass here means the files are the ones that digest commits to, not who published
     them. It is the page's one picture of a record being checked. The checker is Jinn's;
     Colophon's benchmark checks stay in `/docs/check-a-claim`. When the claim or the
@@ -112,8 +113,8 @@ it.
   - the caveats: the "what this does not yet prove" list. Every caveat is always visible
     as a one-line statement; its explanation and its linked source open beneath it. One
     always-visible line under the list links every source, so the page carries them
-    without script. The section is not optional and no caveat is dropped: a surface that omits its own gap is
-    less Legible, not more.
+    without script. The section is not optional and no caveat is dropped: a surface that
+    omits its own gap is less Legible, not more.
 - **Collections**
   - doors: exactly three. *Check a claim* (`/docs/check-a-claim`), *Find a claim*
     (external, Colophon's listing) and *Build on the protocol* (`/docs/protocol`). Each
@@ -146,7 +147,7 @@ The reading surface (`/docs/**`), rendered by Fumadocs over MDX in `content/docs
   - search query
 - **Collections**
   - pages: six. `index` (what exists, what is direction, what is parked);
-    `check-a-claim` (the one thing a stranger can run today: the published checker over a
+    `check-a-claim` (what a stranger can run today: Colophon's checker and Jinn's over a
     published claim); `protocol` (where the protocol is written and how to build on it);
     `task-marketplace` (the parked marketplace, named as parked, with where its design and
     its record live); `machine/index`; `community`. Order comes from the `meta.json`
@@ -228,7 +229,7 @@ reappear.
 | --- | --- |
 | `/` | Landing router (§2.2) |
 | `/docs` | Docs tree index (§2.3) |
-| `/docs/check-a-claim` | Run the published checker over a published claim |
+| `/docs/check-a-claim` | Run Colophon's checker and Jinn's over a published claim |
 | `/docs/protocol` | Where the protocol is written, and how to build on it |
 | `/docs/task-marketplace` | The parked task marketplace, named as parked |
 | `/docs/machine` | Machine-surface index |
