@@ -1,4 +1,4 @@
-import { createHash, createPublicKey, verify as verifySignature, type KeyObject } from "node:crypto";
+import { createHash, createPublicKey, type KeyObject } from "node:crypto";
 import { verifyReport } from "@jinn-network/benchmarking-aggregate";
 import {
   verifyEvidenceNativePortableBundle,
@@ -32,7 +32,8 @@ import {
   parseEvaluationSpec,
 } from "@jinn-network/task-execution-profiles";
 import { DeliveryRecordSchema, SubmissionRecordSchema, TaskSpecificationSchema } from "@jinn-network/task-execution-protocol";
-import { canonicalJsonBytes, dssePreAuthEncoding, parseExactDsseEnvelope } from "@jinn-network/trust-core";
+import { canonicalJsonBytes, parseExactDsseEnvelope } from "@jinn-network/trust-core";
+import { verifyDsseSignatures, verifyEd25519Signature } from "@jinn-network/verify";
 import { refuse } from "./profile/errors.js";
 import {
   BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
@@ -423,17 +424,7 @@ function projectAdmissionExclusions(
 }
 
 function verifyEvidenceNativeSignature(input: EvidenceNativeSignatureVerificationInput): boolean {
-  try {
-    const key = createPublicKey({ key: Buffer.from(input.publicKeyBytes), format: "der", type: "spki" });
-    return key.asymmetricKeyType === "ed25519" && verifySignature(
-      null,
-      Buffer.from(input.preAuthEncoding),
-      key,
-      Buffer.from(input.signature),
-    );
-  } catch {
-    return false;
-  }
+  return verifyEd25519Signature(input.publicKeyBytes, input.preAuthEncoding, input.signature);
 }
 
 /**
@@ -927,36 +918,14 @@ export async function verifyPublicBundleSnapshot(
       verifyReviewerSignature: (input: { envelopeBytes: Uint8Array; evaluatorId: string; keyId: string }): boolean => {
         const key = carriedEvaluatorKeys.get(input.evaluatorId);
         if (key === undefined || key.keyId !== input.keyId) return false;
-        try {
-          const envelope = parseExactDsseEnvelope(input.envelopeBytes);
-          const signature = envelope.signatures[0];
-          return envelope.signatures.length === 1 && signature?.keyid === input.keyId
-            && verifySignature(
-              null,
-              Buffer.from(dssePreAuthEncoding(envelope.payloadType, envelope.payloadBytes)),
-              key.publicKey,
-              Buffer.from(signature.sig, "base64"),
-            );
-        } catch {
-          return false;
-        }
+        return verifyDsseSignatures(input.envelopeBytes, [key], { requireSingleSignature: true }).validSignerKeyids.length === 1;
       },
       verifyAuthoritySignature: (input: { envelopeBytes: Uint8Array; keyId: string; role: AdmissionAuthorityRole }): boolean => {
         const binding = v4Trust.admission.authorities.find((candidate) => candidate.role === input.role);
         if (binding?.keyId !== input.keyId || input.keyId !== v4Trust.report.keyId) return false;
-        try {
-          const envelope = parseExactDsseEnvelope(input.envelopeBytes);
-          const signature = envelope.signatures[0];
-          return envelope.signatures.length === 1 && signature?.keyid === input.keyId
-            && verifySignature(
-              null,
-              Buffer.from(dssePreAuthEncoding(envelope.payloadType, envelope.payloadBytes)),
-              reportKey,
-              Buffer.from(signature.sig, "base64"),
-            );
-        } catch {
-          return false;
-        }
+        return verifyDsseSignatures(input.envelopeBytes, [{ keyId: input.keyId, publicKey: reportKey }], {
+          requireSingleSignature: true,
+        }).validSignerKeyids.length === 1;
       },
     };
     try {

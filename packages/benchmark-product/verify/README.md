@@ -8,7 +8,9 @@ This package is a passthrough alias: it re-exports `@colophon-claims/check` and 
 the exit status are the checker's own, unchanged. Diagnostic lines name `colophon-check`, because
 they come from the checker rather than from this shim. The published JSON Schemas and the
 dependency-free `scripts/external-verify.py` ship in the checker's tarball, not this one:
-`node_modules/@colophon-claims/check/` after installing either name.
+`node_modules/@colophon-claims/check/` after installing either name. The general signature,
+`did:key` and anchor checks inside it come from
+[`@jinn-network/verify`](https://github.com/Jinn-Network/mono/blob/next/packages/discovery/verification/README.md).
 
 Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
 

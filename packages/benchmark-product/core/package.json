@@ -1,6 +1,6 @@
 {
   "name": "@colophon-claims/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Core of the standalone benchmark product (internal codename benchmark-product): the Tier 4 product domain — workspace, draft model, lifecycle, audit journal, principals/authority, the operations-library facade, and the CLI agent surface.",
   "publishConfig": {
     "access": "public"
@@ -49,7 +49,7 @@
     "prepack": "yarn build"
   },
   "dependencies": {
-    "@colophon-claims/check": "0.2.1",
+    "@colophon-claims/check": "0.2.2",
     "@fontsource-variable/newsreader": "5.3.0",
     "@fontsource-variable/public-sans": "5.3.0",
     "@fontsource/ibm-plex-mono": "5.3.0",
@@ -103,6 +103,7 @@
     "@jinn-network/benchmarking-run": "portal:../../benchmarking/run",
     "@jinn-network/environment-record": "portal:../../environments/record",
     "@jinn-network/evidence-discovery": "portal:../../evidence/discovery",
+    "@jinn-network/evidence-offer": "portal:../../evidence/offer",
     "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
     "@jinn-network/evidence-repository": "portal:../../evidence/repository",
     "@jinn-network/execution-recorder": "portal:../../evidence/execution-recorder",
@@ -119,7 +120,8 @@
     "@jinn-network/task-execution-workspace": "portal:../../task-execution/backend-local/workspace",
     "@jinn-network/trust-core": "portal:../../trust/core",
     "@jinn-network/trust-resolve": "portal:../../trust/resolve",
-    "@jinn-network/trust-testing": "portal:../../trust/testing"
+    "@jinn-network/trust-testing": "portal:../../trust/testing",
+    "@jinn-network/verify": "portal:../../discovery/verification"
   },
   "devDependencies": {
     "@jinn-network/execution-evidence-builder": "0.1.0",

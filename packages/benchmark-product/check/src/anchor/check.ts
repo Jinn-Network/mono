@@ -8,6 +8,9 @@
  * escaped mid-walk. The callers refuse `record-integrity` on any `invalid`, which is the design's
  * "fails the whole verification loudly".
  *
+ * The walk is `evaluateAnchors` from `@jinn-network/verify`. This file gives it the bundle's two
+ * subjects, the wording a claim carries, and the splice-catch.
+ *
  * Four rules do the work, and each is a different attack:
  *
  * 1. **Exact-bytes parse, strict schema.** Unknown keys fail closed — the public-bundle closure
@@ -38,74 +41,33 @@ import {
   RUN_RECORD_KIND,
   compareCalendarStrictRfc3339Instants,
 } from "@jinn-network/benchmarking-records";
-import {
-  OPENTIMESTAMPS_ANCHOR_PROFILE,
-  RFC3161_TSA_ANCHOR_PROFILE,
-  createOpenTimestampsProofVerifier,
-  createRfc3161AnchorProofVerifier,
-  decodeAnchorProofContent,
-  parseExactAnchorEvidence,
-} from "@jinn-network/trust-core";
+import { evaluateAnchors } from "@jinn-network/verify";
 import type {
-  AnchorProofResult,
-  AnchorTimeBasis,
-  OpenTimestampsTrustMaterial,
-  Rfc3161AnchorTrustMaterial,
-} from "@jinn-network/trust-core";
+  AnchorProofContext,
+  AnchorRefusal,
+  AnchorSubjectReport as RecordAnchorSubjectReport,
+  AnchorTrustMaterial,
+  AnchorVerificationEntry as RecordAnchorVerificationEntry,
+  AnchorsReport,
+} from "@jinn-network/verify";
 import type { CarriedAnchorRecord, ClaimAnchorSubject } from "../profile/anchor-claims.js";
-import { nodeCryptoAnchorPorts } from "./ports.js";
+
+export type { AnchorProofStatus } from "@jinn-network/verify";
 
 /**
  * Verifier-side trust material, keyed by provider profile. Strictly the verifier operator's own
  * configuration: this package ships none, and an empty set can never yield `verified` (§8 step 3).
  */
-export interface PublicBundleAnchorTrustMaterial {
-  readonly rfc3161?: Rfc3161AnchorTrustMaterial;
-  readonly opentimestamps?: OpenTimestampsTrustMaterial;
-}
-
-/** §4.3's four proof outcomes. `absent` and `declared-but-absent` are per-subject context outcomes
- * this check owns; a proof verifier never reports them. */
-export type AnchorProofStatus = AnchorProofResult["status"];
+export type PublicBundleAnchorTrustMaterial = AnchorTrustMaterial;
 
 /** §7.3's absence semantics, plus the positive case. */
-export type AnchorSubjectOutcome = "anchored" | "absent" | "declared-but-absent";
+export type AnchorSubjectOutcome = RecordAnchorSubjectReport["outcome"];
 
-export interface AnchorVerificationEntry {
-  readonly recordSha256: string;
-  readonly status: AnchorProofStatus;
-  /** The provider profile the record names. Absent only when the record did not parse at all. */
-  readonly provider?: string;
-  /** The subject the record's digest resolves to. Absent on a dangling anchor by definition. */
-  readonly subject?: ClaimAnchorSubject;
-  readonly timeBasis?: AnchorTimeBasis;
-  /** The evaluated instant, present only on `verified` — the one status where a time basis was
-   * actually evaluated against supplied material. */
-  readonly time?: string;
-  /** The profile's extracted byte-facts, reported for `verified` and `present`. */
-  readonly facts?: unknown;
-  /** Why the proof is `pending` or `invalid`. */
-  readonly reason?: string;
-  /** The verifier's own evaluation disclosure: whether this reader had material for this profile at
-   * all. It is never a fact about the bundle. */
-  readonly trustMaterial: "supplied" | "none";
-}
+export type AnchorVerificationEntry = RecordAnchorVerificationEntry<ClaimAnchorSubject>;
 
-export interface AnchorSubjectReport {
-  readonly subject: ClaimAnchorSubject;
-  readonly outcome: AnchorSubjectOutcome;
-  /** The declared provider profiles this bundle carries no matching anchor for. Present only on
-   * `declared-but-absent`. */
-  readonly declaredProfiles?: readonly string[];
-}
+export type AnchorSubjectReport = RecordAnchorSubjectReport<ClaimAnchorSubject>;
 
-export interface IntegrityAnchorsReport {
-  /** One entry per carried record, in record-digest order. */
-  readonly anchors: readonly AnchorVerificationEntry[];
-  readonly subjects: readonly AnchorSubjectReport[];
-  /** The subset the caller must refuse on. Empty means the check passes. */
-  readonly invalid: readonly AnchorVerificationEntry[];
-}
+export type IntegrityAnchorsReport = AnchorsReport<ClaimAnchorSubject>;
 
 export interface EvaluateIntegrityAnchorsInput {
   readonly records: readonly CarriedAnchorRecord[];
@@ -120,149 +82,49 @@ export interface EvaluateIntegrityAnchorsInput {
   readonly trust?: PublicBundleAnchorTrustMaterial;
 }
 
-const SUBJECT_KINDS: ReadonlyMap<ClaimAnchorSubject, string> = new Map([
-  ["lock", RUN_RECORD_KIND],
-  ["matrix", MATRIX_RECORD_KIND],
-]);
-
 /** Plain nouns keep a human refusal intelligible after its declared protocol kind is aliased. */
-const SUBJECT_NAMES: ReadonlyMap<ClaimAnchorSubject, string> = new Map([
-  ["lock", "Run"],
-  ["matrix", "Matrix"],
-]);
+const SUBJECT_NAMES: Readonly<Record<ClaimAnchorSubject, string>> = { lock: "Run", matrix: "Matrix" };
 
-function compareCodeUnits(left: string, right: string): -1 | 0 | 1 {
-  return left < right ? -1 : left > right ? 1 : 0;
+function bundleRefusalReason(refusal: AnchorRefusal<ClaimAnchorSubject>): string | undefined {
+  switch (refusal.code) {
+    case "unknown-subject":
+      return `the anchored digest ${refusal.digest} is neither this bundle's sealed Run nor its sealed Matrix`;
+    case "subject-kind-mismatch":
+      return `subject.kind is ${refusal.kind}, but its digest resolves to this bundle's sealed ${SUBJECT_NAMES[refusal.subject]}`;
+    default:
+      return undefined;
+  }
 }
 
-function invalidEntry(
-  recordSha256: string,
-  reason: string,
-  extra: Partial<AnchorVerificationEntry> = {},
-): AnchorVerificationEntry {
-  return { recordSha256, status: "invalid", reason, trustMaterial: "none", ...extra };
+/** The splice-catch, on `facts.genTime` so it survives the default no-roots configuration. */
+function spliceCatch(closeAt: string) {
+  return ({ subject, timeBasis, facts }: AnchorProofContext<ClaimAnchorSubject>): string | undefined => {
+    if (subject !== "lock" || timeBasis !== "authority-time") return undefined;
+    const genTime = (facts as { readonly genTime?: unknown }).genTime;
+    if (typeof genTime !== "string") return "an authority-time lock anchor carries no comparable genTime";
+    const compared = compareCalendarStrictRfc3339Instants(genTime, closeAt);
+    return compared === undefined || compared > 0
+      ? `the token's genTime ${genTime} is after this run's own pre-registered close instant ${closeAt}`
+      : undefined;
+  };
 }
 
 export function evaluateIntegrityAnchors(input: EvaluateIntegrityAnchorsInput): IntegrityAnchorsReport {
-  const subjectDigests: readonly (readonly [ClaimAnchorSubject, string])[] = [
-    ["lock", input.runSha256],
-    ["matrix", input.matrixSha256],
-  ];
-  const declared = input.declaredProfiles ?? [];
-
-  const anchors = [...input.records]
-    .sort((left, right) => compareCodeUnits(left.recordSha256, right.recordSha256))
-    .map((carried): AnchorVerificationEntry => {
-      // 1. Exact-bytes parse under the strict schema, and the sanctioned proof decoder.
-      let record: ReturnType<typeof parseExactAnchorEvidence>;
-      let proofBytes: Uint8Array;
-      try {
-        record = parseExactAnchorEvidence(carried.bytes);
-        proofBytes = decodeAnchorProofContent(record.proof.content);
-      } catch (cause) {
-        return invalidEntry(
-          carried.recordSha256,
-          `not the exact sealed encoding of a conforming AnchorEvidence record: ${cause instanceof Error ? cause.message : String(cause)}`,
-        );
-      }
-
-      // 2. Recompute the subject from the authenticated snapshot, then check the kind label.
-      const subjectDigest = record.subject.digest.sha256;
-      const resolved = subjectDigests.find(([, digest]) => digest === subjectDigest);
-      if (resolved === undefined) {
-        return invalidEntry(
-          carried.recordSha256,
-          `the anchored digest ${subjectDigest} is neither this bundle's sealed Run nor its sealed Matrix`,
-          { provider: record.provider },
-        );
-      }
-      const [subject] = resolved;
-      const resolvedKind = SUBJECT_KINDS.get(subject)!;
-      if (record.subject.kind !== resolvedKind) {
-        return invalidEntry(
-          carried.recordSha256,
-          `subject.kind is ${record.subject.kind}, but its digest resolves to this bundle's sealed ${SUBJECT_NAMES.get(subject)!}`,
-          { provider: record.provider, subject },
-        );
-      }
-
-      // 3. Verify through the provider profile, with whatever material this reader configured.
-      const rfc3161 = record.provider === RFC3161_TSA_ANCHOR_PROFILE;
-      const openTimestamps = record.provider === OPENTIMESTAMPS_ANCHOR_PROFILE;
-      if (!rfc3161 && !openTimestamps) {
-        return invalidEntry(
-          carried.recordSha256,
-          `no proof verifier implements the anchor profile ${record.provider}`,
-          { provider: record.provider, subject },
-        );
-      }
-      const material = rfc3161 ? input.trust?.rfc3161 : input.trust?.opentimestamps;
-      const result: AnchorProofResult = rfc3161
-        ? createRfc3161AnchorProofVerifier(nodeCryptoAnchorPorts).verifyProof({
-          subjectSha256: subjectDigest,
-          proofBytes,
-          ...(input.trust?.rfc3161 === undefined ? {} : { trust: input.trust.rfc3161 }),
-        })
-        : createOpenTimestampsProofVerifier().verifyProof({
-          subjectSha256: subjectDigest,
-          proofBytes,
-          ...(input.trust?.opentimestamps === undefined ? {} : { trust: input.trust.opentimestamps }),
-        });
-      const trustMaterial = material === undefined ? "none" as const : "supplied" as const;
-      const base = {
-        recordSha256: carried.recordSha256,
-        provider: record.provider,
-        subject,
-        trustMaterial,
-      };
-      if (result.status === "invalid") {
-        return { ...base, status: "invalid", reason: result.reason };
-      }
-      if (result.status === "pending") {
-        return { ...base, status: "pending", timeBasis: result.timeBasis, reason: result.reason };
-      }
-      // Exhaustive over the four proof statuses: `verified` and `present` are what remains, and the
-      // rest of this walk reads the `facts` only they carry. A fifth member of ANCHOR_PROOF_STATUSES
-      // fails here rather than arriving at the splice-catch as an unhandled shape.
-      result.status satisfies "verified" | "present";
-
-      // 4. The splice-catch, on `facts.genTime` so it survives the default no-roots configuration.
-      if (subject === "lock" && result.timeBasis === "authority-time") {
-        const genTime = (result.facts as { readonly genTime?: unknown }).genTime;
-        const compared = typeof genTime === "string"
-          ? compareCalendarStrictRfc3339Instants(genTime, input.closeAt)
-          : undefined;
-        if (compared === undefined || compared > 0) {
-          return invalidEntry(
-            carried.recordSha256,
-            typeof genTime === "string"
-              ? `the token's genTime ${genTime} is after this run's own pre-registered close instant ${input.closeAt}`
-              : "an authority-time lock anchor carries no comparable genTime",
-            { provider: record.provider, subject },
-          );
-        }
-      }
-      return {
-        ...base,
-        status: result.status,
-        timeBasis: result.timeBasis,
-        ...(result.status === "verified" ? { time: result.time } : {}),
-        facts: result.facts,
-      };
-    });
-
-  const subjects = subjectDigests.map(([subject]): AnchorSubjectReport => {
-    const carried = anchors.filter((entry) => entry.subject === subject && entry.status !== "invalid");
-    // §7.3: declared intent changes absence semantics. It is a fact the sealed Run states about
-    // itself, so it is read against the lock subject; a matrix anchor is never declared in advance.
-    const missing = subject === "lock"
-      ? declared.filter((profile) => !carried.some((entry) => entry.provider === profile))
-      : [];
-    if (missing.length > 0) {
-      return { subject, outcome: "declared-but-absent", declaredProfiles: [...missing].sort(compareCodeUnits) };
-    }
-    return { subject, outcome: carried.length > 0 ? "anchored" : "absent" };
+  return evaluateAnchors<ClaimAnchorSubject>({
+    records: input.records,
+    subjects: [
+      {
+        id: "lock",
+        sha256: input.runSha256,
+        kind: RUN_RECORD_KIND,
+        // §7.3: declared intent changes absence semantics. It is a fact the sealed Run states about
+        // itself, so it is read against the lock subject; a matrix anchor is never declared in advance.
+        ...(input.declaredProfiles === undefined ? {} : { declaredProfiles: input.declaredProfiles }),
+      },
+      { id: "matrix", sha256: input.matrixSha256, kind: MATRIX_RECORD_KIND },
+    ],
+    ...(input.trust === undefined ? {} : { trust: input.trust }),
+    renderReason: bundleRefusalReason,
+    rejectProof: spliceCatch(input.closeAt),
   });
-
-  return { anchors, subjects, invalid: anchors.filter((entry) => entry.status === "invalid") };
 }

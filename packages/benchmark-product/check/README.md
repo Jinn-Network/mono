@@ -2,8 +2,6 @@
 
 Check a public Colophon claim bundle without the Colophon app or any execution runtime.
 
-Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
-
 ```sh
 npx @colophon-claims/check@0.2 ./bundle
 ```
@@ -37,7 +35,7 @@ Existing claim bundles retain their recorded verifier pins. Use this 0.2 reader
 for prompted-screening v2 support and the compatible `@0.2` line for this
 release.
 For this release, `@jinn-network/*` is pinned to the exact
-`0.1.0-canary.sha.272455add1170766f064181c105071519a6baf95` receipt.
+`0.1.0-canary.sha.e9220007a2cf6ac359d6a72aadbfaca2d1da9875` receipt.
 It is not a floating `@canary` dependency and is not a stable stack release.
 
 `summarizeVerificationOutcome` is new since the 0.2.1 cut. For a `result.format` it does not
@@ -54,6 +52,12 @@ Verification opens no network connection, reads no account or API credential, an
 nothing. It recomputes the checks the bundle's declared format closes over, against the bytes
 the bundle carries and nothing else. It does not prove that the producing machine was honest
 or that the compared identities are independent parties.
+
+## What comes from Jinn
+
+The general checks are not this package's own. DSSE signature verification, `did:key` decoding and encoding, the RFC 3161 certificate checks, and the evaluation of anchor records come from [`@jinn-network/verify`](https://github.com/Jinn-Network/mono/blob/next/packages/discovery/verification/README.md), which checks Jinn records by the specification's rules, inside a Colophon bundle or not.
+
+This package holds what makes a bundle a Colophon claim: the manifest and its closure, the evidence closure, the Colophon trust file, the Matrix replay, the Report and claim checks, the list of checks each format runs, and every refusal message. A verdict from this package is a verdict on a Colophon bundle. It is not a statement from Jinn, and a record that passes `@jinn-network/verify` has not shown it belongs to any claim.
 
 ## Freeze-artifact repositories
 

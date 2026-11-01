@@ -41,6 +41,8 @@ const PACKED_EXCLUDED = [
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/task-execution-protocol', join(root, 'packages/task-execution/protocol')],
   ['@jinn-network/trust-core', join(root, 'packages/trust/core')],
+  ['@jinn-network/evidence-offer', join(root, 'packages/evidence/offer')],
+  ['@jinn-network/verify', join(root, 'packages/discovery/verification')],
   ['@jinn-network/record-discovery-protocol', join(root, 'packages/discovery/protocol')],
   ['@jinn-network/record-discovery-client', join(root, 'packages/discovery/client')],
   ['@jinn-network/record-discovery-serve', join(root, 'packages/discovery/serve')],
@@ -464,7 +466,7 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
     ));
     if (
       installedBuildMetadata.kind !== 'colophon-package-build/1'
-      || installedBuildMetadata.packageVersion !== '0.1.0'
+      || installedBuildMetadata.packageVersion !== '0.1.1'
       || !/^[0-9a-f]{40}$/.test(installedBuildMetadata.sourceCommit)
       || JSON.stringify(installedBuildMetadata.qualifiedTargets) !== JSON.stringify(['darwin/arm64', 'linux/x64'])
     ) {
@@ -520,7 +522,7 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
       { cwd: oneShotRoot },
     );
     const receipt = JSON.parse(await readFile(join(demo.result.output.root, 'quickstart-receipt.json'), 'utf8'));
-    if (receipt.sourceCommit !== installedBuildMetadata.sourceCommit || receipt.colophonVersion !== '0.1.0') {
+    if (receipt.sourceCommit !== installedBuildMetadata.sourceCommit || receipt.colophonVersion !== '0.1.1') {
       throw new Error(`quickstart receipt did not preserve the packaged immutable provenance: ${JSON.stringify(receipt)}`);
     }
     const reader = JSON.parse(await run(

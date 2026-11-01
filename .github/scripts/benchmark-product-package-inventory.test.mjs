@@ -25,12 +25,12 @@ const PRODUCT_PACKAGES = [
   ['web', '@colophon-claims/web', 'private'],
 ];
 const PACKAGE_VERSIONS = new Map([
-  ['@colophon-claims/core', '0.1.0'],
-  ['@colophon-claims/cli', '0.1.0'],
-  ['@colophon-claims/check', '0.2.1'],
+  ['@colophon-claims/core', '0.1.1'],
+  ['@colophon-claims/cli', '0.1.1'],
+  ['@colophon-claims/check', '0.2.2'],
   // The next free patch under @0.2: 0.2.1 is immutable on npm, and anything in 0.3.x would leave
   // `npx @colophon-claims/verify@0.2` resolving to the pre-rename real package, not the alias.
-  ['@colophon-claims/verify', '0.2.2'],
+  ['@colophon-claims/verify', '0.2.3'],
   ['@colophon-claims/web', '0.1.0'],
 ]);
 
@@ -66,9 +66,7 @@ const CHECK_JINN = [
   // ports. The source-boundaries guard pins it to `src/**/*.test.ts`, which `tsconfig.build.json`
   // excludes from `dist/`, so it never reaches the published package.
   '@jinn-network/trust-core', '@jinn-network/trust-testing',
-  // A devDependency until the checker's general record checks finish moving (#5120): the
-  // equivalence test runs the checker's own code and this package side by side. The
-  // source-boundaries guard pins it to test sources, as it does `trust-testing`.
+  // The checker's general record checks: DSSE signatures, did:key, and anchors (#5120).
   '@jinn-network/verify',
 ];
 const TRANSITIVE_PORTALS = [
@@ -87,6 +85,8 @@ const TRANSITIVE_PORTALS = [
   '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol',
   '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace',
   '@jinn-network/trust-core',
+  // Reached through the checker's runtime dependency on `verify`, which brings `evidence-offer`.
+  '@jinn-network/evidence-offer', '@jinn-network/verify',
 ];
 const PUBLICATION_PORTALS = [
   '@jinn-network/benchmarking-publication', '@jinn-network/record-discovery-client',
@@ -103,7 +103,7 @@ const CHECK_PORTALS = [
   // of the `trust-testing` devDependency, and a portal resolution is what keeps it pointed at the
   // live tree rather than at a registry version that does not exist.
   '@jinn-network/trust-core', '@jinn-network/trust-resolve', '@jinn-network/trust-testing',
-  // The same again for the `verify` devDependency's own declared dependencies.
+  // What `verify` brings beside what the checker already holds, and `verify` itself.
   '@jinn-network/evidence-offer', '@jinn-network/record-discovery-protocol',
   '@jinn-network/verify',
 ];
@@ -118,6 +118,8 @@ const APPROVED = new Map([
     // dependency of the `trust-testing` devDependency. A portal resolution is what keeps it
     // pointed at the live tree rather than at a registry version that does not exist.
     '@jinn-network/trust-resolve',
+    // Reached through the checker's runtime dependency on `verify`.
+    '@jinn-network/evidence-offer', '@jinn-network/verify',
   ] }],
   ['cli', { colophon: ['@colophon-claims/check', '@colophon-claims/core'], jinn: [], portals: [
     '@colophon-claims/check', '@colophon-claims/core', ...TRANSITIVE_PORTALS, ...PUBLICATION_PORTALS,
