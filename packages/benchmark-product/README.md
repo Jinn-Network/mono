@@ -31,19 +31,21 @@ The self-serve source is now split into Colophon-owned Tier 4 packages:
 
 - `@colophon-claims/cli` — the installable `colophon` command;
 - `@colophon-claims/core` — product operations and local composition;
-- `@colophon-claims/check` — the source-tree reader, reserved on npm at
-  `0.0.0` and not a working checker;
+- `@colophon-claims/check` — the reader checker;
 - `@colophon-claims/web` — private source/build input for the local UI.
 
-`@colophon-claims/verify` is published to npm, `latest` `0.2.1`. The reader
+`@colophon-claims/verify` is published to npm, `latest` `0.2.2`. The reader
 lines below therefore run straight from the registry; nothing has to be checked
 out to verify a received bundle.
 
-`@colophon-claims/cli` and `@colophon-claims/core` are implemented but not
-published. Demand-gated registry publication is recorded in DR-2026-08-22-a
-and `colophon-npm-publish.yml`; this tree does not publish them on push.
-`@colophon-claims/web` is private source/build input by design and is not for
-registry release.
+`@colophon-claims/cli` is published to npm, `latest` `0.1.0`.
+`@colophon-claims/core` is published to npm, `latest` `0.1.0`.
+`@colophon-claims/check` is published to npm, `latest` `0.2.1`.
+Demand-gated registry publication is recorded in DR-2026-08-22-a and
+`colophon-npm-publish.yml`; this tree does not publish them on push.
+
+`@colophon-claims/web` is private source/build input by design and is not
+published.
 
 There is no hosted service, account, telemetry, billing, or remote publication.
 Product `publish` means local immutable bundle emission only.
@@ -55,12 +57,11 @@ Installing or running a Colophon package needs npm 11.19 or newer (`npm --versio
 The intended packaged command is:
 
 ```bash
-npx @colophon-claims/cli@0.1
+npx @colophon-claims/cli@0.1.0
 ```
 
 It runs the bundled zero-credential comparison, retains its copied bundle and
-receipt, verifies the copy, and opens a verified loopback viewer. It is not yet
-a registry command because `@colophon-claims/cli` has not been published.
+receipt, verifies the copy, and opens a verified loopback viewer.
 
 For a received bundle, the smaller reader surface is:
 
@@ -77,8 +78,8 @@ per-format table in [`PUBLIC-BUNDLE.md`](PUBLIC-BUNDLE.md) covers the case where
 you have only `bundle.json`; the format string alone is not sufficient, because
 prompted-screening bundles pin a later line without changing their format.
 
-Reports sealed before the planned reader rename pin `@colophon-claims/verify`.
-That is still the working registry checker.
+Reports sealed before the reader rename pin `@colophon-claims/verify`. That name
+stays published permanently as a passthrough alias onto `@colophon-claims/check`.
 
 To verify a bundle with tools that are not ours, see
 [`EXTERNAL-VERIFICATION.md`](EXTERNAL-VERIFICATION.md).
