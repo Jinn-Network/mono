@@ -27,8 +27,8 @@ v4's members plus v6's anchors — and v8 is v7 plus a sealed six-variable
 disclosure-specification record and the `disclosure-specification` check. Both exist
 only from this 0.2.1 release, so their bundles pin `@0.2.1` rather than the `@0.1` line
 every earlier closure stamps. v10 is the composed generation (issue #3405): new bundles
-emit it, and this tree's checker reads it. The 0.2.1 line this package last shipped
-predates v10 and refuses it at manifest parse.
+emit it, and this package reads it from `0.2.1`, its first release under this name. The
+`0.2.1` published as `@colophon-claims/verify` predates v10 and refuses it at manifest parse.
 The evidence-native v5 has two declared profiles, full-evidence and metadata-first;
 this reader supports both. A metadata-first bundle carries the artifact digests without
 the artifact bodies, so `artifact-integrity` reports `not fetched` rather than passing,
@@ -40,10 +40,11 @@ For this release, `@jinn-network/*` is pinned to the exact
 `0.1.0-canary.sha.272455add1170766f064181c105071519a6baf95` receipt.
 It is not a floating `@canary` dependency and is not a stable stack release.
 
-`summarizeVerificationOutcome` is new since the 0.2.1 cut. For a `result.format` it does not
-recognize it refuses rather than returning a check denominator: it throws with `.name`
-`BenchmarkProductError` and `.code` `record-integrity`. No published 0.2.x release exported
-this function, so there is no upgrade path on which its behavior changed.
+For a `result.format` it does not recognize, `summarizeVerificationOutcome` refuses rather than
+returning a check denominator: it throws with `.name` `BenchmarkProductError` and `.code`
+`record-integrity`. `@colophon-claims/verify` `0.2.1` exported the same function and answered such
+a format with the six-check denominator, so a caller moving from it sees a throw where it saw a
+number.
 
 `beaconIndexWord` maps a registered beacon source to the index word a reader surface uses
 (`round` or `height`). An unknown source — including inherited object keys and a symbol —
@@ -125,7 +126,7 @@ after `SPDX-`: the scan is a single forward pass that resumes at the end of each
 than a regex, so it is linear with no name bound, and `SPDX-License-Identifier` followed by any
 number of name characters and a colon is refused. Together with those and with the
 `colophon-freeze-repo/1` to `/2` format bump above, which makes a tree published under `/1` report
-drift, the next published cut is therefore at least 0.3.0, not a patch on 0.2.1.
+drift, all of this shipped in this package's first release, `0.2.1`.
 
 Bundles are also verifiable without this package: [`EXTERNAL-VERIFICATION.md`](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/EXTERNAL-VERIFICATION.md) specifies
 the external path (openssl plus a dependency-free script, shipped here as
