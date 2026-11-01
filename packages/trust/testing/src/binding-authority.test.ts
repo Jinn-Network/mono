@@ -1010,6 +1010,17 @@ describe.each([
       expect(await w.verdict(NEXT_KEY)).toMatchObject({ ok: false, reason: "revoked" });
     });
 
+    test("another row of the named record, without its evidence, does not lift a key's own revocation", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const original = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T2 });
+      await w.revoke(original, NEXT_KEY, T3);
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1, scope: ["verdicts"] });
+      const { ceremonyEvidence: _evidence, ...bare } = original;
+      w.records.push(bare);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject({ ok: false, reason: "revoked" });
+    });
+
     test("a sibling that does not stand lends a key no bindings scope to revoke a record of its own with", async () => {
       const w = world();
       await bindGenesis(w);

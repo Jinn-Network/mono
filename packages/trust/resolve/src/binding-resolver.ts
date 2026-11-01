@@ -513,18 +513,23 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
         // eslint-disable-next-line no-await-in-loop -- revocation sets are small.
         const effectiveTime = await effectiveTimeOfRevocation(revocationRecord.revocation, options.anchors);
         if (effectiveTime === undefined) continue; // unanchored revocations never take effect
-        const named = standing.find(({ record }) => record.bindingDigest === revocationRecord.revocation.target);
-        const namedInWindow = named !== undefined && isWithinWindow(named.record.binding, named.effectiveStart, effectiveTime);
-        if (named !== undefined && named !== winner && !(
-          namedInWindow && isWithinWindow(winner.record.binding, winner.effectiveStart, effectiveTime)
+        // A store may hold one digest in more than one row, so none of this reads a single row.
+        const { target } = revocationRecord.revocation;
+        const named = standing.filter(({ record }) => record.bindingDigest === target);
+        const namedInWindow = named.filter(({ record, effectiveStart }) => isWithinWindow(record.binding, effectiveStart, effectiveTime));
+        if (named.length > 0 && target !== winner.record.bindingDigest && !(
+          namedInWindow.length > 0 && isWithinWindow(winner.record.binding, winner.effectiveStart, effectiveTime)
         )) continue;
-        // eslint-disable-next-line no-await-in-loop -- revocation sets are small.
-        const targetScope = namedInWindow && await ceremonyVerified(named.record, effectiveTime, readable, options);
+        const targetScope: string[] = [];
+        for (const { record } of namedInWindow) {
+          // eslint-disable-next-line no-await-in-loop -- revocation sets are small.
+          if (await ceremonyVerified(record, effectiveTime, readable, options)) targetScope.push(...record.binding.scope);
+        }
         revocations.push({
           revocation: revocationRecord.revocation,
           envelopeBytes: revocationRecord.envelopeBytes,
           effectiveTime,
-          ...(targetScope ? { targetScope: named.record.binding.scope } : {}),
+          ...(targetScope.length > 0 ? { targetScope } : {}),
         });
       }
       revocations.sort((a, b) => compareTimes(a.effectiveTime, b.effectiveTime)
