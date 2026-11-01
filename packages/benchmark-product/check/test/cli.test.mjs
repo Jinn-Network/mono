@@ -130,7 +130,7 @@ test("a missing bundle exits 1 with machine-readable invalid-bundle output", asy
   assert.equal(result.code, 1);
   assert.deepEqual(JSON.parse(result.stdout), {
     ok: false,
-    verifierVersion: "0.2.1",
+    verifierVersion: "0.2.2",
     supportedFormats: [
       "benchmark-product-public-bundle/2",
       "benchmark-product-public-bundle/4",
@@ -1014,7 +1014,7 @@ test("the Run line is the runSha256 that --json already carries, and --json is u
     // human line adds no key and renames none.
     const { ok, verifierVersion, supportedFormats, ...result } = body;
     assert.equal(ok, true, shape.format);
-    assert.equal(verifierVersion, "0.2.1", shape.format);
+    assert.equal(verifierVersion, "0.2.2", shape.format);
     assert.ok(Array.isArray(supportedFormats), shape.format);
     assert.deepEqual(result, shape, shape.format);
   }
