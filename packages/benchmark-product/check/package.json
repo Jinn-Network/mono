@@ -1,6 +1,6 @@
 {
   "name": "@colophon-claims/check",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Standalone public-bundle checker for Colophon claims. Formerly published as @colophon-claims/verify, which remains a permanent passthrough alias.",
   "type": "module",
   "packageManager": "yarn@4.13.0",

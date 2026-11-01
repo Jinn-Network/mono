@@ -111,6 +111,28 @@ const CORE_010_PLATFORM_CLOSURE = [
   '@jinn-network/trust-core',
 ];
 const CLI_010_PLATFORM_CLOSURE = [];
+// The checker's closure once `@jinn-network/verify` is its runtime dependency (issue #5120): the 15
+// above, plus `verify` and the two it brings that the checker did not already hold.
+const CHECK_022_PLATFORM_CLOSURE = [
+  '@jinn-network/benchmarking-aggregate',
+  '@jinn-network/benchmarking-evidence',
+  '@jinn-network/benchmarking-interop',
+  '@jinn-network/benchmarking-local',
+  '@jinn-network/benchmarking-protocol',
+  '@jinn-network/benchmarking-records',
+  '@jinn-network/benchmarking-run',
+  '@jinn-network/environment-record',
+  '@jinn-network/evidence-offer',
+  '@jinn-network/evidence-protocol',
+  '@jinn-network/record-discovery-protocol',
+  '@jinn-network/task-admission',
+  '@jinn-network/task-execution-profiles',
+  '@jinn-network/task-execution-protocol',
+  '@jinn-network/trust-core',
+  '@jinn-network/trust-resolve',
+  '@jinn-network/trust-testing',
+  '@jinn-network/verify',
+];
 const PRODUCT_RELEASES = {
   '@colophon-claims/verify@0.2.0': {
     decision: 'DR-2026-08-22-a',
@@ -146,6 +168,31 @@ const PRODUCT_RELEASES = {
     stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/38246145514/attempts/1',
     receiptSha256: 'd9963a3d7eb18f5fad4a91bdc2aaab3cf94a2f572744ff92581d44e0db1835ba',
     closure: VERIFY_020_PLATFORM_CLOSURE,
+  },
+  // PLACEHOLDER (issue #5120): these three receipts name the stand-in canary e9220007a, a complete
+  // one, so the guards and the packed installs run against real registry rows. The release canary
+  // comes after #5146. Regenerate all three at it, and replace their sha, run and digest here,
+  // before this merges. Nothing may be published from the stand-in.
+  '@colophon-claims/core@0.1.1': {
+    decision: 'operator-authorization-2026-10-30-issue-5120',
+    platformSourceSha: 'e9220007a2cf6ac359d6a72aadbfaca2d1da9875',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41240759970/attempts/1',
+    receiptSha256: 'e3722e31bbf0ab559562cff11fa94b201d496f5d3a09804b419babc060e77d13',
+    closure: CORE_010_PLATFORM_CLOSURE,
+  },
+  '@colophon-claims/cli@0.1.1': {
+    decision: 'operator-authorization-2026-10-30-issue-5120',
+    platformSourceSha: 'e9220007a2cf6ac359d6a72aadbfaca2d1da9875',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41240759970/attempts/1',
+    receiptSha256: '7bff7af5997fd25dc1571a13bef1348f253492b0cabdb1b46e40bdac84fae44a',
+    closure: CLI_010_PLATFORM_CLOSURE,
+  },
+  '@colophon-claims/check@0.2.2': {
+    decision: 'operator-authorization-2026-10-30-issue-5120',
+    platformSourceSha: 'e9220007a2cf6ac359d6a72aadbfaca2d1da9875',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41240759970/attempts/1',
+    receiptSha256: 'dbd3dbcecb4e4c579c80711ef53c0c125cba55bea00f87de5bebd8e6ed1908ec',
+    closure: CHECK_022_PLATFORM_CLOSURE,
   },
 };
 const PRODUCT_RELEASE_IDS = Object.keys(PRODUCT_RELEASES);
@@ -417,11 +464,12 @@ export function applyColophonPublishManifest(manifestPath, pin, options = {}) {
  *
  * It is deliberately not derived from `PRODUCT_RELEASES`. A platform receipt attests one publish
  * run; a registered release is any version this tree may resolve against. `verify@0.1.0` predates
- * the receipt file and `verify@0.2.2` is the alias, which carries no Jinn closure to attest.
+ * the receipt file and `verify@0.2.2` and `0.2.3` are the alias, which carries no Jinn closure to
+ * attest.
  */
 const READER_RELEASES = {
-  '@colophon-claims/check': ['0.2.1'],
-  '@colophon-claims/verify': ['0.1.0', '0.2.0', '0.2.1', '0.2.2'],
+  '@colophon-claims/check': ['0.2.1', '0.2.2'],
+  '@colophon-claims/verify': ['0.1.0', '0.2.0', '0.2.1', '0.2.2', '0.2.3'],
 };
 
 export function registeredReaderReleases(packageName) {

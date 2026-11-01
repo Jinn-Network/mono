@@ -464,7 +464,7 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
     ));
     if (
       installedBuildMetadata.kind !== 'colophon-package-build/1'
-      || installedBuildMetadata.packageVersion !== '0.1.0'
+      || installedBuildMetadata.packageVersion !== '0.1.1'
       || !/^[0-9a-f]{40}$/.test(installedBuildMetadata.sourceCommit)
       || JSON.stringify(installedBuildMetadata.qualifiedTargets) !== JSON.stringify(['darwin/arm64', 'linux/x64'])
     ) {
@@ -520,7 +520,7 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
       { cwd: oneShotRoot },
     );
     const receipt = JSON.parse(await readFile(join(demo.result.output.root, 'quickstart-receipt.json'), 'utf8'));
-    if (receipt.sourceCommit !== installedBuildMetadata.sourceCommit || receipt.colophonVersion !== '0.1.0') {
+    if (receipt.sourceCommit !== installedBuildMetadata.sourceCommit || receipt.colophonVersion !== '0.1.1') {
       throw new Error(`quickstart receipt did not preserve the packaged immutable provenance: ${JSON.stringify(receipt)}`);
     }
     const reader = JSON.parse(await run(

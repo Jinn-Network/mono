@@ -25,12 +25,12 @@ const PRODUCT_PACKAGES = [
   ['web', '@colophon-claims/web', 'private'],
 ];
 const PACKAGE_VERSIONS = new Map([
-  ['@colophon-claims/core', '0.1.0'],
-  ['@colophon-claims/cli', '0.1.0'],
-  ['@colophon-claims/check', '0.2.1'],
+  ['@colophon-claims/core', '0.1.1'],
+  ['@colophon-claims/cli', '0.1.1'],
+  ['@colophon-claims/check', '0.2.2'],
   // The next free patch under @0.2: 0.2.1 is immutable on npm, and anything in 0.3.x would leave
   // `npx @colophon-claims/verify@0.2` resolving to the pre-rename real package, not the alias.
-  ['@colophon-claims/verify', '0.2.2'],
+  ['@colophon-claims/verify', '0.2.3'],
   ['@colophon-claims/web', '0.1.0'],
 ]);
 

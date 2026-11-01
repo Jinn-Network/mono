@@ -615,6 +615,6 @@ export { PRODUCIBLE_ANCHOR_PROFILES } from "./anchor/profiles.js";
 export { HARBOR_RUN_IMPORT_VERSIONS } from "./intake/harbor-run-records.js";
 
 /** The product core's own version, mirrored from package.json. */
-export const PRODUCT_VERSION = "0.1.0";
+export const PRODUCT_VERSION = "0.1.1";
 // Reader-legible publisher identity (issue #2983).
 export type { IdentityBindInput, IdentityBindResult } from "./operations/index.js";
