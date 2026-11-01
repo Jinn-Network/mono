@@ -1021,6 +1021,14 @@ describe.each([
       expect(await w.verdict(NEXT_KEY)).toMatchObject({ ok: false, reason: "revoked" });
     });
 
+    test("a key cannot give up a record before that record took effect", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const record = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T3 });
+      await w.revoke(record, NEXT_KEY, T2);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+    });
+
     test("a sibling that does not stand lends a key no bindings scope to revoke a record of its own with", async () => {
       const w = world();
       await bindGenesis(w);
