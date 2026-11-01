@@ -55,6 +55,12 @@ nothing. It recomputes the checks the bundle's declared format closes over, agai
 the bundle carries and nothing else. It does not prove that the producing machine was honest
 or that the compared identities are independent parties.
 
+## What comes from Jinn
+
+The general checks are not this package's own. DSSE signature verification, `did:key` decoding and encoding, the RFC 3161 certificate checks, and the evaluation of anchor records come from [`@jinn-network/verify`](https://github.com/Jinn-Network/mono/blob/next/packages/discovery/verification/README.md), which checks Jinn records by the specification's rules, inside a Colophon bundle or not.
+
+This package holds what makes a bundle a Colophon claim: the manifest and its closure, the evidence closure, the Colophon trust file, the Matrix replay, the Report and claim checks, the list of checks each format runs, and every refusal message. A verdict from this package is a verdict on a Colophon bundle. It is not a statement from Jinn, and a record that passes `@jinn-network/verify` has not shown it belongs to any claim.
+
 ## Freeze-artifact repositories
 
 A qualification bundle (`benchmark-product-public-bundle/4`,

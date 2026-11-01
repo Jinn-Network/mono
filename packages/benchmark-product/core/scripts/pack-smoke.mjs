@@ -31,6 +31,8 @@ const CROSS_TREE_DEPENDENCIES = [
   ["@jinn-network/task-execution-workspace", ["task-execution", "backend-local", "workspace"]],
   ["@jinn-network/task-execution-launchers", ["task-execution", "backend-local", "launchers"]],
   ["@jinn-network/evidence-protocol", ["evidence", "protocol"]],
+  ["@jinn-network/evidence-offer", ["evidence", "offer"]],
+  ["@jinn-network/verify", ["discovery", "verification"]],
   ["@jinn-network/evidence-repository", ["evidence", "repository"]],
   ["@jinn-network/evidence-discovery", ["evidence", "discovery"]],
   ["@jinn-network/execution-evidence-builder", ["evidence", "execution-evidence-builder"]],
