@@ -15,14 +15,14 @@ export function isContractAnswer(cause: unknown): boolean {
   return false;
 }
 
-/** A read no node took: nothing is known about what was asked. */
+/** A read no node took: nothing is known about what was asked. A rate limit is
+ * one, because the node declined the caller, not the question. */
 const UNREACHED = new Set([
   "HttpRequestError",
   "TimeoutError",
   "WebSocketRequestError",
   "SocketClosedError",
   "LimitExceededRpcError",
-  "ResourceUnavailableRpcError",
 ]);
 
 /**

@@ -180,7 +180,6 @@ describe("createWitnessVerifier", () => {
       ["a socket that failed", failedRead("CallExecutionError", "WebSocketRequestError")],
       ["a socket that closed", failedRead("CallExecutionError", "SocketClosedError")],
       ["a rate limit", failedRead("CallExecutionError", "LimitExceededRpcError")],
-      ["a node with no capacity", failedRead("CallExecutionError", "ResourceUnavailableRpcError")],
       ["an unreachable node, whatever wraps it", failedRead("ContractFunctionRevertedError", "HttpRequestError")],
     ])("lets %s out as an outage: no node took the read", async (_label, cause) => {
       await expect(verifierFailingWith(cause).verify1271Witness(witness)).rejects.toBe(cause);
@@ -198,6 +197,7 @@ describe("createWitnessVerifier", () => {
       ["returned too few bytes", failedRead("AbiDecodingDataSizeTooSmallError")],
       ["ran out of gas", failedRead("CallExecutionError", "ExecutionRevertedError")],
       ["is at a block the node does not hold", failedRead("CallExecutionError", "InvalidInputRpcError")],
+      ["is at a block the node holds no state for", failedRead("CallExecutionError", "ResourceUnavailableRpcError")],
     ])("takes a contract that %s as an answer: a statement chooses both, so it cannot read as an outage", async (_label, cause) => {
       const result = await verifierFailingWith(cause).verify1271Witness(witness);
       expect(result.verified).toBe(false);
@@ -211,6 +211,7 @@ describe("createWitnessVerifier", () => {
     ["a hash that is not 32 bytes", { hash: "0xaa" }],
     ["a hash of the right length that is not hex", { hash: `0x${"zz".repeat(32)}` }],
     ["a signature that is not hex", { signature: "bytes" }],
+    ["a signature too large for a node to take", { signature: `0x${"bb".repeat(3_000_000)}` }],
     ["a block that is not a number on the chain", { blockNumber: 1.5 }],
     ["a block below the first", { blockNumber: -1 }],
     ["a block too far past what a number holds exactly", { blockNumber: 2 ** 53 }],
@@ -229,6 +230,7 @@ describe("createWitnessVerifier", () => {
     ["the first block", { blockNumber: 0 }],
     ["an address in lower case", { safe: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd" }],
     ["an empty signature", { signature: "0x" }],
+    ["the largest signature it will put", { signature: `0x${"bb".repeat(1_048_576)}` }],
   ])("puts a statement naming %s to the archive", async (_label, overrides) => {
     const payload = witnessPayload(overrides);
     const readContract = vi.fn(async () => ERC1271_MAGIC_VALUE);

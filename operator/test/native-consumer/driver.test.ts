@@ -536,6 +536,43 @@ describe('native consumer driver', () => {
     }
   }, 30_000);
 
+  it('refuses a source key its own holder revoked, reading who signed through the production wiring', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jinn-native-consumer-driver-rotated-'));
+    try {
+      const producer = await buildPublicVerticalFixture({ root });
+      try {
+        const ports = fakePorts(producer);
+        const catalog = ports.trust.bindingResolver;
+        const source = producer.identities.requesterSource;
+        const revocation: Revocation = {
+          protocol: TRUST_REVOCATION_FORMAT,
+          target: `sha256:${'2'.repeat(64)}`,
+          revokedBy: source.keyId,
+          anchors: [],
+          effectiveFrom: '2026-02-01T00:00:00Z',
+        };
+        const envelopeBytes = signedEnvelope(canonicalJsonBytes(revocation), TRUST_REVOCATION_MEDIA_TYPE, source);
+        const familyResolver: BindingResolver = {
+          async resolveBinding(query, atTime) {
+            const resolved = await catalog.resolveBinding(query, atTime);
+            return resolved === null || query.key !== source.keyId
+              ? resolved
+              : { ...resolved, revocations: [{ revocation, envelopeBytes, effectiveTime: revocation.effectiveFrom, targetScope: ['bindings'] }] };
+          },
+        };
+        await expect(runNativeConsumer(config(join(root, 'consumer-only'), producer), {
+          ...ports,
+          trust: { ...ports.trust, resolverFor: () => familyResolver },
+        })).rejects.toThrow('unauthorized-source-signer');
+      } finally {
+        await producer.solutionPublisher.close();
+        await producer.evaluatorPublisher.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it('produces a byte-identical canonical report across two independent runs against the same public graph', async () => {
     const root = await mkdtemp(join(tmpdir(), 'jinn-native-consumer-driver-stable-'));
     try {

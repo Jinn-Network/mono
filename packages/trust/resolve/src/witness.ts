@@ -108,12 +108,15 @@ function contentMatches(payload: WitnessStatementPayload, witness: Eip1271Witnes
     && payload.verifier === witness.verifier;
 }
 
+/** Far past any real Safe signature, and small enough for a node to take. */
+const MAX_REEXECUTED_SIGNATURE_BYTES = 1_048_576;
+
 /** Whether a statement can be put to the archive at all. A read that fails is an
  * outage, so what a store holds must be turned away before one is made. */
 function canBeReexecuted(payload: WitnessStatementPayload): boolean {
   return isAddress(payload.safe)
     && isHex(payload.hash) && size(payload.hash) === 32
-    && isHex(payload.signature)
+    && isHex(payload.signature) && size(payload.signature) <= MAX_REEXECUTED_SIGNATURE_BYTES
     && Number.isSafeInteger(payload.blockNumber) && payload.blockNumber >= 0;
 }
 

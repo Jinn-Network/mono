@@ -1035,10 +1035,11 @@ describe("verifyEnvelopeBinding", () => {
       voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
       scope: ["deliveries", "bindings"],
     });
+    const entry = revocationEntry(KEY_2, "2026-02-01T00:00:00Z");
     const resolved = resolvedBinding({
       binding,
       envelopeBytes: sealedEnvelope(binding, TRUST_KEY_BINDING_MEDIA_TYPE, CONSENT_KEY),
-      revocations: [revocationEntry(KEY_2, "2026-02-01T00:00:00Z")],
+      revocations: [{ ...entry, revocation: { ...entry.revocation, target: `sha256:${"b".repeat(64)}` } }],
     });
     const resolver = new FakeBindingResolver().register({ key: KEY_2, agent: AGENT, resolved });
     const envelopeBytes = sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2);
@@ -1048,6 +1049,62 @@ describe("verifyEnvelopeBinding", () => {
       { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
     expect(outcome).toMatchObject({ ok: false, reason: "revoked" });
+  });
+
+  describe("a key's own revocation draws on the record it names", () => {
+    const named = (key: string, scope: KeyBinding["scope"]) => keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: key, algorithm: "ed25519", didKey: key },
+      voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+      scope,
+    });
+    const verdictFor = (revocation: ResolvedRevocation) => {
+      const resolved = resolvedBinding({ binding: named(KEY_2, ["deliveries"]), revocations: [revocation] });
+      return verifyEnvelopeBinding(
+        {
+          envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+          key: KEY_2,
+          agent: AGENT,
+          family: "deliveries",
+          atTime: "2026-03-01T00:00:00Z",
+        },
+        {
+          bindingResolver: new FakeBindingResolver().register({ key: KEY_2, agent: AGENT, resolved }),
+          witnessVerifier: fakeWitnessVerifier,
+          dsseVerifier: trustingDsseVerifier,
+        },
+      );
+    };
+    const ownRevocation = revocationEntry(KEY_2, "2026-02-01T00:00:00Z");
+
+    test("a named record that held bindings scope is enough, whatever answers for the key now", async () => {
+      expect(await verdictFor({ ...ownRevocation, targetScope: ["deliveries", "bindings"] }))
+        .toMatchObject({ ok: false, reason: "revoked" });
+    });
+
+    test("a named record that held no bindings scope gives the key nothing", async () => {
+      expect(await verdictFor({ ...ownRevocation, targetScope: ["deliveries"] })).toMatchObject({ ok: true });
+    });
+
+    test("another key's revocation gets nothing from the named record's scope", async () => {
+      expect(await verdictFor({ ...revocationEntry(CONSENT_KEY, "2026-02-01T00:00:00Z"), targetScope: ["bindings"] }))
+        .toMatchObject({ ok: true });
+    });
+
+    test("a revocation naming another record does not count as the answering key giving up its own", async () => {
+      const entry = revocationEntry(KEY_2, "2026-02-01T00:00:00Z");
+      const resolved = resolvedBinding({
+        binding: named(KEY_2, ["deliveries", "bindings"]),
+        isGenesis: false,
+        revocations: [entry],
+      });
+      const outcome = await checkBindingRevocation(resolved, "2026-03-01T00:00:00Z", {
+        bindingResolver: new FakeBindingResolver().register({ key: KEY_2, agent: AGENT, resolved }),
+        witnessVerifier: fakeWitnessVerifier,
+        dsseVerifier: trustingDsseVerifier,
+      });
+      expect(outcome).toEqual({ ok: true });
+    });
   });
 
   test("a revocation signed by a key with no authority over the binding does not revoke", async () => {

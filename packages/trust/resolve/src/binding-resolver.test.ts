@@ -817,9 +817,10 @@ describe("createBindingResolver", () => {
       return [...asked.mock.calls[0]![0]].sort();
     }
 
-    it("asks for every record in window for this key under this voucher", async () => {
+    it("asks for every record for this key under this voucher, in window or not", async () => {
       const later = record(accountBinding({ anchors: [{ digest: DIGEST_B }] }), DIGEST_B);
-      expect(await targetsAsked(later)).toEqual([DIGEST_A, DIGEST_B]);
+      const ended = record(accountBinding({ expiresAt: "2026-02-01T00:00:00.000Z", anchors: [{ digest: DIGEST_C }] }), DIGEST_C);
+      expect(await targetsAsked(later, ended)).toEqual([DIGEST_A, DIGEST_B, DIGEST_C]);
     });
 
     it("reads a voucher as an identity, so restating what else a record says about it changes nothing", async () => {
@@ -838,9 +839,15 @@ describe("createBindingResolver", () => {
       expect(await targetsAsked(other)).toEqual([DIGEST_A]);
     });
 
-    it("leaves out a record for this key out of window at the time asked", async () => {
-      const ended = record(accountBinding({ expiresAt: "2026-02-01T00:00:00.000Z", anchors: [{ digest: DIGEST_B }] }), DIGEST_B);
-      expect(await targetsAsked(ended)).toEqual([DIGEST_A]);
+    it("leaves out a record its key never signed", async () => {
+      const other = record(accountBinding({ anchors: [{ digest: DIGEST_B }] }), DIGEST_B);
+      const asked = vi.fn(async (_targets: readonly Sha256Digest[]) => []);
+      await createBindingResolver({
+        bindings: { ...fakeStore([other, first]), listRevocationsForTargets: asked },
+        anchors,
+        recordSignedByItsKey: ({ bindingDigest }) => bindingDigest !== DIGEST_B,
+      }).resolveBinding({ key: KEY_A, agent: AGENT }, at);
+      expect(asked).toHaveBeenCalledWith([DIGEST_A]);
     });
 
     it("leaves out a record of another key under this voucher", async () => {

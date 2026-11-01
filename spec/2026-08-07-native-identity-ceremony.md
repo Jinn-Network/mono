@@ -792,10 +792,12 @@ reach it. Neither rule is checked: both are authoring convention, per the table 
 **A replacement binding no longer leaves a revocation behind while both records are in window.**
 The resolver used to look up revocations for the winning binding's digest alone, so an
 earlier-anchored or tied replacement for the same `(key, agent)` escaped every revocation bound to
-the record it superseded. It now reads the revocations of every record in window for that key under
-that voucher (issue #5144), so revoking any of them ends all of them. Two cases remain outside
-that. A record that has left its window shares nothing with a later one, and a replacement under
-another voucher needs its own §7.4a chain, which it is judged on. This text previously named the
+the record it superseded. A revocation now ends every record for that key under that voucher in
+window at its effective time, and the resolver reads that at the revocation's time, not at the time
+asked, so a record ending later lifts nothing (issue #5144). Two cases remain outside that. A record
+that first takes effect after the revocation shares nothing with it, which is how a voucher binds
+a key again. A replacement under another voucher needs its own §7.4a chain, which it is judged on.
+This text previously named the
 catalog author as the only actor, "not the key's thief". That was wrong: §7.4a's self-extension exit
 asks about the voucher's incumbent, not about who holds the replacement, so a thief who can reach
 the catalog stands where its author does. Reaching the catalog is still the bound this section

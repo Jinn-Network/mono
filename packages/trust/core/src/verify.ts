@@ -402,8 +402,9 @@ async function readChain(resolved: ResolvedBinding, walk: AuthorityWalk): Promis
     // §7.4a: "the account is the incumbent authority", and §7.4b keeps what a
     // bindings key revokes recoverable through that account. So a working key
     // can retire the founding binding but not the founding account: only the
-    // account's own revocation ends that binding's self-extension authority.
-    // Every other account stays removable, by any authorized revocation.
+    // account's own revocation ends that binding's self-extension authority,
+    // whichever record of that standing it names. Every other account stays
+    // removable, by any authorized revocation.
     const counting: RevocationsThatCount = authority.isGenesis ? "voucher-signed" : "all";
     // eslint-disable-next-line no-await-in-loop -- sequential: the first that stands settles it.
     if (await roots(authority, counting)) return { rooted: true, peers: [] }; // self-extension (§7.4a option 1)
@@ -513,17 +514,19 @@ async function isRevocationAuthorized(
     // whether that account signed; nothing here checks that the ceremony is new.
     return resolved.binding.voucher.kind === "account" && resolved.binding.voucher.did === revokedBy;
   }
+  // A key giving up its own binding gives no authority to anyone, so it needs no
+  // chain to stand on: the signature above and `bindings` scope are all this act
+  // takes, and refusing it would keep alive a binding its own holder has retired.
+  // The scope is the named record's, not that of whichever record answers for the
+  // key at that instant: a replacement must not be able to lift the revocation.
+  if (revokedBy === resolved.binding.key.didKey && entry.targetScope?.includes("bindings") === true) return true;
   // A currently-valid working key of the same Agent with scope: bindings.
   // Valid means it stands, not that a record for it resolves: otherwise any
   // bindings-scoped record for this Agent could revoke its genesis.
   const revokerBinding = await resolveOnce(walk, revokedBy, resolved.binding.agent, entry.effectiveTime);
   if (revokerBinding === null || !revokerBinding.binding.scope.includes("bindings")) return false;
-  // A key giving up its own binding gives no authority to anyone, so it needs no
-  // chain to stand on: the signature above and `bindings` scope are all this act
-  // takes, and refusing it would keep alive a binding its own holder has retired.
-  // Its own means its standing under this voucher: records of it share revocations.
-  if (revokedBy === resolved.binding.key.didKey
-    && voucherIdentityEquals(revokerBinding.binding.voucher, resolved.binding.voucher)) return true;
+  // The same act, from a resolver that does not report the named record's scope.
+  if (entry.revocation.target === resolved.bindingDigest && revokerBinding.bindingDigest === resolved.bindingDigest) return true;
   return bindingStands(revokerBinding, entry.effectiveTime, walk);
 }
 

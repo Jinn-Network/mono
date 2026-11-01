@@ -24,6 +24,11 @@ export interface ResolvedRevocation {
   /** The revocation's own anchor time -- §7.4b: "its effect starts at its
    * own anchor time," never earlier. */
   readonly effectiveTime: string;
+  /** The scope of the record this revocation names, present when that record
+   * was in window at `effectiveTime` and its ceremony verified. A key's own
+   * revocation draws on the record it names, and only the resolver sees that
+   * record: the one answering for the key at that instant may be another. */
+  readonly targetScope?: KeyBinding["scope"];
 }
 
 /**
@@ -58,11 +63,12 @@ export interface ResolvedBinding {
    * re-resolves the one it relies on and requires that binding to stand. */
   readonly incumbentControls?: readonly IncumbentControl[];
   /** Every anchored revocation naming as `target` this binding's digest, or
-   * the digest of another record in window for this key under this voucher,
-   * whether or not its signer authority holds -- `verify.ts` (not the
-   * resolver) determines authority (§7.4b), consistent with §7.5 step 4
-   * being `core`'s job. A revocation ends a key's standing under a voucher,
-   * so it must not stay behind on a record a later one replaced. */
+   * the digest of another record for this key under this voucher when both
+   * were in window at the revocation's effective time, whether or not its
+   * signer authority holds -- `verify.ts` (not the resolver) determines
+   * authority (§7.4b), consistent with §7.5 step 4 being `core`'s job. A
+   * revocation ends a key's standing under a voucher, so it must not stay
+   * behind on a record a later one replaced, or lapse when one record ends. */
   readonly revocations: readonly ResolvedRevocation[];
 }
 

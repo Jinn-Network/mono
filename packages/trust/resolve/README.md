@@ -33,14 +33,20 @@ closed. A leg must answer `false` for a record it cannot read: a store may hold
 anything, and a throw reads as an outage. The same line runs through the chain reads.
 A read no node took is an outage. What a record chose, or what a node said about it,
 is an answer: a token id no read can be made for, a registry that reverted, or a
-witness naming a block or contract no read can use.
+witness naming a block or contract no read can use. The one exception is the registry:
+the deployment names it and no record can, so bytes that decode to no address stay an
+outage, as a deployment fault.
 
-A revocation ends a key's standing under a voucher, not one record of it. A resolved
-binding lists the revocations of every record in window for that key under that
-voucher, so revoking any of them ends all of them, and a replacement in window beside
-a revoked record cannot leave the revocation behind. A record that has left its window
-shares nothing with a later one, and neither does a record under another voucher,
-which stands on its own §7.4a chain.
+A revocation ends a key's standing under a voucher, not one record of it. It ends every
+record for that key under that voucher in window at its effective time, read at that
+time and not at the time asked, so a replacement beside a revoked record cannot leave
+the revocation behind, and a record ending later lifts nothing. A record that first
+takes effect after the revocation shares nothing with it, which is how a voucher binds
+a key again. Neither does a record under another voucher, which stands on its own
+§7.4a chain. A key's own revocation draws on the record it names: that record must have
+held `bindings` scope, in window at the revocation's effective time, with its ceremony
+verified. `ResolvedRevocation.targetScope` carries this, because only the resolver
+sees the record named.
 
 See `docs/superpowers/plans/2026-07-28-trust-layer.md` for the implementation
 plan.

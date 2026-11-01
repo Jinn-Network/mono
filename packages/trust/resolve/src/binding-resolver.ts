@@ -353,6 +353,18 @@ async function agentIdCompositionHolds(
   return false;
 }
 
+/** §7.5 step 3 for a record this resolver has in hand, whatever is resolving. */
+async function ceremonyVerified(
+  record: SealedKeyBindingRecord,
+  atTime: string,
+  peers: readonly EffectiveBinding[],
+  options: Pick<CreateBindingResolverOptions, "chainFacts" | "verifyHostedCeremony">,
+): Promise<boolean> {
+  if (!(await ceremonyCanBeVerified(record, options.verifyHostedCeremony))) return false;
+  if (record.binding.ceremony.type === "eoa" && !eoaCeremonyVerified(record)) return false;
+  return agentIdCompositionHolds(record, atTime, peers, options);
+}
+
 /** The order §7.3 ranks an Agent's bindings by: earliest effective start,
  * ties broken by digest, so that no stored order can decide anything. */
 function compareEffective(a: EffectiveBinding, b: EffectiveBinding): number {
@@ -486,12 +498,14 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
 
       // A revocation ends a key's standing under a voucher, not one spelling of it: whoever
       // holds a key can seal it again, and the record that wins must not leave a revocation
-      // of the one it replaced behind. So revoking any of these ends all of them.
-      const sameStanding = withComposition.filter(
-        ({ record }) => voucherIdentityEquals(record.binding.voucher, winner.record.binding.voucher),
-      );
+      // of the one it replaced behind. Which records one reaches is read at its effective
+      // time, not at `atTime`, so a record ending later lifts nothing, and a record that
+      // first takes effect after it shares nothing, which is how a voucher binds a key again.
+      const standing = readable.filter(({ record }) => record.binding.key.didKey === query.key
+        && voucherIdentityEquals(record.binding.voucher, winner.record.binding.voucher)
+        && signedByItsKey(record));
       const revocationRecords = await options.bindings.listRevocationsForTargets(
-        sameStanding.map(({ record }) => record.bindingDigest),
+        standing.map(({ record }) => record.bindingDigest),
       );
       const revocations: ResolvedRevocation[] = [];
       for (const revocationRecord of revocationRecords) {
@@ -499,10 +513,18 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
         // eslint-disable-next-line no-await-in-loop -- revocation sets are small.
         const effectiveTime = await effectiveTimeOfRevocation(revocationRecord.revocation, options.anchors);
         if (effectiveTime === undefined) continue; // unanchored revocations never take effect
+        const named = standing.find(({ record }) => record.bindingDigest === revocationRecord.revocation.target);
+        const namedInWindow = named !== undefined && isWithinWindow(named.record.binding, named.effectiveStart, effectiveTime);
+        if (named !== undefined && named !== winner && !(
+          namedInWindow && isWithinWindow(winner.record.binding, winner.effectiveStart, effectiveTime)
+        )) continue;
+        // eslint-disable-next-line no-await-in-loop -- revocation sets are small.
+        const targetScope = namedInWindow && await ceremonyVerified(named.record, effectiveTime, readable, options);
         revocations.push({
           revocation: revocationRecord.revocation,
           envelopeBytes: revocationRecord.envelopeBytes,
           effectiveTime,
+          ...(targetScope ? { targetScope: named.record.binding.scope } : {}),
         });
       }
       revocations.sort((a, b) => compareTimes(a.effectiveTime, b.effectiveTime)

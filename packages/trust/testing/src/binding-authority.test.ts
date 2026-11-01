@@ -992,6 +992,89 @@ describe.each([
       expect(await w.verdict(NEXT_KEY)).toMatchObject({ ok: false, reason: "revoked" });
     });
 
+    test("a key's own revocation stands on the record it names, so a replacement cannot lift it", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const original = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T2 });
+      await w.revoke(original, NEXT_KEY, T3);
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1, scope: ["verdicts"] });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject({ ok: false, reason: "revoked" });
+    });
+
+    test("a key's own revocation stands on the record it names, whoever else answered for the key at that instant", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const original = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T2 });
+      await w.revoke(original, NEXT_KEY, T3);
+      await w.bind({ key: NEXT_KEY, signer: STRANGER, validFrom: T1, expiresAt: "2026-04-15T00:00:00.000Z", scope: ["verdicts"] });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject({ ok: false, reason: "revoked" });
+    });
+
+    test("a sibling that does not stand lends a key no bindings scope to revoke a record of its own with", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const own = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1, scope: ["verdicts"] });
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1, scope: ["bindings"], withoutCeremonyEvidence: true });
+      await w.revoke(own, NEXT_KEY, T2);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+    });
+
+    test("a sibling the key alone sealed lends it no bindings scope to give up a record of its own with", async () => {
+      const w = world();
+      await bindGenesis(w, { expiresAt: T1 });
+      const voucherless = await w.bind({ key: NEXT_KEY, signer: SECOND_OWNER, validFrom: T2, scope: ["verdicts"] });
+      await w.bind({ key: NEXT_KEY, signer: SECOND_OWNER, validFrom: T1, scope: ["bindings"] });
+      await w.revoke(voucherless, NEXT_KEY, T3);
+      expect(await w.verdict(NEXT_KEY)).not.toMatchObject({ reason: "revoked" });
+    });
+
+    test("a forged sibling's revocation of itself reaches nothing, because no ceremony backs its scope", async () => {
+      const w = world();
+      await bindGenesis(w);
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1, scope: ["verdicts"] });
+      const forged = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1, scope: ["bindings"], withoutCeremonyEvidence: true });
+      await w.revoke(forged, NEXT_KEY, T2);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+    });
+
+    test("an entitled key that revokes a sibling whose ceremony fails still ends the standing", async () => {
+      const w = world();
+      await bindGenesis(w);
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1 });
+      const forged = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1, withoutCeremonyEvidence: true });
+      await w.revoke(forged, GENESIS_KEY, T2);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject({ ok: false, reason: "revoked" });
+    });
+
+    test("a revocation reaches what was in window at its own time, so a record ending later lifts nothing", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const ending = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1, expiresAt: T3 });
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: "2026-02-15T00:00:00.000Z" });
+      await w.revoke(ending, GENESIS_KEY, T2);
+      expect(await w.verdict(NEXT_KEY, "2026-02-20T00:00:00.000Z")).toMatchObject(stands);
+      expect(await w.verdict(NEXT_KEY, T2)).toMatchObject({ ok: false, reason: "revoked" });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject({ ok: false, reason: "revoked" });
+    });
+
+    test("a revocation of a record that has already ended reaches nothing else", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const ended = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1, expiresAt: "2026-02-15T00:00:00.000Z" });
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: "2026-02-10T00:00:00.000Z" });
+      await w.revoke(ended, GENESIS_KEY, T2);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+    });
+
+    test("the founding account revoking a later record of the genesis key ends self-extension through it", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const later = await w.bind({ key: GENESIS_KEY, signer: OWNER, validFrom: T1 });
+      await w.revoke(later, accountVoucher(84532, OWNER.address).did, T2);
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T3 });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(refusedChain);
+    });
+
     test("a key's record under another voucher, with no standing, does not give up this voucher's", async () => {
       const w = world();
       await bindGenesis(w);
