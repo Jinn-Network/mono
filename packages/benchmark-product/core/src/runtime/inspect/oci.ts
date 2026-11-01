@@ -329,10 +329,22 @@ async function runBoundedProcess(
     // container through the CLI's default sig-proxy. SIGKILL is only the backstop for a child that
     // ignores the first signal.
     let expired = false;
+    let exited = false;
     let killTimer: NodeJS.Timeout | undefined;
+    // `close` below waits for stdio, and a descendant can hold stdio open after the child has gone.
+    // No signal reaches that descendant, so an expired bound stops reading instead, which is what
+    // lets `close` arrive.
+    const abandonStdio = (): void => {
+      child.stdout.destroy();
+      child.stderr.destroy();
+    };
     const expiry = timeoutMs > 0
       ? setTimeout(() => {
         expired = true;
+        if (exited) {
+          abandonStdio();
+          return;
+        }
         child.kill("SIGTERM");
         killTimer = setTimeout(() => child.kill("SIGKILL"), OCI_TIMEOUT_TERMINATION_GRACE_MS);
       }, timeoutMs)
@@ -345,7 +357,17 @@ async function runBoundedProcess(
       clearBounds();
       reject(cause);
     });
-    child.once("exit", (code, exitSignal) => {
+    child.once("exit", () => {
+      exited = true;
+      if (expired) abandonStdio();
+    });
+    // #5139: settle on `close`, never `exit`. Node emits `exit` with stdio possibly still open, and
+    // on Linux that is the normal order for parallel commands, not a corner case: libuv answers one
+    // SIGCHLD by reaping every child of the loop, after the pipe reads it had already polled, so a
+    // sibling's exit is reported before its stdout has been read at all. Settling there gave
+    // `assertInspectOciHostUndrifted`, which starts three commands at once, an empty stdout from a
+    // command that had written its answer.
+    child.once("close", (code, exitSignal) => {
       clearBounds();
       if (expired) {
         reject(new InspectOciCommandTimeoutError(
