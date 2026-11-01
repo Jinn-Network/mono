@@ -56,6 +56,7 @@
     "@jinn-network/benchmarking-run": "portal:../../benchmarking/run",
     "@jinn-network/environment-record": "portal:../../environments/record",
     "@jinn-network/evidence-discovery": "portal:../../evidence/discovery",
+    "@jinn-network/evidence-offer": "portal:../../evidence/offer",
     "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
     "@jinn-network/evidence-repository": "portal:../../evidence/repository",
     "@jinn-network/execution-recorder": "portal:../../evidence/execution-recorder",
@@ -75,7 +76,8 @@
     "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
     "@jinn-network/task-execution-supervisor": "portal:../../task-execution/backend-local/supervisor",
     "@jinn-network/task-execution-workspace": "portal:../../task-execution/backend-local/workspace",
-    "@jinn-network/trust-core": "portal:../../trust/core"
+    "@jinn-network/trust-core": "portal:../../trust/core",
+    "@jinn-network/verify": "portal:../../discovery/verification"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.12.1",

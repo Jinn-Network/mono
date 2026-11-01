@@ -103,6 +103,7 @@
     "@jinn-network/benchmarking-run": "portal:../../benchmarking/run",
     "@jinn-network/environment-record": "portal:../../environments/record",
     "@jinn-network/evidence-discovery": "portal:../../evidence/discovery",
+    "@jinn-network/evidence-offer": "portal:../../evidence/offer",
     "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
     "@jinn-network/evidence-repository": "portal:../../evidence/repository",
     "@jinn-network/execution-recorder": "portal:../../evidence/execution-recorder",
@@ -119,7 +120,8 @@
     "@jinn-network/task-execution-workspace": "portal:../../task-execution/backend-local/workspace",
     "@jinn-network/trust-core": "portal:../../trust/core",
     "@jinn-network/trust-resolve": "portal:../../trust/resolve",
-    "@jinn-network/trust-testing": "portal:../../trust/testing"
+    "@jinn-network/trust-testing": "portal:../../trust/testing",
+    "@jinn-network/verify": "portal:../../discovery/verification"
   },
   "devDependencies": {
     "@jinn-network/execution-evidence-builder": "0.1.0",

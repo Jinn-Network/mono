@@ -71,6 +71,11 @@
         "to": "@jinn-network/trust-core"
       },
       {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/verify"
+      },
+      {
         "from": "@colophon-claims/cli",
         "kind": "runtime",
         "to": "@colophon-claims/check"
@@ -2320,6 +2325,7 @@
           "@jinn-network/task-execution-profiles",
           "@jinn-network/task-execution-protocol",
           "@jinn-network/trust-core",
+          "@jinn-network/verify",
           "zod"
         ]
       },

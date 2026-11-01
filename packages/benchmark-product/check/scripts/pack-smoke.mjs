@@ -27,9 +27,6 @@ try {
   ]) {
     if (!listing.includes(required)) throw new Error(`packed verifier is missing ${required}`);
   }
-  if (!listing.includes("package/dist/anchor/ports.js")) {
-    throw new Error("packed verifier is missing the RFC 3161 anchor ports");
-  }
   // The anchor conformance suite and the port unit tests live in
   // `src/**/*.test.ts` and import the Trust conformance kit, a devDependency.
   // `tsconfig.build.json` excludes those files from `dist/`; this turns that
@@ -46,6 +43,10 @@ try {
   }
   if (manifest.exports?.["./admission"] === undefined) {
     throw new Error("packed verifier omits the portable admission export");
+  }
+  // Its signature, did:key and anchor checks come from this package at runtime.
+  if (manifest.dependencies?.["@jinn-network/verify"] === undefined) {
+    throw new Error("packed verifier does not depend on @jinn-network/verify");
   }
 } finally {
   await rm(scratch, { recursive: true, force: true });

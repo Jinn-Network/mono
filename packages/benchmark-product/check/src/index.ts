@@ -30,15 +30,14 @@ export {
 export type { ClaimTaskSelectionSection } from "./profile/task-selection.js";
 export type { PublicAssetBinaryQualification, PublicAssetInput } from "./assets.js";
 // The three node:crypto ports the RFC 3161 anchor rule engine injects
-// (anchor-evidence design §6.1 "Placement"). They live here, in the standalone
-// verifier, and are reused by the product core -- which already depends on this
-// package, so the split matches the real dependency direction.
+// (anchor-evidence design §6.1 "Placement"). They live in `@jinn-network/verify`
+// and are re-exported here for the product core, which reads them from this package.
 export {
   anchorCertificateReader,
   anchorChainVerifier,
   anchorSignatureVerifier,
   nodeCryptoAnchorPorts,
-} from "./anchor/ports.js";
+} from "@jinn-network/verify";
 // The `integrity-anchors` check (anchor-evidence design §8), shared by `bundle verify` and the
 // workspace-side `run.verify` so the two cannot become two implementations.
 export { evaluateIntegrityAnchors } from "./anchor/check.js";

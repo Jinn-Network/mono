@@ -85,9 +85,9 @@ const CANDIDATE_CLASS = "factual";
 const STRATUM = "core";
 const TRUTH_LABEL = "CORRECT";
 
-export const REVIEWER_IDS = ["urn:reviewer:characterization-1", "urn:reviewer:characterization-2"] as const;
+const REVIEWER_IDS = ["urn:reviewer:characterization-1", "urn:reviewer:characterization-2"] as const;
 
-export const REVIEWERS: readonly PinnedSigner[] = REVIEWER_IDS.map((id) => {
+const REVIEWERS: readonly PinnedSigner[] = REVIEWER_IDS.map((id) => {
   const signer = signerFromLabel(id);
   return { ...signer, keyId: verdictKeyIdFromEd25519PublicKey(signer.publicKey) };
 });
