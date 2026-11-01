@@ -3,8 +3,6 @@
 The published `colophon` command. A stranger uses it to make a claim, not only to
 check one.
 
-Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
-
 ```sh
 npx @colophon-claims/cli@0.1 --help
 ```
