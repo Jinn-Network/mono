@@ -210,6 +210,154 @@ describe("foldObservations", () => {
     expect(() => foldObservations([one, other])).toThrow(ConflictingObservationError);
   });
 
+  describe("a disagreement between two attempt-engaged is always inside the fold", () => {
+    const LOW = "urn:jinn:backend:aaa"; // sorts before SOURCE
+    const HIGH = "urn:jinn:backend:zzz"; // sorts after SOURCE
+
+    function engagedPinning(pin: string, overrides: Partial<ProtocolObservation> = {}) {
+      return observation(
+        "network.jinn.task-execution.attempt-engaged.v1",
+        {
+          attempt: ATTEMPT,
+          task: `sha256:${"a".repeat(64)}`,
+          submission: "urn:uuid:11111111-1111-5111-8111-111111111111",
+          effectiveDeadline: "2026-08-01T01:00:00Z",
+          source: pin,
+          dispatchContext: { uri: "https://example.test/dispatch-context.json" },
+        },
+        { id: "evt-engaged", sequence: "0000000000000001", ...overrides },
+      );
+    }
+
+    // Nothing in the protocol's order separates one (source, id) at one sequence, so the fold must
+    // not let the pin it happens to read first decide whether the pair is inside it.
+    test.each([
+      ["the other pin sorts first", LOW],
+      ["the other pin sorts last", HIGH],
+    ])("one (source, id) and one sequence pinning two sources is refused when %s", (_name, other) => {
+      const later = started({ id: "evt-started", sequence: "0000000000000002" });
+      const own = engagedPinning(SOURCE);
+      const theirs = engagedPinning(other);
+      expect(() => foldObservations([own, theirs, later])).toThrow(ConflictingObservationError);
+      expect(() => foldObservations([later, theirs, own])).toThrow(ConflictingObservationError);
+    });
+
+    test("the refusal is the same whichever of the two pins is read first", () => {
+      const outcome = (log: readonly ProtocolObservation[]) => {
+        try {
+          return foldObservations(log);
+        } catch (error) {
+          return error;
+        }
+      };
+      const low = outcome([engagedPinning(SOURCE), engagedPinning(LOW)]);
+      const high = outcome([engagedPinning(SOURCE), engagedPinning(HIGH)]);
+      expect(low).toBeInstanceOf(ConflictingObservationError);
+      expect(high).toBeInstanceOf(ConflictingObservationError);
+      expect(low).toMatchObject({ category: "protocol-violation", source: SOURCE, id: "evt-engaged" });
+      expect(high).toMatchObject({ category: "protocol-violation", source: SOURCE, id: "evt-engaged" });
+    });
+
+    test("a pair that pins neither its own source nor one source is refused", () => {
+      expect(() => foldObservations([engagedPinning(LOW), engagedPinning(HIGH)])).toThrow(ConflictingObservationError);
+      expect(() => foldObservations([engagedPinning(HIGH), engagedPinning(LOW)])).toThrow(ConflictingObservationError);
+    });
+
+    test("a pair at two sequences whose first pins another source is refused", () => {
+      const first = engagedPinning(LOW, { sequence: "0000000000000001" });
+      const second = engagedPinning(SOURCE, { sequence: "0000000000000003" });
+      expect(() => foldObservations([first, second])).toThrow(ConflictingObservationError);
+      expect(() => foldObservations([second, first])).toThrow(ConflictingObservationError);
+    });
+
+    test("a pair from a source the first engagement does not pin is refused", () => {
+      const genuine = [engaged({ id: "evt-genuine", sequence: "0000000000000001" }), terminal("delivered", {}, { sequence: "0000000000000002" })];
+      const pair = [
+        engagedPinning(HIGH, { source: HIGH, id: "evt-other", sequence: "0000000000000005" }),
+        engagedPinning(HIGH, { source: HIGH, id: "evt-other", sequence: "0000000000000006" }),
+      ];
+      expect(() => foldObservations([...genuine, ...pair])).toThrow(ConflictingObservationError);
+      expect(() => foldObservations([...pair].reverse().concat(genuine))).toThrow(ConflictingObservationError);
+    });
+
+    test("an agreeing replay of an engagement is still one observation", () => {
+      const once = foldObservations([engagedPinning(SOURCE), started({ sequence: "0000000000000002" })]);
+      const twice = foldObservations([engagedPinning(SOURCE), started({ sequence: "0000000000000002" }), engagedPinning(SOURCE)]);
+      expect(twice).toEqual(once);
+      expect(once.state).toBe("running");
+    });
+
+    test("an engagement sharing its pair with another type is not this case", () => {
+      // Only one of them is an engagement, and it pins a source the pair's own source is not.
+      const pin = engagedPinning(LOW, { id: "evt-shared", sequence: "0000000000000001" });
+      const other = started({ id: "evt-shared", sequence: "0000000000000001" });
+      expect(foldObservations([pin, other])).toEqual(foldObservations([other, pin]));
+      expect(foldObservations([pin, other]).state).toBe("pending");
+    });
+
+    /** A seeded linear congruential generator, so a failing seed can be replayed. It draws from the
+     * high bits: the low bits of this generator cycle too fast to pick from a small pool. */
+    function generator(seed: number) {
+      let state = seed;
+      return (bound: number) => {
+        state = (Math.imul(state, 1664525) + 1013904223) | 0;
+        return Math.floor(((state >>> 0) / 4294967296) * bound);
+      };
+    }
+
+    function shuffled<Item>(items: readonly Item[], next: (bound: number) => number): Item[] {
+      const result = [...items];
+      for (let index = result.length - 1; index > 0; index -= 1) {
+        const other = next(index + 1);
+        [result[index], result[other]] = [result[other]!, result[index]!];
+      }
+      return result;
+    }
+
+    function outcomeOf(log: readonly ProtocolObservation[]): unknown {
+      try {
+        return { derived: foldObservations(log) };
+      } catch (error) {
+        if (!(error instanceof ConflictingObservationError)) throw error;
+        return { refused: error.category, source: error.source, id: error.id };
+      }
+    }
+
+    test("under every shuffle tried, the outcome is one, and a disagreeing engagement pair is refused", () => {
+      const sources = [LOW, SOURCE, HIGH] as const;
+      const ids = ["evt-1", "evt-2"] as const;
+      const sequences = ["0000000000000001", "0000000000000002", "0000000000000003"] as const;
+      let pairs = 0;
+      for (let seed = 1; seed <= 400; seed += 1) {
+        const next = generator(seed);
+        const pick = <Item>(items: readonly Item[]): Item => items[next(items.length)]!;
+        const log: ProtocolObservation[] = [];
+        const size = 2 + next(5);
+        for (let index = 0; index < size; index += 1) {
+          const envelope = { source: pick(sources), id: pick(ids), sequence: pick(sequences) };
+          const kind = next(4);
+          if (kind < 2) log.push(engagedPinning(pick(sources), envelope));
+          else if (kind === 2) log.push(started(envelope));
+          else log.push(terminal(pick(["delivered", "failed"]), {}, envelope));
+        }
+        const engagements = log.filter(({ type }) => type === "network.jinn.task-execution.attempt-engaged.v1");
+        const disagreeing = engagements.some((one) => engagements.some((other) =>
+          one.source === other.source && one.id === other.id
+          && (one.sequence !== other.sequence || JSON.stringify(one.data) !== JSON.stringify(other.data))));
+        const expected = outcomeOf(log);
+        if (disagreeing) {
+          pairs += 1;
+          expect(expected, `seed ${seed}`).toMatchObject({ refused: "protocol-violation" });
+        }
+        for (let round = 0; round < 25; round += 1) {
+          expect(outcomeOf(shuffled(log, next)), `seed ${seed}, round ${round}`).toEqual(expected);
+        }
+      }
+      // The generator must actually reach the case, or the property says nothing.
+      expect(pairs).toBeGreaterThan(50);
+    });
+  });
+
   test("the same sequence on two different observations resolves the same way in either order", () => {
     sequenceCounter = 0;
     const delivered = terminal("delivered", {}, { id: "evt-a", sequence: "0000000000000005" });
