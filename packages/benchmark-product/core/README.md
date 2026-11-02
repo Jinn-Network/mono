@@ -213,7 +213,7 @@ example, `https://example.test/publication` resolves records beneath
 `https://example.test/publication/records/...`; an origin-root mount remains supported.
 
 For this release, `@jinn-network/*` is pinned to the exact
-`0.1.0-canary.sha.e9220007a2cf6ac359d6a72aadbfaca2d1da9875` receipt.
+`0.1.0-canary.sha.bff2fb46a815149690400a628e149a6e915eb337` receipt.
 It is not a floating `@canary` dependency and is not a stable stack release.
 
 ## What this does not yet prove

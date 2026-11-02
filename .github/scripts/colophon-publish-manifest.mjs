@@ -64,6 +64,12 @@ const VERIFY_020_RECEIPT_KEYS = [
 ];
 const VERIFY_020_PRODUCT_KEYS = ['packageName', 'version'];
 const VERIFY_020_PACKAGE_KEYS = ['name', 'version', 'gitHead', 'integrity', 'provenanceUrl'];
+// A receipt that records each package's own `latest` dist-tag, as npm served it when the receipt was
+// read, in place of one `platformLatestVersion` it assumed for every package. Earlier receipts keep
+// the shape they were sealed in: their digests cannot change.
+const LATEST_PER_PACKAGE_RECEIPT_KEYS = VERIFY_020_RECEIPT_KEYS.filter((key) => key !== 'platformLatestVersion');
+const LATEST_PER_PACKAGE_KEYS = [...VERIFY_020_PACKAGE_KEYS, 'latestVersion'];
+const EXACT_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.]+)?$/u;
 const VERIFY_020_PLATFORM_CLOSURE = [
   '@jinn-network/benchmarking-aggregate',
   '@jinn-network/benchmarking-evidence',
@@ -169,29 +175,31 @@ const PRODUCT_RELEASES = {
     receiptSha256: 'd9963a3d7eb18f5fad4a91bdc2aaab3cf94a2f572744ff92581d44e0db1835ba',
     closure: VERIFY_020_PLATFORM_CLOSURE,
   },
-  // PLACEHOLDER (issue #5120): these three receipts name the stand-in canary e9220007a, a complete
-  // one, so the guards and the packed installs run against real registry rows. The release canary
-  // comes after #5146. Regenerate all three at it, and replace their sha, run and digest here,
-  // before this merges. Nothing may be published from the stand-in.
+  // The checker's runtime move to `@jinn-network/verify` (issue #5120), at the canary of #5146's
+  // merge. These receipts record each package's own `latest`: the maintainer pointed
+  // `@jinn-network/verify`'s at a canary build.
   '@colophon-claims/core@0.1.1': {
     decision: 'operator-authorization-2026-10-30-issue-5120',
-    platformSourceSha: 'e9220007a2cf6ac359d6a72aadbfaca2d1da9875',
-    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41240759970/attempts/1',
-    receiptSha256: 'e3722e31bbf0ab559562cff11fa94b201d496f5d3a09804b419babc060e77d13',
+    latestPerPackage: true,
+    platformSourceSha: 'bff2fb46a815149690400a628e149a6e915eb337',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41319951303/attempts/1',
+    receiptSha256: 'cc1dd03377a2b8175c3450039f194b363a63463cb787e0d3f8d6c304ada2eee1',
     closure: CORE_010_PLATFORM_CLOSURE,
   },
   '@colophon-claims/cli@0.1.1': {
     decision: 'operator-authorization-2026-10-30-issue-5120',
-    platformSourceSha: 'e9220007a2cf6ac359d6a72aadbfaca2d1da9875',
-    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41240759970/attempts/1',
-    receiptSha256: '7bff7af5997fd25dc1571a13bef1348f253492b0cabdb1b46e40bdac84fae44a',
+    latestPerPackage: true,
+    platformSourceSha: 'bff2fb46a815149690400a628e149a6e915eb337',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41319951303/attempts/1',
+    receiptSha256: 'c94d0d58723dd43fcb73f820f6ad280f8be22dc59f5faac95e77c5e42dabeb34',
     closure: CLI_010_PLATFORM_CLOSURE,
   },
   '@colophon-claims/check@0.2.2': {
     decision: 'operator-authorization-2026-10-30-issue-5120',
-    platformSourceSha: 'e9220007a2cf6ac359d6a72aadbfaca2d1da9875',
-    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41240759970/attempts/1',
-    receiptSha256: 'dbd3dbcecb4e4c579c80711ef53c0c125cba55bea00f87de5bebd8e6ed1908ec',
+    latestPerPackage: true,
+    platformSourceSha: 'bff2fb46a815149690400a628e149a6e915eb337',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41319951303/attempts/1',
+    receiptSha256: 'f65ba01669a6dbfe5052fc6223413e8b401f1ce77842fc365c8b44aafc0b7692',
     closure: CHECK_022_PLATFORM_CLOSURE,
   },
 };
@@ -297,11 +305,15 @@ function loadProductReleasePlatformPins(repoRoot) {
 }
 
 export function validateProductReleasePlatformPin(pin, manifest) {
-  if (!hasExactKeys(pin, VERIFY_020_RECEIPT_KEYS) || !hasExactKeys(pin.product, VERIFY_020_PRODUCT_KEYS)) {
+  const releaseId = `${pin?.product?.packageName}@${pin?.product?.version}`;
+  const release = PRODUCT_RELEASES[releaseId];
+  const latestPerPackage = release?.latestPerPackage === true;
+  if (
+    !hasExactKeys(pin, latestPerPackage ? LATEST_PER_PACKAGE_RECEIPT_KEYS : VERIFY_020_RECEIPT_KEYS)
+    || !hasExactKeys(pin.product, VERIFY_020_PRODUCT_KEYS)
+  ) {
     throw new Error('product-release pin must retain the immutable verifier 0.2 receipt shape');
   }
-  const releaseId = `${pin.product.packageName}@${pin.product.version}`;
-  const release = PRODUCT_RELEASES[releaseId];
   if (
     release === undefined
     || pin?.decision !== release.decision
@@ -321,7 +333,7 @@ export function validateProductReleasePlatformPin(pin, manifest) {
   }
   if (
     pin.platformDistTag !== 'canary'
-    || pin.platformLatestVersion !== '0.0.0'
+    || (!latestPerPackage && pin.platformLatestVersion !== '0.0.0')
     || pin.stackPublishRunUrl !== release.stackPublishRunUrl
   ) {
     throw new Error('product-release pin must retain its recorded stack-canary receipt');
@@ -340,8 +352,11 @@ export function validateProductReleasePlatformPin(pin, manifest) {
     throw new Error('product-release pin must include every direct Jinn dependency');
   }
   for (const pkg of packages) {
-    if (!hasExactKeys(pkg, VERIFY_020_PACKAGE_KEYS)) {
+    if (!hasExactKeys(pkg, latestPerPackage ? LATEST_PER_PACKAGE_KEYS : VERIFY_020_PACKAGE_KEYS)) {
       throw new Error(`product-release pin package row shape drift for ${pkg?.name ?? '<missing>'}`);
+    }
+    if (latestPerPackage && !EXACT_VERSION.test(String(pkg.latestVersion))) {
+      throw new Error(`product-release pin must record the exact version npm's latest tag served for ${pkg.name}`);
     }
     if (
       pkg.version !== pin.platformVersion

@@ -43,11 +43,10 @@ const V21_PIN_VERSION = `0.1.0-canary.sha.${V21_PIN_SHA}`;
 const CHECK_PIN_SHA = '272455add1170766f064181c105071519a6baf95';
 const CHECK_PIN_VERSION = `0.1.0-canary.sha.${CHECK_PIN_SHA}`;
 const CHECK_PIN_RUN_URL = 'https://github.com/Jinn-Network/mono/actions/runs/38246145514/attempts/1';
-// PLACEHOLDER (issue #5120): the stand-in canary check 0.2.2, core 0.1.1 and cli 0.1.1 name until the
-// release canary exists, after #5146. See the note in PRODUCT_RELEASES.
-const RELEASE_PIN_SHA = 'e9220007a2cf6ac359d6a72aadbfaca2d1da9875';
+// The platform canary check 0.2.2, core 0.1.1 and cli 0.1.1 release against (issue #5120).
+const RELEASE_PIN_SHA = 'bff2fb46a815149690400a628e149a6e915eb337';
 const RELEASE_PIN_VERSION = `0.1.0-canary.sha.${RELEASE_PIN_SHA}`;
-const RELEASE_PIN_RUN_URL = 'https://github.com/Jinn-Network/mono/actions/runs/41240759970/attempts/1';
+const RELEASE_PIN_RUN_URL = 'https://github.com/Jinn-Network/mono/actions/runs/41319951303/attempts/1';
 const RELEASE_DECISION = 'operator-authorization-2026-10-30-issue-5120';
 
 /** The checker, under the name it publishes as today. */
@@ -532,6 +531,49 @@ test('the checker 0.2.2 selects its own receipt at the platform canary it builds
     }
   }
   assert.doesNotMatch(JSON.stringify(patched), /portal:/u);
+});
+
+test('the 0.2.2 release receipts record each package\'s own latest tag rather than assuming 0.0.0 (issue #5120)', () => {
+  // The maintainer pointed `@jinn-network/verify`'s npm `latest` at a canary build, so one shared
+  // `platformLatestVersion: 0.0.0` would be false. These receipts read each package's `latest` from
+  // npm when they were made, and the digest seals what they read.
+  const manifest = checkerManifest();
+  const pin = loadProductReleasePlatformPin(repoRoot, manifest);
+  assert.equal(Object.hasOwn(pin, 'platformLatestVersion'), false);
+  const latest = Object.fromEntries(pin.platformPackages.map((pkg) => [pkg.name, pkg.latestVersion]));
+  assert.equal(latest['@jinn-network/verify'], '0.1.0-canary.sha.86fb8cca1b8061911cf1b0ff7e2c612d0215cf95');
+  for (const [name, version] of Object.entries(latest)) {
+    if (name !== '@jinn-network/verify') assert.equal(version, '0.0.0', name);
+  }
+  for (const product of ['core', 'cli']) {
+    const productPin = loadProductReleasePlatformPin(repoRoot, productManifest(product));
+    assert.equal(Object.hasOwn(productPin, 'platformLatestVersion'), false, product);
+    for (const pkg of productPin.platformPackages) assert.equal(typeof pkg.latestVersion, 'string', pkg.name);
+  }
+
+  const floating = structuredClone(pin);
+  floating.platformPackages[0].latestVersion = 'canary';
+  assert.throws(() => validateProductReleasePlatformPin(floating, manifest), /exact version npm's latest tag served/u);
+  const unrecorded = structuredClone(pin);
+  delete unrecorded.platformPackages[0].latestVersion;
+  assert.throws(() => validateProductReleasePlatformPin(unrecorded, manifest), /row shape drift/u);
+  const assumed = { ...structuredClone(pin), platformLatestVersion: '0.0.0' };
+  assert.throws(() => validateProductReleasePlatformPin(assumed, manifest), /immutable verifier 0\.2 receipt shape/u);
+  const rewritten = structuredClone(pin);
+  rewritten.platformPackages.find((pkg) => pkg.name === '@jinn-network/verify').latestVersion = '0.0.0';
+  assert.throws(
+    () => validateProductReleasePlatformPin(rewritten, manifest),
+    /retain the immutable @colophon-claims\/check@0\.2\.2 receipt values/u,
+  );
+
+  // An earlier receipt keeps the shape it was sealed in, and still records 0.0.0 for all.
+  const previous = loadProductReleasePlatformPin(repoRoot, { ...legacyVerifyManifest(), name: '@colophon-claims/check' });
+  assert.equal(previous.platformLatestVersion, '0.0.0');
+  const moved = { ...structuredClone(previous), platformLatestVersion: latest['@jinn-network/verify'] };
+  assert.throws(
+    () => validateProductReleasePlatformPin(moved, { ...legacyVerifyManifest(), name: '@colophon-claims/check' }),
+    /must retain its recorded stack-canary receipt/u,
+  );
 });
 
 test('the alias may not borrow a receipt for a publish run that never happened', () => {
