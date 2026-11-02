@@ -280,6 +280,16 @@ describe("foldObservations", () => {
       expect(() => foldObservations([...pair].reverse().concat(genuine))).toThrow(ConflictingObservationError);
     });
 
+    test("a pair from another producer at one sequence, pinning two sources, is refused", () => {
+      const genuine = [engaged({ id: "evt-genuine", sequence: "0000000000000001" }), started({ sequence: "0000000000000002" })];
+      const pair = [
+        engagedPinning(HIGH, { source: HIGH, id: "evt-other", sequence: "0000000000000003" }),
+        engagedPinning(LOW, { source: HIGH, id: "evt-other", sequence: "0000000000000003" }),
+      ];
+      expect(() => foldObservations([...genuine, ...pair])).toThrow(ConflictingObservationError);
+      expect(() => foldObservations([...pair].reverse().concat(genuine))).toThrow(ConflictingObservationError);
+    });
+
     test("an agreeing replay of an engagement is still one observation", () => {
       const once = foldObservations([engagedPinning(SOURCE), started({ sequence: "0000000000000002" })]);
       const twice = foldObservations([engagedPinning(SOURCE), started({ sequence: "0000000000000002" }), engagedPinning(SOURCE)]);
