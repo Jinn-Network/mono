@@ -24,6 +24,15 @@ export function didKeyFromEd25519PublicKey(publicKey: KeyObject): string {
   }));
 }
 
+/**
+ * Whether `key` made the one signature an admission envelope carries. The envelope must be the
+ * exact sealed encoding with exactly one signature: an admission record has one signer, and a
+ * second signature, even a valid one, is refused rather than ignored.
+ */
+export function verifySoleSignature(envelopeBytes: Uint8Array, key: { readonly keyId: string; readonly publicKey: KeyObject }): boolean {
+  return verifyDsseSignatures(envelopeBytes, [key], { requireSingleSignature: true }).validSignerKeyids.length === 1;
+}
+
 /** Fail-closed verification of the Report envelope against the bundle-carried author key. */
 export function verifyReportEnvelopeSignatures(envelopeBytes: Uint8Array, key: { readonly keyId: string; readonly publicKey: KeyObject }): { validSignerKeyids: readonly string[] } {
   return verifyDsseSignatures(envelopeBytes, [key], {

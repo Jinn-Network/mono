@@ -33,7 +33,7 @@ import {
 } from "@jinn-network/task-execution-profiles";
 import { DeliveryRecordSchema, SubmissionRecordSchema, TaskSpecificationSchema } from "@jinn-network/task-execution-protocol";
 import { canonicalJsonBytes, parseExactDsseEnvelope } from "@jinn-network/trust-core";
-import { verifyDsseSignatures, verifyEd25519Signature } from "@jinn-network/verify";
+import { verifyEd25519Signature } from "@jinn-network/verify";
 import { refuse } from "./profile/errors.js";
 import {
   BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
@@ -42,7 +42,7 @@ import {
   DISCLOSED_CLAIM_PACKAGE_SCHEMA_ID,
 } from "./profile/claim.js";
 import { buildMethodPortsFromResolver } from "./profile/ports.js";
-import { didKeyFromEd25519PublicKey } from "./profile/signing.js";
+import { didKeyFromEd25519PublicKey, verifySoleSignature } from "./profile/signing.js";
 import { buildPublicReportTrustDeps } from "./profile/trust.js";
 import { evidenceNativeBundleSigners, legacyBundleSigners, type PublicBundleSigner } from "./signers.js";
 import { buildAssemblyPortsFromFacts, type AssemblyPublicKeyRecord } from "./profile/assembly-ports.js";
@@ -918,14 +918,12 @@ export async function verifyPublicBundleSnapshot(
       verifyReviewerSignature: (input: { envelopeBytes: Uint8Array; evaluatorId: string; keyId: string }): boolean => {
         const key = carriedEvaluatorKeys.get(input.evaluatorId);
         if (key === undefined || key.keyId !== input.keyId) return false;
-        return verifyDsseSignatures(input.envelopeBytes, [key], { requireSingleSignature: true }).validSignerKeyids.length === 1;
+        return verifySoleSignature(input.envelopeBytes, key);
       },
       verifyAuthoritySignature: (input: { envelopeBytes: Uint8Array; keyId: string; role: AdmissionAuthorityRole }): boolean => {
         const binding = v4Trust.admission.authorities.find((candidate) => candidate.role === input.role);
         if (binding?.keyId !== input.keyId || input.keyId !== v4Trust.report.keyId) return false;
-        return verifyDsseSignatures(input.envelopeBytes, [{ keyId: input.keyId, publicKey: reportKey }], {
-          requireSingleSignature: true,
-        }).validSignerKeyids.length === 1;
+        return verifySoleSignature(input.envelopeBytes, { keyId: input.keyId, publicKey: reportKey });
       },
     };
     try {
