@@ -701,6 +701,37 @@ describe.each([
       expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
       expect(await w.verdict(key)).toMatchObject(refusedChain);
     });
+
+    test.each([
+      { order: "before", sortsBefore: true },
+      { order: "after", sortsBefore: false },
+    ])("with no founding claim among them, records of two accounts still go by digest, the second's sorting $order the first's", async ({ sortsBefore }) => {
+      const w = world();
+      const first = await bindGenesis(w, { relationship: "signs-for" });
+      const { key } = await bindSorted(w, { signer: STRANGER, validFrom: T0, relationship: "signs-for" }, sortsBefore, first);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(sortsBefore ? refusedChain : stands);
+      expect(await w.verdict(key)).toMatchObject(sortsBefore ? stands : refusedChain);
+    });
+  });
+
+  describe("a record a store files under the genesis binding's digest (§7.3)", () => {
+    test("is not the genesis binding for sharing its digest", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      const later = await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T1 });
+      w.records[w.records.indexOf(later)] = { ...later, bindingDigest: genesis.bindingDigest };
+      expect(await w.verdict(STRANGER_KEY)).toMatchObject(refusedChain);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+    });
+
+    test("one honest record a store lists twice is still the genesis binding", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      w.records.push({ ...genesis });
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1 });
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+    });
   });
 
   describe("a record nothing here can verify (§7.5 step 3)", () => {

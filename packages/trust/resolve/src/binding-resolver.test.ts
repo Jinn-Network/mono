@@ -843,6 +843,58 @@ describe("createBindingResolver", () => {
       expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(false);
       expect((await resolver.resolveBinding({ key: KEY_OWNER, agent: AGENT }, at))?.isGenesis).toBe(true);
     });
+
+    it.each([
+      { digests: "sorting first", own: DIGEST_A, other: DIGEST_B },
+      { digests: "sorting second", own: DIGEST_B, other: DIGEST_A },
+    ])("goes by digest across vouchers when no record claims founding, the other voucher's digest $digests", async ({ own, other }) => {
+      const ownDelegate = accountBinding({ relationship: "signs-for", anchors: [{ digest: own }] });
+      const otherDelegate = accountBinding({ key: keyed(KEY_OWNER), relationship: "signs-for", voucher: otherVoucher, anchors: [{ digest: other }] });
+      for (const stored of [
+        [record(ownDelegate, own), record(otherDelegate, other)],
+        [record(otherDelegate, other), record(ownDelegate, own)],
+      ]) {
+        const resolver = createBindingResolver({ bindings: fakeStore(stored), anchors });
+        // eslint-disable-next-line no-await-in-loop -- one stored order, then the other.
+        expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(own === DIGEST_A);
+        // eslint-disable-next-line no-await-in-loop -- see above.
+        expect((await resolver.resolveBinding({ key: KEY_OWNER, agent: AGENT }, at))?.isGenesis).toBe(other === DIGEST_A);
+      }
+    });
+  });
+
+  describe("the record a store files under the genesis's digest", () => {
+    const at = "2026-06-01T00:00:00.000Z";
+    const keyed = (didKey: string) => ({ publicKey: "pk", keyid: didKey, algorithm: "secp256k1", didKey });
+    const LATER_ANCHOR = ("sha256:" + "e".repeat(64)) as Sha256Digest;
+    const anchors = fakeAnchors({ [DIGEST_A]: "2026-01-01T00:00:00.000Z", [LATER_ANCHOR]: "2026-02-01T00:00:00.000Z" });
+    const founder = accountBinding({ anchors: [{ digest: DIGEST_A }] });
+
+    it("is not the genesis for sharing its digest, if it came later under another voucher", async () => {
+      const later = accountBinding({
+        key: keyed(KEY_OWNER),
+        voucher: { kind: "account", did: "did:pkh:eip155:84532:0x2222222222222222222222222222222222222222", contractAccount: false },
+        anchors: [{ digest: LATER_ANCHOR }],
+      });
+      for (const stored of [
+        [record(founder, DIGEST_A), record(later, DIGEST_A)],
+        [record(later, DIGEST_A), record(founder, DIGEST_A)],
+      ]) {
+        const resolver = createBindingResolver({ bindings: fakeStore(stored), anchors });
+        // eslint-disable-next-line no-await-in-loop -- one stored order, then the other.
+        expect((await resolver.resolveBinding({ key: KEY_OWNER, agent: AGENT }, at))?.isGenesis).toBe(false);
+        // eslint-disable-next-line no-await-in-loop -- see above.
+        expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(true);
+      }
+    });
+
+    it("is still the genesis when a store lists one honest record twice", async () => {
+      const resolver = createBindingResolver({
+        bindings: fakeStore([record(founder, DIGEST_A), record({ ...founder }, DIGEST_A)]),
+        anchors,
+      });
+      expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(true);
+    });
   });
 
   describe("revocations of the records that share a key's standing", () => {
