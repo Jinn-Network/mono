@@ -646,6 +646,63 @@ describe.each([
     });
   });
 
+  describe("a tie at the founding instant (§7.3, §7.4a)", () => {
+    const strangerVoucher = accountVoucher(84532, STRANGER.address).did;
+    const vouchedByStranger = (record: SealedKeyBindingRecord) =>
+      record.binding.voucher.kind === "account" && record.binding.voucher.did === strangerVoucher;
+
+    test.each([
+      { order: "before", sortsBefore: true },
+      { order: "after", sortsBefore: false },
+    ])("founding claims of two accounts give no founder, the second's digest sorting $order the first's", async ({ sortsBefore }) => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      const { key } = await bindSorted(w, { signer: STRANGER, validFrom: T0 }, sortsBefore, genesis);
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1 });
+      await w.bind({ key: THIRD_KEY, signer: SECOND_OWNER, validFrom: T1, consentBy: GENESIS_KEY });
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(refusedChain);
+      expect(await w.verdict(key)).toMatchObject(refusedChain);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(refusedChain);
+      expect(await w.verdict(THIRD_KEY)).toMatchObject(refusedChain);
+    });
+
+    test.each([
+      { rival: "its key never signed", signed: (record: SealedKeyBindingRecord) => !vouchedByStranger(record), extra: {} },
+      { rival: "whose ceremony fails", signed: undefined, extra: { withoutCeremonyEvidence: true } },
+    ])("a founding claim of another account $rival still leaves no founder", async ({ signed, extra }) => {
+      const w = new World(requireAnchors, undefined, signed);
+      const genesis = await bindGenesis(w);
+      await bindSorted(w, { signer: STRANGER, validFrom: T0, ...extra }, false, genesis);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(refusedChain);
+    });
+
+    test.each([
+      { order: "before", sortsBefore: true },
+      { order: "after", sortsBefore: false },
+    ])("one account's founding claims still found the IRI, the second's digest sorting $order the first's", async ({ sortsBefore }) => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      const { key } = await bindSorted(w, { signer: OWNER, validFrom: T0 }, sortsBefore, genesis);
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1 });
+      await w.bind({ key: THIRD_KEY, signer: SECOND_OWNER, validFrom: T1, consentBy: GENESIS_KEY });
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+      expect(await w.verdict(key)).toMatchObject(stands);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+      expect(await w.verdict(THIRD_KEY)).toMatchObject(stands);
+    });
+
+    test.each([
+      { order: "before", sortsBefore: true },
+      { order: "after", sortsBefore: false },
+    ])("a record of another account that does not claim founding leaves the founder standing, its digest sorting $order", async ({ sortsBefore }) => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      const { key } = await bindSorted(w, { signer: STRANGER, validFrom: T0, relationship: "signs-for" }, sortsBefore, genesis);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+      expect(await w.verdict(key)).toMatchObject(refusedChain);
+    });
+  });
+
   describe("a record nothing here can verify (§7.5 step 3)", () => {
     const refused = [
       { ceremony: "safe", ceremonyType: "safe" as const },
