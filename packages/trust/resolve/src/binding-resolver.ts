@@ -404,16 +404,21 @@ function claimsFounding(record: SealedKeyBindingRecord): boolean {
 
 /** True only for the founding binding of the Agent IRI (§7.4a): the
  * earliest-effective binding among every binding ever asserted for it, a tie
- * going first to one that claims founding and then by digest. */
+ * going first to one that claims founding and then by digest. A digest is a
+ * value its author can try again for, so it does not choose between the founding
+ * claims of different vouchers: when the records that claim founding at that
+ * instant name more than one voucher, none of them founds the IRI, and nothing
+ * is its genesis. */
 function isGenesisAmong(candidate: EffectiveBinding, allForAgent: readonly EffectiveBinding[]): boolean {
   return allForAgent.every((other) => {
     if (other.record.bindingDigest === candidate.record.bindingDigest) return true;
     const instant = compareTimes(other.effectiveStart, candidate.effectiveStart);
     if (instant !== 0) return instant > 0;
     const founding = Number(claimsFounding(candidate.record)) - Number(claimsFounding(other.record));
-    return founding !== 0
-      ? founding > 0
-      : compareCodeUnitStrings(other.record.bindingDigest, candidate.record.bindingDigest) >= 0;
+    if (founding !== 0) return founding > 0;
+    if (claimsFounding(candidate.record)
+      && !voucherIdentityEquals(candidate.record.binding.voucher, other.record.binding.voucher)) return false;
+    return compareCodeUnitStrings(other.record.bindingDigest, candidate.record.bindingDigest) >= 0;
   });
 }
 
