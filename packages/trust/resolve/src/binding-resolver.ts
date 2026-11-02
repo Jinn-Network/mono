@@ -408,10 +408,12 @@ function claimsFounding(record: SealedKeyBindingRecord): boolean {
  * value its author can try again for, so it does not choose between the founding
  * claims of different vouchers: when the records that claim founding at that
  * instant name more than one voucher, none of them founds the IRI, and nothing
- * is its genesis. */
+ * is its genesis. A store names each row's digest, so a row is weighed against
+ * every other row: sharing a digest with the genesis binding makes nothing the
+ * genesis. */
 function isGenesisAmong(candidate: EffectiveBinding, allForAgent: readonly EffectiveBinding[]): boolean {
   return allForAgent.every((other) => {
-    if (other.record.bindingDigest === candidate.record.bindingDigest) return true;
+    if (other === candidate) return true;
     const instant = compareTimes(other.effectiveStart, candidate.effectiveStart);
     if (instant !== 0) return instant > 0;
     const founding = Number(claimsFounding(candidate.record)) - Number(claimsFounding(other.record));
