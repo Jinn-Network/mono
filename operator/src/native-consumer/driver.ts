@@ -134,6 +134,7 @@ export async function runNativeConsumer(
         bindingResolver: ports.trust.resolverFor({ family: 'observations', purpose: `native:${role}-discovery` }),
         keyCatalog: { candidateKeys: (agent: string) => Promise.resolve([...ports.trust.candidateKeys(agent)]) },
         verifier: ports.trust.rawSignatureVerifier,
+        revocationAuthority: ports.trust,
       });
       const verifier = createProtocolSourceVerifier({
         state, keys: trustAdapter.keys, sigs: trustAdapter.sigs, fresh: trustAdapter.fresh, now,

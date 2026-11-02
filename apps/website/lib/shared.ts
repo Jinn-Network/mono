@@ -23,8 +23,8 @@ export const links = {
   spec: 'https://github.com/Jinn-Network/spec',
   specRelease: 'https://github.com/Jinn-Network/spec/releases/tag/v0.1.0',
   specOpenQuestions: 'https://github.com/Jinn-Network/spec#what-is-not-yet-proven',
-  /** The published checker. */
-  verifier: 'https://www.npmjs.com/package/@colophon-claims/verify',
+  /** Jinn's published checker. */
+  verifier: 'https://www.npmjs.com/package/@jinn-network/verify',
   /**
    * The record of what ran on the parked Base Sepolia network. Every link to
    * it says so in its own words; it is never offered as a live network.

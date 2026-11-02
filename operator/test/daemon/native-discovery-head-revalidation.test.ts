@@ -66,6 +66,8 @@ function didKeyOf(publicKey: KeyObject): string {
 
 const OLD_KEY = didKeyOf(OLD.publicKey);
 const NEW_KEY = didKeyOf(NEW.publicKey);
+const VOUCHER = 'did:pkh:eip155:1:0x5A5A5a5A5a5A5A5a5A5a5a5a5A5a5A5A5a5A5A5a';
+const REVOCATION_ENVELOPE = new TextEncoder().encode('fixture revocation');
 const PUBLIC_KEYS = new Map([[OLD_KEY, OLD.publicKey], [NEW_KEY, NEW.publicKey]]);
 
 function b64(value: Uint8Array): string {
@@ -97,11 +99,11 @@ function oldKeyRevocation(): ResolvedRevocation {
     revocation: {
       protocol: TRUST_REVOCATION_FORMAT,
       target: `sha256:${'c'.repeat(64)}`,
-      revokedBy: OLD_KEY,
+      revokedBy: VOUCHER,
       anchors: [],
       effectiveFrom: OLD_REVOKED_AT,
     },
-    envelopeBytes: new TextEncoder().encode('fixture revocation'),
+    envelopeBytes: REVOCATION_ENVELOPE,
     effectiveTime: OLD_REVOKED_AT,
   };
 }
@@ -112,7 +114,7 @@ function bindingFor(didKey: string, revocations: readonly ResolvedRevocation[]):
       protocol: TRUST_KEY_BINDING_FORMAT,
       agent: AGENT,
       key: { keyid: didKey, didKey, publicKey: didKey, algorithm: 'ed25519' },
-      voucher: { kind: 'account', did: 'did:pkh:eip155:1:0x5A5A5a5A5a5A5A5a5A5a5a5a5A5a5A5A5a5A5A5a', contractAccount: false },
+      voucher: { kind: 'account', did: VOUCHER, contractAccount: false },
       relationship: 'controls',
       scope: [DISCOVERY_SIGNING_SCOPE],
       validFrom: BOUND_FROM,
@@ -142,7 +144,8 @@ function signingTrustAuthority(
   const witnessVerifier: WitnessVerifier = {
     async verify1271Witness() { return { verified: false, reason: 'fixture never verifies' }; },
   };
-  const dsseVerifier: DsseChainVerifier = () => ({ validSignerKeyids: [] });
+  // Only the voucher's revocation of OLD is ever read: the rule needs to see who signed it.
+  const dsseVerifier: DsseChainVerifier = (bytes) => ({ validSignerKeyids: bytes === REVOCATION_ENVELOPE ? [VOUCHER] : [] });
   return {
     bindingResolver,
     dsseVerifier,
@@ -197,6 +200,37 @@ describe('#3470 — production verifyHead over genuinely signed heads', () => {
     const source = productionSource(signingTrustAuthority());
     await expect(source.verifyHead({ source: { agent: AGENT, name: SOURCE_NAME }, head, signature }))
       .resolves.toEqual({ status });
+  });
+});
+
+describe('a revocation of a discovery key, judged by the production wiring (#5144)', () => {
+  const current = headAt('2026-08-02T01:00:00.000Z', '2026-08-03T01:00:00.000Z');
+
+  it('finds a revoker the family resolver does not answer for', async () => {
+    const COLD_KEY = 'did:key:zNativeRequesterCold';
+    const coldEnvelope = new TextEncoder().encode('fixture cold binding');
+    const revocationEnvelope = new TextEncoder().encode('fixture cold revocation');
+    const revokedByCold: ResolvedRevocation = {
+      ...oldKeyRevocation(),
+      revocation: { ...oldKeyRevocation().revocation, revokedBy: COLD_KEY },
+      envelopeBytes: revocationEnvelope,
+    };
+    const answersForDiscoveryKeys: BindingResolver['resolveBinding'] = async (query) => {
+      if (query.key === NEW_KEY) return bindingFor(NEW_KEY, []);
+      return query.key === OLD_KEY ? bindingFor(OLD_KEY, [revokedByCold]) : null;
+    };
+    const cold = bindingFor(COLD_KEY, []);
+    const catalog: BindingResolver['resolveBinding'] = async (query, atTime) => (query.key === COLD_KEY
+      ? { ...cold, binding: { ...cold.binding, scope: ['bindings'] }, envelopeBytes: coldEnvelope }
+      : answersForDiscoveryKeys(query, atTime));
+    const trust: NativeTrustAuthority = {
+      ...signingTrustAuthority(catalog),
+      dsseVerifier: (bytes) => ({ validSignerKeyids: bytes === coldEnvelope || bytes === revocationEnvelope ? [COLD_KEY] : [] }),
+      resolverFor() { return { resolveBinding: answersForDiscoveryKeys }; },
+    };
+    await expect(productionSource(trust).verifyHead({
+      source: { agent: AGENT, name: SOURCE_NAME }, head: current, signature: signHead(current, OLD.privateKey, OLD_KEY),
+    })).resolves.toEqual({ status: 'unauthorized-signer' });
   });
 });
 

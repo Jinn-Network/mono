@@ -116,6 +116,7 @@ jobs:
           cache: yarn
           cache-dependency-path: |
             packages/trust/core/yarn.lock
+            packages/trust/resolve/yarn.lock
             packages/discovery/protocol/yarn.lock
             packages/discovery/testing/yarn.lock
             packages/discovery/serve/yarn.lock
@@ -251,6 +252,11 @@ jobs:
           yarn build
       - name: Build cross-tree portal dependency from source (trust-testing, §7.8)
         working-directory: packages/trust/testing
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Build cross-tree portal dependency from source (trust-resolve, §7.8)
+        working-directory: packages/trust/resolve
         run: |
           yarn install --immutable
           yarn build

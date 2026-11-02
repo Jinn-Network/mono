@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { BindingResolver, BindingResolverQuery, ResolvedBinding } from "@jinn-network/trust-core";
+import type { BindingAuthorityDeps, BindingResolver, BindingResolverQuery, ResolvedBinding } from "@jinn-network/trust-core";
 import {
   DISCOVERY_SIGNING_SCOPE,
   MEDIA_ENTRY,
@@ -64,6 +64,13 @@ function sign(payloadType: string, payloadBytes: Uint8Array, keyid = KEYID) {
     signatures: [{ keyid, sig: encodeBase64(new TextEncoder().encode(`${sha256Hex(pae)}:${keyid}`)) }],
   };
 }
+
+/** These bindings carry no revocations, so nothing here is ever asked who may make one. */
+const revocationAuthority: BindingAuthorityDeps = {
+  bindingResolver: { resolveBinding: async () => null },
+  witnessVerifier: { verify1271Witness: async () => ({ verified: false }) },
+  dsseVerifier: () => ({ validSignerKeyids: [] }),
+};
 
 const verifier: RawSignatureVerifier = {
   async verify(pae, sig, key) {
@@ -178,6 +185,7 @@ function bootConsumer(
       },
     },
     verifier,
+    revocationAuthority,
   });
   return createVerifyDriver({
     trust,

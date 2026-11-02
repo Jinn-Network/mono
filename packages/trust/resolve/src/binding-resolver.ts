@@ -10,6 +10,7 @@ import {
   isCalendarStrictRfc3339,
   recordDigest,
   verifyEoaCeremony,
+  voucherIdentityEquals,
 } from "@jinn-network/trust-core";
 import type {
   AnchorResolver,
@@ -25,6 +26,8 @@ import type {
   ResolvedRevocation,
   Sha256Digest,
 } from "@jinn-network/trust-core";
+
+import { TrustResolveError } from "./errors.js";
 
 // ---------------------------------------------------------------------------
 // §7.3's at-time binding resolution, composed for `BindingResolver`:
@@ -99,15 +102,20 @@ export interface CreateBindingResolverOptions {
   readonly anchors: AnchorResolver;
   /** Needed only to resolve agentId-voucher bindings' composition leg
    * (§7.2). Omit for deployments/tests that never use agentId vouchers --
-   * any agentId-voucher candidate then simply fails to resolve. */
+   * any agentId-voucher candidate then simply fails to resolve. A
+   * `TrustResolveError` with code `INVALID_INPUT` says the registry holds no such
+   * agent, and the leg fails. Any other throw is an outage: it leaves
+   * `resolveBinding` as a throw. */
   readonly chainFacts?: ChainFactResolver;
   /** §7.5 step 3 for the ceremonies nothing in this package can verify:
    * `safe` (the witness leg in `verify.ts` does not tie a witness to this
    * record), `oidc-machine` (anchored JWKS) and `github-human`. A host that
    * can verify them says so here, record by record. Omit it and those
    * bindings simply fail to resolve: `verify.ts` takes a resolved binding as
-   * this resolver's word that its ceremony was checked. A leg that throws
-   * counts as a no, as a failed `ownerOf` read does. */
+   * this resolver's word that its ceremony was checked. A record the leg cannot
+   * read is a `false`, because a store may hold anything. A throw says the leg
+   * could not find out: it is an outage and leaves `resolveBinding` as a throw,
+   * so a caller can tell it from a refusal. */
   readonly verifyHostedCeremony?: (record: SealedKeyBindingRecord) => Promise<boolean>;
   /** §7.1: a binding is DSSE-signed by the key it binds. A record that key
    * never signed does not resolve and cannot win a conflict over the key. It
@@ -267,12 +275,7 @@ async function ceremonyCanBeVerified(
     case "agentId":
       return record.binding.voucher.kind === "agentId";
     default:
-      if (verifyHostedCeremony === undefined) return false;
-      try {
-        return await verifyHostedCeremony(record);
-      } catch {
-        return false;
-      }
+      return verifyHostedCeremony === undefined ? false : verifyHostedCeremony(record);
   }
 }
 
@@ -333,8 +336,9 @@ async function agentIdCompositionHolds(
   let ownerAddress: string;
   try {
     ownerAddress = await chainFacts.ownerOf(voucher.caip19);
-  } catch {
-    return false;
+  } catch (cause) {
+    if (cause instanceof TrustResolveError && cause.code === "INVALID_INPUT") return false;
+    throw cause;
   }
   const ownerDid = didPkhFromAddress(chainId, ownerAddress);
 
@@ -347,6 +351,18 @@ async function agentIdCompositionHolds(
     if (await accountCeremonyVerified(record, options.verifyHostedCeremony)) return true;
   }
   return false;
+}
+
+/** §7.5 step 3 for a record this resolver has in hand, whatever is resolving. */
+async function ceremonyVerified(
+  record: SealedKeyBindingRecord,
+  atTime: string,
+  peers: readonly EffectiveBinding[],
+  options: Pick<CreateBindingResolverOptions, "chainFacts" | "verifyHostedCeremony">,
+): Promise<boolean> {
+  if (!(await ceremonyCanBeVerified(record, options.verifyHostedCeremony))) return false;
+  if (record.binding.ceremony.type === "eoa" && !eoaCeremonyVerified(record)) return false;
+  return agentIdCompositionHolds(record, atTime, peers, options);
 }
 
 /** The order §7.3 ranks an Agent's bindings by: earliest effective start,
@@ -480,17 +496,41 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
         });
       }
 
-      const revocationRecords = await options.bindings.listRevocationsForTargets([winner.record.bindingDigest]);
+      // A revocation ends a key's standing under a voucher, not one spelling of it: whoever
+      // holds a key can seal it again, and the record that wins must not leave a revocation
+      // of the one it replaced behind. Which records one reaches is read at its effective
+      // time, not at `atTime`, so a record ending later lifts nothing, and a record that
+      // first takes effect after it shares nothing, so a voucher can bind the key again once
+      // what it reached has ended.
+      const standing = readable.filter(({ record }) => record.binding.key.didKey === query.key
+        && voucherIdentityEquals(record.binding.voucher, winner.record.binding.voucher)
+        && signedByItsKey(record));
+      const revocationRecords = await options.bindings.listRevocationsForTargets(
+        standing.map(({ record }) => record.bindingDigest),
+      );
       const revocations: ResolvedRevocation[] = [];
       for (const revocationRecord of revocationRecords) {
         if (!isReadableRevocation(revocationRecord)) continue;
         // eslint-disable-next-line no-await-in-loop -- revocation sets are small.
         const effectiveTime = await effectiveTimeOfRevocation(revocationRecord.revocation, options.anchors);
         if (effectiveTime === undefined) continue; // unanchored revocations never take effect
+        // A store may hold one digest in more than one row, so none of this reads a single row.
+        const { target } = revocationRecord.revocation;
+        const named = standing.filter(({ record }) => record.bindingDigest === target);
+        const namedInWindow = named.filter(({ record, effectiveStart }) => isWithinWindow(record.binding, effectiveStart, effectiveTime));
+        if (named.length > 0 && target !== winner.record.bindingDigest && !(
+          namedInWindow.length > 0 && isWithinWindow(winner.record.binding, winner.effectiveStart, effectiveTime)
+        )) continue;
+        const targetScope: string[] = [];
+        for (const { record } of namedInWindow) {
+          // eslint-disable-next-line no-await-in-loop -- revocation sets are small.
+          if (await ceremonyVerified(record, effectiveTime, readable, options)) targetScope.push(...record.binding.scope);
+        }
         revocations.push({
           revocation: revocationRecord.revocation,
           envelopeBytes: revocationRecord.envelopeBytes,
           effectiveTime,
+          ...(targetScope.length > 0 ? { targetScope } : {}),
         });
       }
       revocations.sort((a, b) => compareTimes(a.effectiveTime, b.effectiveTime)

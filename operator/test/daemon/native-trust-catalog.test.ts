@@ -30,6 +30,8 @@ import {
   type NativeFinalizedAnchorReadClient,
   type NativeSettlementOwnershipReadClient,
 } from '../../src/daemon/native-trust-catalog.js';
+import { createTrustAdapter } from '@jinn-network/record-discovery-client';
+import { DISCOVERY_SIGNING_SCOPE } from '@jinn-network/record-discovery-protocol';
 
 const SPKI = Buffer.from('302a300506032b6570032100', 'hex');
 const NOW = '2026-08-02T12:00:00.000Z';
@@ -163,6 +165,8 @@ async function buildCatalog(options: {
   readonly claimedByAnotherSigner?: boolean;
   /** Adds a stranger's record whose ceremony message cannot be read, and its revocation of the binding. */
   readonly strangerWithUnreadableEvidence?: Readonly<Record<string, unknown>>;
+  /** Scopes the binding for discovery signing too, for the adapter a consumer builds over it. */
+  readonly discoverySigning?: boolean;
   readonly forgeBindingEnvelope?: boolean;
   /** Strips the binding envelope's signatures entirely — an UNSIGNED binding, not a forged one. */
   readonly unsignBindingEnvelope?: boolean;
@@ -192,7 +196,7 @@ async function buildCatalog(options: {
     key: { publicKey: working.id, keyid: working.id, algorithm: 'Ed25519', didKey: working.id },
     voucher: { kind: 'account', did: didPkh(84532, ACCOUNT.address), contractAccount: false },
     relationship: 'controls',
-    scope: ['bindings', family],
+    scope: ['bindings', family, ...(options.discoverySigning === true ? [DISCOVERY_SIGNING_SCOPE] : [])],
     validFrom: options.validFrom ?? VALID_FROM,
     ...(options.expiresAt === undefined ? {} : { expiresAt: options.expiresAt }),
     ceremony: {
@@ -639,6 +643,35 @@ describe('family-scoped resolver skip-vs-refuse boundary (#2525)', () => {
  * either could not express or did not catch; PR1's reviewer flagged M7 (dropping the third
  * settlement resource) as caught by nothing in-tree.
  */
+describe('a revocation of a discovery signing key, over the adapter a consumer builds (§7.4b)', () => {
+  /** Built the way `native-discovery-trust.ts` and `native-consumer/driver.ts` build it. */
+  async function discoveryKeys(options: Parameters<typeof buildCatalog>[0]): Promise<readonly string[]> {
+    const fixture = await buildCatalog({ discoverySigning: true, ...options });
+    const trust = await openNativeTrustCatalog({
+      path: fixture.path,
+      expectedPolicyGenesisDigest: fixture.policyGenesisDigest,
+      anchorClient: anchorClient(fixture, []),
+      settlementOwnershipClient: OWNS,
+      now: new Date(NOW),
+    });
+    const adapter = createTrustAdapter({
+      bindingResolver: trust.resolverFor({ family: FAMILY, purpose: ROLE_PURPOSE }),
+      keyCatalog: { candidateKeys: async (agent) => [...trust.candidateKeys(agent)].filter(({ keyid }) => keyid === fixture.key) },
+      verifier: trust.rawSignatureVerifier,
+      revocationAuthority: trust,
+    });
+    return (await adapter.keys.resolve(AGENT, new Date(NOW))).map(({ keyid }) => keyid);
+  }
+
+  it('keeps a key a stranger revoked', async () => {
+    expect(await discoveryKeys({ strangerWithUnreadableEvidence: {} })).toHaveLength(1);
+  });
+
+  it('refuses a key revoked by a key entitled to revoke it', async () => {
+    await expect(discoveryKeys({ revoked: true })).rejects.toThrow(/revoked/u);
+  });
+});
+
 describe('settlement-authority association (§2.3c)', () => {
   async function openSettlement(
     fixture: CatalogFixture,

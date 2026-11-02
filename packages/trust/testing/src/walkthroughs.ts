@@ -154,7 +154,7 @@ export async function runOldVerdictAfterKeyRotationWalkthrough(
       envelopeEffectiveTime: verdictEffectiveTime,
       claimTime: "2028-06-01T00:00:00.000Z", // the 2028 audit
     },
-    { bindingResolver: fakes.bindingResolver },
+    { bindingResolver: fakes.bindingResolver, witnessVerifier: fakes.witnessVerifier, dsseVerifier: fakes.dsseVerifier },
   );
 
   return { verdictOutcome, settlementJoin };
