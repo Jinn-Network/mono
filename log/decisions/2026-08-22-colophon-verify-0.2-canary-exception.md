@@ -139,3 +139,39 @@ core, and cli adds none of its own.
 This does not permit a floating `@canary`, a mixed SHA closure, another
 product or product version, an implicit future exception, or a stable-stack
 claim. `npm publish` remains a human act after the recording change merges.
+
+## Amendment (2026-11-02): check 0.2.2, core 0.1.1 and cli 0.1.1 at bff2fb4
+
+Issue #5120. `@colophon-claims/check` takes its general record checks from
+`@jinn-network/verify` at runtime: DSSE signatures, `did:key`, the RFC 3161
+ports and the anchor evaluator. It therefore releases as 0.2.2, its alias
+`@colophon-claims/verify` as 0.2.3, and `@colophon-claims/core` and
+`@colophon-claims/cli` as 0.1.1, as the maintainer ruled on #5120 on
+2026-10-30. The three receipts live in
+`packages/benchmark-product/product-release-platform-pins.json` under
+decision `operator-authorization-2026-10-30-issue-5120`.
+
+Only `@colophon-claims/check@0.2.2`, `@colophon-claims/core@0.1.1` and
+`@colophon-claims/cli@0.1.1` MAY pin `@jinn-network/*` to the exact
+already-attested platform version
+`0.1.0-canary.sha.bff2fb46a815149690400a628e149a6e915eb337` (Stack npm
+Publish run 41319951303 attempt 1, push to `next`). bff2fb4 is the merge of
+#5146, and its run published every `@jinn-network/*` package the three
+releases install: 38 in all. The three receipts carry one sha. The checker's
+receipt names 18 packages, the 15 of check 0.2.1 plus `verify`,
+`evidence-offer` and `record-discovery-protocol`. The alias declares no
+`@jinn-network/*` dependency, so it carries no receipt. Every earlier
+receipt is unchanged, and the versions it names stay published as they are.
+
+These three receipts record each package's own `latest` dist-tag, as npm
+served it when the receipt was made, in place of one
+`platformLatestVersion` of `0.0.0` for every package. The maintainer
+pointed `@jinn-network/verify`'s `latest` at
+`0.1.0-canary.sha.86fb8cca1b8061911cf1b0ff7e2c612d0215cf95`, so the single
+value would no longer be true. The other packages read `0.0.0`. This record's
+2026-08-22 statement that `latest` remains bootstrap `0.0.0` describes the
+receipts made before this amendment.
+
+This does not permit a floating `@canary`, a mixed SHA closure, another
+product or product version, an implicit future exception, or a stable-stack
+claim. `npm publish` remains a human act after the recording change merges.
