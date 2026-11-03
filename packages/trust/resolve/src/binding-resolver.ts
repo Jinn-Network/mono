@@ -372,23 +372,66 @@ function compareEffective(a: EffectiveBinding, b: EffectiveBinding): number {
     || compareCodeUnitStrings(a.record.bindingDigest, b.record.bindingDigest);
 }
 
+const rowContents = new WeakMap<SealedKeyBindingRecord, string>();
+
+/** What a stored row says, as text that tells apart any two rows a store reads
+ * from JSON: a field that is absent from one that is null, and bytes from a
+ * string. Values JSON cannot hold, which only a caller building rows in memory
+ * can supply, are outside that and may be written out alike. A row that cannot
+ * be written out at all is ranked as saying nothing. */
+function rowContent(record: SealedKeyBindingRecord): string {
+  const known = rowContents.get(record);
+  if (known !== undefined) return known;
+  let content = "";
+  try {
+    content = JSON.stringify(
+      [
+        record.binding,
+        record.envelopeBytes,
+        "ceremonyEvidence" in record ? [record.ceremonyEvidence] : [],
+        "witness" in record ? [record.witness] : [],
+      ],
+      (_key, value: unknown) => {
+        if (value instanceof Uint8Array) return `b${Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+        return typeof value === "string" ? `s${value}` : value;
+      },
+    ) ?? "";
+  } catch {
+    // A row that cannot be written out is ranked as saying nothing.
+  }
+  rowContents.set(record, content);
+  return content;
+}
+
+/** The order a key's candidates are ranked by: §7.3's order, and then, because
+ * a store names each row's digest, rows that tie on instant and digest go by
+ * what they say, a founding claim first and then their content, so that for
+ * rows a store reads from JSON no stored order chooses between them. */
+function compareCandidates(a: EffectiveBinding, b: EffectiveBinding): number {
+  return compareEffective(a, b)
+    || Number(claimsFounding(b.record)) - Number(claimsFounding(a.record))
+    || compareCodeUnitStrings(rowContent(a.record), rowContent(b.record));
+}
+
 /** §7.4a option 1 (self-extension): every `controls`-relationship peer in
  * window when this candidate took effect. `effectiveStart`, not `validFrom`:
  * the minter chooses `validFrom`, and §7.3 is what stops a choice reaching
  * back. All of them are surfaced because the resolver does not judge them:
  * one chosen here would hide the rest. `verify.ts` matches the candidate's
- * voucher and requires the match to stand. */
+ * voucher and requires the match to stand. Each row is weighed on its own, as
+ * in `isGenesisAmong`: only the candidate row itself is passed over. */
 function findIncumbentControls(
   candidate: EffectiveBinding,
   peers: readonly EffectiveBinding[],
 ): IncumbentControl[] {
   return peers
-    .filter(({ record, effectiveStart }) => {
-      if (record.bindingDigest === candidate.record.bindingDigest) return false;
+    .filter((peer) => {
+      if (peer === candidate) return false;
+      const { record, effectiveStart } = peer;
       if (record.binding.relationship !== "controls") return false;
       return isWithinWindow(record.binding, effectiveStart, candidate.effectiveStart);
     })
-    .sort(compareEffective)
+    .sort(compareCandidates)
     .map(({ record }) => ({ key: record.binding.key.didKey, voucher: record.binding.voucher }));
 }
 
@@ -404,16 +447,23 @@ function claimsFounding(record: SealedKeyBindingRecord): boolean {
 
 /** True only for the founding binding of the Agent IRI (§7.4a): the
  * earliest-effective binding among every binding ever asserted for it, a tie
- * going first to one that claims founding and then by digest. */
+ * going first to one that claims founding and then by digest. A digest is a
+ * value its author can try again for, so it does not choose between the founding
+ * claims of different vouchers: when the records that claim founding at that
+ * instant name more than one voucher, none of them founds the IRI, and nothing
+ * is its genesis. A store names each row's digest, so a row is weighed against
+ * every other row: sharing a digest with the genesis binding makes nothing the
+ * genesis. */
 function isGenesisAmong(candidate: EffectiveBinding, allForAgent: readonly EffectiveBinding[]): boolean {
   return allForAgent.every((other) => {
-    if (other.record.bindingDigest === candidate.record.bindingDigest) return true;
+    if (other === candidate) return true;
     const instant = compareTimes(other.effectiveStart, candidate.effectiveStart);
     if (instant !== 0) return instant > 0;
     const founding = Number(claimsFounding(candidate.record)) - Number(claimsFounding(other.record));
-    return founding !== 0
-      ? founding > 0
-      : compareCodeUnitStrings(other.record.bindingDigest, candidate.record.bindingDigest) >= 0;
+    if (founding !== 0) return founding > 0;
+    if (claimsFounding(candidate.record)
+      && !voucherIdentityEquals(candidate.record.binding.voucher, other.record.binding.voucher)) return false;
+    return compareCodeUnitStrings(other.record.bindingDigest, candidate.record.bindingDigest) >= 0;
   });
 }
 
@@ -485,7 +535,7 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
       const verified = withComposition.filter(
         ({ record }) => record.binding.ceremony.type !== "eoa" || eoaCeremonyVerified(record),
       );
-      const winner = [...(verified.length > 0 ? verified : withComposition)].sort(compareEffective)[0]!;
+      const winner = [...(verified.length > 0 ? verified : withComposition)].sort(compareCandidates)[0]!;
       if (withComposition.length > 1 && options.onConflict) {
         options.onConflict({
           key: query.key,
