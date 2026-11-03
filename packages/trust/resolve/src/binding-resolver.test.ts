@@ -937,6 +937,18 @@ describe("createBindingResolver", () => {
       }
       expect(answers[1]).toStrictEqual(answers[0]);
     });
+
+    it.each(["ab", "bab"])("tells bytes from the string %s in what a row carries, in either stored order", async (text) => {
+      const asBytes = { ...record(founder, DIGEST_A), witness: { signature: Uint8Array.of(0xab) } } as unknown as SealedKeyBindingRecord;
+      const asText = { ...record(founder, DIGEST_A), witness: { signature: text } } as unknown as SealedKeyBindingRecord;
+      const answers = [];
+      for (const stored of [[asBytes, asText], [asText, asBytes]]) {
+        const resolver = createBindingResolver({ bindings: fakeStore(stored), anchors });
+        // eslint-disable-next-line no-await-in-loop -- one stored order, then the other.
+        answers.push(await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at));
+      }
+      expect(answers[1]).toStrictEqual(answers[0]);
+    });
   });
 
   describe("revocations of the records that share a key's standing", () => {
