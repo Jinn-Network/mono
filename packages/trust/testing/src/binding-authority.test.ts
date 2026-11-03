@@ -785,6 +785,14 @@ describe.each([
       expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
       expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
     });
+
+    test("rows of one record without ceremony evidence and with it as null give one verdict in every stored order", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      const { ceremonyEvidence: _evidence, ...bare } = genesis;
+      w.records.splice(w.records.indexOf(genesis), 1, bare, { ...bare, ceremonyEvidence: null as unknown as EoaCeremonyEvidence });
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject({ ok: false, reason: "ceremony-verification-failed" });
+    });
   });
 
   describe("a record nothing here can verify (§7.5 step 3)", () => {

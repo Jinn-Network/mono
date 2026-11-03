@@ -926,6 +926,17 @@ describe("createBindingResolver", () => {
       }
       expect(answers[1]).toEqual(answers[0]);
     });
+
+    it("tells a row that carries no ceremony evidence from one that carries it as null, in either stored order", async () => {
+      const withNull = { ...record(founder, DIGEST_A), ceremonyEvidence: null } as unknown as SealedKeyBindingRecord;
+      const answers = [];
+      for (const stored of [[record(founder, DIGEST_A), withNull], [withNull, record(founder, DIGEST_A)]]) {
+        const resolver = createBindingResolver({ bindings: fakeStore(stored), anchors });
+        // eslint-disable-next-line no-await-in-loop -- one stored order, then the other.
+        answers.push(await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at));
+      }
+      expect(answers[1]).toStrictEqual(answers[0]);
+    });
   });
 
   describe("revocations of the records that share a key's standing", () => {
