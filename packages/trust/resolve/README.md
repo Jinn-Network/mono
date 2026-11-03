@@ -28,7 +28,9 @@ not choose between the founding claims of different vouchers: when the records
 that claim founding at that instant name more than one voucher, none of them is
 the genesis binding, and no binding of the IRI has a chain to stand on. Each
 stored row is weighed on its own: a row filed under the genesis binding's digest
-is not the genesis binding for that.
+is not the genesis binding for that. Rows of one key that share an instant and a
+digest are ranked by a founding claim first and then by what they say, never by
+the order a store lists them in.
 
 `recordSignedByItsKey` is required, because this package has no DSSE verifier of
 its own. A record its key never signed does not resolve and cannot win a conflict
