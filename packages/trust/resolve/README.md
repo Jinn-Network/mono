@@ -29,8 +29,10 @@ that claim founding at that instant name more than one voucher, none of them is
 the genesis binding, and no binding of the IRI has a chain to stand on. Each
 stored row is weighed on its own: a row filed under the genesis binding's digest
 is not the genesis binding for that. Rows of one key that share an instant and a
-digest are ranked by a founding claim first and then by what they say, never by
-the order a store lists them in.
+digest are ranked by a founding claim first and then by what they say, so for
+rows a store reads from JSON the order it lists them in never chooses between
+them. Values JSON cannot hold, which only a caller building rows in memory can
+supply, are outside that.
 
 `recordSignedByItsKey` is required, because this package has no DSSE verifier of
 its own. A record its key never signed does not resolve and cannot win a conflict
