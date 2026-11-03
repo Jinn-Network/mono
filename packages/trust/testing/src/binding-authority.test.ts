@@ -776,6 +776,15 @@ describe.each([
       expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
       expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
     });
+
+    test("the founding account's later record filed under that digest still extends from the genesis binding", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      const next = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1 });
+      fileUnder(w, next, genesis);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+    });
   });
 
   describe("a record nothing here can verify (§7.5 step 3)", () => {
