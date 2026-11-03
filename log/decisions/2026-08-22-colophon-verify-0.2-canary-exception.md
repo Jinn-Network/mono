@@ -140,7 +140,7 @@ This does not permit a floating `@canary`, a mixed SHA closure, another
 product or product version, an implicit future exception, or a stable-stack
 claim. `npm publish` remains a human act after the recording change merges.
 
-## Amendment (2026-11-02): check 0.2.2, core 0.1.1 and cli 0.1.1 at bff2fb4
+## Amendment (2026-11-02): check 0.2.2, core 0.1.1 and cli 0.1.1 at f2aa6f3
 
 Issue #5120. `@colophon-claims/check` takes its general record checks from
 `@jinn-network/verify` at runtime: DSSE signatures, `did:key`, the RFC 3161
@@ -154,9 +154,9 @@ decision `operator-authorization-2026-10-30-issue-5120`.
 Only `@colophon-claims/check@0.2.2`, `@colophon-claims/core@0.1.1` and
 `@colophon-claims/cli@0.1.1` MAY pin `@jinn-network/*` to the exact
 already-attested platform version
-`0.1.0-canary.sha.bff2fb46a815149690400a628e149a6e915eb337` (Stack npm
-Publish run 41319951303 attempt 1, push to `next`). bff2fb4 is the merge of
-#5146, and its run published every `@jinn-network/*` package the three
+`0.1.0-canary.sha.f2aa6f30f2c7d7bcfc4c11e1f6b69f3f44c28603` (Stack npm
+Publish run 41639352404 attempt 1, push to `next`). f2aa6f3 is the merge of
+#5158, and its run published every `@jinn-network/*` package the three
 releases install: 38 in all. The three receipts carry one sha. The checker's
 receipt names 18 packages, the 15 of check 0.2.1 plus `verify`,
 `evidence-offer` and `record-discovery-protocol`. The alias declares no
