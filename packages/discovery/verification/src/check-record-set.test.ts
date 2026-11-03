@@ -400,6 +400,18 @@ describe("lifecycle", () => {
         "conflicting-observations",
       ],
       [
+        "an engagement reusing the true (source, id) and sequence, pinning a source that sorts first",
+        [engaged, ...terminals],
+        observation("attempt-engaged", "evt-1", 1, { ...ENGAGED, source: FORGED_SOURCE }),
+        "conflicting-observations",
+      ],
+      [
+        "an engagement reusing the true (source, id) and sequence, pinning a source that sorts last",
+        [engaged, ...terminals],
+        observation("attempt-engaged", "evt-1", 1, { ...ENGAGED, source: "urn:jinn:backend:zzz" }),
+        "conflicting-observations",
+      ],
+      [
         "a forged engagement tied on sequence",
         [engaged, ...terminals],
         observation("attempt-engaged", "evt-0", 1, { ...ENGAGED, source: FORGED_SOURCE }),

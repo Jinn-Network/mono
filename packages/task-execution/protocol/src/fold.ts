@@ -146,10 +146,20 @@ function inFoldOrder(observations: readonly ProtocolObservation[]): FoldEntry[] 
  * Only the fold's own input can refuse it. §10.4 folds the authoritative source's observations, so
  * a producer outside that source contradicting itself is excluded like everything else it says,
  * and cannot take an Attempt's state away from the source that owns it.
+ *
+ * Two `attempt-engaged` that disagree are always inside. The fold reads every engagement to find
+ * the one that pins the source, so it cannot set a pair of them aside without first choosing
+ * between them, and nothing orders one (`source`, `id`) at one `sequence`: whichever pin sorted
+ * first would decide whether the pair was inside, and so whether the fold refused.
  */
 function refuseConflicts(entries: readonly FoldEntry[], authoritativeSource: string | undefined): void {
   const seen = new Set<string>();
+  const engagements = new Set<string>();
   for (const { observation, dedupeKey } of entries) {
+    if (observation.type === "network.jinn.task-execution.attempt-engaged.v1") {
+      if (engagements.has(dedupeKey)) throw new ConflictingObservationError(observation.source, observation.id);
+      engagements.add(dedupeKey);
+    }
     if (authoritativeSource !== undefined && observation.source !== authoritativeSource) continue;
     if (seen.has(dedupeKey)) throw new ConflictingObservationError(observation.source, observation.id);
     seen.add(dedupeKey);
@@ -213,7 +223,8 @@ function findAuthoritativeSource(ordered: readonly ProtocolObservation[]): strin
  * participates in terminal resolution (so it can never raise a false `contradictory`).
  *
  * @throws {ConflictingObservationError} when the authoritative source's log holds two observations
- * sharing a (`source`, `id`) pair that disagree. The result never depends on array order.
+ * sharing a (`source`, `id`) pair that disagree, or when any source's log holds two such
+ * `attempt-engaged`. The result never depends on array order.
  */
 export function foldObservations(
   observations: readonly ProtocolObservation[],

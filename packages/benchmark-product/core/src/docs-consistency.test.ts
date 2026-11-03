@@ -761,12 +761,13 @@ describe("product documentation consistency", () => {
     expect(paragraph).not.toContain("`PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND`");
   });
 
-  it("never tells a reader the published verifier is unpublished", () => {
+  it("never tells a reader a published Colophon package is unpublished", () => {
     // Issue #4126: the product README held `@colophon-claims/verify` behind the same publication
     // hold as `cli` and `core` long after it shipped. The registry is not reachable from a unit
     // test, but the repository's own sealed reader lines are: every claim this tree builds pins a
     // `verify` release, and the publish workflow refuses a version npm has never served. So a
-    // sentence naming `verify` as unpublished contradicts the constants imported here.
+    // sentence naming `verify` as unpublished contradicts the constants imported here. Issue #5123
+    // was the same hold left on `cli`, `core` and `check` after each of them shipped.
     const readme = read(productReadmePath);
     const blocks = readme.split(/\n\s*\n/u);
     const unpublishedClaims = blocks.filter(
@@ -776,21 +777,23 @@ describe("product documentation consistency", () => {
     for (const block of unpublishedClaims) {
       expect(block, block).not.toContain("@colophon-claims/verify");
       expect(block, block).not.toContain("@colophon-claims/check");
+      expect(block, block).not.toContain("@colophon-claims/cli");
+      expect(block, block).not.toContain("@colophon-claims/core");
     }
     // The reader surface the README sends people to is a registry command, so the README has to
-    // say so rather than leaving it under the hold. Live registry (2026-09-26): the working
-    // checker is still `@colophon-claims/verify` `latest` `0.2.1`; `@colophon-claims/check` is a
-    // `0.0.0` name reservation, not a working checker. Pin those registry facts, not in-tree
+    // say so rather than leaving it under the hold. Live registry (2026-11-01):
+    // `@colophon-claims/verify` `latest` is `0.2.2`, the passthrough alias onto
+    // `@colophon-claims/check` `latest` `0.2.1`. Pin those registry facts, not in-tree
     // `check/package.json` or `verify/package.json` versions (#4732).
     expect(readme).toMatch(/`@colophon-claims\/verify` is published/u);
-    expect(readme).not.toMatch(/`@colophon-claims\/check` is published/u);
+    expect(readme).toMatch(/`@colophon-claims\/check` is published/u);
     const publication = blocks.find(
       (block) => /`@colophon-claims\/verify` is published/u.test(block),
     );
     expect(publication, "README publication sentence").toBeTypeOf("string");
     // Matched against the unwrapped sentence: the hard wrap is cosmetic, so a re-flow that lands
     // the newline between the two tokens must not be reported as a version disagreement.
-    expect(publication?.replace(/\s+/gu, " ")).toContain("`latest` `0.2.1`");
+    expect(publication?.replace(/\s+/gu, " ")).toContain("`latest` `0.2.2`");
     const readerCommands = fenceBodies(readme)
       .flatMap((body) => body.split("\n"))
       .map((line) => line.trim())
@@ -1053,10 +1056,10 @@ const sweptMarkdownFiles: readonly string[] = walkFiles(productRoot).filter((pat
  * The documents that may still print `npx @colophon-claims/verify…`, and why each may.
  * `PUBLIC-BUNDLE.md` quotes the per-format lines the published bundles themselves seal -- quoting a
  * sealed byte is not issuing an instruction. The alias package's own README still documents the
- * old name so that command keeps resolving. The product README documents the live registry until a
- * real `@colophon-claims/check` release ships, so it tells strangers to run the name npm actually
- * serves. `EXTERNAL-VERIFICATION.md` is deliberately absent: it issues a fresh instruction to a
- * cold external verifier, so it prints the current name.
+ * old name so that command keeps resolving. The product README's reader line predates the first
+ * `@colophon-claims/check` release and still prints the alias, which npm serves.
+ * `EXTERNAL-VERIFICATION.md` is deliberately absent: it issues a fresh instruction to a cold
+ * external verifier, so it prints the current name.
  */
 const LEGACY_COMMAND_MARKDOWN = ["PUBLIC-BUNDLE.md", "verify/README.md", "README.md"] as const;
 
