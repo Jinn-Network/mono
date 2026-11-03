@@ -374,18 +374,26 @@ function compareEffective(a: EffectiveBinding, b: EffectiveBinding): number {
 
 const rowContents = new WeakMap<SealedKeyBindingRecord, string>();
 
-/** What a stored row says, as text. A row that cannot be written out says
- * nothing that can tell it apart. */
+/** What a stored row says, as text that tells apart any two rows a store reads
+ * from JSON: a field that is absent from one that is null, and bytes from a
+ * string. Values JSON cannot hold, which only a caller building rows in memory
+ * can supply, are outside that and may be written out alike. A row that cannot
+ * be written out at all is ranked as saying nothing. */
 function rowContent(record: SealedKeyBindingRecord): string {
   const known = rowContents.get(record);
   if (known !== undefined) return known;
   let content = "";
   try {
     content = JSON.stringify(
-      [record.binding, record.envelopeBytes, record.ceremonyEvidence ?? null, record.witness ?? null],
+      [
+        record.binding,
+        record.envelopeBytes,
+        "ceremonyEvidence" in record ? [record.ceremonyEvidence] : [],
+        "witness" in record ? [record.witness] : [],
+      ],
       (_key, value: unknown) => {
-        if (value instanceof Uint8Array) return Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("");
-        return typeof value === "bigint" ? `${value}n` : value;
+        if (value instanceof Uint8Array) return `b${Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+        return typeof value === "string" ? `s${value}` : value;
       },
     ) ?? "";
   } catch {
@@ -397,8 +405,8 @@ function rowContent(record: SealedKeyBindingRecord): string {
 
 /** The order a key's candidates are ranked by: §7.3's order, and then, because
  * a store names each row's digest, rows that tie on instant and digest go by
- * what they say, a founding claim first and then their content, so that no
- * stored order can choose between them. */
+ * what they say, a founding claim first and then their content, so that for
+ * rows a store reads from JSON no stored order chooses between them. */
 function compareCandidates(a: EffectiveBinding, b: EffectiveBinding): number {
   return compareEffective(a, b)
     || Number(claimsFounding(b.record)) - Number(claimsFounding(a.record))
