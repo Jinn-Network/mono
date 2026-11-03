@@ -895,6 +895,37 @@ describe("createBindingResolver", () => {
       });
       expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(true);
     });
+
+    it.each([
+      { beside: "a signs-for record", overrides: { relationship: "signs-for" as const } },
+      { beside: "a record that names a consenter", overrides: { consent: { keyid: KEY_A, sig: "c2ln" } } },
+    ])("answers for the genesis key with the founding claim, not $beside filed under its digest, in either stored order", async ({ overrides }) => {
+      const beside = accountBinding({ ...overrides, anchors: [{ digest: DIGEST_A }] });
+      for (const stored of [
+        [record(founder, DIGEST_A), record(beside, DIGEST_A)],
+        [record(beside, DIGEST_A), record(founder, DIGEST_A)],
+      ]) {
+        const resolver = createBindingResolver({ bindings: fakeStore(stored), anchors });
+        // eslint-disable-next-line no-await-in-loop -- one stored order, then the other.
+        const resolved = await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at);
+        expect(resolved?.binding).toEqual(founder);
+        expect(resolved?.isGenesis).toBe(true);
+      }
+    });
+
+    it("answers for a key with the same record, in either stored order, when two rows differ only in what they say", async () => {
+      const narrower = accountBinding({ scope: ["verdicts"], anchors: [{ digest: DIGEST_A }] });
+      const answers = [];
+      for (const stored of [
+        [record(founder, DIGEST_A), record(narrower, DIGEST_A)],
+        [record(narrower, DIGEST_A), record(founder, DIGEST_A)],
+      ]) {
+        const resolver = createBindingResolver({ bindings: fakeStore(stored), anchors });
+        // eslint-disable-next-line no-await-in-loop -- one stored order, then the other.
+        answers.push((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.binding);
+      }
+      expect(answers[1]).toEqual(answers[0]);
+    });
   });
 
   describe("revocations of the records that share a key's standing", () => {

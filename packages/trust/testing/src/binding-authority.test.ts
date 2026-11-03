@@ -13,6 +13,7 @@ import type {
   BindingAuthorityDeps,
   CeremonyType,
   EoaCeremonyEvidence,
+  KeyBinding,
   Relationship,
   Scope,
   Sha256Digest,
@@ -715,20 +716,63 @@ describe.each([
   });
 
   describe("a record a store files under the genesis binding's digest (§7.3)", () => {
+    /** Files `record` under `under`'s digest, as a store that takes digests as given may. */
+    function fileUnder(w: World, record: SealedKeyBindingRecord, under: SealedKeyBindingRecord): void {
+      w.records[w.records.indexOf(record)] = { ...record, bindingDigest: under.bindingDigest };
+    }
+
     test("is not the genesis binding for sharing its digest", async () => {
       const w = world();
       const genesis = await bindGenesis(w);
       const later = await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T1 });
-      w.records[w.records.indexOf(later)] = { ...later, bindingDigest: genesis.bindingDigest };
+      fileUnder(w, later, genesis);
       expect(await w.verdict(STRANGER_KEY)).toMatchObject(refusedChain);
       expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
     });
 
-    test("one honest record a store lists twice is still the genesis binding", async () => {
+    test.each([
+      { claim: "claims founding", extra: {}, genesisVerdict: refusedChain },
+      { claim: "does not claim founding", extra: { relationship: "signs-for" as const }, genesisVerdict: stands },
+    ])("another account's record at the founding instant that $claim gains nothing from it", async ({ extra, genesisVerdict }) => {
       const w = world();
       const genesis = await bindGenesis(w);
-      w.records.push({ ...genesis });
+      const rival = await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T0, ...extra });
+      fileUnder(w, rival, genesis);
+      expect(await w.verdict(STRANGER_KEY)).toMatchObject(refusedChain);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(genesisVerdict);
+    });
+
+    test.each([
+      { second: "a signs-for record", extra: { relationship: "signs-for" as const } },
+      { second: "a record that names a consenter", extra: { consentBy: GENESIS_KEY } },
+    ])("the founder's own $second of the genesis key at that instant leaves it standing, and what extends from it", async ({ extra }) => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      const second = await w.bind({ key: GENESIS_KEY, signer: OWNER, validFrom: T0, ...extra });
+      fileUnder(w, second, genesis);
       await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1 });
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+    });
+
+    test.each([
+      { change: "its relationship", edit: (binding: KeyBinding): KeyBinding => ({ ...binding, relationship: "signs-for" }) },
+      { change: "a consent", edit: (binding: KeyBinding): KeyBinding => ({ ...binding, consent: { keyid: GENESIS_KEY, sig: btoa("kit-dsse-checks-the-declared-keyid") } }) },
+    ])("a copy of the genesis record with $change changed and the same envelope leaves it standing, and what extends from it", async ({ edit }) => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      w.records.push({ ...genesis, binding: edit(genesis.binding) });
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1 });
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+    });
+
+    test.each([2, 3])("one honest record a store lists %i times is still the genesis binding", async (times) => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      for (let copy = 1; copy < times; copy += 1) w.records.push({ ...genesis });
+      const next = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1 });
+      w.records.push({ ...next });
       expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
       expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
     });
