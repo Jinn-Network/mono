@@ -35,7 +35,7 @@ Existing claim bundles retain their recorded verifier pins. Use this 0.2 reader
 for prompted-screening v2 support and the compatible `@0.2` line for this
 release.
 For this release, `@jinn-network/*` is pinned to the exact
-`0.1.0-canary.sha.bff2fb46a815149690400a628e149a6e915eb337` receipt.
+`0.1.0-canary.sha.f2aa6f30f2c7d7bcfc4c11e1f6b69f3f44c28603` receipt.
 It is not a floating `@canary` dependency and is not a stable stack release.
 
 For a `result.format` it does not recognize, `summarizeVerificationOutcome` refuses rather than

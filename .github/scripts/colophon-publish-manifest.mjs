@@ -175,31 +175,31 @@ const PRODUCT_RELEASES = {
     receiptSha256: 'd9963a3d7eb18f5fad4a91bdc2aaab3cf94a2f572744ff92581d44e0db1835ba',
     closure: VERIFY_020_PLATFORM_CLOSURE,
   },
-  // The checker's runtime move to `@jinn-network/verify` (issue #5120), at the canary of #5146's
+  // The checker's runtime move to `@jinn-network/verify` (issue #5120), at the canary of #5158's
   // merge. These receipts record each package's own `latest`: the maintainer pointed
   // `@jinn-network/verify`'s at a canary build.
   '@colophon-claims/core@0.1.1': {
     decision: 'operator-authorization-2026-10-30-issue-5120',
     latestPerPackage: true,
-    platformSourceSha: 'bff2fb46a815149690400a628e149a6e915eb337',
-    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41319951303/attempts/1',
-    receiptSha256: 'cc1dd03377a2b8175c3450039f194b363a63463cb787e0d3f8d6c304ada2eee1',
+    platformSourceSha: 'f2aa6f30f2c7d7bcfc4c11e1f6b69f3f44c28603',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41639352404/attempts/1',
+    receiptSha256: '718001f48001d4311ddd43fb77562d1b0ebd488e5687884a5594a1a56db9be0a',
     closure: CORE_010_PLATFORM_CLOSURE,
   },
   '@colophon-claims/cli@0.1.1': {
     decision: 'operator-authorization-2026-10-30-issue-5120',
     latestPerPackage: true,
-    platformSourceSha: 'bff2fb46a815149690400a628e149a6e915eb337',
-    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41319951303/attempts/1',
-    receiptSha256: 'c94d0d58723dd43fcb73f820f6ad280f8be22dc59f5faac95e77c5e42dabeb34',
+    platformSourceSha: 'f2aa6f30f2c7d7bcfc4c11e1f6b69f3f44c28603',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41639352404/attempts/1',
+    receiptSha256: '21c0ed4fced453d8699a4323d6704de51dcbcd7ebdcee33a09d13cd47a2df83e',
     closure: CLI_010_PLATFORM_CLOSURE,
   },
   '@colophon-claims/check@0.2.2': {
     decision: 'operator-authorization-2026-10-30-issue-5120',
     latestPerPackage: true,
-    platformSourceSha: 'bff2fb46a815149690400a628e149a6e915eb337',
-    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41319951303/attempts/1',
-    receiptSha256: 'f65ba01669a6dbfe5052fc6223413e8b401f1ce77842fc365c8b44aafc0b7692',
+    platformSourceSha: 'f2aa6f30f2c7d7bcfc4c11e1f6b69f3f44c28603',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41639352404/attempts/1',
+    receiptSha256: '67ef705484ce6facb65b8b37e834ffb830cd4799fc544b3e443e69ecb2816cd3',
     closure: CHECK_022_PLATFORM_CLOSURE,
   },
 };

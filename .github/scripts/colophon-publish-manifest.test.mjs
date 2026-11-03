@@ -44,9 +44,9 @@ const CHECK_PIN_SHA = '272455add1170766f064181c105071519a6baf95';
 const CHECK_PIN_VERSION = `0.1.0-canary.sha.${CHECK_PIN_SHA}`;
 const CHECK_PIN_RUN_URL = 'https://github.com/Jinn-Network/mono/actions/runs/38246145514/attempts/1';
 // The platform canary check 0.2.2, core 0.1.1 and cli 0.1.1 release against (issue #5120).
-const RELEASE_PIN_SHA = 'bff2fb46a815149690400a628e149a6e915eb337';
+const RELEASE_PIN_SHA = 'f2aa6f30f2c7d7bcfc4c11e1f6b69f3f44c28603';
 const RELEASE_PIN_VERSION = `0.1.0-canary.sha.${RELEASE_PIN_SHA}`;
-const RELEASE_PIN_RUN_URL = 'https://github.com/Jinn-Network/mono/actions/runs/41319951303/attempts/1';
+const RELEASE_PIN_RUN_URL = 'https://github.com/Jinn-Network/mono/actions/runs/41639352404/attempts/1';
 const RELEASE_DECISION = 'operator-authorization-2026-10-30-issue-5120';
 
 /** The checker, under the name it publishes as today. */
