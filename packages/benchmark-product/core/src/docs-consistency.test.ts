@@ -781,9 +781,9 @@ describe("product documentation consistency", () => {
       expect(block, block).not.toContain("@colophon-claims/core");
     }
     // The reader surface the README sends people to is a registry command, so the README has to
-    // say so rather than leaving it under the hold. Live registry (2026-11-01):
-    // `@colophon-claims/verify` `latest` is `0.2.2`, the passthrough alias onto
-    // `@colophon-claims/check` `latest` `0.2.1`. Pin those registry facts, not in-tree
+    // say so rather than leaving it under the hold. Live registry (2026-11-04):
+    // `@colophon-claims/verify` `latest` is `0.2.3`, the passthrough alias onto
+    // `@colophon-claims/check` `latest` `0.2.2`. Pin those registry facts, not in-tree
     // `check/package.json` or `verify/package.json` versions (#4732).
     expect(readme).toMatch(/`@colophon-claims\/verify` is published/u);
     expect(readme).toMatch(/`@colophon-claims\/check` is published/u);
@@ -793,7 +793,7 @@ describe("product documentation consistency", () => {
     expect(publication, "README publication sentence").toBeTypeOf("string");
     // Matched against the unwrapped sentence: the hard wrap is cosmetic, so a re-flow that lands
     // the newline between the two tokens must not be reported as a version disagreement.
-    expect(publication?.replace(/\s+/gu, " ")).toContain("`latest` `0.2.2`");
+    expect(publication?.replace(/\s+/gu, " ")).toContain("`latest` `0.2.3`");
     const readerCommands = fenceBodies(readme)
       .flatMap((body) => body.split("\n"))
       .map((line) => line.trim())
