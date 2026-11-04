@@ -296,9 +296,8 @@ jobs:
           (cd packages/task-supply/admission && yarn install --immutable && yarn build)
           (cd packages/benchmarking/interop && yarn install --immutable && yarn build)
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
-          # A devDependency of check, never a runtime dependency yet: the equivalence test runs the
-          # checker's own signature and anchor code beside this package (#5120). It needs
-          # task-execution/profiles and evidence/protocol built, so it comes after them.
+          # A runtime dependency of check, for its signature, did:key and anchor checks (#5120). It
+          # needs task-execution/profiles and evidence/protocol built, so it comes after them.
           (cd packages/evidence/offer && yarn install --immutable && yarn build)
           (cd packages/discovery/verification && yarn install --immutable && yarn build)
           (cd packages/evidence/repository && yarn install --immutable && yarn build)

@@ -3,8 +3,6 @@
 The published `colophon` command. A stranger uses it to make a claim, not only to
 check one.
 
-Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
-
 ```sh
 npx @colophon-claims/cli@0.1 --help
 ```
@@ -110,7 +108,7 @@ publication gates. Colophon never copies an ordinary Claude or Codex home as a s
 doctor proves configuration, not provider acceptance.
 
 For this release, `@jinn-network/*` is pinned to the exact
-`0.1.0-canary.sha.272455add1170766f064181c105071519a6baf95` receipt.
+`0.1.0-canary.sha.f2aa6f30f2c7d7bcfc4c11e1f6b69f3f44c28603` receipt.
 It is not a floating `@canary` dependency and is not a stable stack release.
 
 For a received bundle, the smaller reader surface is:
@@ -119,7 +117,7 @@ For a received bundle, the smaller reader surface is:
 npx @colophon-claims/check@0.2 ./bundle
 ```
 
-That line reads the bundle formats through public-bundle/6, and only the claims that pin it.
+That line reads the bundle formats through public-bundle/10, and only the claims that pin it.
 Reader lines are not forward compatible, and a reader that is too old refuses with the same code
 an invalid bundle earns, so before concluding anything from a refusal, read the line the bundle's
 own claim package pins in `verification.command` — the producer named it for that exact bundle.

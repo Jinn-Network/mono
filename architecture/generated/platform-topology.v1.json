@@ -71,6 +71,11 @@
         "to": "@jinn-network/trust-core"
       },
       {
+        "from": "@colophon-claims/check",
+        "kind": "runtime",
+        "to": "@jinn-network/verify"
+      },
+      {
         "from": "@colophon-claims/cli",
         "kind": "runtime",
         "to": "@colophon-claims/check"
@@ -2320,6 +2325,7 @@
           "@jinn-network/task-execution-profiles",
           "@jinn-network/task-execution-protocol",
           "@jinn-network/trust-core",
+          "@jinn-network/verify",
           "zod"
         ]
       },
@@ -2344,7 +2350,7 @@
       "supersedes": [],
       "tier": 4,
       "transition": null,
-      "version": "0.2.1"
+      "version": "0.2.2"
     },
     {
       "boundaryPolicy": {
@@ -2384,7 +2390,7 @@
       "supersedes": [],
       "tier": 4,
       "transition": null,
-      "version": "0.1.0"
+      "version": "0.1.1"
     },
     {
       "boundaryPolicy": {
@@ -2451,7 +2457,7 @@
       "supersedes": [],
       "tier": 4,
       "transition": null,
-      "version": "0.1.0"
+      "version": "0.1.1"
     },
     {
       "boundaryPolicy": {
@@ -2493,7 +2499,7 @@
         "status": "permanent passthrough alias re-released with every checker version",
         "sunsetCondition": "none planned"
       },
-      "version": "0.2.2"
+      "version": "0.2.3"
     },
     {
       "boundaryPolicy": {

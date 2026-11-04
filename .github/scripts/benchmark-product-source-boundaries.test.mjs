@@ -39,11 +39,7 @@ const CHECK_JINN = [
 // fixtures that drive real operations, which no consumer of a published `dist/` may
 // reach, and which several sibling test files share -- so they cannot be named
 // `*.test.ts` without a test runner collecting them.
-//
-// `@jinn-network/verify` is test-only the same way, in `check`, for the equivalence test that
-// compares the checker's own signature and anchor code with it (#5120). When the checker moves to
-// it at runtime, it leaves this list.
-const TEST_ONLY_JINN = ['@jinn-network/trust-testing', '@jinn-network/verify'];
+const TEST_ONLY_JINN = ['@jinn-network/trust-testing'];
 const isTestSource = (file) => /\.test\.[cm]?[jt]sx?$/.test(file) || /(?:^|\/)testing\//.test(file);
 const MEMBER_ALLOWED = new Map([
   ['core', [...CORE_JINN, '@colophon-claims/check']],

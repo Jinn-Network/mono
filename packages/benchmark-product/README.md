@@ -52,8 +52,6 @@ Product `publish` means local immutable bundle emission only.
 
 ## Cold public quickstart
 
-Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
-
 The intended packaged command is:
 
 ```bash
@@ -69,7 +67,7 @@ For a received bundle, the smaller reader surface is:
 npx @colophon-claims/verify@0.2 ./bundle
 ```
 
-That line reads the bundle formats through public-bundle/6, and only the claims
+That line reads the bundle formats through public-bundle/10, and only the claims
 that pin it. Reader lines are not forward compatible, and a reader that is too
 old refuses with the same code an invalid bundle earns, so before concluding
 anything from a refusal, read the line the bundle's own claim package pins in
