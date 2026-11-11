@@ -220,7 +220,7 @@ jobs:
     name: Hermetic gate (deterministic, snapshot)
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # A hung step must not burn the merge queue's check-response budget, and must
     # not hold a runner for the 360-minute default against the plan's concurrent-job
     # ceiling. Observed green runs land around 12 minutes; the ceiling is generous

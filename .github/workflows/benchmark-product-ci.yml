@@ -391,7 +391,7 @@ jobs:
   # those exact distributions before installing or compiling the web package.
   web:
     needs: [architecture, product]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The web package consumes core through a Yarn portal. Preserve the portal path so Node
     # resolves core's transitive portal dependencies from this isolated consumer install rather
     # than from core's source directory (which intentionally has no node_modules in this job).
