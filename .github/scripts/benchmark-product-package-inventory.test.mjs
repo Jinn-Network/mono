@@ -274,6 +274,20 @@ test('the cross-runner distribution artifact retains the private Next runtime wi
   }
 });
 
+// inspect-ai 0.3.255 requires agent-client-protocol>=0.12.0 with no upper bound, and 1.0.0 removed
+// the acp.helpers module it imports at start (issue #5171). Every place that installs the supported
+// Inspect runtime pins the protocol too, so a fresh install cannot resolve a release it does not run on.
+test('every install of the supported Inspect runtime pins agent-client-protocol', () => {
+  const installs = [
+    ['.github/workflows/benchmark-product-ci.yml', /inspect_ai-0\.3\.255-py3-none-any\.whl"? agent-client-protocol==0\.12\.1\b/u],
+    ['packages/benchmark-product/core/src/runtime/inspect/Dockerfile', /inspect-ai==0\.3\.255 \\\n\s*agent-client-protocol==0\.12\.1 \\/u],
+    ['packages/benchmark-product/INSPECT-RUNTIME.md', /`inspect-ai==0\.3\.255` with `agent-client-protocol==0\.12\.1`/u],
+  ];
+  for (const [path, pinned] of installs) {
+    assert.match(readFileSync(join(root, path), 'utf8'), pinned, `${path} must pin agent-client-protocol==0.12.1 beside inspect-ai==0.3.255`);
+  }
+});
+
 test('Colophon and Jinn dependencies and portal resolutions match the approved graph', () => {
   for (const [directory] of PRODUCT_PACKAGES) {
     const manifest = readPackage(directory);
