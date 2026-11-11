@@ -34,13 +34,13 @@ The self-serve source is now split into Colophon-owned Tier 4 packages:
 - `@colophon-claims/check` — the reader checker;
 - `@colophon-claims/web` — private source/build input for the local UI.
 
-`@colophon-claims/verify` is published to npm, `latest` `0.2.2`. The reader
+`@colophon-claims/verify` is published to npm, `latest` `0.2.3`. The reader
 lines below therefore run straight from the registry; nothing has to be checked
 out to verify a received bundle.
 
-`@colophon-claims/cli` is published to npm, `latest` `0.1.0`.
-`@colophon-claims/core` is published to npm, `latest` `0.1.0`.
-`@colophon-claims/check` is published to npm, `latest` `0.2.1`.
+`@colophon-claims/cli` is published to npm, `latest` `0.1.1`.
+`@colophon-claims/core` is published to npm, `latest` `0.1.1`.
+`@colophon-claims/check` is published to npm, `latest` `0.2.2`.
 Demand-gated registry publication is recorded in DR-2026-08-22-a and
 `colophon-npm-publish.yml`; this tree does not publish them on push.
 
