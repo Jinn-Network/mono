@@ -9,7 +9,8 @@ Issue: [#2745](https://github.com/Jinn-Network/mono/issues/2745). Decision:
 
 ## What this proves
 
-A human operator, on a machine with Python 3.11+ and `inspect-ai==0.3.255`,
+A human operator, on a machine with Python 3.11+, `inspect-ai==0.3.255` and
+`agent-client-protocol==0.12.1`,
 drives the **built Colophon CLI** (core `dist/cli/bin.js`, the same advanced
 verb surface as the installable `colophon` command) through select → quote →
 lock → launch → collect → View export against:

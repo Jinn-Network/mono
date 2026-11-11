@@ -9,6 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN python -m pip install \
     inspect-ai==0.3.255 \
+    agent-client-protocol==0.12.1 \
     inspect-evals==0.16.0 \
     openai==2.53.0 \
     && mkdir -p "${TIKTOKEN_CACHE_DIR}" \
