@@ -114,7 +114,7 @@ the exact line the producer named. The table in
 [Portable verification](#portable-verification) is the same mapping keyed by
 format, for a reader who has only `bundle.json`.
 
-Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
+Installing or running a Colophon package needs Node 22 or newer, with the npm that comes with it. If an `npm` or `npx` command stops with `Cannot read properties of null (reading 'edgesOut')`, run `npm install -g npm@11` and run it again.
 
 Verify a version 2 bundle with:
 
@@ -878,7 +878,7 @@ every closure. Use the table below when you cannot reach the claim package and h
 `bundle.json`. Each section above states the same thing in place, with the anchored form spelled
 out where it applies.
 
-Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
+Installing or running a Colophon package needs Node 22 or newer, with the npm that comes with it. If an `npm` or `npx` command stops with `Cannot read properties of null (reading 'edgesOut')`, run `npm install -g npm@11` and run it again.
 
 | `bundle.json` format | Pinned line | Compatible line | Checks | Anchor flags |
 | --- | --- | --- | --- | --- |

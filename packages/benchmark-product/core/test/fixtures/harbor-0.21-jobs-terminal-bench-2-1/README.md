@@ -1,15 +1,16 @@
 # Harbor 0.21.0 jobs directories, Terminal-Bench 2.1
 
-Two real jobs directories written by Harbor 0.21.0, each pruned to a few tasks by two arms. Each
-is what `run import --from harbor <jobs-dir>` is given after a claimant has run the official
+Three real jobs directories written by Harbor 0.21.0, each pruned to a few tasks. Each is what
+`run import --from harbor <jobs-dir>` is given after a claimant has run the official
 Terminal-Bench 2.1 slate themselves.
 
 | Directory | Tasks | Trials per task | Read by |
 | --- | --- | --- | --- |
 | `jobs/` | 3 | 1 | `src/intake/harbor-run-records.test.ts`, `src/conformance/claimant-path.terminal-bench-2-1.test.ts`, `src/conformance/zero-judged-arm.test.ts`, `src/cli/official-slate-run-plan.test.ts`, `src/cli/results-zero-judged.test.ts` |
 | `jobs-two-attempts/` | 2 | 2 | `src/intake/harbor-run-records.test.ts` |
+| `jobs-resumed/` | 3, `oracle` only | 1 | `src/intake/harbor-run-records.test.ts` |
 
-These two records are also the list of Harbor versions the reader accepts. `--from harbor` reads
+These records are also the list of Harbor versions the reader accepts. `--from harbor` reads
 a job only when its `lock.json` states a version that a record here states, and a test holds the
 two lists equal. To accept another Harbor version, add a real jobs directory written by it.
 
@@ -62,6 +63,42 @@ What the record shows:
 **The scores in this record are not a result either.** Harbor ran in a linux/amd64 container
 under emulation on an Apple-silicon host.
 
+## Where `jobs-resumed/` came from
+
+A run on 2026-11-11, made to see what Harbor 0.21.0 leaves after a job is interrupted and then
+resumed (issue #5175). One `oracle` job of three tasks ran one trial at a time:
+
+```
+harbor run -d 'terminal-bench/terminal-bench-2-1@sha256:7d7bdc1cbedad549fc1140404bd4dc45e5fd0ea7c4186773687d177ad3a0699a' \
+  -a oracle --n-attempts 1 --max-retries 0 --n-concurrent 1 -o jobs --job-name oracle \
+  -i terminal-bench/cancel-async-tasks -i terminal-bench/circuit-fibsqrt -i terminal-bench/adaptive-rejection-sampler
+```
+
+It was stopped with SIGINT while its second trial was running. At that point `circuit-fibsqrt`
+had finished with a reward of 1.0, `adaptive-rejection-sampler` had ended in `CancelledError`
+with no reward, and `cancel-async-tasks` had not started. The job was then resumed:
+
+```
+harbor job resume -p jobs/oracle -f CancelledError
+```
+
+What the record shows:
+
+- Harbor deleted the cancelled trial directory (`adaptive-rejection-sampler__RnVYZnr`) and ran
+  that task again in a new one, then ran `cancel-async-tasks`. The finished `circuit-fibsqrt`
+  trial was kept as it was. The job holds one trial directory for each task, each with a reward.
+- `-f CancelledError` is the default of `harbor job resume` in 0.21.0, though its `--help` does not
+  show it. A second resume of a copy of the interrupted job, run without `-f`, removed the
+  cancelled trial directory the same way.
+- The job `lock.json` states Harbor 0.21.0 and `retry.max_retries` as 0, and the job
+  `result.json` states 3 completed trials and `stats.n_retries` as 0. Nothing in the job says a
+  trial was cancelled and run again.
+
+There is no `terminus-2` job in this record. The resume made no model call.
+
+**The scores in this record are not a result.** Harbor ran in a linux/amd64 container under
+emulation on an Apple-silicon host.
+
 ## What is kept
 
 - Per job (`oracle`, `terminus-2`): `config.json`, `lock.json` and `result.json`, byte for byte.
@@ -75,6 +112,8 @@ under emulation on an Apple-silicon host.
 - In `jobs-two-attempts/` the two tasks are `adaptive-rejection-sampler` and
   `cancel-async-tasks`, with both trial directories of each. Nothing was dropped from the
   original job but the files listed below.
+- In `jobs-resumed/` the three tasks are `adaptive-rejection-sampler`, `cancel-async-tasks` and
+  `circuit-fibsqrt`, the whole job.
 
 ## What is removed
 
@@ -96,6 +135,7 @@ writes:
 ```
 node prune.mjs jobs <source-jobs-dir>
 node prune.mjs jobs-two-attempts <source-jobs-dir>
+node prune.mjs jobs-resumed <source-jobs-dir>
 ```
 
 It refuses to finish if anything it wrote holds a non-empty `env`, `kwargs`, `mcp_servers` or

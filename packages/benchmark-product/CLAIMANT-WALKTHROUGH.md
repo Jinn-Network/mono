@@ -23,7 +23,7 @@ The two `harbor run` commands were not run again for this document. Harbor 0.21.
 
 ## What you need
 
-- Node 22 or newer. Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
+- Node 22 or newer, with the npm that comes with it. Node 22's npm 10 is enough. If an `npm` or `npx` command stops with `Cannot read properties of null (reading 'edgesOut')`, run `npm install -g npm@11` and run the command again.
 - Linux x64 or Apple-silicon macOS. `quote` is a required step and is known to run on those two. On any other platform, Linux arm64 included, it stops before it reads or creates anything and names the platform it found and the two it supports.
 - Docker. Harbor runs each task in a container.
 - The Docker daemon running, and the `docker compose` command. Harbor stops at once if the daemon is down, and it starts each task with `docker compose`.
@@ -301,6 +301,16 @@ harbor run -d 'terminal-bench/terminal-bench-2-1@sha256:7d7bdc1cbedad549fc114040
 
 When both jobs finish, you have `./jobs/terminus-2` and `./jobs/oracle`. Do not edit anything in them.
 
+**If a job stops before it finishes.** A Ctrl-C, a full disk, a sleeping laptop or a lost network can stop Harbor partway. The trials that were running end with `CancelledError` and no reward, and the tasks that had not started have no trial yet. Resume the job with Harbor, removing the cancelled trials:
+
+```sh
+harbor job resume -p jobs/oracle -f CancelledError
+```
+
+Use the job's own directory, `jobs/terminus-2` or `jobs/oracle`. Harbor deletes each trial directory that ended in `CancelledError`, then runs those tasks and the ones that had not started. Harbor 0.21.0 does the same when you leave out `-f`, though its `--help` does not say so. Resuming is running Harbor, not editing its output, and `run import` accepts the resumed job. Every trial must still end before the close time. The bundle does not show that a trial was cancelled and run again.
+
+Do not start a second job for the same arm under another name. `run import` refuses a task with more trials than replicates.
+
 ## 10. `run import`: bring the run in
 
 ```sh
@@ -371,9 +381,7 @@ Next to the address, state the Run digest and the timestamp authority you used.
 
 ## Check it from a second machine
 
-The reader needs Node 22, the npm stated below and the address. No account, no workspace and no Harbor.
-
-Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
+The reader needs Node 22 or newer, with the npm that comes with it, and the address. No account, no workspace and no Harbor. If an `npx` command stops with `Cannot read properties of null (reading 'edgesOut')`, run `npm install -g npm@11` and run it again.
 
 `bundle.json` lists every file of the bundle. The reader fetches it, then each file it lists. Here the bundle is hosted at `https://example.org/tb21`.
 
@@ -522,15 +530,22 @@ The page names neither Harbor's version nor the timestamp authority. `claim-pack
 
 Everything in the bundle directory is public once you host it. Nothing is redacted.
 
-The bundle holds the sealed method, the records of every cell, the signed report, the claim, the anchor record, the import record `external-import.json`, and the report page. It also holds the evidence files of every graded or ungradeable trial, byte for byte as Harbor wrote them. For each such trial, where the file exists:
+The bundle holds the sealed method, the records of every cell, the signed report, the claim, the anchor record, the import record `external-import.json`, and the report page. It also holds the evidence files of every graded or ungradeable trial, byte for byte as Harbor wrote them. For each such trial, where the file exists, these are the files and the names the bundle gives them:
 
-- `result.json` and `config.json`;
-- `verifier/reward.txt`, `verifier/reward.json` and `reward.json`;
-- `artifacts/prediction.json`;
-- `agent/trajectory.json`, the agent's trajectory;
-- `agent/recording.cast`, the terminal recording.
+| In the Harbor trial directory | Name in the bundle |
+| --- | --- |
+| `result.json` | `trial-result.json` |
+| `config.json` | `trial-config.json` |
+| `verifier/reward.txt` | `reward.txt` |
+| `verifier/reward.json` | `reward.json` |
+| `reward.json` | `reward-root.json` |
+| `artifacts/prediction.json` | `prediction.json` |
+| `agent/recording.cast`, the terminal recording | `recording.cast` |
+| `agent/trajectory.json`, the agent's trajectory | `trajectory.json` |
 
-Read them before you publish. A trial's `result.json` holds the path of the trial directory on your machine and, for a trial that raised an error, a stack trace. A trajectory holds the task instruction as the agent saw it and everything the agent then read and wrote.
+No file in the bundle has these names. Each is stored by its content, as `records/<sha256>.bin`. The bundle's `README.md` lists each trial's files under its task and arm, in the order of the table, without the ones the trial does not have. The names are in the cell's delivery record. `matrix.json` gives each cell's arm and its `delivery`, written `sha256:<digest>`. The delivery record is `records/<digest>.bin`, and its `outputs` give each file's name and digest.
+
+Read them before you publish. They are the same bytes as the files in your `jobs` directory, so that is the easiest place to read them. A trial's `result.json` holds the path of the trial directory on your machine and, for a trial that raised an error, a stack trace. A trajectory holds the task instruction as the agent saw it and everything the agent then read and wrote.
 
 A slot that was not delivered carries no evidence file. The slot and its reason are in `external-import.json`.
 
@@ -543,6 +558,6 @@ A slot that was not delivered carries no evidence file. The slot and its reason 
 - **Harbor 0.21.0 only, retries off.** A job from another version, or one that allowed retries, is refused by name.
 - **Evidence caps.** One evidence file may be at most 8 MiB. All evidence of a run together is capped at 4 MiB for each planned cell, or at 64 MiB when that is more. A run may have at most 10,000 cells.
 - **One rate for each arm.** A run on this slate reports each arm's pass rate with its interval. It states no comparison between the arms and no winner.
-- **Platforms.** The claimant commands need Linux x64 or Apple-silicon macOS, because `quote` does. The checker needs only Node 22 and the npm stated above.
+- **Platforms.** The claimant commands need Linux x64 or Apple-silicon macOS, because `quote` does. The checker needs only Node 22 or newer.
 
 [`EXTERNAL-RUN-IMPORT.md`](EXTERNAL-RUN-IMPORT.md) has the full rules of the Harbor reader. [`PUBLIC-BUNDLE.md`](PUBLIC-BUNDLE.md) describes the bundle format.
