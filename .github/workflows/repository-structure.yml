@@ -123,6 +123,10 @@ jobs:
       # Six lanes were pinned one failure at a time; this finds the next one before it runs (#5104).
       - name: Every job that installs packed packages pins npm 11.19.0 or newer
         run: node --test .github/scripts/workflow-npm-pin.test.mjs
+      # Repository-wide as well: `ubuntu-latest` moved to Ubuntu 26.04, where the Playwright in
+      # this tree cannot install Chromium, and the move reached runners one at a time (#5173).
+      - name: Every job that installs a Playwright browser runs on ubuntu-24.04
+        run: node --test .github/scripts/workflow-playwright-runner.test.mjs
   identifier-origin:
     name: Identifier origin tripwire
     needs: changes

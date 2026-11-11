@@ -43,7 +43,8 @@ compatibility and regression path.
 
 The supported first slice is deliberately narrow:
 
-- `inspect-ai==0.3.255` under Python 3.11 or newer;
+- `inspect-ai==0.3.255` with `agent-client-protocol==0.12.1`, under Python 3.11
+  or newer (Inspect 0.3.255 does not start with `agent-client-protocol` 1.0.0);
 - one real task reference resolving to exactly one task, either
   `path/to/file.py@task_name` in an existing project or a registered task from
   an installed evaluation package;
