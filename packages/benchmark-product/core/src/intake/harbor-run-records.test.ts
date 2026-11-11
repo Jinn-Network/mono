@@ -336,13 +336,17 @@ describe("readHarborRunRecords — Harbor 0.21 jobs and trials", () => {
 /**
  * The real Harbor 0.21.0 jobs directories (#4937). `jobs` is three official Terminal-Bench 2.1
  * tasks by two arms, one trial each. `jobs-two-attempts` is two of those tasks by the same arms,
- * two attempts each. See the fixture README for where each came from and what was removed.
+ * two attempts each. `jobs-resumed` is one oracle job of three tasks that was interrupted and then
+ * resumed with `harbor job resume -f CancelledError`. See the fixture README for where each came
+ * from and what was removed.
  */
 const FIXTURES = fileURLToPath(new URL("../../test/fixtures", import.meta.url));
 const REAL_JOBS = join(FIXTURES, "harbor-0.21-jobs-terminal-bench-2-1", "jobs");
 const TWO_ATTEMPT_JOBS = join(FIXTURES, "harbor-0.21-jobs-terminal-bench-2-1", "jobs-two-attempts");
 const REAL_TASKS = ["adaptive-rejection-sampler", "cancel-async-tasks", "chess-best-move"] as const;
 const TWO_ATTEMPT_TASKS = ["adaptive-rejection-sampler", "cancel-async-tasks"] as const;
+const RESUMED_JOBS = join(FIXTURES, "harbor-0.21-jobs-terminal-bench-2-1", "jobs-resumed");
+const RESUMED_TASKS = ["adaptive-rejection-sampler", "cancel-async-tasks", "circuit-fibsqrt"] as const;
 const REAL_MODEL = "openrouter/deepseek/deepseek-v4.1-flash";
 /** The one measurement an official Task's `external-verifier` EvaluationSpec declares. */
 const REWARD = [{ name: "reward", type: "number", required: true }] as const;
@@ -977,6 +981,41 @@ describe("readHarborRunImport — the official Terminal-Bench 2.1 slate", () => 
       if (imported.ok) throw new Error("expected the import to be refused");
       expect(imported.error.issues!.map((issue) => issue.path)).toEqual(Array.from({ length: 4 }, () => "unknown-slot"));
       expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+    });
+  });
+
+  describe("an interrupted job resumed by Harbor (the real jobs-resumed record, #5175)", () => {
+    /** The job started at 15:55:44Z on 2026-11-11 and the resume finished at 16:01:05Z. */
+    const LOCKED_AT = "2026-11-11T15:50:00.000Z";
+    const IMPORTED_AT = "2026-11-11T16:30:00.000Z";
+
+    test("resume -f CancelledError leaves one finished trial for each task, and the import takes the job", async () => {
+      await lockedOfficialSlate({ tasks: RESUMED_TASKS, lockedAt: LOCKED_AT });
+      const dump = readHarborRunImport({ workspaceDir, draftId: "draft-1", jobsDir: RESUMED_JOBS });
+      expect(dump.source).toEqual({ harness: "harbor", version: "0.21.0" });
+      // Harbor removed the cancelled trial and ran its task again. The record holds no trial
+      // for the agent arm, so that arm's slots are not delivered.
+      expect(byCell(dump, (record) => record.outcome)).toEqual({
+        "oracle: adaptive-rejection-sampler #1": "graded",
+        "oracle: cancel-async-tasks #1": "graded",
+        "oracle: circuit-fibsqrt #1": "graded",
+        "deepseek-flash: adaptive-rejection-sampler #1": "unrun",
+        "deepseek-flash: cancel-async-tasks #1": "unrun",
+        "deepseek-flash: circuit-fibsqrt #1": "unrun",
+      });
+      const imported = await importRunRecords(context(IMPORTED_AT), {
+        draftId: "draft-1",
+        records: dump.records,
+        source: dump.source,
+        evidenceRoot: dump.evidenceRoot,
+        namedReader: "harbor",
+        maxAggregateEvidenceBytes: dump.maxAggregateEvidenceBytes,
+      });
+      expect(imported).toMatchObject({
+        ok: true,
+        result: { importedCellCount: 6, written: { graded: 3, ungradeable: 0, notDelivered: 3 } },
+      });
+      expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("running");
     });
   });
 

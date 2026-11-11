@@ -12,7 +12,7 @@ dependency-free `scripts/external-verify.py` ship in the checker's tarball, not 
 `did:key` and anchor checks inside it come from
 [`@jinn-network/verify`](https://github.com/Jinn-Network/mono/blob/next/packages/discovery/verification/README.md).
 
-Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
+Installing or running a Colophon package needs Node 22 or newer, with the npm that comes with it. If an `npm` or `npx` command stops with `Cannot read properties of null (reading 'edgesOut')`, run `npm install -g npm@11` and run it again.
 
 The name stays published permanently. Bundles sealed before the rename print their reader command
 with this name, and a sealed instruction that stops resolving is a broken claim, so:
