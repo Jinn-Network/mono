@@ -101,7 +101,7 @@ emulation on an Apple-silicon host.
 
 ## What is kept
 
-- Per job (`oracle`, `terminus-2`): `config.json`, `lock.json` and `result.json`, byte for byte.
+- Per job: `config.json`, `lock.json` and `result.json`, byte for byte.
   In `jobs/` they still describe all ten trials of the original job. Note that the `oracle` job
   `config.json` has no `agents` key: Harbor omits its default agent.
 - Per kept trial: `config.json` and `verifier/reward.txt` byte for byte, and `result.json` with two
@@ -128,7 +128,7 @@ emulation on an Apple-silicon host.
 
 ## The prune script
 
-`prune.mjs` produced each record from the directory Harbor wrote and is the only way either
+`prune.mjs` produced each record from the directory Harbor wrote and is the only way any of them
 should be regenerated. Its first argument names the record, which is also the directory it
 writes:
 

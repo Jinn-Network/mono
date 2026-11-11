@@ -301,13 +301,15 @@ harbor run -d 'terminal-bench/terminal-bench-2-1@sha256:7d7bdc1cbedad549fc114040
 
 When both jobs finish, you have `./jobs/terminus-2` and `./jobs/oracle`. Do not edit anything in them.
 
-**If a job stops before it finishes.** A Ctrl-C, a full disk, a sleeping laptop or a lost network can stop Harbor partway. The trials that were running end with `CancelledError` and no reward, and the tasks that had not started have no trial yet. Resume the job with Harbor, removing the cancelled trials:
+**If a job stops before it finishes.** A Ctrl-C, a `kill` or a shutdown stops Harbor partway. The trials that were running end with `CancelledError` and no reward, and the tasks that had not started have no trial yet. Resume the job with Harbor, removing the cancelled trials:
 
 ```sh
 harbor job resume -p jobs/oracle -f CancelledError
 ```
 
-Use the job's own directory, `jobs/terminus-2` or `jobs/oracle`. Harbor deletes each trial directory that ended in `CancelledError`, then runs those tasks and the ones that had not started. Harbor 0.21.0 does the same when you leave out `-f`, though its `--help` does not say so. Resuming is running Harbor, not editing its output, and `run import` accepts the resumed job. Every trial must still end before the close time. The bundle does not show that a trial was cancelled and run again.
+Run it from the directory you ran `harbor run` in, and use the job's own directory, `jobs/terminus-2` or `jobs/oracle`. Harbor deletes each trial directory that ended in `CancelledError`, then runs those tasks and the ones that had not started. Harbor 0.21.0 does the same when you leave out `-f`, though its `--help` does not say so. Resuming is running Harbor, not editing its output, and `run import` accepts the resumed job. Every trial must still end before the close time. The bundle does not show that a trial was cancelled and run again.
+
+A trial that ended in any other error, such as a lost network or a full disk, is a result, not a cancellation. Resuming does not run it again, and `run import` records its slot as not delivered.
 
 Do not start a second job for the same arm under another name. `run import` refuses a task with more trials than replicates.
 
@@ -530,9 +532,9 @@ The page names neither Harbor's version nor the timestamp authority. `claim-pack
 
 Everything in the bundle directory is public once you host it. Nothing is redacted.
 
-The bundle holds the sealed method, the records of every cell, the signed report, the claim, the anchor record, the import record `external-import.json`, and the report page. It also holds the evidence files of every graded or ungradeable trial, byte for byte as Harbor wrote them. For each such trial, where the file exists, these are the files and the names the bundle gives them:
+The bundle holds the sealed method, the records of every cell, the signed report, the claim, the anchor record, the import record `external-import.json`, and the report page. It also holds the evidence files of every graded or ungradeable trial, byte for byte as Harbor wrote them. For each such trial, where the file exists, these are the files and the names the bundle gives them in the delivery record:
 
-| In the Harbor trial directory | Name in the bundle |
+| In the Harbor trial directory | Name in the delivery record |
 | --- | --- |
 | `result.json` | `trial-result.json` |
 | `config.json` | `trial-config.json` |

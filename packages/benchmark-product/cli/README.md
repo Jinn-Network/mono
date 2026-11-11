@@ -63,7 +63,9 @@ A draft needs at least two arms. A claimant with one agent adds Harbor's
 `quote` is a required step, and it is known to run on Ubuntu x64 and
 Apple-silicon macOS arm64. So the claimant verbs need one of those two
 platforms, the same two the sample is qualified on. Checking a bundle needs only
-Node 22 or newer, with the npm that comes with it.
+Node 22 or newer, with the npm that comes with it. If an `npm` or `npx` command
+stops with `Cannot read properties of null (reading 'edgesOut')`, run
+`npm install -g npm@11` and run it again.
 
 ## Service venue verbs
 
