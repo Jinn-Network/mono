@@ -32,7 +32,9 @@ export const BUNDLE_V3_FORMAT = "benchmark-product-public-bundle/3" as const;
  * exactly when its run is anchored, projects a binary qualification, AND has a sealed
  * disclosure-specification declaration. Every other bundle keeps the version it already had, byte
  * for byte. This constant is a SECOND, independent copy of the verifier's own -- both must carry it
- * or the producer cannot emit what the verifier accepts.
+ * or the producer cannot emit what the verifier accepts. The rule scopes to formats core emits;
+ * a format core only classifies in the verifier's output (`/5` in `operations/publish.ts`) is
+ * imported from `@colophon-claims/check` instead.
  */
 export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
 /**
@@ -41,7 +43,8 @@ export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
  * about the closure is derived from that vector by the registry in `@colophon-claims/check`. It
  * renders the report page the four report-prose rulings direct (issue #4191). A SECOND,
  * independent copy of the verifier's own constant, for the same reason `/8`'s is -- both packages
- * must carry it or the producer cannot emit what the verifier accepts.
+ * must carry it or the producer cannot emit what the verifier accepts. Like `/8`, the rule scopes
+ * to formats core emits, not to formats it only reads back from the verifier.
  *
  * **New bundles emit it by default** (issue #3405, D1 clean cutover). `report` omitted or
  * `composedFormat: true` seals the composed claim; `composedFormat: false` is the rollback onto

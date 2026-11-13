@@ -1,5 +1,9 @@
 import { existsSync, rmSync, rmdirSync } from "node:fs";
 import { join } from "node:path";
+// `/5` is a format the verifier classifies and core never emits, so core keeps no copy of it: the
+// refusal sites below compare `verified.format`, which `verifyPublicBundle` returns typed by the
+// check package. Contrast `BUNDLE_V8_FORMAT` and `BUNDLE_V10_FORMAT` in `../bundle/manifest.js`,
+// which core emits and so must carry as independent copies.
 import { BUNDLE_V5_FORMAT } from "@colophon-claims/check";
 import type { DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
