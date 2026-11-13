@@ -29,6 +29,6 @@ describe("public entry", () => {
     // `export type { SupportedBundleFormat }` over a local alias is exactly the evasion this
     // pin exists to catch.
     const index = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
-    expect(index).toMatch(/export type \{[^}]*SupportedBundleFormat[^}]*\} from "/);
+    expect(index).toMatch(/export (?:type )?\{[^}]*(?:type )?SupportedBundleFormat[^}]*\} from "/);
   });
 });
