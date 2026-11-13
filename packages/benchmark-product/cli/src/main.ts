@@ -22,7 +22,7 @@ import {
   type ColophonBuildMetadata,
   type RuntimeTarget,
 } from "./build-metadata.js";
-import { firstCommand, usesPrimaryWrapperHelp } from "./help-routing.js";
+import { firstCommand, usesPrimaryWrapperHelp, verbOf } from "./help-routing.js";
 
 export const USAGE = `Colophon — Publish benchmark claims people can check.
 
@@ -405,7 +405,7 @@ export async function runColophonCli(argv: readonly string[], context: ColophonC
     // from the local backend's native helper while `demo` named the platform and the supported
     // targets. Say what `demo` says, before anything is read or created. Help names no platform,
     // so it stays readable everywhere.
-    if (argv[0] === "quote" && !argv.includes("--help")) {
+    if (verbOf(argv) === "quote" && !argv.includes("--help")) {
       assertQualifiedRuntime(context.buildMetadata ?? readPackagedBuildMetadata(), context.runtimeTarget);
     }
     if (argv[0] === "help") {

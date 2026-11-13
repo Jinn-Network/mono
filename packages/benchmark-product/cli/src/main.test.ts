@@ -233,6 +233,38 @@ describe("Colophon install surface", () => {
       expect(body.error.detail).toContain("Supported targets: darwin/arm64, linux/x64");
     });
 
+    // Issue #5046: the refusal keyed on argv[0], so any flag before the verb skipped it and sent
+    // `quote` to the native helper. Core accepts flags and the verb in either order.
+    test("refuses the same way when a flag comes before the verb", async () => {
+      const rest = ["--workspace", "ws", "--principal", "me", "--draft", "draft-1"];
+      const flagFirst = [
+        ["--json", "quote", ...rest],
+        ["--workspace", "ws", "quote", "--principal", "me", "--draft", "draft-1"],
+        ["--principal=me", "quote", "--workspace", "ws", "--draft", "draft-1"],
+      ];
+      for (const flagged of flagFirst) {
+        const { cwd, context: target } = onTarget(unqualified);
+        const answer = await runColophonCli(flagged, target);
+        const shown = flagged.join(" ");
+        expect(answer.exitCode, shown).toBe(1);
+        expect(`${answer.stdout}${answer.stderr}`, shown).toContain("not qualified for linux/arm64");
+        expect(`${answer.stdout}${answer.stderr}`, shown).toContain("Supported targets: darwin/arm64, linux/x64");
+        expect(readdirSync(cwd), shown).toEqual([]);
+      }
+    });
+
+    test("a flag before the verb still reaches core on a qualified platform, and help stays readable", async () => {
+      const { context: qualified } = onTarget({ platform: "linux", architecture: "x64" });
+      const quoted = await runColophonCli(["--json", ...argv], qualified);
+      expect(quoted.exitCode).not.toBe(0);
+      expect(`${quoted.stdout}${quoted.stderr}`).not.toContain("not qualified");
+
+      const { context: target } = onTarget(unqualified);
+      const helped = await runColophonCli(["--json", "quote", "--help"], target);
+      expect(helped.exitCode).toBe(0);
+      expect(helped.stdout).toContain("quote");
+    });
+
     test("still prints its help, which names no platform and runs nothing", async () => {
       const { context: target } = onTarget(unqualified);
       for (const helpArgv of [["quote", "--help"], ["help", "quote"]]) {

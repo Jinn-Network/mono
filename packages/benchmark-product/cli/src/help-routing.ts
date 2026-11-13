@@ -36,3 +36,22 @@ function helpTopic(argv: readonly string[]): string | undefined {
   }
   return undefined;
 }
+
+// Core's `parseArgs` treats these as flags that never take a value. Keep in step with it.
+const BOOLEAN_FLAGS = new Set(["help", "json", "include-native-artifacts", "ack-provider-network-costs", "ack-sample-size"]);
+
+/**
+ * The verb as core finds it: the first positional word, with flags allowed before it. A value
+ * flag (`--workspace ws`) takes the next token, so that token is not the verb. (Issue #5046)
+ */
+export function verbOf(argv: readonly string[]): string | undefined {
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]!;
+    if (token === "--") return argv[index + 1];
+    if (!token.startsWith("--")) return token;
+    if (token.includes("=") || BOOLEAN_FLAGS.has(token.slice(2))) continue;
+    const next = argv[index + 1];
+    if (next !== undefined && !next.startsWith("--")) index += 1;
+  }
+  return undefined;
+}
