@@ -10,6 +10,12 @@
  * matches the CURRENT draft spec — an edit between quote and lock invalidates the quote, and
  * the product refuses to lock a draft whose priced description no longer describes it.
  *
+ * A brought run (DR-2026-10-06, decision 4): `lock` also takes a `draft` that was never quoted
+ * when its run is brought (`isBroughtRunDraft`). A quote describes the local venue, and a brought
+ * run is made on the claimant's own harness, so there is nothing for a quote to describe. Such a
+ * lock writes the RunState a quote would have, without the quote, and seals the same Run bytes a
+ * quoted lock of the same draft at the same instant seals.
+ *
  * Once locked, the draft is immutable by construction: `isDraftMutable` (domain/lifecycle.ts)
  * already fences every draft-mutation operation (`updateDraft`, `armAdd`/`armUpdate`/`armRemove`,
  * the intake operations) to `draft`/`quoted` states only — this module adds no separate
@@ -41,7 +47,15 @@ import {
   inspectRuntimeMethodForBinding,
   type InspectRuntimeMethodDisclosure,
 } from "../runtime/inspect/disclosure.js";
-import { requireRunState, specDigest, writeRunState } from "../run/state.js";
+import { loadOrCreateReportSigningKey } from "../report/signing.js";
+import {
+  createPublicationState,
+  readRunState,
+  requireRunState,
+  specDigest,
+  writeRunState,
+  type RunState,
+} from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { HarborSelectionManifestSchema, isHarborCompatibleEvaluationRuntime } from "../runtime/harbor/manifest.js";
@@ -142,20 +156,59 @@ export function draftHarborRunRequirements(workspaceDir: string, draftId: string
 }
 
 /**
+ * Whether this draft's run is brought, so `lock` takes it without a quote (DR-2026-10-06,
+ * decision 4).
+ *
+ * `lock` comes before the run, so it cannot see the import that brings it. It reads the binding
+ * instead: a draft `method terminal-bench-2.1` bound to the official slate, with no evaluation
+ * runtime, is the claimant path, and its results arrive through `run import --from harbor`, the
+ * one import that slate accepts (`run-import.ts`). A draft that binds a runtime, or that is on any
+ * other Benchmark, is a run on a venue Colophon controls, and `lock` still takes it only quoted.
+ */
+function isBroughtRunDraft(workspaceDir: string, document: DraftDocument): boolean {
+  if (document.spec.evaluationRuntime !== undefined || document.spec.taskSet.kind !== "benchmark") return false;
+  return carriesOfficialTerminalBench21Slate(
+    parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256)),
+  );
+}
+
+/**
+ * The RunState `quote` writes (`run-quote.ts`), without the quote. The owner is the same
+ * workspace key, so the Run this lock seals is byte-identical to a quoted lock's; the publication
+ * state is the same. A RunState that an edit-invalidated quote left behind keeps only its
+ * publication state, as a re-quote keeps it, and none of its quote.
+ */
+function unquotedRunState(workspaceDir: string, draftId: string, document: DraftDocument): RunState {
+  const owner = loadOrCreateReportSigningKey(workspaceDir).keyId;
+  const previousPublication = readRunState(workspaceDir, draftId)?.publication;
+  return {
+    draftId,
+    specSha256: specDigest(document.spec),
+    owner,
+    publication: previousPublication === undefined
+      ? createPublicationState({ agentKeyRef: owner })
+      : { ...previousPublication, source: { ...previousPublication.source, agentKeyRef: owner } },
+  };
+}
+
+/**
  * The advisory a lock of this draft would print and seal (issue #2978), so an operator surface can
  * show the width BEFORE the irreversible seal and `runLock` can seal the same numbers afterwards.
  *
- * `undefined` for a draft no lock could seal right now — not quoted, or carrying no benchmark, so
- * there is no item count and therefore no n. Returning `undefined` rather than refusing keeps this
- * a pure advisory: the caller gating on it does not have to restate the lock's own preconditions,
- * and `runLock` stays the one place that says why a lock cannot happen.
+ * `undefined` for a draft no lock could seal right now — not quoted (and not a brought run, which
+ * locks unquoted), or carrying no benchmark, so there is no item count and therefore no n.
+ * Returning `undefined` rather than refusing keeps this a pure advisory: the caller gating on it
+ * does not have to restate the lock's own preconditions, and `runLock` stays the one place that
+ * says why a lock cannot happen.
  */
 export function draftSampleSizeAdvisory(
   workspaceDir: string,
   draftId: string,
 ): SampleSizeAdvisory | undefined {
   const document = readDraftDocument(workspaceDir, draftId);
-  if (document.state !== "quoted" || document.spec.taskSet.kind !== "benchmark") return undefined;
+  const lockable = document.state === "quoted"
+    || (document.state === "draft" && isBroughtRunDraft(workspaceDir, document));
+  if (!lockable || document.spec.taskSet.kind !== "benchmark") return undefined;
   const benchmark = parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256));
   if (benchmark.items.length < 1) return undefined;
   return sampleSizeAdvisory({
@@ -189,7 +242,8 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
     inputs: input,
     run: () => {
       const document = readDraftDocument(clockedContext.workspaceDir, input.draftId);
-      if (document.state !== "quoted") {
+      const unquoted = document.state === "draft" && isBroughtRunDraft(clockedContext.workspaceDir, document);
+      if (document.state !== "quoted" && !unquoted) {
         refuse(
           "illegal-transition",
           `drafts.${input.draftId}.state`,
@@ -202,7 +256,10 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
         resolveAssurance(document.spec.assurance),
       );
 
-      const runState = requireRunState(clockedContext.workspaceDir, input.draftId);
+      // Written only with the seal below, so a refusal before it leaves no RunState behind.
+      const runState = unquoted
+        ? unquotedRunState(clockedContext.workspaceDir, input.draftId, document)
+        : requireRunState(clockedContext.workspaceDir, input.draftId);
       const currentSpecSha256 = specDigest(document.spec);
       if (runState.specSha256 !== currentSpecSha256) {
         refuse(
@@ -390,7 +447,7 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
         authoredAt: at,
       });
 
-      const transitioned = transition("quoted", "lock");
+      const transitioned = transition(document.state, "lock");
       if (!transitioned.ok) {
         // Unreachable given the state guard above — kept so a future TRANSITIONS edit fails
         // loud here instead of silently locking a state the table no longer permits.
