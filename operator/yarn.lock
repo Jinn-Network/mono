@@ -1126,7 +1126,7 @@ __metadata:
     "@noble/curves": "npm:^2.0.0"
     "@noble/ed25519": "npm:^3.1.0"
     "@noble/hashes": "npm:^2.2.0"
-    "@opentelemetry/api": "npm:^1.10.0"
+    "@opentelemetry/api": "npm:~1.10.0"
     "@opentelemetry/core": "npm:^3.0.0"
     "@opentelemetry/exporter-trace-otlp-grpc": "npm:^0.301.0"
     "@opentelemetry/exporter-trace-otlp-http": "npm:^0.301.0"
@@ -1592,7 +1592,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@opentelemetry/api@npm:^1.10.0":
+"@opentelemetry/api@npm:~1.10.0":
   version: 1.10.0
   resolution: "@opentelemetry/api@npm:1.10.0"
   checksum: 10c0/c666f89d882e2e3ea3780b4e419de3ba7e00a80bf334269c3c8507a5e2b4e453e2bc8368f6230f894d789b206c14dde313ea6f51fa7bc629f0eff8480b5d356b

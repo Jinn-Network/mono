@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDoctorCommand } from '@/cli/commands/doctor.js';
+import { createDoctorCommand, nodeVersionMeetsFloor } from '@/cli/commands/doctor.js';
 import { runCommand } from '@test/cli.js';
 import { requireConfigPathFromArgs } from '@/config/path-args.js';
 
@@ -275,5 +275,14 @@ describe('checkDistributorReachable', () => {
     expect(result?.remedy).toContain('funding key');
     expect(result?.remedy).toContain('`Overflow`');
     expect(result?.remedy).toContain('The Base Sepolia task marketplace is parked');
+  });
+});
+
+describe('nodeVersionMeetsFloor', () => {
+  it.each(['20.19.0', '22.15.0', '22.21.1'])('rejects %s', (version) => {
+    expect(nodeVersionMeetsFloor(version)).toBe(false);
+  });
+  it.each(['22.22.0', '22.23.4', '24.0.0'])('accepts %s', (version) => {
+    expect(nodeVersionMeetsFloor(version)).toBe(true);
   });
 });

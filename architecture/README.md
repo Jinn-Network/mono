@@ -107,7 +107,7 @@ older band.
 - CI, the npm publish workflows, the Dockerfiles that start from a Node image, `.nvmrc` and
   `.node-version` run Node 22. Some verification jobs pin the exact patch.
 - Every package that publishes to npm (its catalog `publishPolicy` is not `private`, `never` or
-  `disabled`) declares `engines.node` as `>=22`.
+  `disabled`) declares `engines.node` as `>=22`, or a higher Node 22 floor that a dependency requires (the operator declares `>=22.22`).
 - `@types/node` stays on major 22 (`^22`) in every manifest that declares it, so type definitions
   never describe APIs the runtime lacks.
 - Dependabot never bumps `@types/node`. Every npm entry in `.github/dependabot.yml` ignores it for

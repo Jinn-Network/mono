@@ -98,15 +98,19 @@ interface CheckResult {
   };
 }
 
+export function nodeVersionMeetsFloor(version: string): boolean {
+  const [major, minor] = version.split('.').map((part) => parseInt(part, 10));
+  return major > 22 || (major === 22 && minor >= 22);
+}
+
 async function checkNodeVersion(): Promise<CheckResult> {
   const version = process.versions.node;
-  const major = parseInt(version.split('.')[0], 10);
-  const ok = major >= 20;
+  const ok = nodeVersionMeetsFloor(version);
   return {
     name: 'node_version',
     ok,
     detail: `v${version}`,
-    ...(ok ? {} : { remedy: 'Upgrade to Node.js 20 or newer.' }),
+    ...(ok ? {} : { remedy: 'Upgrade to Node.js 22.22 or newer.' }),
   };
 }
 
@@ -365,7 +369,7 @@ export function createDoctorCommand(deps: DoctorDeps = PRODUCTION_DEPS): Command
 
 Runs a set of non-mutating checks against the local environment and
 configuration:
-  - node_version                Node.js >= 20
+  - node_version                Node.js >= 22.22
   - claude_binary               claude CLI resolvable on PATH
   - claude_auth                 Claude CLI authenticated
   - keystore_present            mnemonic keystore in configured earning directory (optional)
