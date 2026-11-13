@@ -264,6 +264,14 @@ const DEFAULT_OCI_WORKER_TIMEOUT_MS = 1_800_000;
  *  expiry from orphaning the very container the runner exists to clean up. */
 const OCI_TIMEOUT_TERMINATION_GRACE_MS = 10_000;
 
+/**
+ * #5163. After a command exits non-zero before its bound, how long its already-written output may
+ * still be read before the pipes are abandoned. A descendant that holds stdout open must not turn
+ * that exit into a wait for the bound; the failure is the exit, and stderr is a few bytes the
+ * kernel has already queued by then.
+ */
+const OCI_FAILED_EXIT_DRAIN_MS = 250;
+
 function resolveTimeoutMs(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw.trim() === "") return fallback;
@@ -330,6 +338,8 @@ async function runBoundedProcess(
     // ignores the first signal.
     let expired = false;
     let exited = false;
+    let failedBeforeBound = false;
+    let drainTimer: NodeJS.Timeout | undefined;
     let killTimer: NodeJS.Timeout | undefined;
     // `close` below waits for stdio, and a descendant can hold stdio open after the child has gone.
     // No signal reaches that descendant, so an expired bound stops reading instead, which is what
@@ -352,14 +362,25 @@ async function runBoundedProcess(
     const clearBounds = (): void => {
       if (expiry !== undefined) clearTimeout(expiry);
       if (killTimer !== undefined) clearTimeout(killTimer);
+      if (drainTimer !== undefined) clearTimeout(drainTimer);
     };
     child.once("error", (cause) => {
       clearBounds();
       reject(cause);
     });
-    child.once("exit", () => {
+    child.once("exit", (code) => {
       exited = true;
-      if (expired) abandonStdio();
+      if (expired) {
+        abandonStdio();
+        return;
+      }
+      // #5163: a non-zero exit is the answer whatever a descendant still holds. Its stdout is not
+      // needed (the error carries only stderr), so stop waiting for the pipes after a short drain.
+      // An exit 0 is not decided here: its stdout is the result, so it is still read to its end.
+      if (code !== 0) {
+        failedBeforeBound = true;
+        drainTimer = setTimeout(abandonStdio, OCI_FAILED_EXIT_DRAIN_MS);
+      }
     });
     // #5139: settle on `close`, never `exit`. Node emits `exit` with stdio possibly still open, and
     // on Linux that is the normal order for parallel commands, not a corner case: libuv answers one
@@ -369,7 +390,7 @@ async function runBoundedProcess(
     // command that had written its answer.
     child.once("close", (code, exitSignal) => {
       clearBounds();
-      if (expired) {
+      if (expired && !failedBeforeBound) {
         reject(new InspectOciCommandTimeoutError(
           `OCI runtime command timed out after ${String(timeoutMs)} ms: ${describeBoundedCommand(executable, args)}`,
         ));

@@ -312,3 +312,41 @@ test("a descendant that holds stdout after the command exits still expires as a 
   // seconds late.
   expect(Date.now() - startedAt).toBeLessThan(8_000);
 });
+
+/**
+ * #5163. A command that exits non-zero while a descendant still holds its stdout is an error exit,
+ * not a timeout. The bound here is far longer than the test allows, so the outcome has to be
+ * decided by the exit, not by waiting for the bound or for the descendant to let go.
+ */
+test("a non-zero exit is reported as that exit even when a descendant still holds stdout", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "jinn-oci-held-stdout-nonzero-"));
+  temporaryDirectories.push(directory);
+  process.env.JINN_INSPECT_OCI_COMMAND_TIMEOUT_MS = "60000";
+  const hostBinding = driftCheckBinding(writeDriftCheckFakeDocker(directory, DRIFT_CHECK_COMMANDS[0].selectedBy, "sleep 6 & exit 3"));
+
+  const startedAt = Date.now();
+  const failure = await assertInspectOciHostUndrifted(hostBinding, undriftedManifest(hostBinding)).catch((cause: unknown) => cause);
+
+  expect(failure).not.toBeInstanceOf(InspectOciCommandTimeoutError);
+  expect((failure as Error).message).toContain("OCI runtime command exited 3");
+  expect(Date.now() - startedAt).toBeLessThan(5_000);
+});
+
+/**
+ * #5163. The command is still running when the bound expires and a descendant holds its stdout.
+ * SIGTERM ends the command, but nothing signals the descendant, so only abandoning the pipes lets
+ * the refusal arrive. Without that step the call waits for the descendant, many seconds past the bound.
+ */
+test("a command still running at the bound with a descendant holding stdout expires promptly as a typed timeout", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "jinn-oci-running-held-stdout-"));
+  temporaryDirectories.push(directory);
+  process.env.JINN_INSPECT_OCI_COMMAND_TIMEOUT_MS = "500";
+  const hostBinding = driftCheckBinding(writeDriftCheckFakeDocker(directory, DRIFT_CHECK_COMMANDS[0].selectedBy, "sleep 8 & sleep 8"));
+
+  const startedAt = Date.now();
+  const failure = await assertInspectOciHostUndrifted(hostBinding, undriftedManifest(hostBinding)).catch((cause: unknown) => cause);
+
+  expect(failure).toBeInstanceOf(InspectOciCommandTimeoutError);
+  expect((failure as Error).message).toContain("timed out after 500 ms: docker version");
+  expect(Date.now() - startedAt).toBeLessThan(4_000);
+});
