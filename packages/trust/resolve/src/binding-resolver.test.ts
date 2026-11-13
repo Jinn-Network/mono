@@ -1102,6 +1102,11 @@ describe("createBindingResolver", () => {
       expect((await composed(await accountLeg()))?.bindingDigest).toBe(DIGEST_A);
     });
 
+    it("composes with the owner's record when a store files it under the agentId record's digest", async () => {
+      const resolved = await composed({ ...(await accountLeg()), bindingDigest: DIGEST_A });
+      expect(resolved?.binding.voucher).toEqual({ kind: "agentId", caip19: AGENT_ASSET });
+    });
+
     it("does not compose with a record that only names the owner", async () => {
       const { ceremonyEvidence: _ceremonyEvidence, ...unsigned } = await accountLeg();
       expect(await composed(unsigned)).toBeNull();
