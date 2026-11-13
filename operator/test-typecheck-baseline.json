@@ -107,7 +107,7 @@
   "test/daemon/native-verdict-observation.test.ts": 1,
   "test/daemon/requester-adoption-defect-48.test.ts": 8,
   "test/daemon/requester-role-before-anchor-2647.test.ts": 2,
-  "test/daemon/role-identities.test.ts": 5,
+  "test/daemon/role-identities.test.ts": 4,
   "test/daemon/settlement-grade.test.ts": 1,
   "test/daemon/work-loop.test.ts": 2,
   "test/e2e/_archive-consumer-child.ts": 1,

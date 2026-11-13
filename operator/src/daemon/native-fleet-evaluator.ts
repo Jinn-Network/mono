@@ -172,6 +172,7 @@ export async function buildFleetNativeEvaluator(
     storePath: evaluatorStorePath,
     password: input.password,
     bindingResolver: input.trust.bindingResolver,
+    revocationAuthority: input.trust,
     verifyRoleBinding: input.trust.verifyRoleBinding,
   });
 

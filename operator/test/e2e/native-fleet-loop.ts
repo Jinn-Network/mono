@@ -175,6 +175,7 @@ export async function runNativeFleetLoop(): Promise<void> {
       storePath: setup.operatorA.solverStore.storePath,
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now,
     });
@@ -184,6 +185,7 @@ export async function runNativeFleetLoop(): Promise<void> {
       storePath: setup.operatorA.requesterStore!.storePath,
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now,
     });
@@ -193,6 +195,7 @@ export async function runNativeFleetLoop(): Promise<void> {
       storePath: setup.operatorA.admissionStore!.storePath,
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now,
     });
@@ -202,6 +205,7 @@ export async function runNativeFleetLoop(): Promise<void> {
       storePath: setup.operatorB.solverStore.storePath,
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now,
     });

@@ -37,6 +37,7 @@ import {
   type NativeEvaluatorCompositionInput,
 } from "../../src/daemon/native-evaluator-composition.js";
 import { openRoleIdentitySet } from "../../src/daemon/role-identities.js";
+import { fakeTrust } from "../_support/native-trust.js";
 
 const AGENT = "urn:jinn:evaluator:golden";
 const EVALUATOR_ADDRESS = `0x${"2".repeat(40)}` as const;
@@ -123,6 +124,7 @@ async function fixture(input: {
     password: "operator-password",
     agent: AGENT,
     bindingResolver: resolver,
+    revocationAuthority: fakeTrust({ bindingResolver: resolver }),
     now: () => new Date("2026-08-02T12:00:00.000Z"),
   });
   const modulePath = join(root, "prediction-evaluator-deployment.mjs");

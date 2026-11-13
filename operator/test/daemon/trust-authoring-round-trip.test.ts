@@ -359,6 +359,7 @@ describe('@jinn-network/trust-authoring → production verifiers', () => {
       storePath: genesis.solverStore,
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now: () => now,
     });
@@ -389,6 +390,7 @@ describe('@jinn-network/trust-authoring → production verifiers', () => {
       storePath: genesis.requesterStore,
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now: () => now,
     });
@@ -398,6 +400,7 @@ describe('@jinn-network/trust-authoring → production verifiers', () => {
       storePath: genesis.admissionStore,
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now: () => now,
     });
@@ -453,6 +456,7 @@ describe('@jinn-network/trust-authoring → production verifiers', () => {
       storePath: genesis.solverStore,
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now: () => at,
     });
@@ -490,6 +494,7 @@ describe('@jinn-network/trust-authoring → production verifiers', () => {
       storePath: genesis.solverStore,
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now: () => now,
     });
@@ -555,6 +560,7 @@ describe('@jinn-network/trust-authoring → production verifiers', () => {
       storePath: b.storePath,
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now: () => now,
     });
@@ -564,6 +570,7 @@ describe('@jinn-network/trust-authoring → production verifiers', () => {
       storePath: genesis.solverStore,
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now: () => now,
     });

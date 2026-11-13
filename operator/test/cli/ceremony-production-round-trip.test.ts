@@ -313,6 +313,7 @@ describe('jinn ceremony → production verifiers, two operators, distinct EOAs a
       storePath: join(dir, 'identity', `${family}.enc.json`),
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now,
     });
@@ -398,6 +399,7 @@ describe('jinn ceremony → production verifiers, two operators, distinct EOAs a
         storePath: join(dir, 'identity', `${family}.enc.json`),
         password: PASSWORD,
         bindingResolver: trust.bindingResolver,
+        revocationAuthority: trust,
         verifyRoleBinding: trust.verifyRoleBinding,
         now,
       });
@@ -438,6 +440,7 @@ describe('jinn ceremony → production verifiers, two operators, distinct EOAs a
       storePath: join(dir, 'identity', 'solver.enc.json'),
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now,
     })).get('solver-settlement').keyId;
@@ -481,6 +484,7 @@ describe('jinn ceremony → production verifiers, two operators, distinct EOAs a
       storePath: join(dir, 'identity', 'solver.enc.json'),
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now,
     })).get('solver-settlement').keyId;
@@ -608,6 +612,7 @@ describe('produced catalog over the production calldata-locator verifier (#2432)
       storePath: join(dir, 'identity', `${family}.enc.json`),
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now,
     });
