@@ -8,11 +8,13 @@ import {
   type LifecycleState,
 } from "./lifecycle.js";
 
-/** Every legal row of the spec §4.1 transition table, in the order the spec lists them. */
+/** Every legal row of the spec §4.1 transition table, in the order the spec lists them, plus
+ * `draft --lock--> locked` for a brought run (DR-2026-10-06, decision 4). */
 const LEGAL_TRANSITIONS: ReadonlyArray<readonly [LifecycleState, LifecycleEvent, LifecycleState]> = [
   ["draft", "edit", "draft"],
   ["draft", "preview", "draft"],
   ["draft", "quote", "quoted"],
+  ["draft", "lock", "locked"],
   ["quoted", "preview", "quoted"],
   ["quoted", "edit", "draft"],
   ["quoted", "lock", "locked"],

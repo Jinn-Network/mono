@@ -16,7 +16,9 @@ import {
 import { PREDICTION_FORECAST_PROFILE_DIGEST_HEX } from "@jinn-network/task-execution-profiles";
 import { readAuditEntries } from "../audit/journal.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
-import { readRunState, writeRunState } from "../run/state.js";
+import { loadOrCreateReportSigningKey } from "../report/signing.js";
+import { readRunState, specDigest, writeRunState } from "../run/state.js";
+import { HARBOR_ADAPTER_ID } from "../runtime/harbor/manifest.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, sealedRecordPath } from "../workspace/sealed-store.js";
 import { armAdd, armUpdate } from "./arms.js";
@@ -24,6 +26,7 @@ import { authorityGrant } from "./authority-ops.js";
 import type { OperationContext } from "./context.js";
 import { createDraft, readDraftDocument, updateDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
+import { selectMethod } from "./method.js";
 import { draftSampleSizeAdvisory, runLock } from "./run-lock.js";
 import { buildRegistrationClosure } from "./publication-register.js";
 import { runQuote } from "./run-quote.js";
@@ -147,6 +150,139 @@ describe("runLock — lifecycle transition", () => {
     if (second.ok) return;
     expect(second.error.code).toBe("illegal-transition");
   });
+});
+
+/**
+ * DR-2026-10-06, decision 4 (issue #5164): `lock` takes an unquoted draft whose run is brought.
+ *
+ * `quote` asks the local venue what it could run, which says nothing about a run made on the
+ * claimant's own harness. A draft that `method terminal-bench-2.1` bound to the official slate,
+ * with no evaluation runtime, is brought: `run import --from harbor` is the only way its results
+ * arrive. Every other unquoted draft is a run on a venue Colophon controls, and is still refused.
+ */
+describe("runLock — an unquoted draft for a brought run", () => {
+  async function setUpSlateDraft(clock: () => string, draftId: string): Promise<void> {
+    const bound = await selectMethod(contextFor(clock), { draftId, ref: "terminal-bench-2.1", cwd: workspaceDir, slice: "1" });
+    expect(bound.ok, JSON.stringify(bound)).toBe(true);
+    for (const [armId, pinning] of [
+      ["terminus-2", { agent: { id: "terminus-2" }, model: { id: "provider/model-x" } }],
+      ["oracle", { agent: { id: "oracle" } }],
+    ] as const) {
+      const added = armAdd(contextFor(clock), { draftId, armId, pinning });
+      expect(added.ok, JSON.stringify(added)).toBe(true);
+    }
+  }
+
+  async function setUpUnquotedSlateDraft(clock: () => string, draftId = "brought"): Promise<void> {
+    initWorkspace(contextFor(clock));
+    expect(createDraft(contextFor(clock), { draftId, name: "Brought" }).ok).toBe(true);
+    await setUpSlateDraft(clock, draftId);
+  }
+
+  test("draft -> locked on the official Terminal-Bench 2.1 slate, with no quote and no RunState before it", async () => {
+    const clock = makeClock();
+    await setUpUnquotedSlateDraft(clock);
+    expect(readDraftDocument(workspaceDir, "brought").state).toBe("draft");
+    expect(readRunState(workspaceDir, "brought")).toBeUndefined();
+
+    const outcome = runLock(contextFor(clock), { draftId: "brought", acknowledgedSampleSizeAdvisory: true });
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.draft.state).toBe("locked");
+    expect(readDraftDocument(workspaceDir, "brought").state).toBe("locked");
+    expect(parseRun(getSealedBytes(workspaceDir, outcome.result.runSha256)).arms).toHaveLength(2);
+    // The lines `run import --from harbor` holds the run to are stated as for a quoted lock.
+    expect(outcome.result.harborRun?.dataset).toMatch(/^terminal-bench\/terminal-bench-2-1@sha256:/u);
+
+    const state = readRunState(workspaceDir, "brought");
+    expect(state?.runSha256).toBe(outcome.result.runSha256);
+    expect(state?.lockedAt).toBeDefined();
+    // The owner a quote would have written: the workspace key init created.
+    expect(state?.owner).toBe(loadOrCreateReportSigningKey(workspaceDir).keyId);
+    expect(state?.specSha256).toBe(specDigest(readDraftDocument(workspaceDir, "brought").spec));
+    expect(state?.publication?.source.agentKeyRef).toBe(state?.owner);
+    // Nothing was quoted, so nothing says it was.
+    expect(state?.quote).toBeUndefined();
+    expect(state?.quotedAt).toBeUndefined();
+
+    const entries = readAuditEntries(workspaceDir);
+    expect(entries[entries.length - 1]).toMatchObject({ action: "lock", subject: "brought", outcome: "ok" });
+  }, 60_000);
+
+  test("seals the same Run bytes as quote then lock of the same draft", async () => {
+    const setupClock = makeClock();
+    await setUpUnquotedSlateDraft(setupClock, "brought");
+    expect(createDraft(contextFor(setupClock), { draftId: "quoted", name: "Brought" }).ok).toBe(true);
+    await setUpSlateDraft(setupClock, "quoted");
+    const quoted = await runQuote(contextFor(setupClock), { draftId: "quoted" });
+    expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
+    expect(draftSampleSizeAdvisory(workspaceDir, "brought")).toBeDefined();
+    expect(draftSampleSizeAdvisory(workspaceDir, "brought")).toEqual(draftSampleSizeAdvisory(workspaceDir, "quoted"));
+
+    // One frozen instant for both locks, so `closeAt` is identical in both records.
+    const lockClock = () => "2026-08-05T09:00:00Z";
+    const fromQuote = runLock(contextFor(lockClock), { draftId: "quoted", acknowledgedSampleSizeAdvisory: true });
+    const unquoted = runLock(contextFor(lockClock), { draftId: "brought", acknowledgedSampleSizeAdvisory: true });
+    expect(fromQuote.ok && unquoted.ok, JSON.stringify({ fromQuote, unquoted })).toBe(true);
+    if (!fromQuote.ok || !unquoted.ok) return;
+    expect(unquoted.result.runSha256).toBe(fromQuote.result.runSha256);
+    expect(unquoted.result.sampleSizeAdvisory).toEqual(fromQuote.result.sampleSizeAdvisory);
+    expect(unquoted.result.harborRun).toEqual(fromQuote.result.harborRun);
+  }, 60_000);
+
+  test("a quote an edit invalidated does not stand in the way, and is not carried into the lock", async () => {
+    const clock = makeClock();
+    await setUpUnquotedSlateDraft(clock);
+    expect((await runQuote(contextFor(clock), { draftId: "brought" })).ok).toBe(true);
+    const edited = armUpdate(contextFor(clock), { draftId: "brought", armId: "oracle", notes: "changed after quote" });
+    expect(edited.ok && edited.result.draft.state).toBe("draft");
+
+    const outcome = runLock(contextFor(clock), { draftId: "brought" });
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    const state = readRunState(workspaceDir, "brought");
+    expect(state?.specSha256).toBe(specDigest(readDraftDocument(workspaceDir, "brought").spec));
+    expect(state?.quote).toBeUndefined();
+    expect(state?.quotedAt).toBeUndefined();
+  }, 60_000);
+
+  test("still refuses an unquoted draft for the local venue, unchanged", async () => {
+    const clock = makeClock();
+    initWorkspace(contextFor(clock));
+    createDraft(contextFor(clock), { draftId: "draft-1", name: "Local venue" });
+    await sampleInit(contextFor(clock), { draftId: "draft-1" });
+    armAdd(contextFor(clock), { draftId: "draft-1", armId: "baseline", pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } });
+    armAdd(contextFor(clock), { draftId: "draft-1", armId: "sample", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } });
+
+    expect(draftSampleSizeAdvisory(workspaceDir, "draft-1")).toBeUndefined();
+    const outcome = runLock(contextFor(clock), { draftId: "draft-1", acknowledgedSampleSizeAdvisory: true });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("illegal-transition");
+    expect(outcome.error.detail).toBe('draft draft-1 is in state "draft" — only a quoted draft can be locked');
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("draft");
+    expect(readRunState(workspaceDir, "draft-1")).toBeUndefined();
+  }, 60_000);
+
+  test("still refuses an unquoted slate draft that binds an evaluation runtime, unchanged", async () => {
+    const clock = makeClock();
+    await setUpUnquotedSlateDraft(clock, "driven");
+    // A runtime binding makes the slate a run on a venue Colophon controls (`launch` drives it
+    // there). The refusal comes before the binding's selection manifest is read.
+    const document = readDraftDocument(workspaceDir, "driven");
+    atomicWriteFileSync(draftPath(workspaceDir, "driven"), JSON.stringify({
+      ...document,
+      spec: { ...document.spec, evaluationRuntime: { adapterId: HARBOR_ADAPTER_ID, selectionManifestSha256: "0".repeat(64) } },
+    }, null, 2));
+
+    expect(draftSampleSizeAdvisory(workspaceDir, "driven")).toBeUndefined();
+    const outcome = runLock(contextFor(clock), { draftId: "driven", acknowledgedSampleSizeAdvisory: true });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("illegal-transition");
+    expect(outcome.error.detail).toBe('draft driven is in state "draft" — only a quoted draft can be locked');
+    expect(readDraftDocument(workspaceDir, "driven").state).toBe("draft");
+    expect(readRunState(workspaceDir, "driven")).toBeUndefined();
+  }, 60_000);
 });
 
 describe("runLock — A2 quote invalidation", () => {

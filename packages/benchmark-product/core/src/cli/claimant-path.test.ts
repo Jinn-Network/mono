@@ -193,6 +193,30 @@ describe("the published order reaches a locked official slate without a refusal"
   }, 120_000);
 });
 
+// DR-2026-10-06, decision 4 (issue #5164). The published path above still runs `quote`; this is
+// the same walk without it, and the seal-time sample-size gate has to stand in front of it all the
+// same, because an acknowledged advisory is part of the sealed Run.
+describe("lock takes an unquoted draft on the official slate", () => {
+  test("init, draft create, method, arm add, lock: refused until --ack-sample-size, then sealed", async () => {
+    const ctx = context();
+    await ok(["init", ...base()], ctx);
+    await ok(["draft", "create", ...base(), "--name", "tb21", "--id", "draft-1"], ctx);
+    await ok(["method", "terminal-bench-2.1", ...base(), "--draft", "draft-1", "--slice", "10"], ctx);
+    await ok(["arm", "add", ...base(), "--draft", "draft-1", "--arm", "terminus-2", "--pinning", harborPinning("terminus-2", "provider/model-x")], ctx);
+    await ok(["arm", "add", ...base(), "--draft", "draft-1", "--arm", "oracle", "--pinning", harborPinning("oracle")], ctx);
+
+    const unacknowledged = await runCli(["lock", ...base(), "--draft", "draft-1"], ctx);
+    expect(unacknowledged.exitCode).toBe(2);
+    expect(unacknowledged.stderr).toContain("At the declared n=10 per arm");
+    expect(unacknowledged.stderr).toContain("--ack-sample-size");
+
+    const locked = await ok(["lock", ...base(), "--draft", "draft-1", "--ack-sample-size"], ctx);
+    expect(locked.stdout).toContain("At the declared n=10 per arm");
+    expect(locked.stdout).toMatch(/locked draft draft-1: run [a-f0-9]{64}, closes /u);
+    expect(locked.stdout).toContain("run import --from harbor accepts the Harbor run of this lock only when:");
+  }, 120_000);
+});
+
 describe("inspect prints what Harbor needs for an official slate (issue #4953)", () => {
   test("the dataset pin and the task names in Harbor's own form, without opening sealed records", async () => {
     const ctx = context();
