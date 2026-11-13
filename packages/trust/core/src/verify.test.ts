@@ -957,6 +957,39 @@ describe("verifyEnvelopeBinding", () => {
         .register({ key: CONSENT_KEY, agent: AGENT, resolved: authorityBinding(peer) });
       expect(await verifyKey2(resolver)).toMatchObject({ ok: true });
     });
+
+    // A row is told from another row filed under its digest by what it holds. One whose
+    // contents cannot be written out cannot be told apart, so it stands for nothing.
+    test("a genesis binding whose stored row cannot be written out has no chain", async () => {
+      const resolver = new FakeBindingResolver().register({
+        key: KEY_2,
+        agent: AGENT,
+        resolved: resolvedBinding({ binding: own, ceremonyEvidence: { written: 1n } as never }),
+      });
+      expect(await verifyKey2(resolver)).toMatchObject({
+        ok: false,
+        reason: "consent-chain-violation",
+        detail: "the binding's stored row cannot be written out, so it cannot be told from another row.",
+      });
+    });
+
+    test.each([
+      { held: "can be written out", evidence: { written: "1" }, verdict: { ok: true } },
+      { held: "cannot be written out", evidence: { written: 1n }, verdict: { ok: false, reason: "consent-chain-violation" } },
+    ])("an incumbent whose stored row $held gives authority accordingly", async ({ evidence, verdict }) => {
+      const resolver = new FakeBindingResolver()
+        .register({
+          key: KEY_2,
+          agent: AGENT,
+          resolved: resolvedBinding({ binding: own, isGenesis: false, incumbentControls: [{ key: CONSENT_KEY, voucher }] }),
+        })
+        .register({
+          key: CONSENT_KEY,
+          agent: AGENT,
+          resolved: authorityBinding(peer, { ceremonyEvidence: evidence as never }),
+        });
+      expect(await verifyKey2(resolver)).toMatchObject(verdict);
+    });
   });
 
   describe("an agentId voucher (§7.2)", () => {

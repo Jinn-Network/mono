@@ -850,6 +850,16 @@ describe.each([
       expect(await w.verdict(THIRD_KEY)).toMatchObject(stands);
       expect(await w.notRevoked(GENESIS_KEY, NOW)).toBe(true);
     });
+
+    test("a stranger's verdict leg under the genesis digest does not hide the founding account's revocation from the settlement leg", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w, { scope: ["verdicts", "bindings", "settlements"] });
+      const strangers = await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T1 });
+      fileUnder(w, strangers, genesis);
+      await w.revoke(genesis, accountVoucher(84532, OWNER.address).did, T2);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject({ ok: false, reason: "revoked" });
+      expect(await w.join(STRANGER_KEY, GENESIS_KEY, T3, T4)).toMatchObject({ ok: false });
+    });
   });
 
   describe("a record nothing here can verify (§7.5 step 3)", () => {
