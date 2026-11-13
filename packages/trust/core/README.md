@@ -36,6 +36,17 @@ envelope's time. Its `deps` and `checkBindingRevocation`'s need a resolver that
 answers for every key of an Agent: a revoker's key is rarely in the family the binding
 it revokes signs.
 
+## What identifies a binding
+
+A store files each record under a digest, and a store that takes digests as given can
+file two different rows under one. So the §7.4 walk names a binding by its row, as
+`@jinn-network/trust-resolve` does, never by its digest alone: whether a binding is
+sound, whether its chain holds, and whether a revocation counts against it are decided
+for its row, which is its digest together with its record, its envelope and its
+evidence. Rows alike in all of that are one row. A row filed under another's digest
+takes nothing from it and costs it nothing. A row whose contents cannot be written out
+cannot be told from another, so it gives no authority and has no chain.
+
 ## What a ceremony does not show
 
 Nothing here shows that a ceremony is current. A ceremony (§7.2) shows that an

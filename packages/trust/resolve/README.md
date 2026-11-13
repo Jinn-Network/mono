@@ -32,7 +32,8 @@ is not the genesis binding for that. Rows of one key that share an instant and a
 digest are ranked by a founding claim first and then by what they say, so for
 rows a store reads from JSON the order it lists them in never chooses between
 them. Values JSON cannot hold, which only a caller building rows in memory can
-supply, are outside that.
+supply, are outside that. The `agentId` composition leg weighs rows the same way:
+an account record a store files under the `agentId` record's digest still counts.
 
 `recordSignedByItsKey` is required, because this package has no DSSE verifier of
 its own. A record its key never signed does not resolve and cannot win a conflict

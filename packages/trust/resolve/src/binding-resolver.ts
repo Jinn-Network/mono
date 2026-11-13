@@ -343,7 +343,9 @@ async function agentIdCompositionHolds(
   const ownerDid = didPkhFromAddress(chainId, ownerAddress);
 
   for (const { record, effectiveStart } of peers) {
-    if (record.bindingDigest === candidate.bindingDigest) continue;
+    // Each row is weighed on its own, as in `isGenesisAmong`: a row the store files under
+    // the candidate's digest is not the candidate.
+    if (record === candidate) continue;
     if (record.binding.voucher.kind !== "account") continue;
     if (record.binding.voucher.did !== ownerDid) continue;
     if (!isWithinWindow(record.binding, effectiveStart, atTime)) continue;

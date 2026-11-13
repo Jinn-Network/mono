@@ -251,6 +251,40 @@ function startWalk({ bindingResolver, witnessVerifier, dsseVerifier }: BindingAu
   return { bindingResolver, witnessVerifier, dsseVerifier, settled: new Map(), resolved: new Map() };
 }
 
+const rows = new WeakMap<ResolvedBinding, string | null>();
+
+/**
+ * Which stored row a resolved binding is, as the resolver weighs it. A store files each row
+ * under a digest, and one that takes digests as given can file different rows under one, so
+ * the digest alone names no binding: its row is the digest with its record, its envelope and
+ * its evidence. Rows alike in all of that are one row. `undefined` for a row that cannot be
+ * written out, which cannot be told from another: it gives no authority and has no chain.
+ */
+function rowOf(resolved: ResolvedBinding): string | undefined {
+  const known = rows.get(resolved);
+  if (known !== undefined) return known ?? undefined;
+  let row: string | null = null;
+  try {
+    row = JSON.stringify(
+      [
+        resolved.bindingDigest,
+        resolved.binding,
+        resolved.envelopeBytes,
+        "ceremonyEvidence" in resolved ? [resolved.ceremonyEvidence] : [],
+        "witness" in resolved ? [resolved.witness] : [],
+      ],
+      (_key, value: unknown) => {
+        if (value instanceof Uint8Array) return `b${Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+        return typeof value === "string" ? `s${value}` : value;
+      },
+    );
+  } catch {
+    // A row that cannot be written out cannot be told from another.
+  }
+  rows.set(resolved, row);
+  return row ?? undefined;
+}
+
 function resolveOnce(walk: AuthorityWalk, key: string, agent: string, atTime: string): Promise<ResolvedBinding | null> {
   const fact = `${agent}\u001f${key}\u001f${atTime}`;
   const known = walk.resolved.get(fact);
@@ -305,8 +339,9 @@ async function authorityUsable(
   walk: AuthorityWalk,
   revocationsThatCount: RevocationsThatCount = "all",
 ): Promise<boolean> {
-  if (!withinWindow(resolved, atTime)) return false;
-  const sound = await settle(walk, `record\u001f${resolved.bindingDigest}`, async () => (
+  const row = rowOf(resolved);
+  if (row === undefined || !withinWindow(resolved, atTime)) return false;
+  const sound = await settle(walk, `record\u001f${row}`, async () => (
     signedBy(walk, resolved.envelopeBytes, resolved.binding.key.didKey)
     && (await verifyCeremonyLeg(resolved, walk.witnessVerifier)).verified
   ));
@@ -461,35 +496,43 @@ async function readChain(resolved: ResolvedBinding, walk: AuthorityWalk): Promis
  * reachable through authority at that same instant is read once, then standing
  * spreads out from the ones rooted at an earlier instant. Everything else the
  * walk asks about lies at a strictly earlier instant, so the fact settled here
- * for each member does not depend on which of them asked.
+ * for each member does not depend on which of them asked. Each fact is its
+ * row's (`rowOf`), so a row filed under another's digest takes nothing from it.
  */
 async function chainHolds(resolved: ResolvedBinding, walk: AuthorityWalk): Promise<boolean> {
-  const fact = (binding: ResolvedBinding): string => `chain\u001f${binding.bindingDigest}`;
-  const known = walk.settled.get(fact(resolved));
+  const row = rowOf(resolved);
+  if (row === undefined) return false;
+  const known = walk.settled.get(`chain\u001f${row}`);
   if (known !== undefined) return known;
 
-  const batch = new Map<ResolvedBinding["bindingDigest"], ChainReading>();
+  const batch = new Map<string, ChainReading>();
   const unread = [resolved];
   for (let next = unread.pop(); next !== undefined; next = unread.pop()) {
-    if (batch.has(next.bindingDigest)) continue;
-    const settled = walk.settled.get(fact(next));
+    // A peer was usable, so it has a row.
+    const nextRow = rowOf(next);
+    if (nextRow === undefined || batch.has(nextRow)) continue;
+    const settled = walk.settled.get(`chain\u001f${nextRow}`);
     // eslint-disable-next-line no-await-in-loop -- batches are small; sequential is fine.
     const reading = settled === undefined ? await readChain(next, walk) : { rooted: settled, peers: [] };
-    batch.set(next.bindingDigest, reading);
+    batch.set(nextRow, reading);
     unread.push(...reading.peers);
   }
 
-  const standing = new Set([...batch].filter(([, { rooted }]) => rooted).map(([digest]) => digest));
+  const standing = new Set([...batch].filter(([, { rooted }]) => rooted).map(([member]) => member));
+  const stands = (peer: ResolvedBinding): boolean => {
+    const peerRow = rowOf(peer);
+    return peerRow !== undefined && standing.has(peerRow);
+  };
   for (let spread = true; spread;) {
     spread = false;
-    for (const [digest, { peers }] of batch) {
-      if (standing.has(digest) || !peers.some(({ bindingDigest }) => standing.has(bindingDigest))) continue;
-      standing.add(digest);
+    for (const [member, { peers }] of batch) {
+      if (standing.has(member) || !peers.some(stands)) continue;
+      standing.add(member);
       spread = true;
     }
   }
-  for (const digest of batch.keys()) walk.settled.set(`chain\u001f${digest}`, standing.has(digest));
-  return standing.has(resolved.bindingDigest);
+  for (const member of batch.keys()) walk.settled.set(`chain\u001f${member}`, standing.has(member));
+  return standing.has(row);
 }
 
 async function checkConsentChain(
@@ -497,6 +540,9 @@ async function checkConsentChain(
   walk: AuthorityWalk,
 ): Promise<{ ok: boolean; detail?: string }> {
   if (await chainHolds(resolved, walk)) return { ok: true };
+  if (rowOf(resolved) === undefined) {
+    return { ok: false, detail: "the binding's stored row cannot be written out, so it cannot be told from another row." };
+  }
   const { detail } = await readChain(resolved, walk);
   return { ok: false, ...(detail === undefined ? {} : { detail }) };
 }
@@ -525,8 +571,10 @@ async function isRevocationAuthorized(
   // bindings-scoped record for this Agent could revoke its genesis.
   const revokerBinding = await resolveOnce(walk, revokedBy, resolved.binding.agent, entry.effectiveTime);
   if (revokerBinding === null || !revokerBinding.binding.scope.includes("bindings")) return false;
-  // The same act, from a resolver that does not report the named record's scope.
-  if (entry.revocation.target === resolved.bindingDigest && revokerBinding.bindingDigest === resolved.bindingDigest) return true;
+  // The same act, from a resolver that does not report the named record's scope: what answers
+  // for the key is this binding's own row, not merely one filed under its digest.
+  const row = rowOf(resolved);
+  if (entry.revocation.target === resolved.bindingDigest && row !== undefined && rowOf(revokerBinding) === row) return true;
   return bindingStands(revokerBinding, entry.effectiveTime, walk);
 }
 
@@ -540,15 +588,19 @@ async function checkRevocation(
   walk: AuthorityWalk,
   revocationsThatCount: RevocationsThatCount = "all",
 ): Promise<{ ok: boolean; detail?: string }> {
+  // A row that cannot be written out has nothing to remember an answer by.
+  const row = rowOf(resolved);
   for (const entry of resolved.revocations) {
     if (revocationsThatCount === "voucher-signed" && !entry.revocation.revokedBy.startsWith("did:pkh:")) continue;
     // §7.4b: never retroactive -- a revocation anchored after the
     // evidence's effective time attributes nothing before it.
     const comparison = compareCalendarStrictRfc3339Instants(entry.effectiveTime, atTime);
     if (comparison !== undefined && (comparison > 0 || (comparison === 0 && boundary === "before"))) continue;
-    const fact = `revocation\u001f${resolved.bindingDigest}\u001f${recordDigest(entry.envelopeBytes)}`;
+    const authorized = () => isRevocationAuthorized(resolved, entry, walk);
     // eslint-disable-next-line no-await-in-loop -- revocations lists are small; sequential is fine.
-    if (!(await settle(walk, fact, () => isRevocationAuthorized(resolved, entry, walk)))) continue;
+    if (!(await (row === undefined
+      ? authorized()
+      : settle(walk, `revocation\u001f${row}\u001f${recordDigest(entry.envelopeBytes)}`, authorized)))) continue;
     // Authority comes first: a time nobody can read refuses only when someone
     // with standing wrote it, or any record naming this binding would revoke it.
     return {
