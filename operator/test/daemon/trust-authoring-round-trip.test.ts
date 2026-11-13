@@ -10,7 +10,7 @@
  * could not distinguish "the package authors production-valid artifacts" from "the fixtures and the
  * package agree with each other".
  */
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -31,11 +31,18 @@ import {
   type RoleSigner,
   type SealedBindingEntry,
 } from '@jinn-network/trust-authoring';
-import { dssePreAuthEncoding, recordDigest } from '@jinn-network/trust-core';
+import {
+  didPkh,
+  dssePreAuthEncoding,
+  recordDigest,
+  sealRevocation,
+  type DsseSigner,
+} from '@jinn-network/trust-core';
 import { createTrustAdapter } from '@jinn-network/record-discovery-client';
 import { MEDIA_HEAD, sealJson } from '@jinn-network/record-discovery-protocol';
 import { DISCOVERY_SIGNING_SCOPE } from '@jinn-network/record-discovery-protocol';
 import { ADMISSION_RECEIPT_TRUST_SCOPE } from '@jinn-network/marketplace-binding';
+import { hexToBytes } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { describe, expect, it } from 'vitest';
 import {
@@ -703,5 +710,110 @@ describe('admission binding carries the receipt-issuing scope every verifier che
     const scope = decodeBindingScope(admissionBindings[0]!.envelopeBytes);
     expect(scope).toContain(ADMISSION_RECEIPT_TRUST_SCOPE);
     expect(scope).not.toContain('authorizations');
+  });
+});
+
+/**
+ * Role identities read revocations through the revocation authority rule, as every other reader
+ * does (#5147). `revocations` lists every record naming a binding, whoever signed it, so a role
+ * that counts the list stops on anyone's say-so, and one that cannot check the voucher account's
+ * signature never stops at all: a role binding holds no `bindings` scope, so on the native path
+ * its voucher account is the one party that can revoke it.
+ *
+ * `trust-authoring` authors no revocation yet (`revokeBinding` is deferred), so the record is
+ * sealed with trust-core and given its own, later anchor. Everything else is production code.
+ */
+describe('role identities apply the revocation authority rule over a real catalog (#5147)', () => {
+  const REVOKED_ROLE = 'solver-delivery' as const;
+  const SOLVER_ROLES: readonly NativeRoleIdentityRole[] = ['solver-delivery', 'solver-settlement', 'solver-discovery'];
+
+  /** Key authority section 8: the account signs the DSSE pre-authentication encoding with EIP-191. */
+  function accountSigner(account: typeof ceremonyAccountA): DsseSigner {
+    const keyid = didPkh(84532, account.address);
+    return async ({ preAuthEncoding }) => [{
+      keyid,
+      signature: hexToBytes(await account.signMessage({ message: { raw: preAuthEncoding } })),
+    }];
+  }
+
+  async function catalogRevokedBy(revoker: 'voucher-account' | 'unbound-key') {
+    const genesis = await genesisForOperatorA();
+    const target = genesis.bindings.find(({ role, agent }) => role === REVOKED_ROLE && agent === AGENT_A)!;
+    const anchorDigest = recordDigest(new TextEncoder().encode(`revocation-anchor-${revoker}`));
+    const chain = anchorChain(1_786_000_600);
+    const locator = await submitAnchor({
+      walletClient: chain.walletClient,
+      publicClient: chain.publicClient,
+      target: '0x00000000000000000000000000000000000a11c0',
+      digest: anchorDigest,
+    });
+    // The catalog authority's key signs policies and holds no binding to the Agent.
+    const [revokedBy, signer] = revoker === 'voucher-account'
+      ? [didPkh(84532, ceremonyAccountA.address), accountSigner(ceremonyAccountA)]
+      : [genesis.authority.keyId, genesis.authority.dsseSigner];
+    const revocation = await sealRevocation({
+      protocol: 'https://spec.jinn.network/trust/revocation/v1',
+      target: target.digest,
+      revokedBy,
+      anchors: [{ digest: anchorDigest }],
+      effectiveFrom: locator.anchorTime,
+    }, signer);
+    const catalog = JSON.parse(await readFile(genesis.catalogPath, 'utf8')) as {
+      anchors: unknown[];
+      revocations: unknown[];
+    };
+    catalog.anchors.push(anchorDeclaration(anchorDigest, locator));
+    catalog.revocations.push({
+      digest: revocation.recordDigest,
+      envelope: Buffer.from(revocation.envelopeBytes).toString('base64'),
+    });
+    await writeFile(genesis.catalogPath, JSON.stringify(catalog));
+
+    const revokedAt = locator.anchorTime;
+    const trust = await openNativeTrustCatalog({
+      path: genesis.catalogPath,
+      expectedPolicyGenesisDigest: genesis.policyGenesisDigest,
+      anchorClient: anchorClientFor([
+        { digest: genesis.anchor.digest, anchorTime: genesis.anchorTime, transactionHash: genesis.anchor.locator.transactionHash },
+        { digest: anchorDigest, anchorTime: revokedAt, transactionHash: locator.transactionHash },
+      ]),
+      settlementOwnershipClient: ownershipFor(SAFE_A, [ceremonyAccountA.address]),
+      now: new Date(revokedAt),
+    });
+    const openAt = (at: string) => openRoleIdentitySet({
+      agent: AGENT_A,
+      requiredRoles: SOLVER_ROLES,
+      storePath: genesis.solverStore,
+      password: PASSWORD,
+      bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
+      verifyRoleBinding: trust.verifyRoleBinding,
+      now: () => new Date(at),
+    });
+    return { trust, openAt, key: target.keyId, bootedBefore: genesis.anchorTime, revokedAt };
+  }
+
+  it('ignores a revocation signed by a key that holds no binding to the Agent', async () => {
+    const { openAt, revokedAt } = await catalogRevokedBy('unbound-key');
+
+    const roles = await openAt(revokedAt);
+    await expect(roles.resolveEffective(REVOKED_ROLE, revokedAt)).resolves.toMatchObject({ ok: true });
+  });
+
+  it("takes the voucher account's revocation at boot, at effective time, and in the role's authority gate", async () => {
+    const { trust, openAt, key, bootedBefore, revokedAt } = await catalogRevokedBy('voucher-account');
+
+    await expect(openAt(revokedAt)).rejects.toThrow(/"solver-delivery" binding is revoked at boot/u);
+    const roles = await openAt(bootedBefore);
+    await expect(roles.resolveEffective(REVOKED_ROLE, bootedBefore)).resolves.toMatchObject({ ok: true });
+    await expect(roles.resolveEffective(REVOKED_ROLE, revokedAt)).resolves.toEqual({ ok: false, reason: 'revoked' });
+    await expect(roles.resolveEffective('solver-discovery', revokedAt)).resolves.toMatchObject({ ok: true });
+    await expect(trust.verifyRoleBinding({
+      role: REVOKED_ROLE,
+      key,
+      agent: AGENT_A,
+      family: 'deliveries',
+      atTime: revokedAt,
+    })).rejects.toThrow(/revoked/u);
   });
 });
