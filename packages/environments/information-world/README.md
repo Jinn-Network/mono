@@ -37,3 +37,7 @@ DigestSet subject values, by contrast, are bare hex — `bareHexDigest` converts
 conformance kit carries the confusion fixture.
 
 See `../../../docs/superpowers/specs/2026-07-31-chain-environment-family-design.md` §4.4.
+
+## Vitest
+
+`@jinn-network/information-world/testing` needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project. The other entry points do not need it.

@@ -31,6 +31,8 @@ const CROSS_TREE_DEPENDENCIES = [
   ["@jinn-network/task-execution-workspace", ["task-execution", "backend-local", "workspace"]],
   ["@jinn-network/task-execution-launchers", ["task-execution", "backend-local", "launchers"]],
   ["@jinn-network/evidence-protocol", ["evidence", "protocol"]],
+  ["@jinn-network/evidence-offer", ["evidence", "offer"]],
+  ["@jinn-network/verify", ["discovery", "verification"]],
   ["@jinn-network/evidence-repository", ["evidence", "repository"]],
   ["@jinn-network/evidence-discovery", ["evidence", "discovery"]],
   ["@jinn-network/execution-evidence-builder", ["evidence", "execution-evidence-builder"]],
@@ -132,7 +134,7 @@ if (requiredEntry.PRODUCT_BRANDING.displayName !== PRODUCT_BRANDING.displayName)
   throw new Error("packed require/import branding entries diverged");
 }
 
-if (PRODUCT_VERSION !== "0.1.0") throw new Error("product version drifted");
+if (PRODUCT_VERSION !== "0.1.1") throw new Error("product version drifted");
 if (typeof runCancel !== "function") throw new Error("runCancel missing from packed public entrypoint");
 // The bundled sample must build from the PACKED graph: this proves the admission package ships
 // its golden fixture in the tarball and the whole intake path works for an external consumer.

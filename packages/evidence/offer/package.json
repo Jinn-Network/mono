@@ -48,14 +48,6 @@
     "@jinn-network/trust-core": "0.1.0",
     "zod": "4.4.3"
   },
-  "peerDependencies": {
-    "vitest": "^4.1.8"
-  },
-  "peerDependenciesMeta": {
-    "vitest": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.9.3",

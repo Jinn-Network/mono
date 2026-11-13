@@ -36,7 +36,7 @@ export interface RealIdentity {
 export function realIdentity(label: string): RealIdentity {
   const pair = generateKeyPairSync('ed25519');
   return {
-    keyId: `did:key:z6Mk${label}111111111111111111111111111111`,
+    keyId: `did:key:z6Mk${label.replace(/[0OIl]/gu, '1')}111111111111111111111111111111`,
     ...pair,
     sign: (payload) => new Uint8Array(sign(null, payload, pair.privateKey)),
     verify: (payload, signature) => verify(null, payload, pair.publicKey, signature),
@@ -80,7 +80,7 @@ export function createRealTrustFixture(input: {
         algorithm: 'ed25519',
         didKey: entry.identity.keyId,
       },
-      voucher: { kind: 'oidc-machine', subject: entry.voucher },
+      voucher: { kind: 'oidc-machine', subject: `repo:fixture/${entry.voucher}:ref:refs/heads/main` },
       relationship: entry.relationship,
       scope: [...entry.scope],
       validFrom: time,
@@ -108,7 +108,15 @@ export function createRealTrustFixture(input: {
       return anchorTime === undefined ? null : { digest, anchorTime };
     },
   };
-  const bindingResolver = createBindingResolver({ bindings: store, anchors: anchorResolver, requireAnchors: true });
+  const bindingResolver = createBindingResolver({
+    bindings: store,
+    anchors: anchorResolver,
+    requireAnchors: true,
+    // These fixture bindings carry a placeholder machine ceremony; the fixture is the host vouching for it.
+    verifyHostedCeremony: async () => true,
+    recordSignedByItsKey: ({ binding, envelopeBytes }) =>
+      dsseVerifier(envelopeBytes).validSignerKeyids.includes(binding.key.didKey),
+  });
   const identityByKey = new Map(input.bindings.map(({ identity }) => [identity.keyId, identity]));
   const dsseVerifier: DsseChainVerifier = (bytes) => {
     let parsed;

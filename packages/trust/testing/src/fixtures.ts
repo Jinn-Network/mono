@@ -22,6 +22,7 @@ import type {
   DsseSigner,
   Eip1271Witness,
   EoaCeremonyEvidence,
+  IncumbentControl,
   KeyBinding,
   PolicyPurposeEntry,
   Relationship,
@@ -222,7 +223,7 @@ export async function buildKeyBindingFixture(options: BuildKeyBindingFixtureOpti
 export interface ResolvedBindingFixtureOptions extends BuildKeyBindingFixtureOptions {
   readonly effectiveStart?: string;
   readonly isGenesis?: boolean;
-  readonly incumbentControlVoucher?: VoucherIdentity;
+  readonly incumbentControls?: readonly IncumbentControl[];
   readonly witness?: Eip1271Witness;
   readonly revocations?: readonly ResolvedRevocation[];
 }
@@ -247,7 +248,7 @@ export async function buildResolvedBindingFixture(
     revocations: options.revocations ?? [],
     ...(built.ceremonyEvidence === undefined ? {} : { ceremonyEvidence: built.ceremonyEvidence }),
     ...(options.witness === undefined ? {} : { witness: options.witness }),
-    ...(options.incumbentControlVoucher === undefined ? {} : { incumbentControlVoucher: options.incumbentControlVoucher }),
+    ...(options.incumbentControls === undefined ? {} : { incumbentControls: options.incumbentControls }),
   };
   return { ...built, resolved };
 }

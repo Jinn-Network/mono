@@ -293,10 +293,8 @@ test('no manifest overrides the @noble/hashes resolution', () => {
   }
 });
 
-test('the testing kit declares Vitest as an exact optional peer', () => {
+test('the testing kit declares no Vitest peer', () => {
   const testing = readPackage('testing');
-  assert.deepEqual(testing.peerDependencies, { vitest: '^4.1.8' });
-  assert.deepEqual(testing.peerDependenciesMeta, {
-    vitest: { optional: true },
-  });
+  assert.equal(testing.peerDependencies, undefined);
+  assert.equal(testing.peerDependenciesMeta, undefined);
 });

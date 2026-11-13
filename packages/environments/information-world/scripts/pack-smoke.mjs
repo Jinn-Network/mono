@@ -250,9 +250,9 @@ const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoo
 if (Object.keys(packageJson.dependencies ?? {}).some((name) => name.startsWith('@jinn-network/'))) {
   throw new Error('the information-world package must ship with zero Jinn runtime dependencies');
 }
-if (packageJson.peerDependencies?.vitest !== '^4.1.8'
-    || packageJson.peerDependenciesMeta?.vitest?.optional !== true) {
-  throw new Error('the ./testing kit must declare vitest as an exact optional peer');
+if (packageJson.peerDependencies?.vitest !== undefined
+    || packageJson.peerDependenciesMeta?.vitest !== undefined) {
+  throw new Error('the ./testing kit must not declare a vitest peer');
 }
 for (const rootEntrypoint of ["index.js", "index.d.ts"]) {
   const rootSource = await readFile(${JSON.stringify(join(installedRoot, "dist"))} + "/" + rootEntrypoint, "utf8");

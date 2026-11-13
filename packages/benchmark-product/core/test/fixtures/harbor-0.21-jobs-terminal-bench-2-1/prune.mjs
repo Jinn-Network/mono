@@ -8,7 +8,8 @@
  *   node prune.mjs <record> <source-jobs-dir> [<out-dir>]
  *
  * `<record>` is a key of `RECORDS` below, and is also the directory the record is written to:
- * `jobs` (one trial per task) or `jobs-two-attempts` (two trials per task).
+ * `jobs` (one trial per task), `jobs-two-attempts` (two trials per task) or `jobs-resumed` (one
+ * oracle job that was interrupted and resumed).
  *
  * The source is a jobs directory Harbor wrote (`harbor run ... -o jobs`), holding one job
  * directory per arm. The output keeps, for each job, the job `config.json`, `lock.json` and
@@ -31,11 +32,11 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
-const JOBS = ["oracle", "terminus-2"];
 const JOB_FILES = ["config.json", "lock.json", "result.json"];
 /**
  * The committed records. Each is named for the directory it is written to, and states the tasks
- * it keeps and how many trial directories each job must hold for each of them. A source job with
+ * it keeps and how many trial directories each job must hold for each of them. `jobs` names the
+ * job directories a record keeps; it is `oracle` and `terminus-2` when left out. A source job with
  * any other count for a kept task is refused: Harbor does not number a task's trials, so the
  * count is the only thing that says a record is the one-attempt or the two-attempt shape.
  */
@@ -48,6 +49,11 @@ const RECORDS = {
     tasks: ["adaptive-rejection-sampler", "cancel-async-tasks"],
     trialsPerTask: 2,
   },
+  "jobs-resumed": {
+    jobs: ["oracle"],
+    tasks: ["adaptive-rejection-sampler", "cancel-async-tasks", "circuit-fibsqrt"],
+    trialsPerTask: 1,
+  },
 };
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -56,7 +62,7 @@ if (recordArg === undefined || !Object.hasOwn(RECORDS, recordArg) || sourceArg =
   console.error(`usage: node prune.mjs <${Object.keys(RECORDS).join("|")}> <source-jobs-dir> [<out-dir>]`);
   process.exit(2);
 }
-const { tasks: TASKS, trialsPerTask: TRIALS_PER_TASK } = RECORDS[recordArg];
+const { jobs: JOBS = ["oracle", "terminus-2"], tasks: TASKS, trialsPerTask: TRIALS_PER_TASK } = RECORDS[recordArg];
 const source = resolve(sourceArg);
 const out = resolve(outArg ?? join(here, recordArg));
 

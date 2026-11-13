@@ -49,3 +49,7 @@ Credentials, private keys, bearer tokens, wallet authority, and similar
 material must remain closed over by the injected sink capability. Concrete
 sinks may persist only non-secret recovery identifiers and must run the
 exported contract kit with printable and binary synthetic authority markers.
+
+## Vitest
+
+`@jinn-network/evidence-publication/testing` needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project. The other entry points do not need it.

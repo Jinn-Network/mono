@@ -1,0 +1,3367 @@
+{
+  "kit/golden": {
+    "library": {
+      "returned": {
+        "format": "benchmark-product-public-bundle/2",
+        "identity": "de045873c91e87c7b96e25841450aee46c0fe6a2936831aefa53bae421aed87a",
+        "checks": [
+          "manifest",
+          "evidence-closure",
+          "trust",
+          "matrix-rederivation",
+          "report-verification",
+          "claim-consistency"
+        ],
+        "signers": [
+          {
+            "role": "publisher",
+            "identity": "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
+            "keyId": "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
+            "custody": "same-operator",
+            "keyFingerprint": "sha256:d0aa1595b43cf61e9dfafa456d0b81b92a5aaf53de3627139ca1ab016a9ccda4"
+          },
+          {
+            "role": "automated-grader",
+            "identity": "urn:jinn:benchmark-product:local-venue:evaluator-1",
+            "keyId": "benchmark-product-verdict-dc8dbb6d84571890",
+            "custody": "same-operator"
+          }
+        ],
+        "benchmarkSha256": "c21f9eab990dabd54c08987c87f38f25e2a18ff86686e3c13131425c10b497ec",
+        "runSha256": "5a640cbf3b60afee34b360cd1120823424d22e2c673c0db1c3bb58b557c11cbf",
+        "matrixSha256": "546ed4c8bc349db998dabe34ffd5f452d85009423aff5a621a24ee6ed08d43b7",
+        "reportSha256": "1a72e2614af474c4728c211f702d7bd7e3615f44c6ac7520f5874549207d2ebb",
+        "reportEnvelopeSha256": "5d4cbd890f885f39e1be9bdaa50c9d4dad02e5ebefc5f9f22dbd1f20f7cd7450"
+      }
+    },
+    "json": {
+      "exitCode": 0,
+      "stdout": {
+        "ok": true,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "format": "benchmark-product-public-bundle/2",
+        "identity": "de045873c91e87c7b96e25841450aee46c0fe6a2936831aefa53bae421aed87a",
+        "checks": [
+          "manifest",
+          "evidence-closure",
+          "trust",
+          "matrix-rederivation",
+          "report-verification",
+          "claim-consistency"
+        ],
+        "signers": [
+          {
+            "role": "publisher",
+            "identity": "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
+            "keyId": "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
+            "custody": "same-operator",
+            "keyFingerprint": "sha256:d0aa1595b43cf61e9dfafa456d0b81b92a5aaf53de3627139ca1ab016a9ccda4"
+          },
+          {
+            "role": "automated-grader",
+            "identity": "urn:jinn:benchmark-product:local-venue:evaluator-1",
+            "keyId": "benchmark-product-verdict-dc8dbb6d84571890",
+            "custody": "same-operator"
+          }
+        ],
+        "benchmarkSha256": "c21f9eab990dabd54c08987c87f38f25e2a18ff86686e3c13131425c10b497ec",
+        "runSha256": "5a640cbf3b60afee34b360cd1120823424d22e2c673c0db1c3bb58b557c11cbf",
+        "matrixSha256": "546ed4c8bc349db998dabe34ffd5f452d85009423aff5a621a24ee6ed08d43b7",
+        "reportSha256": "1a72e2614af474c4728c211f702d7bd7e3615f44c6ac7520f5874549207d2ebb",
+        "reportEnvelopeSha256": "5d4cbd890f885f39e1be9bdaa50c9d4dad02e5ebefc5f9f22dbd1f20f7cd7450"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 0,
+      "stdout": "Recomputed: 6 of 6 checks passed\nBundle: sha256:de045873c91e87c7b96e25841450aee46c0fe6a2936831aefa53bae421aed87a\nFormat: benchmark-product-public-bundle/2\nRun: 5a640cbf3b60afee34b360cd1120823424d22e2c673c0db1c3bb58b557c11cbf\n\nNot checked by this tool: whether the machine that produced this bundle was\nhonest, and whether the compared identities are independent parties. What is\nrecomputed is the bundle's integrity, evidence closure, signing trust,\ncalculations, the report, and claim consistency — against the bytes the\nbundle carries, nothing else.\n\nmanifest                  passed       every listed file is here, unaltered\nevidence-closure          passed       every run's evidence is carried here\ntrust                     passed       the signing keys match the identities\nmatrix-rederivation       passed       the run tally follows from the evidence\nreport-verification       passed       the result follows from the runs\nclaim-consistency         passed       the claim agrees with the records here\n\nSigned by\n  publisher · 1 key\n    key sha256:d0aa1595b43cf61e9dfafa456d0b81b92a5aaf53de3627139ca1ab016a9ccda4 — no domain bound\n  automated grader — same operator · 1 key\n\nNo files were uploaded.\nProtocol identifiers are names, not addresses — this verifier fetches nothing\nfrom them. Checks run against the exact platform bytes installed from npm.\n",
+      "stderr": ""
+    }
+  },
+  "kit/tampered/claim-headline-tampered": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "claim package headline.baseline.passRate is not the exact projection of verified facts",
+        "issues": [
+          {
+            "path": "claim-consistency",
+            "message": "claim package headline.baseline.passRate is not the exact projection of verified facts"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "claim package headline.baseline.passRate is not the exact projection of verified facts"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: claim package headline.baseline.passRate is not the exact projection of verified facts\n"
+    }
+  },
+  "kit/tampered/claim-text-tampered": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "claim package verification.trustRoot is not the exact projection of verified facts",
+        "issues": [
+          {
+            "path": "claim-consistency",
+            "message": "claim package verification.trustRoot is not the exact projection of verified facts"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "claim package verification.trustRoot is not the exact projection of verified facts"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: claim package verification.trustRoot is not the exact projection of verified facts\n"
+    }
+  },
+  "kit/tampered/envelope-payload-malleated": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "report-envelope: invalid DSSE envelope: TrustCoreError: DSSE envelope payload is not strict standard or URL-safe base64.",
+        "issues": [
+          {
+            "path": "report-verification",
+            "message": "report-envelope: invalid DSSE envelope: TrustCoreError: DSSE envelope payload is not strict standard or URL-safe base64."
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "report-envelope: invalid DSSE envelope: TrustCoreError: DSSE envelope payload is not strict standard or URL-safe base64."
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: report-envelope: invalid DSSE envelope: TrustCoreError: DSSE envelope payload is not strict standard or URL-safe base64.\n"
+    }
+  },
+  "kit/tampered/file-truncated": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "manifest entry \"verdicts.json\" is missing",
+        "issues": [
+          {
+            "path": "verdicts.json",
+            "message": "manifest entry \"verdicts.json\" is missing"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "manifest entry \"verdicts.json\" is missing"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: manifest entry \"verdicts.json\" is missing\n"
+    }
+  },
+  "kit/tampered/manifest-digest-mismatch": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "digest mismatch for \"share.txt\"",
+        "issues": [
+          {
+            "path": "share.txt",
+            "message": "digest mismatch for \"share.txt\""
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "digest mismatch for \"share.txt\""
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: digest mismatch for \"share.txt\"\n"
+    }
+  },
+  "kit/tampered/manifest-length-mismatch": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "byte length mismatch for \"share.txt\"",
+        "issues": [
+          {
+            "path": "share.txt",
+            "message": "byte length mismatch for \"share.txt\""
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "byte length mismatch for \"share.txt\""
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: byte length mismatch for \"share.txt\"\n"
+    }
+  },
+  "kit/tampered/recanonicalized-report-bytes": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "primary benchmark record is invalid: document failed schema validation at sealing (§6.1)",
+        "issues": [
+          {
+            "path": "evidence-closure",
+            "message": "primary benchmark record is invalid: document failed schema validation at sealing (§6.1)"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "primary benchmark record is invalid: document failed schema validation at sealing (§6.1)"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: primary benchmark record is invalid: document failed schema validation at sealing (§6.1)\n"
+    }
+  },
+  "kit/tampered/record-digest-mismatch": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "evidence record digest mismatch",
+        "issues": [
+          {
+            "path": "records/01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71.bin",
+            "message": "evidence record digest mismatch"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "evidence record digest mismatch"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: evidence record digest mismatch\n"
+    }
+  },
+  "kit/tampered/record-substituted": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 bytes are missing",
+        "issues": [
+          {
+            "path": "evidence-closure",
+            "message": "verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 bytes are missing"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 bytes are missing"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 bytes are missing\n"
+    }
+  },
+  "kit/tampered/report-payload-edited": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "report-authenticity: no valid signer binds to author/scope/time: did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX:envelope-signature-invalid",
+        "issues": [
+          {
+            "path": "report-verification",
+            "message": "report-authenticity: no valid signer binds to author/scope/time: did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX:envelope-signature-invalid"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "report-authenticity: no valid signer binds to author/scope/time: did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX:envelope-signature-invalid"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: report-authenticity: no valid signer binds to author/scope/time: <identifier: see --json>:envelope-signature-invalid\n"
+    }
+  },
+  "kit/tampered/report-signature-grafted": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "report-authenticity: no valid signer binds to author/scope/time: did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX:envelope-signature-invalid",
+        "issues": [
+          {
+            "path": "report-verification",
+            "message": "report-authenticity: no valid signer binds to author/scope/time: did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX:envelope-signature-invalid"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "report-authenticity: no valid signer binds to author/scope/time: did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX:envelope-signature-invalid"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: report-authenticity: no valid signer binds to author/scope/time: <identifier: see --json>:envelope-signature-invalid\n"
+    }
+  },
+  "kit/tampered/results-miscomputed-resigned": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "report-recompute: recomputed results do not match the sealed Report results",
+        "issues": [
+          {
+            "path": "report-verification",
+            "message": "report-recompute: recomputed results do not match the sealed Report results"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "report-recompute: recomputed results do not match the sealed Report results"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: report-recompute: recomputed results do not match the sealed Report results\n"
+    }
+  },
+  "kit/tampered/trust-key-swapped": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI",
+        "issues": [
+          {
+            "path": "trust",
+            "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: Report author/keyId/didKey are not derived from the bundled Report SPKI\n"
+    }
+  },
+  "kit/tampered/verdict-signature-grafted-resigned": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "matrix-rederivation: re-derived digest sha256:7db9baa3f7740e35815840933e9176e178fe5a600e0a4b57fa7969780c146c80 !== received sha256:16bfe298a7deef8688e266841f083883743505918857df3cc7af7c6cddb2f4ca",
+        "issues": [
+          {
+            "path": "matrix-rederivation",
+            "message": "matrix-rederivation: re-derived digest sha256:7db9baa3f7740e35815840933e9176e178fe5a600e0a4b57fa7969780c146c80 !== received sha256:16bfe298a7deef8688e266841f083883743505918857df3cc7af7c6cddb2f4ca"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "matrix-rederivation: re-derived digest sha256:7db9baa3f7740e35815840933e9176e178fe5a600e0a4b57fa7969780c146c80 !== received sha256:16bfe298a7deef8688e266841f083883743505918857df3cc7af7c6cddb2f4ca"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: matrix-rederivation: re-derived digest sha256:7db9baa3f7740e35815840933e9176e178fe5a600e0a4b57fa7969780c146c80 !== received sha256:16bfe298a7deef8688e266841f083883743505918857df3cc7af7c6cddb2f4ca\n"
+    }
+  },
+  "trust/report-key-is-not-spki": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "trust.report.spkiDerBase64 is not a valid SPKI public key",
+        "issues": [
+          {
+            "path": "trust.report.spkiDerBase64",
+            "message": "trust.report.spkiDerBase64 is not a valid SPKI public key"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "trust.report.spkiDerBase64 is not a valid SPKI public key"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: trust.report.spkiDerBase64 is not a valid SPKI public key\n"
+    }
+  },
+  "trust/report-key-is-not-ed25519": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "trust.report.spkiDerBase64 is not an Ed25519 public key",
+        "issues": [
+          {
+            "path": "trust.report.spkiDerBase64",
+            "message": "trust.report.spkiDerBase64 is not an Ed25519 public key"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "trust.report.spkiDerBase64 is not an Ed25519 public key"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: trust.report.spkiDerBase64 is not an Ed25519 public key\n"
+    }
+  },
+  "trust/report-did-key-is-not-derived-from-its-spki": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI",
+        "issues": [
+          {
+            "path": "trust",
+            "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: Report author/keyId/didKey are not derived from the bundled Report SPKI\n"
+    }
+  },
+  "trust/report-key-id-differs-from-the-derived-did-key": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI",
+        "issues": [
+          {
+            "path": "trust",
+            "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: Report author/keyId/didKey are not derived from the bundled Report SPKI\n"
+    }
+  },
+  "trust/report-did-key-alone-differs-from-the-derived-did-key": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI",
+        "issues": [
+          {
+            "path": "trust",
+            "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: Report author/keyId/didKey are not derived from the bundled Report SPKI\n"
+    }
+  },
+  "trust/report-author-alone-differs-from-the-report": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI",
+        "issues": [
+          {
+            "path": "trust",
+            "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "Report author/keyId/didKey are not derived from the bundled Report SPKI"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: Report author/keyId/didKey are not derived from the bundled Report SPKI\n"
+    }
+  },
+  "trust/report-key-spelled-url-safe-is-accepted": {
+    "library": {
+      "returned": {
+        "format": "benchmark-product-public-bundle/2",
+        "identity": "aa8603b4f3fa37e74edc7fb45b4ebea3f88ee22fde02d198168837a112af49e8",
+        "checks": [
+          "manifest",
+          "evidence-closure",
+          "trust",
+          "matrix-rederivation",
+          "report-verification",
+          "claim-consistency"
+        ],
+        "signers": [
+          {
+            "role": "publisher",
+            "identity": "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
+            "keyId": "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
+            "custody": "same-operator",
+            "keyFingerprint": "sha256:d0aa1595b43cf61e9dfafa456d0b81b92a5aaf53de3627139ca1ab016a9ccda4"
+          },
+          {
+            "role": "automated-grader",
+            "identity": "urn:jinn:benchmark-product:local-venue:evaluator-1",
+            "keyId": "benchmark-product-verdict-dc8dbb6d84571890",
+            "custody": "same-operator"
+          }
+        ],
+        "benchmarkSha256": "c21f9eab990dabd54c08987c87f38f25e2a18ff86686e3c13131425c10b497ec",
+        "runSha256": "5a640cbf3b60afee34b360cd1120823424d22e2c673c0db1c3bb58b557c11cbf",
+        "matrixSha256": "546ed4c8bc349db998dabe34ffd5f452d85009423aff5a621a24ee6ed08d43b7",
+        "reportSha256": "1a72e2614af474c4728c211f702d7bd7e3615f44c6ac7520f5874549207d2ebb",
+        "reportEnvelopeSha256": "5d4cbd890f885f39e1be9bdaa50c9d4dad02e5ebefc5f9f22dbd1f20f7cd7450"
+      }
+    },
+    "json": {
+      "exitCode": 0,
+      "stdout": {
+        "ok": true,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "format": "benchmark-product-public-bundle/2",
+        "identity": "aa8603b4f3fa37e74edc7fb45b4ebea3f88ee22fde02d198168837a112af49e8",
+        "checks": [
+          "manifest",
+          "evidence-closure",
+          "trust",
+          "matrix-rederivation",
+          "report-verification",
+          "claim-consistency"
+        ],
+        "signers": [
+          {
+            "role": "publisher",
+            "identity": "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
+            "keyId": "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
+            "custody": "same-operator",
+            "keyFingerprint": "sha256:d0aa1595b43cf61e9dfafa456d0b81b92a5aaf53de3627139ca1ab016a9ccda4"
+          },
+          {
+            "role": "automated-grader",
+            "identity": "urn:jinn:benchmark-product:local-venue:evaluator-1",
+            "keyId": "benchmark-product-verdict-dc8dbb6d84571890",
+            "custody": "same-operator"
+          }
+        ],
+        "benchmarkSha256": "c21f9eab990dabd54c08987c87f38f25e2a18ff86686e3c13131425c10b497ec",
+        "runSha256": "5a640cbf3b60afee34b360cd1120823424d22e2c673c0db1c3bb58b557c11cbf",
+        "matrixSha256": "546ed4c8bc349db998dabe34ffd5f452d85009423aff5a621a24ee6ed08d43b7",
+        "reportSha256": "1a72e2614af474c4728c211f702d7bd7e3615f44c6ac7520f5874549207d2ebb",
+        "reportEnvelopeSha256": "5d4cbd890f885f39e1be9bdaa50c9d4dad02e5ebefc5f9f22dbd1f20f7cd7450"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 0,
+      "stdout": "Recomputed: 6 of 6 checks passed\nBundle: sha256:aa8603b4f3fa37e74edc7fb45b4ebea3f88ee22fde02d198168837a112af49e8\nFormat: benchmark-product-public-bundle/2\nRun: 5a640cbf3b60afee34b360cd1120823424d22e2c673c0db1c3bb58b557c11cbf\n\nNot checked by this tool: whether the machine that produced this bundle was\nhonest, and whether the compared identities are independent parties. What is\nrecomputed is the bundle's integrity, evidence closure, signing trust,\ncalculations, the report, and claim consistency — against the bytes the\nbundle carries, nothing else.\n\nmanifest                  passed       every listed file is here, unaltered\nevidence-closure          passed       every run's evidence is carried here\ntrust                     passed       the signing keys match the identities\nmatrix-rederivation       passed       the run tally follows from the evidence\nreport-verification       passed       the result follows from the runs\nclaim-consistency         passed       the claim agrees with the records here\n\nSigned by\n  publisher · 1 key\n    key sha256:d0aa1595b43cf61e9dfafa456d0b81b92a5aaf53de3627139ca1ab016a9ccda4 — no domain bound\n  automated grader — same operator · 1 key\n\nNo files were uploaded.\nProtocol identifiers are names, not addresses — this verifier fetches nothing\nfrom them. Checks run against the exact platform bytes installed from npm.\n",
+      "stderr": ""
+    }
+  },
+  "trust/evaluator-key-is-not-spki": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "trust.evaluators.urn:jinn:benchmark-product:local-venue:evaluator-1 is not a valid SPKI public key",
+        "issues": [
+          {
+            "path": "trust.evaluators.urn:jinn:benchmark-product:local-venue:evaluator-1",
+            "message": "trust.evaluators.urn:jinn:benchmark-product:local-venue:evaluator-1 is not a valid SPKI public key"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "trust.evaluators.urn:jinn:benchmark-product:local-venue:evaluator-1 is not a valid SPKI public key"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: trust.evaluators.<identifier: see --json> is not a valid SPKI public key\n"
+    }
+  },
+  "trust/evaluator-key-is-not-ed25519": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "trust.evaluators.urn:jinn:benchmark-product:local-venue:evaluator-1 is not an Ed25519 public key",
+        "issues": [
+          {
+            "path": "trust.evaluators.urn:jinn:benchmark-product:local-venue:evaluator-1",
+            "message": "trust.evaluators.urn:jinn:benchmark-product:local-venue:evaluator-1 is not an Ed25519 public key"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "trust.evaluators.urn:jinn:benchmark-product:local-venue:evaluator-1 is not an Ed25519 public key"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: trust.evaluators.<identifier: see --json> is not an Ed25519 public key\n"
+    }
+  },
+  "trust/evaluator-key-id-is-not-derived-from-its-spki": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "evaluator urn:jinn:benchmark-product:local-venue:evaluator-1 keyId is not derived from its SPKI",
+        "issues": [
+          {
+            "path": "trust",
+            "message": "evaluator urn:jinn:benchmark-product:local-venue:evaluator-1 keyId is not derived from its SPKI"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "evaluator urn:jinn:benchmark-product:local-venue:evaluator-1 keyId is not derived from its SPKI"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: evaluator <identifier: see --json> keyId is not derived from its SPKI\n"
+    }
+  },
+  "trust/evaluator-named-twice": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "trust.evaluators.evaluator contains duplicate identities",
+        "issues": [
+          {
+            "path": "trust.evaluators.evaluator",
+            "message": "trust.evaluators.evaluator contains duplicate identities"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "trust.evaluators.evaluator contains duplicate identities"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: trust.evaluators.evaluator contains duplicate identities\n"
+    }
+  },
+  "trust/evaluator-set-names-one-the-matrix-does-not": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "evaluator trust set must exactly equal Matrix-referenced evaluators",
+        "issues": [
+          {
+            "path": "trust",
+            "message": "evaluator trust set must exactly equal Matrix-referenced evaluators"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "evaluator trust set must exactly equal Matrix-referenced evaluators"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: evaluator trust set must exactly equal Matrix-referenced evaluators\n"
+    }
+  },
+  "trust/one-spki-under-two-identities": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "one SPKI is reused under multiple bundled identities",
+        "issues": [
+          {
+            "path": "trust",
+            "message": "one SPKI is reused under multiple bundled identities"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "one SPKI is reused under multiple bundled identities"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: one SPKI is reused under multiple bundled identities\n"
+    }
+  },
+  "trust/verdict-key-id-disagrees-with-its-evaluator": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 keyId cross-validation failed",
+        "issues": [
+          {
+            "path": "trust",
+            "message": "verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 keyId cross-validation failed"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 keyId cross-validation failed"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 keyId cross-validation failed\n"
+    }
+  },
+  "evidence-closure/verdict-names-another-evaluator": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 evaluator mismatch",
+        "issues": [
+          {
+            "path": "verdicts.json",
+            "message": "verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 evaluator mismatch"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 evaluator mismatch"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 evaluator mismatch\n"
+    }
+  },
+  "evidence-closure/verdict-catalog-is-one-short": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "verdict catalog does not match Matrix verdict closure",
+        "issues": [
+          {
+            "path": "verdicts.json",
+            "message": "verdict catalog does not match Matrix verdict closure"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "verdict catalog does not match Matrix verdict closure"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: verdict catalog does not match Matrix verdict closure\n"
+    }
+  },
+  "anchored-bundle/dangling-anchor": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix",
+        "issues": [
+          {
+            "path": "anchors/05d56b22a066fe82fe08d2b26a27767d51e94eebffd4e34560551e403b64dae0.bin",
+            "message": "carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix\n"
+    }
+  },
+  "anchored-bundle/two-dangling-anchors": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix",
+        "issues": [
+          {
+            "path": "anchors/05d56b22a066fe82fe08d2b26a27767d51e94eebffd4e34560551e403b64dae0.bin",
+            "message": "carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix\n"
+    }
+  },
+  "anchored-bundle/anchor-file-is-not-named-by-its-digest": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "anchor record digest mismatch",
+        "issues": [
+          {
+            "path": "anchors/5555555555555555555555555555555555555555555555555555555555555555.bin",
+            "message": "anchor record digest mismatch"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "anchor record digest mismatch"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: anchor record digest mismatch\n"
+    }
+  },
+  "anchored-bundle/anchor-over-the-sealed-run": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "claim package anchors is not the exact projection of verified facts",
+        "issues": [
+          {
+            "path": "claim-consistency",
+            "message": "claim package anchors is not the exact projection of verified facts"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "claim package anchors is not the exact projection of verified facts"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: claim package anchors is not the exact projection of verified facts\n"
+    }
+  },
+  "report-envelope/signed-by-another-key": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "report-authenticity: no valid signer binds to author/scope/time: did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX:envelope-signature-invalid",
+        "issues": [
+          {
+            "path": "report-verification",
+            "message": "report-authenticity: no valid signer binds to author/scope/time: did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX:envelope-signature-invalid"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "report-authenticity: no valid signer binds to author/scope/time: did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX:envelope-signature-invalid"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: report-authenticity: no valid signer binds to author/scope/time: <identifier: see --json>:envelope-signature-invalid\n"
+    }
+  },
+  "report-envelope/key-id-is-not-the-report-key": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "report-authenticity: no valid signer binds to author/scope/time: urn:key:stranger:envelope-signature-invalid",
+        "issues": [
+          {
+            "path": "report-verification",
+            "message": "report-authenticity: no valid signer binds to author/scope/time: urn:key:stranger:envelope-signature-invalid"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "report-authenticity: no valid signer binds to author/scope/time: urn:key:stranger:envelope-signature-invalid"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: report-authenticity: no valid signer binds to author/scope/time: <identifier: see --json>:envelope-signature-invalid\n"
+    }
+  },
+  "report-envelope/a-stranger-signs-beside-the-report-key": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "claim package records.reportEnvelopeSha256 is not the exact projection of verified facts",
+        "issues": [
+          {
+            "path": "claim-consistency",
+            "message": "claim package records.reportEnvelopeSha256 is not the exact projection of verified facts"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "claim package records.reportEnvelopeSha256 is not the exact projection of verified facts"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: claim package records.reportEnvelopeSha256 is not the exact projection of verified facts\n"
+    }
+  },
+  "evidence-native-signature/valid-signature": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "Matrix v2 failed deterministic assembly-3.0 replay",
+        "issues": [
+          {
+            "path": "evidence-native-bundle",
+            "message": "Matrix v2 failed deterministic assembly-3.0 replay"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "Matrix v2 failed deterministic assembly-3.0 replay"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: Matrix v2 failed deterministic assembly-3.0 replay\n"
+    }
+  },
+  "evidence-native-signature/flipped-signature": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "Result Evaluation signature is invalid or unbound",
+        "issues": [
+          {
+            "path": "evidence-native-bundle",
+            "message": "Result Evaluation signature is invalid or unbound"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "Result Evaluation signature is invalid or unbound"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: Result Evaluation signature is invalid or unbound\n"
+    }
+  },
+  "evidence-native-signature/signed-by-another-key": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "Result Evaluation signature is invalid or unbound",
+        "issues": [
+          {
+            "path": "evidence-native-bundle",
+            "message": "Result Evaluation signature is invalid or unbound"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "Result Evaluation signature is invalid or unbound"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: Result Evaluation signature is invalid or unbound\n"
+    }
+  },
+  "evidence-native-signature/key-id-is-not-a-declared-signer": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "Result Evaluation signature is invalid or unbound",
+        "issues": [
+          {
+            "path": "evidence-native-bundle",
+            "message": "Result Evaluation signature is invalid or unbound"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "Result Evaluation signature is invalid or unbound"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: Result Evaluation signature is invalid or unbound\n"
+    }
+  },
+  "evidence-native-signature/public-key-is-not-spki": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "Result Evaluation signature is invalid or unbound",
+        "issues": [
+          {
+            "path": "evidence-native-bundle",
+            "message": "Result Evaluation signature is invalid or unbound"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "Result Evaluation signature is invalid or unbound"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: Result Evaluation signature is invalid or unbound\n"
+    }
+  },
+  "evidence-native-signature/public-key-is-not-ed25519": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "Result Evaluation signature is invalid or unbound",
+        "issues": [
+          {
+            "path": "evidence-native-bundle",
+            "message": "Result Evaluation signature is invalid or unbound"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "Result Evaluation signature is invalid or unbound"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: Result Evaluation signature is invalid or unbound\n"
+    }
+  },
+  "evidence-native-signature/p256-key-with-a-signature-it-verifies": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "Result Evaluation signature is invalid or unbound",
+        "issues": [
+          {
+            "path": "evidence-native-bundle",
+            "message": "Result Evaluation signature is invalid or unbound"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "Result Evaluation signature is invalid or unbound"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: Result Evaluation signature is invalid or unbound\n"
+    }
+  },
+  "admission-authority-signature/valid-signature": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "Benchmark binary intake extension is outside its strict schema",
+        "issues": [
+          {
+            "path": "evidence-closure",
+            "message": "Benchmark binary intake extension is outside its strict schema"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "Benchmark binary intake extension is outside its strict schema"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: Benchmark binary intake extension is outside its strict schema\n"
+    }
+  },
+  "admission-authority-signature/flipped-signature": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.operatorAssertion: authority signature is invalid for role operator-truth-attestor",
+        "issues": [
+          {
+            "path": "evidence-closure",
+            "message": "binary admission replay failed: resolutions.0.operatorAssertion: authority signature is invalid for role operator-truth-attestor"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.operatorAssertion: authority signature is invalid for role operator-truth-attestor"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: binary admission replay failed: resolutions.0.operatorAssertion: authority signature is invalid for role operator-truth-attestor\n"
+    }
+  },
+  "admission-authority-signature/signed-by-another-key": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.operatorAssertion: authority signature is invalid for role operator-truth-attestor",
+        "issues": [
+          {
+            "path": "evidence-closure",
+            "message": "binary admission replay failed: resolutions.0.operatorAssertion: authority signature is invalid for role operator-truth-attestor"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.operatorAssertion: authority signature is invalid for role operator-truth-attestor"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: binary admission replay failed: resolutions.0.operatorAssertion: authority signature is invalid for role operator-truth-attestor\n"
+    }
+  },
+  "admission-authority-signature/key-id-is-not-the-report-key": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.operatorAssertion: authority signature is invalid for role operator-truth-attestor",
+        "issues": [
+          {
+            "path": "evidence-closure",
+            "message": "binary admission replay failed: resolutions.0.operatorAssertion: authority signature is invalid for role operator-truth-attestor"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.operatorAssertion: authority signature is invalid for role operator-truth-attestor"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: binary admission replay failed: resolutions.0.operatorAssertion: authority signature is invalid for role operator-truth-attestor\n"
+    }
+  },
+  "admission-authority-signature/two-signatures": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.operatorAssertion: authority evidence has the wrong payload type or signature count",
+        "issues": [
+          {
+            "path": "evidence-closure",
+            "message": "binary admission replay failed: resolutions.0.operatorAssertion: authority evidence has the wrong payload type or signature count"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.operatorAssertion: authority evidence has the wrong payload type or signature count"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: binary admission replay failed: resolutions.0.operatorAssertion: authority evidence has the wrong payload type or signature count\n"
+    }
+  },
+  "admission-reviewer-signature/valid-signature": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.reviews.0: review measurements do not match the frozen human-review EvaluationSpec",
+        "issues": [
+          {
+            "path": "evidence-closure",
+            "message": "binary admission replay failed: resolutions.0.reviews.0: review measurements do not match the frozen human-review EvaluationSpec"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.reviews.0: review measurements do not match the frozen human-review EvaluationSpec"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: binary admission replay failed: resolutions.0.reviews.0: review measurements do not match the frozen human-review EvaluationSpec\n"
+    }
+  },
+  "admission-reviewer-signature/flipped-signature": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid",
+        "issues": [
+          {
+            "path": "evidence-closure",
+            "message": "binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid\n"
+    }
+  },
+  "admission-reviewer-signature/signed-by-another-key": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid",
+        "issues": [
+          {
+            "path": "evidence-closure",
+            "message": "binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid\n"
+    }
+  },
+  "admission-reviewer-signature/key-id-is-not-the-reviewer-key": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid",
+        "issues": [
+          {
+            "path": "evidence-closure",
+            "message": "binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid\n"
+    }
+  },
+  "admission-reviewer-signature/evaluator-carries-no-key": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid",
+        "issues": [
+          {
+            "path": "evidence-closure",
+            "message": "binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid\n"
+    }
+  },
+  "admission-reviewer-signature/two-signatures": {
+    "library": {
+      "threw": {
+        "name": "BenchmarkProductError",
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.reviews.0: review verdict must be one Result Evaluation envelope with one signature",
+        "issues": [
+          {
+            "path": "evidence-closure",
+            "message": "binary admission replay failed: resolutions.0.reviews.0: review verdict must be one Result Evaluation envelope with one signature"
+          }
+        ]
+      }
+    },
+    "json": {
+      "exitCode": 1,
+      "stdout": {
+        "ok": false,
+        "verifierVersion": "<verifier-version>",
+        "supportedFormats": [
+          "benchmark-product-public-bundle/2",
+          "benchmark-product-public-bundle/4",
+          "benchmark-product-public-bundle/5",
+          "benchmark-product-public-bundle/6",
+          "benchmark-product-public-bundle/7",
+          "benchmark-product-public-bundle/8",
+          "benchmark-product-public-bundle/10"
+        ],
+        "code": "record-integrity",
+        "message": "binary admission replay failed: resolutions.0.reviews.0: review verdict must be one Result Evaluation envelope with one signature"
+      },
+      "stderr": ""
+    },
+    "human": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "colophon-check: binary admission replay failed: resolutions.0.reviews.0: review verdict must be one Result Evaluation envelope with one signature\n"
+    }
+  },
+  "report-envelope-signatures/golden-envelope": {
+    "validSignerKeyids": [
+      "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX"
+    ]
+  },
+  "report-envelope-signatures/flipped-signature": {
+    "validSignerKeyids": []
+  },
+  "report-envelope-signatures/signed-by-another-key": {
+    "validSignerKeyids": []
+  },
+  "report-envelope-signatures/key-id-is-not-the-report-key": {
+    "validSignerKeyids": []
+  },
+  "report-envelope-signatures/a-stranger-signs-first": {
+    "validSignerKeyids": [
+      "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX"
+    ]
+  },
+  "report-envelope-signatures/the-report-key-signs-twice": {
+    "validSignerKeyids": [
+      "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX",
+      "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX"
+    ]
+  },
+  "report-envelope-signatures/respelled-envelope-is-accepted": {
+    "validSignerKeyids": [
+      "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX"
+    ]
+  },
+  "report-envelope-signatures/url-safe-signature-is-accepted": {
+    "validSignerKeyids": [
+      "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX"
+    ]
+  },
+  "report-envelope-signatures/not-an-envelope": {
+    "validSignerKeyids": []
+  },
+  "report-envelope-signatures/verifying-key-is-not-ed25519": {
+    "validSignerKeyids": []
+  },
+  "report-envelope-signatures/p256-key-with-a-signature-it-verifies": {
+    "validSignerKeyids": [
+      "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX"
+    ]
+  },
+  "evaluator-claim/valid-signature": "urn:evaluator:characterization",
+  "evaluator-claim/solver-role-resolves-to-the-owner": "urn:owner:characterization",
+  "evaluator-claim/no-role": "unresolved",
+  "evaluator-claim/claim-is-not-a-string": "unresolved",
+  "evaluator-claim/digest-has-no-prefix": "unresolved",
+  "evaluator-claim/no-key-for-the-claim": "unresolved",
+  "evaluator-claim/record-is-not-carried": "unresolved",
+  "evaluator-claim/flipped-signature": "unresolved",
+  "evaluator-claim/signed-by-another-key": "unresolved",
+  "evaluator-claim/key-id-is-not-the-evaluator-key": "unresolved",
+  "evaluator-claim/a-stranger-signs-first": "urn:evaluator:characterization",
+  "evaluator-claim/respelled-envelope-is-accepted": "urn:evaluator:characterization",
+  "evaluator-claim/url-safe-signature-is-accepted": "urn:evaluator:characterization",
+  "evaluator-claim/digest-has-another-prefix": "unresolved",
+  "evaluator-claim/p256-key-with-a-signature-it-verifies": "urn:evaluator:characterization",
+  "verdict-envelope/payload-type-is-not-the-verdict-type": {
+    "threw": {
+      "name": "BenchmarkProductError",
+      "code": "execution",
+      "message": "verdict envelope payloadType is not the verdict DSSE payload type",
+      "issues": [
+        {
+          "path": "payloadType",
+          "message": "verdict envelope payloadType is not the verdict DSSE payload type"
+        }
+      ]
+    }
+  },
+  "did-key-derivation/golden-report-key": {
+    "returned": "did:key:z6MkiTfZS4EM9K1fczmhpcmi1YxDdtURfuPWJrCSofeTwYFX"
+  },
+  "did-key-derivation/label-derived-key": {
+    "returned": "did:key:z6MkgQDXPH8bLr14z5GXPjbymRZpK2PM1rRKNWZ5wgfMkDn5"
+  },
+  "did-key-derivation/p256-key-is-not-refused": {
+    "returned": "did:key:z6MknnLMgi41Cef18DdXTaN6pbL5bxnvosTFSJUnixbdR9Wj"
+  },
+  "did-key-derivation/p384-key": {
+    "threw": {
+      "name": "Error",
+      "message": "Ed25519 public key raw bytes must be 32 bytes, got 48"
+    }
+  },
+  "did-key-derivation/rsa-key": {
+    "threw": {
+      "name": "Error",
+      "message": "Ed25519 public key JWK export is missing its x-coordinate"
+    }
+  },
+  "did-key-decoding/golden-report-key": {
+    "publicKeyHex": "3b8955ece6e29ffa041af08ad488ec6cfcd1b16a043e1eb1869d8c7ec6009656",
+    "spkiDerBase64": "MCowBQYDK2VwAyEAO4lV7Obin/oEGvCK1IjsbPzRsWoEPh6xhp2MfsYAllY=",
+    "fingerprint": "sha256:d0aa1595b43cf61e9dfafa456d0b81b92a5aaf53de3627139ca1ab016a9ccda4"
+  },
+  "did-key-decoding/not-a-did": {
+    "publicKeyHex": null,
+    "spkiDerBase64": null,
+    "fingerprint": null
+  },
+  "did-key-decoding/another-did-method": {
+    "publicKeyHex": null,
+    "spkiDerBase64": null,
+    "fingerprint": null
+  },
+  "did-key-decoding/another-did-method-on-a-real-key": {
+    "publicKeyHex": null,
+    "spkiDerBase64": null,
+    "fingerprint": null
+  },
+  "did-key-decoding/empty-payload": {
+    "publicKeyHex": null,
+    "spkiDerBase64": null,
+    "fingerprint": null
+  },
+  "did-key-decoding/character-outside-the-alphabet": {
+    "publicKeyHex": null,
+    "spkiDerBase64": null,
+    "fingerprint": null
+  },
+  "did-key-decoding/character-outside-the-alphabet-at-key-length": {
+    "publicKeyHex": null,
+    "spkiDerBase64": null,
+    "fingerprint": null
+  },
+  "did-key-decoding/ed25519-prefix-on-a-short-key": {
+    "publicKeyHex": null,
+    "spkiDerBase64": null,
+    "fingerprint": null
+  },
+  "did-key-decoding/payload-one-digit-too-long": {
+    "publicKeyHex": null,
+    "spkiDerBase64": null,
+    "fingerprint": null
+  },
+  "did-key-decoding/too-short-for-a-key": {
+    "publicKeyHex": null,
+    "spkiDerBase64": null,
+    "fingerprint": null
+  },
+  "did-key-decoding/secp256k1-key": {
+    "publicKeyHex": null,
+    "spkiDerBase64": null,
+    "fingerprint": null
+  },
+  "did-key-decoding/x25519-key": {
+    "publicKeyHex": null,
+    "spkiDerBase64": null,
+    "fingerprint": null
+  },
+  "anchors/nothing-carried": {
+    "anchors": [],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "absent"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/declared-and-nothing-carried": {
+    "anchors": [],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "declared-but-absent",
+        "declaredProfiles": [
+          "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1"
+        ]
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/two-declared-one-carried": {
+    "anchors": [
+      {
+        "recordSha256": "d87b5580e495afc652cc7854393fa81e12e8eca34835fbe3107aeaf655d65cba",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "present",
+        "timeBasis": "authority-time",
+        "facts": {
+          "genTime": "2026-05-01T12:00:00Z",
+          "policyOid": "2.999.1",
+          "serialNumber": "0102030405060708090a0b0c0d0e0f10",
+          "signerCertificateSha256": "a8130302dd961dca1397c081ee24fcc7201b8a9a9b85eca82caabdb02b5b785e",
+          "signatureAlgorithmOid": "1.2.840.10045.4.3.2",
+          "accuracy": {
+            "seconds": 1
+          }
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "declared-but-absent",
+        "declaredProfiles": [
+          "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1"
+        ]
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/one-declared-one-carried": {
+    "anchors": [
+      {
+        "recordSha256": "d87b5580e495afc652cc7854393fa81e12e8eca34835fbe3107aeaf655d65cba",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "present",
+        "timeBasis": "authority-time",
+        "facts": {
+          "genTime": "2026-05-01T12:00:00Z",
+          "policyOid": "2.999.1",
+          "serialNumber": "0102030405060708090a0b0c0d0e0f10",
+          "signerCertificateSha256": "a8130302dd961dca1397c081ee24fcc7201b8a9a9b85eca82caabdb02b5b785e",
+          "signatureAlgorithmOid": "1.2.840.10045.4.3.2",
+          "accuracy": {
+            "seconds": 1
+          }
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/rfc3161-lock/no-trust-material": {
+    "anchors": [
+      {
+        "recordSha256": "d87b5580e495afc652cc7854393fa81e12e8eca34835fbe3107aeaf655d65cba",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "present",
+        "timeBasis": "authority-time",
+        "facts": {
+          "genTime": "2026-05-01T12:00:00Z",
+          "policyOid": "2.999.1",
+          "serialNumber": "0102030405060708090a0b0c0d0e0f10",
+          "signerCertificateSha256": "a8130302dd961dca1397c081ee24fcc7201b8a9a9b85eca82caabdb02b5b785e",
+          "signatureAlgorithmOid": "1.2.840.10045.4.3.2",
+          "accuracy": {
+            "seconds": 1
+          }
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/rfc3161-lock/trust-material-supplied": {
+    "anchors": [
+      {
+        "recordSha256": "d87b5580e495afc652cc7854393fa81e12e8eca34835fbe3107aeaf655d65cba",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock",
+        "trustMaterial": "supplied",
+        "status": "verified",
+        "timeBasis": "authority-time",
+        "time": "2026-05-01T12:00:00Z",
+        "facts": {
+          "genTime": "2026-05-01T12:00:00Z",
+          "policyOid": "2.999.1",
+          "serialNumber": "0102030405060708090a0b0c0d0e0f10",
+          "signerCertificateSha256": "a8130302dd961dca1397c081ee24fcc7201b8a9a9b85eca82caabdb02b5b785e",
+          "signatureAlgorithmOid": "1.2.840.10045.4.3.2",
+          "accuracy": {
+            "seconds": 1
+          }
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/rfc3161-lock/trust-material-from-another-authority": {
+    "anchors": [
+      {
+        "recordSha256": "d87b5580e495afc652cc7854393fa81e12e8eca34835fbe3107aeaf655d65cba",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock",
+        "trustMaterial": "supplied",
+        "status": "present",
+        "timeBasis": "authority-time",
+        "facts": {
+          "genTime": "2026-05-01T12:00:00Z",
+          "policyOid": "2.999.1",
+          "serialNumber": "0102030405060708090a0b0c0d0e0f10",
+          "signerCertificateSha256": "a8130302dd961dca1397c081ee24fcc7201b8a9a9b85eca82caabdb02b5b785e",
+          "signatureAlgorithmOid": "1.2.840.10045.4.3.2",
+          "accuracy": {
+            "seconds": 1
+          }
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/rfc3161-lock/token-covers-another-digest": {
+    "anchors": [
+      {
+        "recordSha256": "50ab1e300fb817aa1fcd99c6a4821019423f62398f15b3a1cce12209a4a60c14",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "invalid",
+        "reason": "messageImprint.hashedMessage is not the subject digest (§6.1 rule 12)."
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "absent"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": [
+      {
+        "recordSha256": "50ab1e300fb817aa1fcd99c6a4821019423f62398f15b3a1cce12209a4a60c14",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "invalid",
+        "reason": "messageImprint.hashedMessage is not the subject digest (§6.1 rule 12)."
+      }
+    ]
+  },
+  "anchors/rfc3161-lock/invalid-anchor-does-not-satisfy-declared-intent": {
+    "anchors": [
+      {
+        "recordSha256": "50ab1e300fb817aa1fcd99c6a4821019423f62398f15b3a1cce12209a4a60c14",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "invalid",
+        "reason": "messageImprint.hashedMessage is not the subject digest (§6.1 rule 12)."
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "declared-but-absent",
+        "declaredProfiles": [
+          "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1"
+        ]
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": [
+      {
+        "recordSha256": "50ab1e300fb817aa1fcd99c6a4821019423f62398f15b3a1cce12209a4a60c14",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "invalid",
+        "reason": "messageImprint.hashedMessage is not the subject digest (§6.1 rule 12)."
+      }
+    ]
+  },
+  "anchors/rfc3161-lock/after-the-close-instant": {
+    "anchors": [
+      {
+        "recordSha256": "38c249067f8f32ba49954d568bf1b6a1f7ac90dc8978b6a8fc5ce63216999dbe",
+        "status": "invalid",
+        "reason": "the token's genTime 2026-06-01T12:00:00Z is after this run's own pre-registered close instant 2026-06-01T00:00:00Z",
+        "trustMaterial": "none",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock"
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "absent"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": [
+      {
+        "recordSha256": "38c249067f8f32ba49954d568bf1b6a1f7ac90dc8978b6a8fc5ce63216999dbe",
+        "status": "invalid",
+        "reason": "the token's genTime 2026-06-01T12:00:00Z is after this run's own pre-registered close instant 2026-06-01T00:00:00Z",
+        "trustMaterial": "none",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock"
+      }
+    ]
+  },
+  "anchors/rfc3161-lock/close-instant-is-not-comparable": {
+    "anchors": [
+      {
+        "recordSha256": "d87b5580e495afc652cc7854393fa81e12e8eca34835fbe3107aeaf655d65cba",
+        "status": "invalid",
+        "reason": "the token's genTime 2026-05-01T12:00:00Z is after this run's own pre-registered close instant not an instant",
+        "trustMaterial": "none",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock"
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "absent"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": [
+      {
+        "recordSha256": "d87b5580e495afc652cc7854393fa81e12e8eca34835fbe3107aeaf655d65cba",
+        "status": "invalid",
+        "reason": "the token's genTime 2026-05-01T12:00:00Z is after this run's own pre-registered close instant not an instant",
+        "trustMaterial": "none",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock"
+      }
+    ]
+  },
+  "anchors/rfc3161-matrix/after-the-close-instant": {
+    "anchors": [
+      {
+        "recordSha256": "49625bbf2d04db2f0d92c409f9ee49c74d386abac300cfa8b5ab111ca4fe3a27",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "matrix",
+        "trustMaterial": "none",
+        "status": "present",
+        "timeBasis": "authority-time",
+        "facts": {
+          "genTime": "2026-06-01T12:00:00Z",
+          "policyOid": "2.999.1",
+          "serialNumber": "0102030405060708090a0b0c0d0e0f10",
+          "signerCertificateSha256": "a8130302dd961dca1397c081ee24fcc7201b8a9a9b85eca82caabdb02b5b785e",
+          "signatureAlgorithmOid": "1.2.840.10045.4.3.2",
+          "accuracy": {
+            "seconds": 1
+          }
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "absent"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "anchored"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/dangling-digest": {
+    "anchors": [
+      {
+        "recordSha256": "77cc649bdf71257c84e2ad2e7dd8e5d46352ab04f2af9f170e532701156c61f4",
+        "status": "invalid",
+        "reason": "the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix",
+        "trustMaterial": "none",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1"
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "absent"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": [
+      {
+        "recordSha256": "77cc649bdf71257c84e2ad2e7dd8e5d46352ab04f2af9f170e532701156c61f4",
+        "status": "invalid",
+        "reason": "the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix",
+        "trustMaterial": "none",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1"
+      }
+    ]
+  },
+  "anchors/kind-label-misdescribes-its-digest": {
+    "anchors": [
+      {
+        "recordSha256": "a452ce4ba37407eb37d0fad11cdd7f0ca577f8263d8c173731192f8a97d83ed8",
+        "status": "invalid",
+        "reason": "subject.kind is https://spec.jinn.network/records/benchmark-matrix/v1, but its digest resolves to this bundle's sealed Run",
+        "trustMaterial": "none",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock"
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "absent"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": [
+      {
+        "recordSha256": "a452ce4ba37407eb37d0fad11cdd7f0ca577f8263d8c173731192f8a97d83ed8",
+        "status": "invalid",
+        "reason": "subject.kind is https://spec.jinn.network/records/benchmark-matrix/v1, but its digest resolves to this bundle's sealed Run",
+        "trustMaterial": "none",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock"
+      }
+    ]
+  },
+  "anchors/unimplemented-provider": {
+    "anchors": [
+      {
+        "recordSha256": "f243228fd9d09beef3440d0e4bd6d127756850ea0c36644600e7041cdf3b1073",
+        "status": "invalid",
+        "reason": "no proof verifier implements the anchor profile https://spec.jinn.network/trust/anchor-profiles/not-implemented/v1",
+        "trustMaterial": "none",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/not-implemented/v1",
+        "subject": "lock"
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "absent"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": [
+      {
+        "recordSha256": "f243228fd9d09beef3440d0e4bd6d127756850ea0c36644600e7041cdf3b1073",
+        "status": "invalid",
+        "reason": "no proof verifier implements the anchor profile https://spec.jinn.network/trust/anchor-profiles/not-implemented/v1",
+        "trustMaterial": "none",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/not-implemented/v1",
+        "subject": "lock"
+      }
+    ]
+  },
+  "anchors/respelled-record": {
+    "anchors": [
+      {
+        "recordSha256": "2c5d504d17b410ed76e208c64fdff62e4c4e4f813ec7712d3ca61a07b33cce1d",
+        "status": "invalid",
+        "reason": "not the exact sealed encoding of a conforming AnchorEvidence record: Anchor-evidence bytes are not the exact sealed encoding.",
+        "trustMaterial": "none"
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "absent"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": [
+      {
+        "recordSha256": "2c5d504d17b410ed76e208c64fdff62e4c4e4f813ec7712d3ca61a07b33cce1d",
+        "status": "invalid",
+        "reason": "not the exact sealed encoding of a conforming AnchorEvidence record: Anchor-evidence bytes are not the exact sealed encoding.",
+        "trustMaterial": "none"
+      }
+    ]
+  },
+  "anchors/chain-lock/complete-no-headers": {
+    "anchors": [
+      {
+        "recordSha256": "a4e48d9ce998b10c2f0e683831f53209ecc61a12bfdb257d85a8f44a94b3846a",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "present",
+        "timeBasis": "chain-time",
+        "facts": {
+          "blockHeight": 880017
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/chain-lock/complete-with-headers": {
+    "anchors": [
+      {
+        "recordSha256": "a4e48d9ce998b10c2f0e683831f53209ecc61a12bfdb257d85a8f44a94b3846a",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+        "subject": "lock",
+        "trustMaterial": "supplied",
+        "status": "verified",
+        "timeBasis": "chain-time",
+        "time": "2026-08-17T12:00:00Z",
+        "facts": {
+          "blockHeight": 880017
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/chain-lock/pending-and-complete": {
+    "anchors": [
+      {
+        "recordSha256": "19743553d17414dd1938d407c7d4c0080f1be360accdb9b41496b29f04f14120",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "pending",
+        "timeBasis": "authority-time",
+        "reason": "The proof carries 1 calendar promise and no Bitcoin attestation."
+      },
+      {
+        "recordSha256": "a4e48d9ce998b10c2f0e683831f53209ecc61a12bfdb257d85a8f44a94b3846a",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "present",
+        "timeBasis": "chain-time",
+        "facts": {
+          "blockHeight": 880017
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/chain-lock/fabricated-no-headers": {
+    "anchors": [
+      {
+        "recordSha256": "515eaa518fad7645be130260c9afa9b8fc7bc48072f3bfddaefe935a78e030d0",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "present",
+        "timeBasis": "chain-time",
+        "facts": {
+          "blockHeight": 880017
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/chain-lock/fabricated-with-headers": {
+    "anchors": [
+      {
+        "recordSha256": "515eaa518fad7645be130260c9afa9b8fc7bc48072f3bfddaefe935a78e030d0",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+        "subject": "lock",
+        "trustMaterial": "supplied",
+        "status": "invalid",
+        "reason": "The commitment attested at block 880017 is not the merkle root of the supplied header for that height."
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "absent"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": [
+      {
+        "recordSha256": "515eaa518fad7645be130260c9afa9b8fc7bc48072f3bfddaefe935a78e030d0",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+        "subject": "lock",
+        "trustMaterial": "supplied",
+        "status": "invalid",
+        "reason": "The commitment attested at block 880017 is not the merkle root of the supplied header for that height."
+      }
+    ]
+  },
+  "anchors/chain-matrix/complete-no-headers": {
+    "anchors": [
+      {
+        "recordSha256": "5d2057d38610aca8df0b726b14ad2a6f73484e6b16fd7111bb1e238b55f7e837",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+        "subject": "matrix",
+        "trustMaterial": "none",
+        "status": "present",
+        "timeBasis": "chain-time",
+        "facts": {
+          "blockHeight": 880017
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "absent"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "anchored"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/chain-lock/records-given-out-of-digest-order": {
+    "anchors": [
+      {
+        "recordSha256": "19743553d17414dd1938d407c7d4c0080f1be360accdb9b41496b29f04f14120",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "pending",
+        "timeBasis": "authority-time",
+        "reason": "The proof carries 1 calendar promise and no Bitcoin attestation."
+      },
+      {
+        "recordSha256": "a4e48d9ce998b10c2f0e683831f53209ecc61a12bfdb257d85a8f44a94b3846a",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "present",
+        "timeBasis": "chain-time",
+        "facts": {
+          "blockHeight": 880017
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/chain-lock/pending-only": {
+    "anchors": [
+      {
+        "recordSha256": "19743553d17414dd1938d407c7d4c0080f1be360accdb9b41496b29f04f14120",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "pending",
+        "timeBasis": "authority-time",
+        "reason": "The proof carries 1 calendar promise and no Bitcoin attestation."
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/two-declared-none-carried": {
+    "anchors": [],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "declared-but-absent",
+        "declaredProfiles": [
+          "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+          "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1"
+        ]
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/rfc3161-lock/at-the-close-instant": {
+    "anchors": [
+      {
+        "recordSha256": "1a2669b7f264d6b1a5911d183b59fed021897bd3638cdf5e7ef08513f33458f8",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "present",
+        "timeBasis": "authority-time",
+        "facts": {
+          "genTime": "2026-06-01T00:00:00Z",
+          "policyOid": "2.999.1",
+          "serialNumber": "0102030405060708090a0b0c0d0e0f10",
+          "signerCertificateSha256": "a8130302dd961dca1397c081ee24fcc7201b8a9a9b85eca82caabdb02b5b785e",
+          "signatureAlgorithmOid": "1.2.840.10045.4.3.2",
+          "accuracy": {
+            "seconds": 1
+          }
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/rfc3161-lock/after-the-close-instant-with-trust-material": {
+    "anchors": [
+      {
+        "recordSha256": "38c249067f8f32ba49954d568bf1b6a1f7ac90dc8978b6a8fc5ce63216999dbe",
+        "status": "invalid",
+        "reason": "the token's genTime 2026-06-01T12:00:00Z is after this run's own pre-registered close instant 2026-06-01T00:00:00Z",
+        "trustMaterial": "none",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock"
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "absent"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": [
+      {
+        "recordSha256": "38c249067f8f32ba49954d568bf1b6a1f7ac90dc8978b6a8fc5ce63216999dbe",
+        "status": "invalid",
+        "reason": "the token's genTime 2026-06-01T12:00:00Z is after this run's own pre-registered close instant 2026-06-01T00:00:00Z",
+        "trustMaterial": "none",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock"
+      }
+    ]
+  },
+  "anchors/rfc3161-lock/trust-material-for-the-other-provider": {
+    "anchors": [
+      {
+        "recordSha256": "d87b5580e495afc652cc7854393fa81e12e8eca34835fbe3107aeaf655d65cba",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "present",
+        "timeBasis": "authority-time",
+        "facts": {
+          "genTime": "2026-05-01T12:00:00Z",
+          "policyOid": "2.999.1",
+          "serialNumber": "0102030405060708090a0b0c0d0e0f10",
+          "signerCertificateSha256": "a8130302dd961dca1397c081ee24fcc7201b8a9a9b85eca82caabdb02b5b785e",
+          "signatureAlgorithmOid": "1.2.840.10045.4.3.2",
+          "accuracy": {
+            "seconds": 1
+          }
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/captured/digicert-token": {
+    "anchors": [
+      {
+        "recordSha256": "4e948f5d6bf50c071b89a22e63f895f2b18e37f578067d07b67c502882299569",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "present",
+        "timeBasis": "authority-time",
+        "facts": {
+          "genTime": "2026-08-17T20:37:55Z",
+          "policyOid": "2.16.840.1.114412.7.1",
+          "serialNumber": "00ce28e208030db02ff8ca617585729ed5",
+          "signerCertificateSha256": "4aa03fa22cd75c84c55c938f828e676b9caecab33fe36d269aa334f146110a33",
+          "signatureAlgorithmOid": "1.2.840.113549.1.1.1"
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/captured/sslcom-token": {
+    "anchors": [
+      {
+        "recordSha256": "890061a51633d2f8a32415ce568499daa9a93d2db83e46dcb12d775c624995b4",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock",
+        "trustMaterial": "none",
+        "status": "present",
+        "timeBasis": "authority-time",
+        "facts": {
+          "genTime": "2026-08-17T20:37:56Z",
+          "policyOid": "1.3.6.1.4.1.38064.1.3.6.1",
+          "serialNumber": "5628fa1ed557b610",
+          "signerCertificateSha256": "542af9a16a8d722e661149788ae994c18a9aaee5a65cb344a2549af96c79c78b",
+          "signatureAlgorithmOid": "1.2.840.10045.4.3.2",
+          "accuracy": {
+            "seconds": 1
+          }
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "anchored"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": []
+  },
+  "anchors/captured/digicert-token-after-the-close-instant": {
+    "anchors": [
+      {
+        "recordSha256": "4e948f5d6bf50c071b89a22e63f895f2b18e37f578067d07b67c502882299569",
+        "status": "invalid",
+        "reason": "the token's genTime 2026-08-17T20:37:55Z is after this run's own pre-registered close instant 2026-08-17T00:00:00Z",
+        "trustMaterial": "none",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock"
+      }
+    ],
+    "subjects": [
+      {
+        "subject": "lock",
+        "outcome": "absent"
+      },
+      {
+        "subject": "matrix",
+        "outcome": "absent"
+      }
+    ],
+    "invalid": [
+      {
+        "recordSha256": "4e948f5d6bf50c071b89a22e63f895f2b18e37f578067d07b67c502882299569",
+        "status": "invalid",
+        "reason": "the token's genTime 2026-08-17T20:37:55Z is after this run's own pre-registered close instant 2026-08-17T00:00:00Z",
+        "trustMaterial": "none",
+        "provider": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+        "subject": "lock"
+      }
+    ]
+  }
+}

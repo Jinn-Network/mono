@@ -135,3 +135,7 @@ yarn test
 yarn build
 yarn pack:smoke
 ```
+
+## Vitest
+
+`@jinn-network/evidence-repository/testing` needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project. The other entry points do not need it.

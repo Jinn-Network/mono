@@ -1,0 +1,10 @@
+{
+    "task": {
+        "name": "terminal-bench/circuit-fibsqrt",
+        "ref": "sha256:9bcffe1054bb33249aa578a9a2a74f3c8cca66b0cb7aa1328233f1d31822aae3",
+        "source": "terminal-bench/terminal-bench-2-1"
+    },
+    "trial_name": "circuit-fibsqrt__N8PzsH4",
+    "trials_dir": "jobs/oracle",
+    "job_id": "29a52c71-44c6-4a7d-8677-42fc2987a00c"
+}

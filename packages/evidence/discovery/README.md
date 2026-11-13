@@ -21,3 +21,7 @@ separate concrete binding and is never re-exported by the package root.
 
 The source material retained from the three predecessor packages is available
 under [`docs/`](./docs) and [`specifications/`](./specifications).
+
+## Vitest
+
+`@jinn-network/evidence-discovery/testing` needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project. The other entry points do not need it.

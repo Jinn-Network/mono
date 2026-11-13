@@ -67,14 +67,6 @@
     "@jinn-network/trust-testing": "0.1.0",
     "viem": "^2.0.0"
   },
-  "peerDependencies": {
-    "vitest": "^4.1.8"
-  },
-  "peerDependenciesMeta": {
-    "vitest": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@jinn-network/evidence-discovery": "0.1.0",
     "@jinn-network/evidence-repository": "0.1.0",

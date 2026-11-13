@@ -30,3 +30,7 @@ of that is proven against the declared anchor root versus declared as fixture co
 
 This package has no Jinn runtime dependency and holds no ports. Sealing is re-implemented here
 rather than imported; cross-package equivalence is proven by test-only fixtures.
+
+## Vitest
+
+`@jinn-network/chain-environment-record/testing` needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project. The other entry points do not need it.

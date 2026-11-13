@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { BindingResolver, BindingResolverQuery, ResolvedBinding } from "@jinn-network/trust-core";
+import { TRUST_KEY_BINDING_MEDIA_TYPE, TRUST_REVOCATION_FORMAT, TRUST_REVOCATION_MEDIA_TYPE, parseDsseEnvelope, sealDsseEnvelope } from "@jinn-network/trust-core";
+import type {
+  BindingAuthorityDeps,
+  BindingResolver,
+  BindingResolverQuery,
+  ResolvedBinding,
+  ResolvedRevocation,
+} from "@jinn-network/trust-core";
 import { DISCOVERY_SIGNING_SCOPE, dssePreAuthEncoding, sha256Hex } from "@jinn-network/record-discovery-protocol";
 
 import { createTrustAdapter } from "./trust-adapter.js";
@@ -11,6 +18,17 @@ interface FakeBindingSeed {
   validFrom: string;
   validTo: string | null;
   scope: string;
+  revocations?: readonly ResolvedRevocation[];
+  /** Stands by itself. Otherwise the binding has nothing under it. */
+  isGenesis?: boolean;
+}
+
+function sealedBy(keyid: string, payloadType: string): Uint8Array {
+  return sealDsseEnvelope({
+    payloadBytes: new TextEncoder().encode("{}"),
+    payloadType,
+    signatures: [{ signature: Uint8Array.of(1), keyid }],
+  });
 }
 
 function makeFakeBindingResolver(seeds: FakeBindingSeed[]): BindingResolver {
@@ -32,15 +50,15 @@ function makeFakeBindingResolver(seeds: FakeBindingSeed[]): BindingResolver {
           scope: [seed.scope],
           validFrom: seed.validFrom,
           ...(seed.validTo === null ? {} : { expiresAt: seed.validTo }),
-          ceremony: { type: "eoa", digest: `sha256:${"0".repeat(64)}` },
+          ceremony: { type: "oidc-machine", digest: `sha256:${"0".repeat(64)}` },
           strength: "strong",
           anchors: [],
         } as never,
-        envelopeBytes: new Uint8Array(),
-        bindingDigest: `sha256:${"0".repeat(64)}`,
+        envelopeBytes: sealedBy(seed.keyid, TRUST_KEY_BINDING_MEDIA_TYPE),
+        bindingDigest: `sha256:${sha256Hex(new TextEncoder().encode(seed.keyid))}`,
         effectiveStart: seed.validFrom,
-        isGenesis: true,
-        revocations: [],
+        isGenesis: seed.isGenesis ?? true,
+        revocations: seed.revocations ?? [],
       };
     },
   };
@@ -51,6 +69,31 @@ function makeAgentKeyCatalog(byAgent: Record<string, AgentKeyCatalogEntry[]>): A
     async candidateKeys(agent: string) {
       return byAgent[agent] ?? [];
     },
+  };
+}
+
+/** Reads the keyid each signature declares: these cases are about authority, not signature bytes. */
+function authorityOver(bindingResolver: BindingResolver): BindingAuthorityDeps {
+  return {
+    bindingResolver,
+    witnessVerifier: { verify1271Witness: async () => ({ verified: false }) },
+    dsseVerifier: (envelopeBytes) => ({
+      validSignerKeyids: parseDsseEnvelope(envelopeBytes).signatures.flatMap(({ keyid }) => (keyid === undefined ? [] : [keyid])),
+    }),
+  };
+}
+
+function revocationBy(revokedBy: string, effectiveTime: string): ResolvedRevocation {
+  return {
+    revocation: {
+      protocol: TRUST_REVOCATION_FORMAT,
+      target: `sha256:${"0".repeat(64)}`,
+      revokedBy,
+      anchors: [],
+      effectiveFrom: effectiveTime,
+    },
+    envelopeBytes: sealedBy(revokedBy, TRUST_REVOCATION_MEDIA_TYPE),
+    effectiveTime,
   };
 }
 
@@ -73,7 +116,7 @@ describe("createTrustAdapter (§10.1: wraps trust-core key-binding resolution)",
         { keyid: "key-1", probeAt: "2026-06-01T00:00:00.000Z" },
       ],
     });
-    const adapter = createTrustAdapter({ bindingResolver: resolver, keyCatalog: catalog, verifier: fakeVerifier });
+    const adapter = createTrustAdapter({ bindingResolver: resolver, keyCatalog: catalog, verifier: fakeVerifier, revocationAuthority: authorityOver(resolver) });
 
     const resolved = await adapter.keys.resolve("did:key:zAgentSourceOne", new Date("2026-07-28T12:00:00.000Z"));
 
@@ -85,7 +128,7 @@ describe("createTrustAdapter (§10.1: wraps trust-core key-binding resolution)",
       { agent: "did:key:zAgentSourceOne", keyid: "key-1", validFrom: "2026-01-01T00:00:00.000Z", validTo: null, scope: "verdicts" },
     ]);
     const catalog = makeAgentKeyCatalog({ "did:key:zAgentSourceOne": [{ keyid: "key-1", probeAt: "2026-01-01T00:00:00.000Z" }] });
-    const adapter = createTrustAdapter({ bindingResolver: resolver, keyCatalog: catalog, verifier: fakeVerifier });
+    const adapter = createTrustAdapter({ bindingResolver: resolver, keyCatalog: catalog, verifier: fakeVerifier, revocationAuthority: authorityOver(resolver) });
 
     const resolved = await adapter.keys.resolve("did:key:zAgentSourceOne", new Date("2026-07-28T12:00:00.000Z"));
 
@@ -99,7 +142,7 @@ describe("createTrustAdapter (§10.1: wraps trust-core key-binding resolution)",
     const catalog = makeAgentKeyCatalog({
       "did:key:zAgentSourceOne": [{ keyid: "key-old", probeAt: "2025-06-01T00:00:00.000Z" }],
     });
-    const adapter = createTrustAdapter({ bindingResolver: resolver, keyCatalog: catalog, verifier: fakeVerifier });
+    const adapter = createTrustAdapter({ bindingResolver: resolver, keyCatalog: catalog, verifier: fakeVerifier, revocationAuthority: authorityOver(resolver) });
 
     expect(await adapter.keys.everBound("did:key:zAgentSourceOne", "key-old")).toBe(true);
   });
@@ -107,7 +150,7 @@ describe("createTrustAdapter (§10.1: wraps trust-core key-binding resolution)",
   it("everBound() reports false for a key never bound to the agent under the scope", async () => {
     const resolver = makeFakeBindingResolver([]);
     const catalog = makeAgentKeyCatalog({});
-    const adapter = createTrustAdapter({ bindingResolver: resolver, keyCatalog: catalog, verifier: fakeVerifier });
+    const adapter = createTrustAdapter({ bindingResolver: resolver, keyCatalog: catalog, verifier: fakeVerifier, revocationAuthority: authorityOver(resolver) });
 
     expect(await adapter.keys.everBound("did:key:zAgentSourceOne", "key-unknown")).toBe(false);
   });
@@ -135,7 +178,7 @@ describe("createTrustAdapter (§10.1: wraps trust-core key-binding resolution)",
     ]);
     const entries = [{ keyid: "key-1", probeAt: "2026-01-01T00:00:00.000Z" }];
     const catalog = makeAgentKeyCatalog({ "did:key:zAgentSourceOne": entries, "did:key:zAgentSourceTwo": entries });
-    const adapter = createTrustAdapter({ bindingResolver: resolver, keyCatalog: catalog, verifier: fakeVerifier });
+    const adapter = createTrustAdapter({ bindingResolver: resolver, keyCatalog: catalog, verifier: fakeVerifier, revocationAuthority: authorityOver(resolver) });
 
     // Active and in-scope on every axis `isActiveForDiscoverySigning` checks --
     // only the agent differs, so nothing below the resolution would catch it.
@@ -150,14 +193,75 @@ describe("createTrustAdapter (§10.1: wraps trust-core key-binding resolution)",
     ]);
     const entries = [{ keyid: "key-1", probeAt: "2026-01-01T00:00:00.000Z" }];
     const catalog = makeAgentKeyCatalog({ "did:key:zAgentSourceOne": entries, "did:key:zAgentSourceTwo": entries });
-    const adapter = createTrustAdapter({ bindingResolver: resolver, keyCatalog: catalog, verifier: fakeVerifier });
+    const adapter = createTrustAdapter({ bindingResolver: resolver, keyCatalog: catalog, verifier: fakeVerifier, revocationAuthority: authorityOver(resolver) });
 
     expect(await adapter.keys.everBound("did:key:zAgentSourceOne", "key-1")).toBe(false);
     expect(await adapter.keys.everBound("did:key:zAgentSourceTwo", "key-1")).toBe(true);
   });
 
+  describe("resolve() and a revocation naming the key (§7.4b)", () => {
+    const AGENT = "did:key:zAgentSourceOne";
+    const VOUCHER = "did:pkh:eip155:1:0x0";
+    const AT = new Date("2026-07-28T12:00:00.000Z");
+    const BEFORE = "2026-07-01T00:00:00.000Z";
+    const AFTER = "2026-08-01T00:00:00.000Z";
+    const signingKey = (revocations: readonly ResolvedRevocation[]): FakeBindingSeed => ({
+      agent: AGENT, keyid: "key-1", validFrom: "2026-01-01T00:00:00.000Z", validTo: null, scope: DISCOVERY_SIGNING_SCOPE, revocations,
+    });
+    const coldKey = (isGenesis: boolean): FakeBindingSeed => ({
+      agent: AGENT, keyid: "key-cold", validFrom: "2026-01-01T00:00:00.000Z", validTo: null, scope: "bindings", isGenesis,
+    });
+    const catalog = makeAgentKeyCatalog({ [AGENT]: [{ keyid: "key-1", probeAt: "2026-01-01T00:00:00.000Z" }] });
+
+    function resolvedKeys(seeds: FakeBindingSeed[], authoritySeeds: FakeBindingSeed[] = seeds) {
+      const adapter = createTrustAdapter({
+        bindingResolver: makeFakeBindingResolver(seeds),
+        keyCatalog: catalog,
+        verifier: fakeVerifier,
+        revocationAuthority: authorityOver(makeFakeBindingResolver(authoritySeeds)),
+      });
+      return adapter.keys.resolve(AGENT, AT).then((keys) => keys.map(({ keyid }) => keyid));
+    }
+
+    it("drops a key its voucher account revoked by `at`", async () => {
+      expect(await resolvedKeys([signingKey([revocationBy(VOUCHER, BEFORE)])])).toEqual([]);
+    });
+
+    it("keeps a key whose revocation takes effect after `at`", async () => {
+      expect(await resolvedKeys([signingKey([revocationBy(VOUCHER, AFTER)])])).toEqual(["key-1"]);
+    });
+
+    it("drops a key revoked by a standing bindings key", async () => {
+      expect(await resolvedKeys([signingKey([revocationBy("key-cold", BEFORE)]), coldKey(true)])).toEqual([]);
+    });
+
+    it("finds the revoker through the authority's resolver, not the one that answers for discovery signing", async () => {
+      const signing = signingKey([revocationBy("key-cold", BEFORE)]);
+      expect(await resolvedKeys([signing], [signing, coldKey(true)])).toEqual([]);
+    });
+
+    it("keeps a key revoked by a key with no binding", async () => {
+      expect(await resolvedKeys([signingKey([revocationBy("key-stranger", BEFORE)])])).toEqual(["key-1"]);
+    });
+
+    it("keeps a key revoked by a bindings key that does not stand", async () => {
+      expect(await resolvedKeys([signingKey([revocationBy("key-cold", BEFORE)]), coldKey(false)])).toEqual(["key-1"]);
+    });
+
+    it("a dependency outage while judging a revocation stays an outage, not a verdict on the key", async () => {
+      const outage: BindingResolver = { resolveBinding: async () => { throw new Error("no route to host"); } };
+      const adapter = createTrustAdapter({
+        bindingResolver: makeFakeBindingResolver([signingKey([revocationBy("key-cold", BEFORE)])]),
+        keyCatalog: catalog,
+        verifier: fakeVerifier,
+        revocationAuthority: authorityOver(outage),
+      });
+      await expect(adapter.keys.resolve(AGENT, AT)).rejects.toThrow("no route to host");
+    });
+  });
+
   it("sigs.verify() delegates to the injected raw verifier", async () => {
-    const adapter = createTrustAdapter({ bindingResolver: makeFakeBindingResolver([]), keyCatalog: makeAgentKeyCatalog({}), verifier: fakeVerifier });
+    const adapter = createTrustAdapter({ bindingResolver: makeFakeBindingResolver([]), keyCatalog: makeAgentKeyCatalog({}), verifier: fakeVerifier, revocationAuthority: authorityOver(makeFakeBindingResolver([])) });
     const pae = dssePreAuthEncoding("application/vnd.jinn.record-discovery.head.v1+json", new TextEncoder().encode("{}"));
     const key = { keyid: "key-1", publicKey: "pubkey-key-1", algorithm: "ed25519" };
     const sig = new TextEncoder().encode(`${sha256Hex(pae)}:key-1`);
@@ -167,14 +271,14 @@ describe("createTrustAdapter (§10.1: wraps trust-core key-binding resolution)",
   });
 
   it("fresh.isFresh() reuses the trust layer's freshness semantics: refreshBy strictly after now", () => {
-    const adapter = createTrustAdapter({ bindingResolver: makeFakeBindingResolver([]), keyCatalog: makeAgentKeyCatalog({}), verifier: fakeVerifier });
+    const adapter = createTrustAdapter({ bindingResolver: makeFakeBindingResolver([]), keyCatalog: makeAgentKeyCatalog({}), verifier: fakeVerifier, revocationAuthority: authorityOver(makeFakeBindingResolver([])) });
 
     expect(adapter.fresh.isFresh("2026-07-29T00:00:00.000Z", new Date("2026-07-28T12:00:00.000Z"))).toBe(true);
     expect(adapter.fresh.isFresh("2026-07-28T00:00:00.000Z", new Date("2026-07-28T12:00:00.000Z"))).toBe(false);
   });
 
   it("fresh.isFresh() reads a refreshBy through the protocol's one strict helper, leap seconds included (#3603)", () => {
-    const adapter = createTrustAdapter({ bindingResolver: makeFakeBindingResolver([]), keyCatalog: makeAgentKeyCatalog({}), verifier: fakeVerifier });
+    const adapter = createTrustAdapter({ bindingResolver: makeFakeBindingResolver([]), keyCatalog: makeAgentKeyCatalog({}), verifier: fakeVerifier, revocationAuthority: authorityOver(makeFakeBindingResolver([])) });
 
     // `parseHeadTimestamp` reads `23:59:60` as `23:59:59.999` (#3482). A bare
     // `new Date` returned NaN, so a leap-second refreshBy read as stale -- benign,

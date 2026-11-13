@@ -57,7 +57,8 @@ try {
         "@jinn-network/benchmarking-testing": `file:${testingArchive}`,
         // The kit's `describe...Conformance()` drivers import vitest at module load (evidence
         // `repository/testing` precedent, task-execution-testing/scripts/pack-smoke.mjs
-        // precedent) -- an optional peer, but a real runtime import once any driver is loaded.
+        // precedent) -- not a dependency of the package, but a real runtime import once any
+        // driver is loaded.
         vitest: "4.1.8",
       },
     }),
@@ -83,9 +84,9 @@ const packageJson = JSON.parse(
     "utf8",
   ),
 );
-if (packageJson.peerDependencies?.vitest !== "^4.1.8"
-    || packageJson.peerDependenciesMeta?.vitest?.optional !== true) {
-  throw new Error("packed optional Vitest peer contract changed");
+if (packageJson.peerDependencies?.vitest !== undefined
+    || packageJson.peerDependenciesMeta?.vitest !== undefined) {
+  throw new Error("packed manifest must not declare a vitest peer");
 }
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/"));
 const expectedJinnDependencies = ["@jinn-network/benchmarking-records", "@jinn-network/task-execution-profiles", "@jinn-network/task-execution-protocol"];

@@ -155,12 +155,8 @@ assert.equal("sha256Digest" in root, false);
       "utf8",
     ),
   );
-  assert.deepEqual(installedManifest.peerDependencies, {
-    vitest: "^4.1.8",
-  });
-  assert.deepEqual(installedManifest.peerDependenciesMeta, {
-    vitest: { optional: true },
-  });
+  assert.equal(installedManifest.peerDependencies, undefined);
+  assert.equal(installedManifest.peerDependenciesMeta, undefined);
   const forbiddenDependencies = [
     "@huggingface/transformers",
     "@lmoe/gliner-onnx",

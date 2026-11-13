@@ -1,5 +1,5 @@
-import { resolveBindingForAgent } from "@jinn-network/trust-core";
-import type { BindingResolver } from "@jinn-network/trust-core";
+import { checkBindingRevocation, resolveBindingForAgent } from "@jinn-network/trust-core";
+import type { BindingAuthorityDeps, BindingResolver } from "@jinn-network/trust-core";
 import { DISCOVERY_SIGNING_SCOPE, parseHeadTimestamp } from "@jinn-network/record-discovery-protocol";
 import type { FreshnessPolicy, KeyResolver, ResolvedKey, SignatureVerifier } from "@jinn-network/record-discovery-protocol";
 
@@ -52,6 +52,13 @@ export interface TrustAdapterDeps {
   bindingResolver: BindingResolver;
   keyCatalog: AgentKeyCatalog;
   verifier: RawSignatureVerifier;
+  /**
+   * What decides whether a revocation naming a key has any effect (§7.4b). Its
+   * resolver must answer for every key of an Agent, so it cannot be a
+   * `bindingResolver` that answers for one family or policy purpose: a revoker's
+   * key is not a discovery signing key.
+   */
+  revocationAuthority: BindingAuthorityDeps;
 }
 
 export interface TrustAdapter {
@@ -63,20 +70,26 @@ export interface TrustAdapter {
 /**
  * A resolved binding is active for discovery signing at `atIso` when: it
  * holds the discovery signing scope, its effective start has passed, and
- * no revocation is effective by `atIso`. This is a deliberately narrower
- * check than trust-core's own full §7.5 procedure (which also verifies the
- * ceremony leg, the consent chain, and revoker authority) -- entry
+ * no revocation by a key entitled to make one is effective by `atIso`. This
+ * is a deliberately narrower check than trust-core's own full §7.5 procedure
+ * (which also verifies the ceremony leg and the consent chain) -- entry
  * corroboration and head-signature acceptance need "is this key currently
  * authorized to sign under this scope," not the full binding-establishment
  * proof, which trust-core's own consumers verify once when the binding
  * itself is admitted. Recorded as a scoping decision (Finding F5's
- * adaptation), not a shortcut around trust-core's guarantees.
+ * adaptation), not a shortcut around trust-core's guarantees. Revocation is
+ * not narrowed: `revocations` lists whatever names the binding, so anything
+ * less than trust-core's rule lets a stranger end a key.
  */
-function isActiveForDiscoverySigning(binding: Awaited<ReturnType<BindingResolver["resolveBinding"]>>, atIso: string): boolean {
+async function isActiveForDiscoverySigning(
+  binding: Awaited<ReturnType<BindingResolver["resolveBinding"]>>,
+  atIso: string,
+  authority: BindingAuthorityDeps,
+): Promise<boolean> {
   if (binding === null) return false;
   if (!binding.binding.scope.includes(DISCOVERY_SIGNING_SCOPE)) return false;
   if (binding.effectiveStart > atIso) return false;
-  return binding.revocations.every((revocation) => revocation.effectiveTime > atIso);
+  return (await checkBindingRevocation(binding, atIso, authority)).ok;
 }
 
 export function createTrustAdapter(deps: TrustAdapterDeps): TrustAdapter {
@@ -87,7 +100,8 @@ export function createTrustAdapter(deps: TrustAdapterDeps): TrustAdapter {
       const resolved: ResolvedKey[] = [];
       for (const candidate of candidates) {
         const binding = await resolveBindingForAgent(deps.bindingResolver, { key: candidate.keyid, agent }, atIso);
-        if (isActiveForDiscoverySigning(binding, atIso)) {
+        // eslint-disable-next-line no-await-in-loop -- candidates are few, and a resolver may be remote.
+        if (await isActiveForDiscoverySigning(binding, atIso, deps.revocationAuthority)) {
           resolved.push({ keyid: binding!.binding.key.keyid, publicKey: binding!.binding.key.publicKey, algorithm: binding!.binding.key.algorithm });
         }
       }

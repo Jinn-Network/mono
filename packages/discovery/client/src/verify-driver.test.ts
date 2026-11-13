@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { BindingResolver, BindingResolverQuery, DsseEnvelope, ResolvedBinding } from "@jinn-network/trust-core";
+import type { BindingAuthorityDeps, BindingResolver, BindingResolverQuery, DsseEnvelope, ResolvedBinding } from "@jinn-network/trust-core";
 import type { AnnouncedItem, AnnouncementEntry, SourceHead } from "@jinn-network/record-discovery-protocol";
 import {
   DISCOVERY_SIGNING_SCOPE,
@@ -57,6 +57,13 @@ function makeFakeBindingResolver(seeds: FakeBindingSeed[]): BindingResolver {
 }
 
 /** Matches the M3 kit's own fake-signing scheme (`sha256Hex(pae) + ":" + keyid`), which the §18 vector fixtures were generated against. */
+/** These bindings carry no revocations, so nothing here is ever asked who may make one. */
+const revocationAuthority: BindingAuthorityDeps = {
+  bindingResolver: { resolveBinding: async () => null },
+  witnessVerifier: { verify1271Witness: async () => ({ verified: false }) },
+  dsseVerifier: () => ({ validSignerKeyids: [] }),
+};
+
 const vectorCompatibleVerifier: RawSignatureVerifier = {
   async verify(pae, sig, key) {
     return new TextDecoder().decode(sig) === `${sha256Hex(pae)}:${key.keyid}`;
@@ -101,6 +108,7 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
         },
       },
       verifier: vectorCompatibleVerifier,
+      revocationAuthority,
     });
     const driver = createVerifyDriver({
       trust,
@@ -158,6 +166,7 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
         },
       },
       verifier: acceptAllVerifier,
+      revocationAuthority,
     });
     const head = parseSourceHead({
       protocol: "https://spec.jinn.network/record-discovery/v1",
@@ -207,6 +216,7 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
       bindingResolver: makeFakeBindingResolver([]),
       keyCatalog: { async candidateKeys() { return []; } },
       verifier: acceptAllVerifier,
+      revocationAuthority,
     });
     const driver = createVerifyDriver({
       trust,
@@ -272,6 +282,7 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
       },
       keyCatalog: { async candidateKeys() { return [{ keyid: "key-1", probeAt: "2026-01-01T00:00:00.000Z" }]; } },
       verifier: acceptAllVerifier,
+      revocationAuthority,
     });
 
     const driver = createVerifyDriver({
@@ -362,6 +373,7 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
       },
       keyCatalog: { async candidateKeys() { return [{ keyid: "key-1", probeAt: "2026-01-01T00:00:00.000Z" }]; } },
       verifier: acceptAllVerifier,
+      revocationAuthority,
     });
     const holdStore = {
       async get(origin: string) { return holds.get(origin); },
@@ -515,6 +527,7 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
       },
       keyCatalog: { async candidateKeys() { return [{ keyid: "key-1", probeAt: "2026-01-01T00:00:00.000Z" }]; } },
       verifier: acceptAllVerifier,
+      revocationAuthority,
     });
     const holdStore = {
       async get(origin: string) { return holds.get(origin); },

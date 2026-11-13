@@ -95,7 +95,7 @@ interface RoleKey { readonly id: string; readonly privateKey: KeyObject; readonl
 
 function roleKey(label: string): RoleKey {
   const pair = generateKeyPairSync('ed25519');
-  return { id: `did:key:z6Mk${label}111111111111111111111111111111`, ...pair };
+  return { id: `did:key:z6Mk${label.replace(/[0OIl]/gu, '1')}111111111111111111111111111111`, ...pair };
 }
 
 function envelope(payloadBytes: Uint8Array, payloadType: string, key: RoleKey): Uint8Array {
@@ -264,7 +264,14 @@ function makeGraph(keys: Record<'requester' | 'admission' | 'executor' | 'evalua
   };
 }
 
-function makeTrust(keys: Record<string, RoleKey>, input: { revokedRequester?: boolean; missingAnchors?: boolean } = {}): ConsumerTrustPorts {
+interface TrustOptions {
+  readonly revokedRequester?: boolean;
+  /** Which key revokes the evaluator's settlement leg, before the verdict settles. */
+  readonly evaluatorDeclarationRevokedBy?: 'evaluatorCold' | 'stranger';
+  readonly missingAnchors?: boolean;
+}
+
+function makeTrust(keys: Record<string, RoleKey>, input: TrustOptions = {}): ConsumerTrustPorts {
   const records: SealedKeyBindingRecord[] = [];
   const anchors = new Map<Sha256Digest, string>();
   const binding = (agent: string, key: RoleKey, scope: string[], relationship: 'controls' | 'signs-for', order: number) => {
@@ -273,7 +280,7 @@ function makeTrust(keys: Record<string, RoleKey>, input: { revokedRequester?: bo
     const value: KeyBinding = {
       protocol: TRUST_KEY_BINDING_FORMAT, agent,
       key: { publicKey: key.publicKey.export({ type: 'spki', format: 'der' }).toString('base64'), keyid: key.id, algorithm: 'ed25519', didKey: key.id },
-      voucher: { kind: 'oidc-machine', subject: `machine:${agent}` },
+      voucher: { kind: 'oidc-machine', subject: `repo:fixture/${agent.replace(/\W/gu, '-')}:ref:refs/heads/main` },
       relationship, scope, validFrom: `2026-01-${String(order).padStart(2, '0')}T00:00:00Z`,
       ceremony: { type: 'oidc-machine', digest: `sha256:${'c'.repeat(64)}` }, strength: deriveStrength('oidc-machine'),
       anchors: [{ digest: anchor }],
@@ -286,8 +293,9 @@ function makeTrust(keys: Record<string, RoleKey>, input: { revokedRequester?: bo
   binding(ADMISSION_AGENT, keys.admission!, [ADMISSION_RECEIPT_TRUST_SCOPE], 'controls', 2);
   binding(SOLVER_AGENT, keys.solverDeclaration!, ['settlements'], 'controls', 3);
   binding(SOLVER_AGENT, keys.executor!, ['deliveries'], 'signs-for', 4);
-  binding(EVALUATOR_AGENT, keys.evaluatorDeclaration!, ['settlements'], 'controls', 5);
+  const evaluatorDeclarationDigest = binding(EVALUATOR_AGENT, keys.evaluatorDeclaration!, ['settlements'], 'controls', 5);
   binding(EVALUATOR_AGENT, keys.evaluator!, ['deliveries', 'verdicts'], 'signs-for', 6);
+  binding(EVALUATOR_AGENT, keys.evaluatorCold!, ['bindings'], 'controls', 7);
 
   const revocations: SealedRevocationRecord[] = [];
   if (input.revokedRequester) {
@@ -298,6 +306,16 @@ function makeTrust(keys: Record<string, RoleKey>, input: { revokedRequester?: bo
       effectiveFrom: '2026-08-01T00:00:00Z', anchors: [{ digest: anchor }],
     };
     revocations.push({ revocation, envelopeBytes: envelope(canonicalJsonBytes(revocation), TRUST_REVOCATION_MEDIA_TYPE, keys.requester!) });
+  }
+  if (input.evaluatorDeclarationRevokedBy !== undefined) {
+    const anchor = `sha256:${'f'.repeat(64)}` as Sha256Digest;
+    anchors.set(anchor, '2026-08-02T11:35:00Z');
+    const signer = keys[input.evaluatorDeclarationRevokedBy]!;
+    const revocation: Revocation = {
+      protocol: TRUST_REVOCATION_FORMAT, target: evaluatorDeclarationDigest, revokedBy: signer.id,
+      effectiveFrom: '2026-08-02T11:35:00Z', anchors: [{ digest: anchor }],
+    };
+    revocations.push({ revocation, envelopeBytes: envelope(canonicalJsonBytes(revocation), TRUST_REVOCATION_MEDIA_TYPE, signer) });
   }
   const store: BindingStore = {
     async listBindingsForAgent(agent) { return records.filter(({ binding }) => binding.agent === agent); },
@@ -310,7 +328,15 @@ function makeTrust(keys: Record<string, RoleKey>, input: { revokedRequester?: bo
       return anchorTime === undefined ? null : { digest, anchorTime };
     },
   };
-  const resolver = createBindingResolver({ bindings: store, anchors: anchorResolver, requireAnchors: true });
+  const resolver = createBindingResolver({
+    bindings: store,
+    anchors: anchorResolver,
+    requireAnchors: true,
+    // These fixture bindings carry a placeholder machine ceremony; the fixture is the host vouching for it.
+    verifyHostedCeremony: async () => true,
+    recordSignedByItsKey: ({ binding, envelopeBytes }) =>
+      dsseVerifier(envelopeBytes).validSignerKeyids.includes(binding.key.didKey),
+  });
   const keyMap = new Map(Object.values(keys).map((key) => [key.id, key.publicKey]));
   const dsseVerifier: DsseChainVerifier = (bytes) => {
     let parsed;
@@ -336,7 +362,7 @@ function makeTrust(keys: Record<string, RoleKey>, input: { revokedRequester?: bo
   };
 }
 
-async function fixture(options: { revokedRequester?: boolean; missingAnchors?: boolean } = {}) {
+async function fixture(options: TrustOptions = {}) {
   const root = await mkdtemp(join(tmpdir(), 'jinn-consumer-verification-'));
   roots.push(root);
   const state = await ConsumerState.open(root);
@@ -351,6 +377,7 @@ async function fixture(options: { revokedRequester?: boolean; missingAnchors?: b
     requester: roleKey('Requester'), admission: roleKey('Admission'), executor: roleKey('Executor'),
     solverDeclaration: roleKey('SolverDeclaration'), evaluator: roleKey('Evaluator'),
     evaluatorDeclaration: roleKey('EvaluatorDeclaration'),
+    evaluatorCold: roleKey('EvaluatorCold'), stranger: roleKey('Stranger'),
   };
   const graph = makeGraph(keys);
   const authority: NativeRoleAuthority = {
@@ -413,6 +440,19 @@ describe('independent native vertical verification', () => {
   it('fails an effective, cryptographically authorized revocation', async () => {
     const value = await fixture({ revokedRequester: true });
     await expect(verifyNativeVertical(value)).rejects.toMatchObject({ reason: 'requester-authentication-failed' });
+    value.state.close();
+  });
+
+  it('fails the settlement join when a key entitled to revoke the settlement leg revoked it before the claim', async () => {
+    const value = await fixture({ evaluatorDeclarationRevokedBy: 'evaluatorCold' });
+    await expect(verifyNativeVertical(value))
+      .rejects.toMatchObject({ reason: 'named-verdict-gate-failed', message: expect.stringContaining('settlement-join') });
+    value.state.close();
+  });
+
+  it('keeps the settlement join when a key with no binding names the settlement leg in a revocation', async () => {
+    const value = await fixture({ evaluatorDeclarationRevokedBy: 'stranger' });
+    await expect(verifyNativeVertical(value)).resolves.toMatchObject({ decisionGrade: true });
     value.state.close();
   });
 

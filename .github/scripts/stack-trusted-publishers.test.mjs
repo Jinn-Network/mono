@@ -65,7 +65,7 @@ test('every canonical canary-lane package gets one registration bound to this re
   const registrations = buildRegistrationList(repoRoot);
   const expectedPackages = canaryLanePackageNames(repoRoot);
   assert.deepEqual(registrations.map((registration) => registration.package), expectedPackages);
-  assert.equal(registrations.length, 75);
+  assert.equal(registrations.length, 76);
   assert.equal(registrations.length, expectedPackages.length);
   assert.equal(new Set(registrations.map((r) => r.package)).size, registrations.length);
   for (const registration of registrations) {

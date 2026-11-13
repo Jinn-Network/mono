@@ -341,14 +341,16 @@ test('every quotation in the copy is verbatim from the source it names', () => {
   );
 });
 
-// Only `@colophon-claims/verify` is published. The other Colophon packages
-// are 0.0.0 name reservations, so no command on the site may install or run
-// them, and the checker is always pinned to an exact version.
+// `@colophon-claims/verify` is the only Colophon package a command on the site
+// may install or run, and every `npx` line naming it pins an exact version.
+// `cli`, `core` and `check` are published too, but the site gives no command
+// for them, and a command goes on the site only after it has been run as
+// written. Adding one means running it, then widening this allowlist.
 test('every Colophon command on the site runs a published, pinned package', () => {
-  const unpublished = scanCopy(
+  const otherPackages = scanCopy(
     /\b(npx|npm (i|install|exec)|yarn (add|dlx)|pnpm (add|dlx))\b[^\n]*@colophon-claims\/(?!verify\b)/,
   );
-  assert.deepEqual(unpublished, []);
+  assert.deepEqual(otherPackages, []);
 
   const unpinned = scanCopy(/\bnpx\b[^\n]*@colophon-claims\/verify(?!@\d+\.\d+\.\d+)/);
   assert.deepEqual(unpinned, []);

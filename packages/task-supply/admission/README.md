@@ -38,3 +38,7 @@ transitions. `admitChainCandidate` implements the state-predicate differential: 
 versus reference over the success **conjunction**. Individual predicates holding at baseline is
 expected and is never a refusal — only the conjunction's flip from false (empty) to true
 (reference) earns a receipt.
+
+## Vitest
+
+`@jinn-network/task-admission/testing` needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project. The other entry points do not need it.

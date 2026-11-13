@@ -1,14 +1,15 @@
 // Every workflow job that installs or packs packed packages has to run npm 11.19.0 or newer.
 //
 // The npm bundled with the runner's Node 22 (10.9.9) dies with "Cannot read properties of null
-// (reading 'edgesOut')" when two optional peers conflict, as the optional `vitest` peers of the
-// packed `@jinn-network/*` packages have since vitest@4.1.12 (npm/cli#8261, fixed in npm 11.6.0 and
-// never in npm 10; #5079). The crash was found and fixed one lane at a time, after each lane
-// failed: Benchmark Product CI (#5078), Layer CI and the jinn-agent journey (#5086), the layer
-// publish workflow (#5092), the npm and SDK publish workflows (#5097) and Policy Optimization CI
-// (#5101). Each of those lanes installs npm 11.19.0 in the job; nothing checked that the lanes
-// which had not run lately did the same (#5104). The minimum is 11.19.0, the version every pinned
-// lane installs, so that the lanes stay on one npm.
+// (reading 'edgesOut')" when two optional peers conflict, as the peers of vitest@4.1.12 do with
+// @vitest/browser-webdriverio@4.1.11 (npm/cli#8261, fixed in npm 11.6.0 and never in npm 10;
+// #5079). A job reaches that conflict by installing vitest, or by installing a package published
+// before #5087 dropped the optional `vitest` peer. The crash was found and fixed one lane at a
+// time, after each lane failed: Benchmark Product CI (#5078), Layer CI and the jinn-agent journey
+// (#5086), the layer publish workflow (#5092), the npm and SDK publish workflows (#5097) and
+// Policy Optimization CI (#5101). Each of those lanes installs npm 11.19.0 in the job; nothing
+// checked that the lanes which had not run lately did the same (#5104). The minimum is 11.19.0,
+// the version every pinned lane installs, so that the lanes stay on one npm.
 //
 // A job that runs `npm install`, `npm i`, `npm ci`, `npm pack`, a `pack:smoke` script or a
 // packed-types script must run `npm install --global npm@<version>` first, with `<version>` an

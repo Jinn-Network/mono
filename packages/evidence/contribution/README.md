@@ -165,8 +165,9 @@ describeEvidenceContributionContract(() => new InMemoryEvidenceContributionDrive
 `describeEvidenceContributionContract` is a portable Vitest suite: any host
 that implements the same driver shape (an in-memory fixture, or one wired to
 real infrastructure) can run it to prove its integration behaves like every
-other conformant host. `/testing` requires Vitest; the root entrypoint (`.`)
-never does.
+other conformant host. `@jinn-network/evidence-contribution/testing` needs
+`vitest` installed. `vitest` is not a dependency of this package, so add it to
+your own project. The root entrypoint (`.`) never needs it.
 
 ## Non-goals
 

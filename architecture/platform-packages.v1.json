@@ -300,7 +300,7 @@
       "stable": true
     },
     "implementations-v1": {
-      "expectedPackageCount": 53,
+      "expectedPackageCount": 54,
       "publishPolicies": [
         "canary-and-stable"
       ],
@@ -1675,6 +1675,53 @@
           {
             "path": "docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md",
             "status": "draft"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "implementations-v1",
+      "publishPolicy": "canary-and-stable",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/verify",
+      "path": "packages/discovery/verification",
+      "domain": "discovery",
+      "role": "checks Jinn records by the rules in the specification",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-trust-and-identity-layer-design.md",
+            "status": "approved"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-08-17-pluggable-integrity-providers-design.md",
+            "status": "approved"
           }
         ],
         "decisionRecord": {

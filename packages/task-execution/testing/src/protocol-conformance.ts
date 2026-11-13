@@ -2,10 +2,12 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import {
   compareCodeUnitStrings,
+  ConflictingObservationError,
   deriveAttemptUri,
   documentDigest,
   type GoldenConformanceReport,
   type GoldenScenario,
+  type ProtocolObservation,
   loadAdversarialManifest,
   loadEquivalenceExpectedDigest,
   loadEquivalenceTaskBytes,
@@ -256,6 +258,14 @@ export function describeProtocolConformance(): void {
       // change the derived result, proving the fold resolves order by `sequence`.
       expect(foldObservations(observations)).toEqual(foldObservations([...observations].reverse()));
       expect(foldObservations(observations).state).toBe("running");
+    });
+
+    test("replayed-and-out-of-order: a replay that disagrees with the original is refused in either array order (§10.1, §10.4)", async () => {
+      const observations = await readAdversarialJson("replayed-and-out-of-order", "observations.json") as ProtocolObservation[];
+      const started = observations.find(({ type }) => type === "network.jinn.task-execution.attempt-started.v1")!;
+      const disagreeing = { ...started, sequence: "0000000000000003" };
+      expect(() => foldObservations([...observations, disagreeing])).toThrow(ConflictingObservationError);
+      expect(() => foldObservations([disagreeing, ...observations])).toThrow(ConflictingObservationError);
     });
 
     test("sequence-boundary: the fixed 16-digit encoding orders lexicographically the same as numerically", async () => {

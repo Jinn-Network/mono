@@ -10,13 +10,15 @@ Jinn is an open protocol and network for work and the data it produces: records 
 
 ## What you can do here
 
-- **Check a benchmark claim** — [Colophon](packages/benchmark-product/README.md) turns a preregistered comparison of agent configurations into a portable bundle anyone can check from its own bytes. The checker is published on npm as [`@colophon-claims/verify`](https://www.npmjs.com/package/@colophon-claims/verify), and checking a published claim is free:
+- **Check a benchmark claim** — [Colophon](packages/benchmark-product/README.md) turns a preregistered comparison of agent configurations into a portable bundle anyone can check from its own bytes. The checker is published on npm as [`@colophon-claims/verify`](https://www.npmjs.com/package/@colophon-claims/verify), and checking a published claim is free.
+
+  Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
 
   ```bash
   npx @colophon-claims/verify@0.2.1 ./bundle
   ```
 
-  *The sealing tool, `@colophon-claims/cli`, is not published yet, so sealing a claim is still local. There is no hosted service, account or billing. Local pre-registration is discipline, not proof against the run owner.*
+  *The sealing tool, [`@colophon-claims/cli`](https://www.npmjs.com/package/@colophon-claims/cli), is published on npm and runs on your own machine. There is no hosted service, account or billing. Local pre-registration is discipline, not proof against the run owner.*
   → [colophon.claims](https://colophon.claims/) · [External verification path](packages/benchmark-product/EXTERNAL-VERIFICATION.md)
 
 - **Read the SolverNet design** — posting a funded pool of tasks that operators compete to solve is designed, not built. There is no launch command in the tree today; `jinn solver-nets` covers activation, harness selection, and pool validation for SolverNets that already exist.

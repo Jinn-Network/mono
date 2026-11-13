@@ -2,8 +2,6 @@
 
 Check a public Colophon claim bundle without the Colophon app or any execution runtime.
 
-Installing or running a Colophon package needs npm 11.19 or newer (`npm --version` prints yours). If yours is older, as on Node 22, which ships npm 10, run `npm install -g npm@11` first.
-
 ```sh
 npx @colophon-claims/check@0.2 ./bundle
 ```
@@ -27,8 +25,8 @@ v4's members plus v6's anchors — and v8 is v7 plus a sealed six-variable
 disclosure-specification record and the `disclosure-specification` check. Both exist
 only from this 0.2.1 release, so their bundles pin `@0.2.1` rather than the `@0.1` line
 every earlier closure stamps. v10 is the composed generation (issue #3405): new bundles
-emit it, and this tree's checker reads it. The 0.2.1 line this package last shipped
-predates v10 and refuses it at manifest parse.
+emit it, and this package reads it from `0.2.1`, its first release under this name. The
+`0.2.1` published as `@colophon-claims/verify` predates v10 and refuses it at manifest parse.
 The evidence-native v5 has two declared profiles, full-evidence and metadata-first;
 this reader supports both. A metadata-first bundle carries the artifact digests without
 the artifact bodies, so `artifact-integrity` reports `not fetched` rather than passing,
@@ -37,13 +35,14 @@ Existing claim bundles retain their recorded verifier pins. Use this 0.2 reader
 for prompted-screening v2 support and the compatible `@0.2` line for this
 release.
 For this release, `@jinn-network/*` is pinned to the exact
-`0.1.0-canary.sha.272455add1170766f064181c105071519a6baf95` receipt.
+`0.1.0-canary.sha.f2aa6f30f2c7d7bcfc4c11e1f6b69f3f44c28603` receipt.
 It is not a floating `@canary` dependency and is not a stable stack release.
 
-`summarizeVerificationOutcome` is new since the 0.2.1 cut. For a `result.format` it does not
-recognize it refuses rather than returning a check denominator: it throws with `.name`
-`BenchmarkProductError` and `.code` `record-integrity`. No published 0.2.x release exported
-this function, so there is no upgrade path on which its behavior changed.
+For a `result.format` it does not recognize, `summarizeVerificationOutcome` refuses rather than
+returning a check denominator: it throws with `.name` `BenchmarkProductError` and `.code`
+`record-integrity`. `@colophon-claims/verify` `0.2.1` exported the same function and answered such
+a format with the six-check denominator, so a caller moving from it sees a throw where it saw a
+number.
 
 `beaconIndexWord` maps a registered beacon source to the index word a reader surface uses
 (`round` or `height`). An unknown source — including inherited object keys and a symbol —
@@ -54,6 +53,12 @@ Verification opens no network connection, reads no account or API credential, an
 nothing. It recomputes the checks the bundle's declared format closes over, against the bytes
 the bundle carries and nothing else. It does not prove that the producing machine was honest
 or that the compared identities are independent parties.
+
+## What comes from Jinn
+
+The general checks are not this package's own. DSSE signature verification, `did:key` decoding and encoding, the RFC 3161 certificate checks, and the evaluation of anchor records come from [`@jinn-network/verify`](https://github.com/Jinn-Network/mono/blob/next/packages/discovery/verification/README.md), which checks Jinn records by the specification's rules, inside a Colophon bundle or not.
+
+This package holds what makes a bundle a Colophon claim: the manifest and its closure, the evidence closure, the Colophon trust file, the Matrix replay, the Report and claim checks, the list of checks each format runs, and every refusal message. A verdict from this package is a verdict on a Colophon bundle. It is not a statement from Jinn, and a record that passes `@jinn-network/verify` has not shown it belongs to any claim.
 
 ## Freeze-artifact repositories
 
@@ -125,7 +130,7 @@ after `SPDX-`: the scan is a single forward pass that resumes at the end of each
 than a regex, so it is linear with no name bound, and `SPDX-License-Identifier` followed by any
 number of name characters and a colon is refused. Together with those and with the
 `colophon-freeze-repo/1` to `/2` format bump above, which makes a tree published under `/1` report
-drift, the next published cut is therefore at least 0.3.0, not a patch on 0.2.1.
+drift, all of this shipped in this package's first release, `0.2.1`.
 
 Bundles are also verifiable without this package: [`EXTERNAL-VERIFICATION.md`](https://github.com/Jinn-Network/mono/blob/next/packages/benchmark-product/EXTERNAL-VERIFICATION.md) specifies
 the external path (openssl plus a dependency-free script, shipped here as

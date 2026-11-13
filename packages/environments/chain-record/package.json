@@ -51,14 +51,6 @@
     "@noble/hashes": "^2.2.0",
     "zod": "4.4.3"
   },
-  "peerDependencies": {
-    "vitest": "^4.1.8"
-  },
-  "peerDependenciesMeta": {
-    "vitest": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@jinn-network/environment-record": "0.1.0",
     "@jinn-network/evidence-protocol": "0.1.0",

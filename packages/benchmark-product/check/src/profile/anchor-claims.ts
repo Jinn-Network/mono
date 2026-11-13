@@ -48,7 +48,7 @@ import {
   parseExactAnchorEvidence,
 } from "@jinn-network/trust-core";
 import type { AnchorProofResult } from "@jinn-network/trust-core";
-import { nodeCryptoAnchorPorts } from "../anchor/ports.js";
+import { nodeCryptoAnchorPorts } from "@jinn-network/verify";
 
 /** The two records this product anchors (§7.1). Both are whole sealed-record digests. */
 export type ClaimAnchorSubject = "lock" | "matrix";

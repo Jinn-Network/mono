@@ -1,8 +1,8 @@
-import { verify as cryptoVerify, type KeyObject } from "node:crypto";
+import type { KeyObject } from "node:crypto";
 import type { RunRecord } from "@jinn-network/benchmarking-records";
 import { localAssemblyPorts, type LocalCellPinningEvidence } from "@jinn-network/benchmarking-local";
 import type { AssemblyPorts, InScopeCell } from "@jinn-network/benchmarking-run";
-import { dssePreAuthEncoding, parseDsseEnvelope } from "@jinn-network/trust-core";
+import { verifyDsseSignatures } from "@jinn-network/verify";
 import { venueIsolationPostureForPolicy } from "./isolation.js";
 import type { LocalAdmissionReceiptFact } from "./admission-receipts.js";
 
@@ -23,9 +23,11 @@ function resolveEvaluatorClaim(resolveBytes: (digest: string) => Uint8Array, evi
     if (typeof ref?.claim !== "string" || typeof ref.verdictDigest !== "string" || !ref.verdictDigest.startsWith("sha256:")) return "unresolved";
     const key = loadKeys().get(ref.claim);
     if (key === undefined) return "unresolved";
-    const envelope = parseDsseEnvelope(resolveBytes(ref.verdictDigest.slice("sha256:".length)));
-    const preAuth = Buffer.from(dssePreAuthEncoding(envelope.payloadType, envelope.payloadBytes));
-    return envelope.signatures.some((signature) => signature.keyid === key.keyId && cryptoVerify(null, preAuth, key.publicKey, Buffer.from(signature.sig, "base64"))) ? ref.claim : "unresolved";
+    const { validSignerKeyids } = verifyDsseSignatures(resolveBytes(ref.verdictDigest.slice("sha256:".length)), [key], {
+      allowRespelledEnvelope: true,
+      allowNonEd25519Keys: true,
+    });
+    return validSignerKeyids.length > 0 ? ref.claim : "unresolved";
   } catch { return "unresolved"; }
 }
 

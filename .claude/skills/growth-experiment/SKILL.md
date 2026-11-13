@@ -7,7 +7,7 @@ description: Drive one cycle of Jinn's growth experiment loop — PLAN an attemp
 
 Implements the cycle in [`GROWTH.md`](../../../GROWTH.md). See §4 for the model and Mayfield rungs, §5 for the engine knobs, §7 for the non-negotiables. This skill is their enforcement and the only sanctioned writer of new log entries.
 
-Two sets of knobs appear in this skill and they are different things. The nine **loadout knobs** (pitch, audience, channel, format, proof, ask, cadence, voice, amplifiers) are what the loadout holds and what one attempt varies: "one knob" in PLAN, in the one-knob rule of `GROWTH.md` §7, and in a log entry's "Knob varied" always means one of these. The **engine knobs** in `GROWTH.md` §5 (Sensitivity, Scope, Resolution and Baseline for the instrument; Step size, Direction, Parallelism and Commit policy for the search rule) are the settings of the system that judges and revises the loadout. This skill does not vary them per attempt, and `GROWTH.md` §5 defines them. `GROWTH.md` §4 and §6 call the loadout "eight knobs"; the template below lists nine.
+Two sets of knobs appear in this skill and they are different things. The nine **loadout knobs** (pitch, audience, channel, format, proof, ask, cadence, voice, amplifiers) are what the loadout holds and what one attempt varies: "one knob" in PLAN, in the one-knob rule of `GROWTH.md` §7, and in a log entry's "Knob varied" always means one of these. The **engine knobs** in `GROWTH.md` §5 (Sensitivity, Scope, Resolution and Baseline for the instrument; Step size, Direction, Parallelism and Commit policy for the search rule) are the settings of the system that judges and revises the loadout. This skill does not vary them per attempt, and `GROWTH.md` §5 defines them.
 
 ## When to invoke
 

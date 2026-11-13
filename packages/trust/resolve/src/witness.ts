@@ -2,8 +2,10 @@
 
 import { parseDsseEnvelope } from "@jinn-network/trust-core";
 import type { Eip1271Witness, WitnessResult, WitnessVerifier } from "@jinn-network/trust-core";
+import { isAddress, isHex, size } from "viem";
 
 import { ERC1271_IS_VALID_SIGNATURE_ABI, ERC1271_MAGIC_VALUE } from "./abis.js";
+import { isReadAnswered } from "./contract-answer.js";
 
 // ---------------------------------------------------------------------------
 // §7.2a's 1271 witness: "A witness is not bare data. It is a DSSE-signed
@@ -63,7 +65,9 @@ export interface CreateWitnessVerifierOptions {
    * this decision itself). */
   readonly acceptedVerifiers?: readonly string[];
   /** Archive re-execution fallback (§7.2a). Omit to fail closed when the
-   * witness author is not policy-accepted. */
+   * witness author is not policy-accepted. A read no node took throws: that is an
+   * outage, and says nothing about the witness. Anything a node said about the
+   * block and contract the statement chose is an answer. */
   readonly archiveClient?: ArchiveReadClient;
 }
 
@@ -104,6 +108,18 @@ function contentMatches(payload: WitnessStatementPayload, witness: Eip1271Witnes
     && payload.verifier === witness.verifier;
 }
 
+/** Far past any real Safe signature, and small enough for a node to take. */
+const MAX_REEXECUTED_SIGNATURE_BYTES = 1_048_576;
+
+/** Whether a statement can be put to the archive at all. A read that fails is an
+ * outage, so what a store holds must be turned away before one is made. */
+function canBeReexecuted(payload: WitnessStatementPayload): boolean {
+  return isAddress(payload.safe)
+    && isHex(payload.hash) && size(payload.hash) === 32
+    && isHex(payload.signature) && size(payload.signature) <= MAX_REEXECUTED_SIGNATURE_BYTES
+    && Number.isSafeInteger(payload.blockNumber) && payload.blockNumber >= 0;
+}
+
 /**
  * Builds a `WitnessVerifier` (§7.2a): checks the witness envelope decodes
  * and is signed, and that its content matches the outer `Eip1271Witness`
@@ -117,6 +133,10 @@ export function createWitnessVerifier(options: CreateWitnessVerifierOptions = {}
 
   return {
     async verify1271Witness(witness: Eip1271Witness): Promise<WitnessResult> {
+      // A store may hold anything, and a throw from this leg reads as an outage.
+      if (typeof witness !== "object" || witness === null) {
+        return { verified: false, reason: "witness cannot be read." };
+      }
       const payload = parseWitnessPayload(witness.envelopeBytes);
       if (payload === undefined) {
         return { verified: false, reason: "witness envelope does not decode to a signed statement." };
@@ -145,6 +165,10 @@ export function createWitnessVerifier(options: CreateWitnessVerifierOptions = {}
         };
       }
 
+      if (!canBeReexecuted(payload)) {
+        return { verified: false, reason: "witness statement cannot be put to the archive." };
+      }
+
       let magicValue: unknown;
       try {
         magicValue = await options.archiveClient.readContract({
@@ -155,6 +179,7 @@ export function createWitnessVerifier(options: CreateWitnessVerifierOptions = {}
           blockNumber: BigInt(witness.blockNumber),
         });
       } catch (cause) {
+        if (!isReadAnswered(cause)) throw cause; // an outage, not a verdict on the witness
         return {
           verified: false,
           reason: `archive re-execution of isValidSignature failed: `

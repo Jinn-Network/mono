@@ -70,3 +70,7 @@ A `scope: "composite"` attestation covers what exists only in combination — ro
 collisions, the whole world boots offline, the K-run observation spans both planes. It does not
 cover the chain world or any information world on its own; `requiresComponentAttestations`
 lists the component records whose own attestations a consumer must additionally obtain.
+
+## Vitest
+
+`@jinn-network/chain-environment-verification/testing` needs `vitest` installed and a run with `globals: true`. `vitest` is not a dependency of this package, so add it to your own project. The other entry points do not need it.

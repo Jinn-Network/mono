@@ -206,3 +206,7 @@ documents pass the schema and are refused by the canonicalizer: the schema is ex
 so a namespaced key may carry a value outside the I-JSON subset — a non-integral or non-finite
 number, or a string holding an unpaired UTF-16 surrogate. The kit asserts both, because an
 implementation that silently seals one of those produces bytes no one else can reproduce.
+
+## Vitest
+
+`@jinn-network/evidence-offer/testing` needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project. The other entry points do not need it.

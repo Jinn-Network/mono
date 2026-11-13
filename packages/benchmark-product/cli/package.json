@@ -1,6 +1,6 @@
 {
   "name": "@colophon-claims/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Installable Colophon command: run, inspect, and publish locally verifiable benchmark bundles.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
@@ -38,8 +38,8 @@
     "prepack": "yarn build"
   },
   "dependencies": {
-    "@colophon-claims/check": "0.2.1",
-    "@colophon-claims/core": "0.1.0",
+    "@colophon-claims/check": "0.2.2",
+    "@colophon-claims/core": "0.1.1",
     "next": "16.4.2",
     "react": "19.2.8",
     "react-dom": "19.2.8"
@@ -62,6 +62,7 @@
     "@jinn-network/benchmarking-run": "portal:../../benchmarking/run",
     "@jinn-network/environment-record": "portal:../../environments/record",
     "@jinn-network/evidence-discovery": "portal:../../evidence/discovery",
+    "@jinn-network/evidence-offer": "portal:../../evidence/offer",
     "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
     "@jinn-network/evidence-repository": "portal:../../evidence/repository",
     "@jinn-network/execution-recorder": "portal:../../evidence/execution-recorder",
@@ -81,7 +82,8 @@
     "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
     "@jinn-network/task-execution-supervisor": "portal:../../task-execution/backend-local/supervisor",
     "@jinn-network/task-execution-workspace": "portal:../../task-execution/backend-local/workspace",
-    "@jinn-network/trust-core": "portal:../../trust/core"
+    "@jinn-network/trust-core": "portal:../../trust/core",
+    "@jinn-network/verify": "portal:../../discovery/verification"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

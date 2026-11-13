@@ -3,6 +3,7 @@
 import { ceremonyEvidenceDigest, verifyEoaCeremony } from "./ceremony.js";
 import { canonicalJsonBytes } from "./canonical-json.js";
 import { dssePreAuthEncoding, sealDsseEnvelope } from "./dsse.js";
+import { recordDigest } from "./hashing.js";
 import { TRUST_KEY_BINDING_MEDIA_TYPE } from "./identifiers.js";
 import { compareCalendarStrictRfc3339Instants, isCalendarStrictRfc3339 } from "./rfc3339.js";
 import type { DsseChainVerifier } from "./policy.js";
@@ -43,7 +44,8 @@ function decodeBase64(value: string): Uint8Array {
   return bytes;
 }
 
-function voucherIdentityEquals(a: VoucherIdentity, b: VoucherIdentity): boolean {
+/** Whether two vouchers are one identity, whatever else a record says about it. */
+export function voucherIdentityEquals(a: VoucherIdentity, b: VoucherIdentity): boolean {
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
     case "account":
@@ -155,17 +157,21 @@ async function verifyCeremonyLeg(
     // commitment -- any evidence that independently recovers and content-
     // matches would verify, regardless of what the signed record actually
     // committed to (major finding: the digest is otherwise decorative).
-    const committedDigest = resolved.binding.ceremony.digest;
-    const suppliedDigest = ceremonyEvidenceDigest(resolved.ceremonyEvidence);
-    if (suppliedDigest !== committedDigest) {
-      return {
-        verified: false,
-        reason: `ceremony evidence digest "${suppliedDigest}" does not match the binding's `
-          + `committed ceremony.digest "${committedDigest}".`,
-      };
+    try {
+      const committedDigest = resolved.binding.ceremony.digest;
+      const suppliedDigest = ceremonyEvidenceDigest(resolved.ceremonyEvidence);
+      if (suppliedDigest !== committedDigest) {
+        return {
+          verified: false,
+          reason: `ceremony evidence digest "${suppliedDigest}" does not match the binding's `
+            + `committed ceremony.digest "${committedDigest}".`,
+        };
+      }
+      const result = verifyEoaCeremony(resolved.ceremonyEvidence, resolved.binding);
+      return { verified: result.verified, ...(result.reason === undefined ? {} : { reason: result.reason }) };
+    } catch {
+      return { verified: false, reason: "ceremony evidence cannot be read." };
     }
-    const result = verifyEoaCeremony(resolved.ceremonyEvidence, resolved.binding);
-    return { verified: result.verified, ...(result.reason === undefined ? {} : { reason: result.reason }) };
   }
 
   if (ceremonyType === "safe") {
@@ -176,11 +182,10 @@ async function verifyCeremonyLeg(
     return { verified: result.verified, ...(result.reason === undefined ? {} : { reason: result.reason }) };
   }
 
-  // agentId / oidc-machine / github-human: the resolver already performed
-  // this ceremony's authenticity check as part of resolution (the agentId
-  // composition leg and anchored-JWKS leg are `resolve`'s job, per §7.2
-  // and T13's `createBindingResolver`) -- a non-null `ResolvedBinding`
-  // already carries that guarantee for these ceremony types.
+  // agentId / oidc-machine / github-human: §7.5 step 3's leg for these needs
+  // I/O, so it is the resolver's job (§17), and a non-null `ResolvedBinding`
+  // is the resolver's statement that it ran. `createBindingResolver` keeps
+  // that promise by not resolving a binding whose ceremony nothing verified.
   return { verified: true };
 }
 
@@ -215,115 +220,361 @@ export async function resolveBindingForAgent(
   return resolved;
 }
 
-async function checkConsentChain(
+// ---------------------------------------------------------------------------
+// §7.4a/§7.4b authority: a binding that gives authority (an incumbent, a
+// consenter, a revoker) must itself stand. Resolving is not enough -- a
+// resolved binding is data (`interfaces.ts`) and a store may hold anything.
+// ---------------------------------------------------------------------------
+
+/** What §7.4 authority is judged with. The resolver must answer for every key of
+ * an Agent: a revoker's key rarely signs the family the binding it revokes signs,
+ * so one that answers only for a family or a policy purpose hides it. */
+export type BindingAuthorityDeps = Pick<VerifyEnvelopeBindingDeps, "bindingResolver" | "witnessVerifier" | "dsseVerifier">;
+
+/** Which revocations end a binding's use as an authority. Every one that is
+ * authorized, except for the founding account's own incumbency: see `readChain`. */
+type RevocationsThatCount = "all" | "voucher-signed";
+
+/** One verification's walk. `settled` holds each fact the walk has decided,
+ * because a store full of peers would otherwise be re-walked along every path
+ * through it. Every fact is decided at a fixed instant -- a binding's own
+ * effective start, a revocation's own effective time -- so the answer does
+ * not depend on which path asked. */
+interface AuthorityWalk extends BindingAuthorityDeps {
+  readonly settled: Map<string, boolean>;
+  /** One resolve per (agent, key, instant): a store of n peers would otherwise
+   * resolve each of them once per candidate. */
+  readonly resolved: Map<string, Promise<ResolvedBinding | null>>;
+}
+
+function startWalk({ bindingResolver, witnessVerifier, dsseVerifier }: BindingAuthorityDeps): AuthorityWalk {
+  return { bindingResolver, witnessVerifier, dsseVerifier, settled: new Map(), resolved: new Map() };
+}
+
+function resolveOnce(walk: AuthorityWalk, key: string, agent: string, atTime: string): Promise<ResolvedBinding | null> {
+  const fact = `${agent}\u001f${key}\u001f${atTime}`;
+  const known = walk.resolved.get(fact);
+  if (known !== undefined) return known;
+  const resolved = resolveBindingForAgent(walk.bindingResolver, { key, agent }, atTime);
+  walk.resolved.set(fact, resolved);
+  return resolved;
+}
+
+async function settle(walk: AuthorityWalk, fact: string, decide: () => Promise<boolean>): Promise<boolean> {
+  const known = walk.settled.get(fact);
+  if (known !== undefined) return known;
+  const decided = await decide();
+  walk.settled.set(fact, decided);
+  return decided;
+}
+
+/** Whether `keyid` signed these bytes. A store may hold anything, and what
+ * cannot be read was signed by no one. */
+function signedBy(walk: AuthorityWalk, envelopeBytes: Uint8Array, keyid: string): boolean {
+  try {
+    return walk.dsseVerifier(envelopeBytes).validSignerKeyids.includes(keyid);
+  } catch {
+    return false;
+  }
+}
+
+function withinWindow(resolved: ResolvedBinding, atTime: string): boolean {
+  const start = compareCalendarStrictRfc3339Instants(atTime, resolved.effectiveStart);
+  if (start === undefined || start < 0) return false;
+  if (resolved.binding.expiresAt === undefined) return true;
+  const end = compareCalendarStrictRfc3339Instants(atTime, resolved.binding.expiresAt);
+  return end !== undefined && end <= 0;
+}
+
+/**
+ * All of what it takes to give authority at an instant except the consent
+ * chain: in window, record signed by the key it binds (§7.1), ceremony
+ * verified, and no authorized revocation effective strictly before that
+ * instant. Step 5 is not applied: authority is a §7.4 question, and a
+ * verifier's trust policy says nothing about who an Agent's keys are.
+ *
+ * Revocations count strictly before the instant because an act is judged by
+ * the state it was taken in. So a successor can revoke the binding it descends
+ * from, and two keys revoking each other at one instant both take effect. It
+ * also keeps the walk finite: a revocation's signer is always judged at a
+ * strictly earlier instant than the binding it revokes was being judged at.
+ */
+async function authorityUsable(
   resolved: ResolvedBinding,
   atTime: string,
-  deps: { readonly bindingResolver: BindingResolver; readonly dsseVerifier: DsseChainVerifier },
-): Promise<{ ok: boolean; detail?: string }> {
-  if (resolved.isGenesis) return { ok: true };
+  walk: AuthorityWalk,
+  revocationsThatCount: RevocationsThatCount = "all",
+): Promise<boolean> {
+  if (!withinWindow(resolved, atTime)) return false;
+  const sound = await settle(walk, `record\u001f${resolved.bindingDigest}`, async () => (
+    signedBy(walk, resolved.envelopeBytes, resolved.binding.key.didKey)
+    && (await verifyCeremonyLeg(resolved, walk.witnessVerifier)).verified
+  ));
+  return sound && (await checkRevocation(resolved, atTime, "before", walk, revocationsThatCount)).ok;
+}
+
+/** Whether a binding stands at the instant it gives authority. */
+async function bindingStands(
+  resolved: ResolvedBinding,
+  atTime: string,
+  walk: AuthorityWalk,
+  revocationsThatCount: RevocationsThatCount = "all",
+): Promise<boolean> {
+  return await authorityUsable(resolved, atTime, walk, revocationsThatCount) && chainHolds(resolved, walk);
+}
+
+/** What one binding's record offers §7.4a, before the batch it was sealed in
+ * is settled. */
+interface ChainReading {
+  /** Genesis, or an authority from a strictly earlier instant stands. */
+  readonly rooted: boolean;
+  /** Usable authorities that took effect at this binding's own instant:
+   * they stand or fall with it. */
+  readonly peers: readonly ResolvedBinding[];
+  /** Why the chain fails if nothing roots it. */
+  readonly detail?: string;
+}
+
+/**
+ * The consent countersignature's target bytes are not specified by the design
+ * (§7.4a names the rule, not the wire format). This implementation defines them
+ * as the DSSE PAE of the binding's own canonical payload with the `consent`
+ * field itself omitted (avoiding the self-reference a signature-over-itself
+ * would create) -- a documented convention, flagged as a finding for design
+ * ratification. A store may hold anything, and a walk over someone else's
+ * record must end in a verdict: what cannot be read is no signature.
+ */
+function consentSignatureValid(
+  binding: ResolvedBinding["binding"],
+  consent: NonNullable<ResolvedBinding["binding"]["consent"]>,
+  walk: AuthorityWalk,
+): boolean {
+  try {
+    const { consent: _consent, ...bindingWithoutConsent } = binding;
+    const syntheticEnvelope = sealDsseEnvelope({
+      payloadBytes: canonicalJsonBytes(bindingWithoutConsent),
+      payloadType: TRUST_KEY_BINDING_MEDIA_TYPE,
+      signatures: [{ signature: decodeBase64(consent.sig), keyid: consent.keyid }],
+    });
+    return walk.dsseVerifier(syntheticEnvelope).validSignerKeyids.includes(consent.keyid);
+  } catch {
+    return false;
+  }
+}
+
+async function readChain(resolved: ResolvedBinding, walk: AuthorityWalk): Promise<ChainReading> {
+  if (resolved.isGenesis) return { rooted: true, peers: [] };
 
   const { binding } = resolved;
+  // Authority is judged when it was exercised, and §7.3's effective start is
+  // when this binding really entered the world: `validFrom` alone is the
+  // minter's claim. Later expiry or revocation of the authority takes nothing
+  // back (§7.4b), and a back-dated `validFrom` reaches nothing earlier.
+  const mintTime = resolved.effectiveStart;
+  const peers: ResolvedBinding[] = [];
+  /** True when `authority` roots this binding. One from its own instant is
+   * noted as a peer instead: only its batch as a whole can say if it stands. */
+  const roots = async (authority: ResolvedBinding, revocationsThatCount: RevocationsThatCount = "all"): Promise<boolean> => {
+    const order = compareCalendarStrictRfc3339Instants(authority.effectiveStart, mintTime);
+    if (order === undefined || order > 0) return false;
+    if (order < 0) return bindingStands(authority, mintTime, walk, revocationsThatCount);
+    // Nothing that could revoke the genesis exists before it, so the founding
+    // exception has no work to do at the genesis's own instant.
+    if (await authorityUsable(authority, mintTime, walk)) peers.push(authority);
+    return false;
+  };
 
-  if (
-    resolved.incumbentControlVoucher !== undefined
-    && voucherIdentityEquals(resolved.incumbentControlVoucher, binding.voucher)
-  ) {
-    return { ok: true }; // self-extension (§7.4a option 1)
+  // §7.2: registry facts alone never vouch an IRI, and an agentId ceremony signs
+  // no key, so an agentId voucher is no incumbent (§7.4a option 1). It joins only
+  // by consent.
+  const incumbents = binding.voucher.kind === "agentId" ? [] : resolved.incumbentControls ?? [];
+  for (const incumbent of incumbents) {
+    if (!voucherIdentityEquals(incumbent.voucher, binding.voucher)) continue;
+    // eslint-disable-next-line no-await-in-loop -- sequential: the first that stands settles it.
+    const authority = await resolveOnce(walk, incumbent.key, binding.agent, mintTime);
+    // What the store listed is a candidate; what resolves for that key is the
+    // binding that holds it, so that is the record every check here applies to.
+    if (authority === null
+      || authority.binding.relationship !== "controls"
+      || !voucherIdentityEquals(authority.binding.voucher, binding.voucher)) {
+      continue;
+    }
+    // §7.4a: "the account is the incumbent authority", and §7.4b keeps what a
+    // bindings key revokes recoverable through that account. So a working key
+    // can retire the founding binding but not the founding account: only the
+    // account's own revocation ends that binding's self-extension authority,
+    // whichever record of that standing it names. Every other account stays
+    // removable, by any authorized revocation.
+    const counting: RevocationsThatCount = authority.isGenesis ? "voucher-signed" : "all";
+    // eslint-disable-next-line no-await-in-loop -- sequential: the first that stands settles it.
+    if (await roots(authority, counting)) return { rooted: true, peers: [] }; // self-extension (§7.4a option 1)
   }
 
   if (binding.consent !== undefined) {
-    // The consent countersignature's target bytes are not specified by the
-    // design (§7.4a names the rule, not the wire format). This
-    // implementation defines them as the DSSE PAE of the binding's own
-    // canonical payload with the `consent` field itself omitted (avoiding
-    // the self-reference a signature-over-itself would create) -- a
-    // documented convention, flagged as a finding for design ratification.
-    const { consent: _consent, ...bindingWithoutConsent } = binding;
-    const consentTargetPayload = canonicalJsonBytes(bindingWithoutConsent);
-    const syntheticEnvelope = sealDsseEnvelope({
-      payloadBytes: consentTargetPayload,
-      payloadType: TRUST_KEY_BINDING_MEDIA_TYPE,
-      signatures: [{ signature: decodeBase64(binding.consent.sig), keyid: binding.consent.keyid }],
-    });
-    const { validSignerKeyids } = deps.dsseVerifier(syntheticEnvelope);
-    if (!validSignerKeyids.includes(binding.consent.keyid)) {
-      return { ok: false, detail: "consent countersignature does not validate against its declared keyid." };
+    if (!consentSignatureValid(binding, binding.consent, walk)) {
+      return { rooted: false, peers, detail: "consent countersignature does not validate against its declared keyid." };
     }
-    const consentingBinding = await resolveBindingForAgent(
-      deps.bindingResolver,
-      { key: binding.consent.keyid, agent: binding.agent },
-      atTime,
-    );
+    const consentingBinding = await resolveOnce(walk, binding.consent.keyid, binding.agent, mintTime);
     if (consentingBinding === null || !consentingBinding.binding.scope.includes("bindings")) {
       return {
-        ok: false,
-        detail: `consent keyid "${binding.consent.keyid}" does not currently hold a scope:bindings `
-          + `binding to "${binding.agent}".`,
+        rooted: false,
+        peers,
+        detail: `consent keyid "${binding.consent.keyid}" did not hold a scope:bindings binding to `
+          + `"${binding.agent}" at this binding's effective start "${mintTime}".`,
       };
     }
-    return { ok: true }; // cross-account consent (§7.4a option 2)
+    if (await roots(consentingBinding)) return { rooted: true, peers: [] }; // cross-account consent (§7.4a option 2)
+    return {
+      rooted: false,
+      peers,
+      detail: `consent keyid "${binding.consent.keyid}" holds a binding to "${binding.agent}" that did `
+        + `not stand at this binding's effective start "${mintTime}" (§7.4a).`,
+    };
   }
 
-  if (resolved.incumbentControlVoucher === undefined) {
+  if (incumbents.length === 0) {
     return {
-      ok: false,
+      rooted: false,
+      peers,
       detail: "non-genesis binding carries no incumbent controls voucher and no "
         + "bindings-scoped consent countersignature (§7.4a).",
     };
   }
   return {
-    ok: false,
-    detail: `non-genesis binding's incumbent controls voucher `
-      + `(${describeVoucherIdentity(resolved.incumbentControlVoucher)}) is not the binding's own voucher `
-      + `(${describeVoucherIdentity(binding.voucher)}) and it carries no bindings-scoped consent `
-      + "countersignature (§7.4a).",
+    rooted: false,
+    peers,
+    detail: `no incumbent controls binding (${incumbents.map(({ voucher }) => describeVoucherIdentity(voucher)).join(", ")}) `
+      + `stands for the binding's own voucher (${describeVoucherIdentity(binding.voucher)}) and it `
+      + "carries no bindings-scoped consent countersignature (§7.4a).",
   };
+}
+
+/**
+ * Whether a chain of authority reaches this binding from the genesis: the
+ * least fixed point, not a walk that gives up on a repeat, so a binding stands
+ * only on something that does. This is the cycle guard. A binding cannot
+ * countersign itself, and a ring of bindings countersigning each other has
+ * nothing under it however it is entered.
+ *
+ * Bindings sealed at one instant may authorize each other in any order, and
+ * no digest may decide which, so a batch is settled together: every binding
+ * reachable through authority at that same instant is read once, then standing
+ * spreads out from the ones rooted at an earlier instant. Everything else the
+ * walk asks about lies at a strictly earlier instant, so the fact settled here
+ * for each member does not depend on which of them asked.
+ */
+async function chainHolds(resolved: ResolvedBinding, walk: AuthorityWalk): Promise<boolean> {
+  const fact = (binding: ResolvedBinding): string => `chain\u001f${binding.bindingDigest}`;
+  const known = walk.settled.get(fact(resolved));
+  if (known !== undefined) return known;
+
+  const batch = new Map<ResolvedBinding["bindingDigest"], ChainReading>();
+  const unread = [resolved];
+  for (let next = unread.pop(); next !== undefined; next = unread.pop()) {
+    if (batch.has(next.bindingDigest)) continue;
+    const settled = walk.settled.get(fact(next));
+    // eslint-disable-next-line no-await-in-loop -- batches are small; sequential is fine.
+    const reading = settled === undefined ? await readChain(next, walk) : { rooted: settled, peers: [] };
+    batch.set(next.bindingDigest, reading);
+    unread.push(...reading.peers);
+  }
+
+  const standing = new Set([...batch].filter(([, { rooted }]) => rooted).map(([digest]) => digest));
+  for (let spread = true; spread;) {
+    spread = false;
+    for (const [digest, { peers }] of batch) {
+      if (standing.has(digest) || !peers.some(({ bindingDigest }) => standing.has(bindingDigest))) continue;
+      standing.add(digest);
+      spread = true;
+    }
+  }
+  for (const digest of batch.keys()) walk.settled.set(`chain\u001f${digest}`, standing.has(digest));
+  return standing.has(resolved.bindingDigest);
+}
+
+async function checkConsentChain(
+  resolved: ResolvedBinding,
+  walk: AuthorityWalk,
+): Promise<{ ok: boolean; detail?: string }> {
+  if (await chainHolds(resolved, walk)) return { ok: true };
+  const { detail } = await readChain(resolved, walk);
+  return { ok: false, ...(detail === undefined ? {} : { detail }) };
 }
 
 async function isRevocationAuthorized(
   resolved: ResolvedBinding,
   entry: ResolvedRevocation,
-  deps: { readonly bindingResolver: BindingResolver; readonly dsseVerifier: DsseChainVerifier },
+  walk: AuthorityWalk,
 ): Promise<boolean> {
-  const { validSignerKeyids } = deps.dsseVerifier(entry.envelopeBytes);
-  if (!validSignerKeyids.includes(entry.revocation.revokedBy)) return false;
-
   const revokedBy = entry.revocation.revokedBy;
+  if (!signedBy(walk, entry.envelopeBytes, revokedBy)) return false;
+
   if (revokedBy.startsWith("did:pkh:")) {
-    // The binding's voucher account, via a fresh ceremony (§7.4b).
+    // The binding's voucher account (§7.4b). The injected verifier decides
+    // whether that account signed; nothing here checks that the ceremony is new.
     return resolved.binding.voucher.kind === "account" && resolved.binding.voucher.did === revokedBy;
   }
+  // A key giving up its own binding gives no authority to anyone, so it needs no
+  // chain to stand on: the signature above and `bindings` scope are all this act
+  // takes, and refusing it would keep alive a binding its own holder has retired.
+  // The scope is the named record's, not that of whichever record answers for the
+  // key at that instant: a replacement must not be able to lift the revocation.
+  if (revokedBy === resolved.binding.key.didKey && entry.targetScope?.includes("bindings") === true) return true;
   // A currently-valid working key of the same Agent with scope: bindings.
-  const revokerBinding = await resolveBindingForAgent(
-    deps.bindingResolver,
-    { key: revokedBy, agent: resolved.binding.agent },
-    entry.effectiveTime,
-  );
-  return revokerBinding !== null && revokerBinding.binding.scope.includes("bindings");
+  // Valid means it stands, not that a record for it resolves: otherwise any
+  // bindings-scoped record for this Agent could revoke its genesis.
+  const revokerBinding = await resolveOnce(walk, revokedBy, resolved.binding.agent, entry.effectiveTime);
+  if (revokerBinding === null || !revokerBinding.binding.scope.includes("bindings")) return false;
+  // The same act, from a resolver that does not report the named record's scope.
+  if (entry.revocation.target === resolved.bindingDigest && revokerBinding.bindingDigest === resolved.bindingDigest) return true;
+  return bindingStands(revokerBinding, entry.effectiveTime, walk);
 }
 
+/** `"at"` is step 4's check on the evidence: a revocation effective at or
+ * before `atTime` applies. `"before"` is `bindingStands`'s, which excludes the
+ * instant itself. */
 async function checkRevocation(
   resolved: ResolvedBinding,
   atTime: string,
-  deps: { readonly bindingResolver: BindingResolver; readonly dsseVerifier: DsseChainVerifier },
+  boundary: "at" | "before",
+  walk: AuthorityWalk,
+  revocationsThatCount: RevocationsThatCount = "all",
 ): Promise<{ ok: boolean; detail?: string }> {
   for (const entry of resolved.revocations) {
+    if (revocationsThatCount === "voucher-signed" && !entry.revocation.revokedBy.startsWith("did:pkh:")) continue;
     // §7.4b: never retroactive -- a revocation anchored after the
     // evidence's effective time attributes nothing before it.
     const comparison = compareCalendarStrictRfc3339Instants(entry.effectiveTime, atTime);
-    if (comparison === undefined) {
-      return { ok: false, detail: "revocation effectiveTime is not a calendar-valid RFC 3339 authority time." };
-    }
-    if (comparison > 0) continue;
+    if (comparison !== undefined && (comparison > 0 || (comparison === 0 && boundary === "before"))) continue;
+    const fact = `revocation\u001f${resolved.bindingDigest}\u001f${recordDigest(entry.envelopeBytes)}`;
     // eslint-disable-next-line no-await-in-loop -- revocations lists are small; sequential is fine.
-    if (await isRevocationAuthorized(resolved, entry, deps)) {
-      return {
-        ok: false,
-        detail: `revoked effective "${entry.effectiveTime}" by "${entry.revocation.revokedBy}".`,
-      };
-    }
+    if (!(await settle(walk, fact, () => isRevocationAuthorized(resolved, entry, walk)))) continue;
+    // Authority comes first: a time nobody can read refuses only when someone
+    // with standing wrote it, or any record naming this binding would revoke it.
+    return {
+      ok: false,
+      detail: comparison === undefined
+        ? "revocation effectiveTime is not a calendar-valid RFC 3339 authority time."
+        : `revoked effective "${entry.effectiveTime}" by "${entry.revocation.revokedBy}".`,
+    };
   }
   return { ok: true };
+}
+
+/**
+ * §7.5 step 4's absence of anchored revocation, for a consumer that reads a
+ * resolved binding without the rest of the procedure. `revocations` lists every
+ * record naming the binding, whoever signed it (`interfaces.ts`), so reading that
+ * list directly lets anyone end a binding, and reading it not at all lets a
+ * revoked one stand. This is the one reading of it: §7.4b's authority first,
+ * then the effective time, at or before `atTime`.
+ */
+export async function checkBindingRevocation(
+  resolved: ResolvedBinding,
+  atTime: string,
+  deps: BindingAuthorityDeps,
+): Promise<{ readonly ok: boolean; readonly detail?: string }> {
+  return checkRevocation(resolved, atTime, "at", startWalk(deps));
 }
 
 function strengthSatisfies(actual: Strength, required: Strength): boolean {
@@ -446,7 +697,8 @@ export async function verifyEnvelopeBinding(
       detail: `binding scope [${resolved.binding.scope.join(", ")}] does not cover family "${input.family}".`,
     };
   }
-  const consentResult = await checkConsentChain(resolved, input.atTime, deps);
+  const walk = startWalk(deps);
+  const consentResult = await checkConsentChain(resolved, walk);
   if (!consentResult.ok) {
     return {
       ok: false,
@@ -455,7 +707,7 @@ export async function verifyEnvelopeBinding(
       ...(consentResult.detail === undefined ? {} : { detail: consentResult.detail }),
     };
   }
-  const revocationResult = await checkRevocation(resolved, input.atTime, deps);
+  const revocationResult = await checkRevocation(resolved, input.atTime, "at", walk);
   if (!revocationResult.ok) {
     return {
       ok: false,
@@ -520,11 +772,18 @@ export interface SettlementJoinOutcome {
  * relationship in `{controls, signs-for}`; the settlement leg must also
  * stand (not revoked) at the later claim time. Divergent times or a
  * missing leg fail the join -- no partial credit.
+ *
+ * A resolver does not judge what it returns: a revoked binding still resolves,
+ * carrying what names it, and so does one with no standing (`interfaces.ts`).
+ * So a revoked leg fails here, by §7.4b's authority, and a revocation with no
+ * authority has no effect. The settlement leg must also stand at the envelope's
+ * time. The verdict leg's standing is `verifyEnvelopeBinding`'s to establish.
  */
 export async function settlementJoinCheck(
   input: SettlementJoinInput,
-  deps: { readonly bindingResolver: BindingResolver },
+  deps: BindingAuthorityDeps,
 ): Promise<SettlementJoinOutcome> {
+  const walk = startWalk(deps);
   const verdictLeg = await resolveBindingForAgent(
     deps.bindingResolver,
     { key: input.verdictKey, agent: input.claimedEvaluatorAgent },
@@ -545,6 +804,10 @@ export async function settlementJoinCheck(
       reason: `verdict leg's relationship "${verdictLeg.binding.relationship}" is neither controls nor signs-for.`,
     };
   }
+  const verdictRevocation = await checkRevocation(verdictLeg, input.envelopeEffectiveTime, "at", walk);
+  if (!verdictRevocation.ok) {
+    return { ok: false, reason: `verdict leg is revoked at the envelope's time: ${verdictRevocation.detail}` };
+  }
 
   const settlementLegAtEnvelopeTime = await resolveBindingForAgent(
     deps.bindingResolver,
@@ -557,13 +820,22 @@ export async function settlementJoinCheck(
   if (!settlementLegAtEnvelopeTime.binding.scope.includes("settlements")) {
     return { ok: false, reason: "settlement leg does not carry scope:settlements." };
   }
+  const envelopeTimeRevocation = await checkRevocation(settlementLegAtEnvelopeTime, input.envelopeEffectiveTime, "at", walk);
+  if (!envelopeTimeRevocation.ok) {
+    return { ok: false, reason: `settlement leg is revoked at the envelope's time: ${envelopeTimeRevocation.detail}` };
+  }
+  // §7.5a: "valid at the envelope's time". A resolved binding is data, so the leg must
+  // stand: its own signature, its ceremony (§7.5 step 3) and its §7.4a chain (step 4).
+  if (!(await bindingStands(settlementLegAtEnvelopeTime, input.envelopeEffectiveTime, walk))) {
+    return { ok: false, reason: "settlement leg does not stand at the envelope's time (§7.5 steps 3 and 4)." };
+  }
 
   // "not revoked at claim time" -- a distinct, later check from the
   // envelope-time resolution above (divergent-times protection).
   // Resolved through the plain resolver rather than `resolveBindingForAgent`
-  // so the two ways this leg can fail to stand for the claimed agent report
-  // distinctly: a genuine miss (revoked or expired) and a resolution that
-  // drifted to a different Agent IRI. The inline assertion mirrors
+  // so the two ways this leg can fail to resolve for the claimed agent report
+  // distinctly: a genuine miss and a resolution that drifted to a different
+  // Agent IRI. The inline assertion mirrors
   // `verifyEnvelopeBinding` step 2.
   const settlementLegAtClaimTime = await deps.bindingResolver.resolveBinding(
     { key: input.settlementDeclarationKey, agent: input.claimedEvaluatorAgent },
@@ -581,6 +853,15 @@ export async function settlementJoinCheck(
   }
   if (!settlementLegAtClaimTime.binding.scope.includes("settlements")) {
     return { ok: false, reason: "settlement leg lost scope:settlements at claim time." };
+  }
+  // Both records: the key may be bound by a later one by the claim, and that must
+  // not lift a revocation of the binding the envelope was joined to.
+  for (const leg of [settlementLegAtEnvelopeTime, settlementLegAtClaimTime]) {
+    // eslint-disable-next-line no-await-in-loop -- at most two records; the walk memoizes.
+    const claimTimeRevocation = await checkRevocation(leg, input.claimTime, "at", walk);
+    if (!claimTimeRevocation.ok) {
+      return { ok: false, reason: `settlement leg is revoked at claim time: ${claimTimeRevocation.detail}` };
+    }
   }
 
   // The agent this join PROVED, not the one it was handed -- equal by

@@ -272,13 +272,11 @@ test('evidence package Jinn dependencies and portal resolutions match the approv
   }
 });
 
-test('testing entrypoints declare Vitest as an exact optional peer', () => {
+test('testing entrypoints declare no Vitest peer', () => {
   for (const directory of ['derivation', 'retrieval', 'trace', 'trace-decode', 'offer', 'gate']) {
     const manifest = readPackage(directory);
-    assert.deepEqual(manifest.peerDependencies, { vitest: '^4.1.8' });
-    assert.deepEqual(manifest.peerDependenciesMeta, {
-      vitest: { optional: true },
-    });
+    assert.equal(manifest.peerDependencies, undefined);
+    assert.equal(manifest.peerDependenciesMeta, undefined);
   }
 });
 

@@ -25,12 +25,12 @@ const PRODUCT_PACKAGES = [
   ['web', '@colophon-claims/web', 'private'],
 ];
 const PACKAGE_VERSIONS = new Map([
-  ['@colophon-claims/core', '0.1.0'],
-  ['@colophon-claims/cli', '0.1.0'],
-  ['@colophon-claims/check', '0.2.1'],
+  ['@colophon-claims/core', '0.1.1'],
+  ['@colophon-claims/cli', '0.1.1'],
+  ['@colophon-claims/check', '0.2.2'],
   // The next free patch under @0.2: 0.2.1 is immutable on npm, and anything in 0.3.x would leave
   // `npx @colophon-claims/verify@0.2` resolving to the pre-rename real package, not the alias.
-  ['@colophon-claims/verify', '0.2.2'],
+  ['@colophon-claims/verify', '0.2.3'],
   ['@colophon-claims/web', '0.1.0'],
 ]);
 
@@ -66,6 +66,8 @@ const CHECK_JINN = [
   // ports. The source-boundaries guard pins it to `src/**/*.test.ts`, which `tsconfig.build.json`
   // excludes from `dist/`, so it never reaches the published package.
   '@jinn-network/trust-core', '@jinn-network/trust-testing',
+  // The checker's general record checks: DSSE signatures, did:key, and anchors (#5120).
+  '@jinn-network/verify',
 ];
 const TRANSITIVE_PORTALS = [
   '@jinn-network/attestation-issuer', '@jinn-network/benchmarking-aggregate',
@@ -83,6 +85,8 @@ const TRANSITIVE_PORTALS = [
   '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol',
   '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace',
   '@jinn-network/trust-core',
+  // Reached through the checker's runtime dependency on `verify`, which brings `evidence-offer`.
+  '@jinn-network/evidence-offer', '@jinn-network/verify',
 ];
 const PUBLICATION_PORTALS = [
   '@jinn-network/benchmarking-publication', '@jinn-network/record-discovery-client',
@@ -99,6 +103,9 @@ const CHECK_PORTALS = [
   // of the `trust-testing` devDependency, and a portal resolution is what keeps it pointed at the
   // live tree rather than at a registry version that does not exist.
   '@jinn-network/trust-core', '@jinn-network/trust-resolve', '@jinn-network/trust-testing',
+  // What `verify` brings beside what the checker already holds, and `verify` itself.
+  '@jinn-network/evidence-offer', '@jinn-network/record-discovery-protocol',
+  '@jinn-network/verify',
 ];
 
 const APPROVED = new Map([
@@ -111,6 +118,8 @@ const APPROVED = new Map([
     // dependency of the `trust-testing` devDependency. A portal resolution is what keeps it
     // pointed at the live tree rather than at a registry version that does not exist.
     '@jinn-network/trust-resolve',
+    // Reached through the checker's runtime dependency on `verify`.
+    '@jinn-network/evidence-offer', '@jinn-network/verify',
   ] }],
   ['cli', { colophon: ['@colophon-claims/check', '@colophon-claims/core'], jinn: [], portals: [
     '@colophon-claims/check', '@colophon-claims/core', ...TRANSITIVE_PORTALS, ...PUBLICATION_PORTALS,
@@ -141,6 +150,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/benchmarking-run', join(root, 'packages/benchmarking/run')],
   ['@jinn-network/environment-record', join(root, 'packages/environments/record')],
   ['@jinn-network/evidence-discovery', join(root, 'packages/evidence/discovery')],
+  ['@jinn-network/evidence-offer', join(root, 'packages/evidence/offer')],
   ['@jinn-network/execution-evidence-builder', join(root, 'packages/evidence/execution-evidence-builder')],
   ['@jinn-network/evidence-protocol', join(root, 'packages/evidence/protocol')],
   ['@jinn-network/evidence-repository', join(root, 'packages/evidence/repository')],
@@ -164,6 +174,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/trust-core', join(root, 'packages/trust/core')],
   ['@jinn-network/trust-resolve', join(root, 'packages/trust/resolve')],
   ['@jinn-network/trust-testing', join(root, 'packages/trust/testing')],
+  ['@jinn-network/verify', join(root, 'packages/discovery/verification')],
 ]);
 
 function readPackage(directory) {
@@ -260,6 +271,20 @@ test('the cross-runner distribution artifact retains the private Next runtime wi
     '!packages/**/dist/**/.yarnrc*',
   ]) {
     assert.ok(upload.includes(exclusion), `hidden artifact upload must exclude ${exclusion}`);
+  }
+});
+
+// inspect-ai 0.3.255 requires agent-client-protocol>=0.12.0 with no upper bound, and 1.0.0 removed
+// the acp.helpers module it imports at start (issue #5171). Every place that installs the supported
+// Inspect runtime pins the protocol too, so a fresh install cannot resolve a release it does not run on.
+test('every install of the supported Inspect runtime pins agent-client-protocol', () => {
+  const installs = [
+    ['.github/workflows/benchmark-product-ci.yml', /inspect_ai-0\.3\.255-py3-none-any\.whl"? agent-client-protocol==0\.12\.1\b/u],
+    ['packages/benchmark-product/core/src/runtime/inspect/Dockerfile', /inspect-ai==0\.3\.255 \\\n\s*agent-client-protocol==0\.12\.1 \\/u],
+    ['packages/benchmark-product/INSPECT-RUNTIME.md', /`inspect-ai==0\.3\.255` with `agent-client-protocol==0\.12\.1`/u],
+  ];
+  for (const [path, pinned] of installs) {
+    assert.match(readFileSync(join(root, path), 'utf8'), pinned, `${path} must pin agent-client-protocol==0.12.1 beside inspect-ai==0.3.255`);
   }
 });
 

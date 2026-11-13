@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { loadFixtureFamily, runStructuralCheck } from "../testing.js";
 import { canonicalJsonBytes } from "../bytes.js";
-import { compilePayloadValidator, type RegExpEngine } from "./payload-schema.js";
+import { assertSafeSchema, compilePayloadValidator, type RegExpEngine } from "./payload-schema.js";
 
 const familyDir = fileURLToPath(new URL("../../fixtures/schema-hardening", import.meta.url));
 
@@ -78,5 +78,17 @@ describe("injectable regExp engine (program §7.17)", () => {
     expect(validator("abc")).toEqual({ ok: true });
     expect(validator("ABC").ok).toBe(false);
     expect(constructedCount).toBeGreaterThan(0);
+  });
+});
+
+describe("assertSafeSchema: no external reference of any spelling (§6.4)", () => {
+  it.each(["$ref", "$dynamicRef", "$recursiveRef"])("refuses a remote %s, however deep", (keyword) => {
+    const schema = { properties: { nested: { [keyword]: "https://evil.example/schema.json" } } };
+    expect(() => assertSafeSchema(schema, canonicalJsonBytes(schema))).toThrow(`non-local ${keyword}`);
+  });
+
+  it.each(["$ref", "$dynamicRef", "$recursiveRef"])("allows a local %s", (keyword) => {
+    const schema = { properties: { nested: { [keyword]: "#node" } } };
+    expect(() => assertSafeSchema(schema, canonicalJsonBytes(schema))).not.toThrow();
   });
 });

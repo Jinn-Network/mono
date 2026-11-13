@@ -1,6 +1,6 @@
 {
   "name": "@colophon-claims/check",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Standalone public-bundle checker for Colophon claims. Formerly published as @colophon-claims/verify, which remains a permanent passthrough alias.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
@@ -63,6 +63,7 @@
     "@jinn-network/task-execution-profiles": "0.1.0",
     "@jinn-network/task-execution-protocol": "0.1.0",
     "@jinn-network/trust-core": "0.1.0",
+    "@jinn-network/verify": "0.1.0",
     "zod": "4.4.3"
   },
   "resolutions": {
@@ -75,13 +76,16 @@
     "@jinn-network/benchmarking-run": "portal:../../benchmarking/run",
     "@jinn-network/benchmarking-protocol": "portal:../../benchmarking/protocol",
     "@jinn-network/environment-record": "portal:../../environments/record",
+    "@jinn-network/evidence-offer": "portal:../../evidence/offer",
     "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
+    "@jinn-network/record-discovery-protocol": "portal:../../discovery/protocol",
     "@jinn-network/task-admission": "portal:../../task-supply/admission",
     "@jinn-network/task-execution-profiles": "portal:../../task-execution/profiles",
     "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
     "@jinn-network/trust-core": "portal:../../trust/core",
     "@jinn-network/trust-resolve": "portal:../../trust/resolve",
-    "@jinn-network/trust-testing": "portal:../../trust/testing"
+    "@jinn-network/trust-testing": "portal:../../trust/testing",
+    "@jinn-network/verify": "portal:../../discovery/verification"
   },
   "devDependencies": {
     "@jinn-network/trust-testing": "0.1.0",

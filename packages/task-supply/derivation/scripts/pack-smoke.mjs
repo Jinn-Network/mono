@@ -55,9 +55,9 @@ try {
       dependencies: Object.fromEntries([
         ...[...archives].map(([name, archive]) => [name, `file:${archive}`]),
         // `./testing` exports the SupplyPool/GoldStore conformance kits, which call vitest's
-        // describe/it at module scope. vitest is an OPTIONAL peer of this package precisely
-        // because the root entrypoint never touches it — but a consumer that imports
-        // `./testing` must supply it, and the smoke proves that contract rather than hiding it.
+        // describe/it at module scope. vitest is not a dependency of this package because the
+        // root entrypoint never touches it, but a consumer that imports `./testing` must supply
+        // it, and the smoke proves that contract rather than hiding it.
         ["vitest", "^4.1.8"],
       ]),
     }),

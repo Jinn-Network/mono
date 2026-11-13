@@ -116,7 +116,7 @@ const DERIVATION_ALLOWED_DEV_DEPENDENCIES = [
   'vitest',
 ];
 
-const DERIVATION_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const DERIVATION_ALLOWED_PEER_DEPENDENCIES = [];
 
 const PUBLICATION_FORBIDDEN_PACKAGES = [
   '@jinn-network/autopilot',
@@ -170,7 +170,7 @@ const PUBLICATION_ALLOWED_DEV_DEPENDENCIES = [
   'vitest',
 ];
 
-const PUBLICATION_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const PUBLICATION_ALLOWED_PEER_DEPENDENCIES = [];
 const PUBLICATION_FORBIDDEN_MANIFEST_PACKAGES =
   PUBLICATION_FORBIDDEN_PACKAGES.filter(
     (dependency) => dependency !== '@jinn-network/evidence-protocol',
@@ -216,7 +216,7 @@ const RETRIEVAL_ALLOWED_DEV_DEPENDENCIES = [
   'typescript',
   'vitest',
 ];
-const RETRIEVAL_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const RETRIEVAL_ALLOWED_PEER_DEPENDENCIES = [];
 const RETRIEVAL_FORBIDDEN_PACKAGES = [
   '@huggingface/transformers',
   '@jinn-network/autopilot',
@@ -260,7 +260,7 @@ const CONTRIBUTION_ALLOWED_DEV_DEPENDENCIES = [
   'typescript',
   'vitest',
 ];
-const CONTRIBUTION_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const CONTRIBUTION_ALLOWED_PEER_DEPENDENCIES = [];
 const CONTRIBUTION_FORBIDDEN_PACKAGES = [
   '@huggingface/transformers',
   '@jinn-network/attestation-issuer',
@@ -316,7 +316,7 @@ const TRACE_ALLOWED_DEV_DEPENDENCIES = [
   'typescript',
   'vitest',
 ];
-const TRACE_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const TRACE_ALLOWED_PEER_DEPENDENCIES = [];
 const TRACE_FORBIDDEN_PACKAGES = [
   '@jinn-network/attestation-issuer',
   '@jinn-network/autopilot',
@@ -359,7 +359,7 @@ const TRACE_FORBIDDEN_PACKAGES = [
 // design is wrong. It performs no I/O outside its fixture loaders in the testing region.
 const TRACE_DECODE_ALLOWED_DEPENDENCIES = ['@jinn-network/evidence-trace'];
 const TRACE_DECODE_ALLOWED_DEV_DEPENDENCIES = ['@types/node', 'typescript', 'vitest'];
-const TRACE_DECODE_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const TRACE_DECODE_ALLOWED_PEER_DEPENDENCIES = [];
 const TRACE_DECODE_FORBIDDEN_PACKAGES = [
   '@jinn-network/attestation-issuer',
   '@jinn-network/autopilot',
@@ -410,7 +410,7 @@ const TRACE_DECODE_FORBIDDEN_PACKAGES = [
 // region, where `node:crypto` is also allowed for the deterministic fixture signer.
 const OFFER_ALLOWED_DEPENDENCIES = ['@jinn-network/trust-core', 'zod'];
 const OFFER_ALLOWED_DEV_DEPENDENCIES = ['@types/node', 'typescript', 'vitest'];
-const OFFER_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const OFFER_ALLOWED_PEER_DEPENDENCIES = [];
 const OFFER_FORBIDDEN_PACKAGES = [
   '@jinn-network/attestation-issuer',
   '@jinn-network/autopilot',
@@ -468,7 +468,7 @@ const GATE_ALLOWED_DEPENDENCIES = [
   'zod',
 ];
 const GATE_ALLOWED_DEV_DEPENDENCIES = ['@types/node', 'typescript', 'vitest'];
-const GATE_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const GATE_ALLOWED_PEER_DEPENDENCIES = [];
 const GATE_FORBIDDEN_PACKAGES = [
   '@jinn-network/attestation-issuer',
   '@jinn-network/autopilot',
@@ -1281,9 +1281,7 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     DERIVATION_ALLOWED_PEER_DEPENDENCIES,
     'derivation peer dependencies must remain test-only',
   );
-  assert.deepEqual(derivationManifest.peerDependenciesMeta, {
-    vitest: { optional: true },
-  });
+  assert.equal(derivationManifest.peerDependenciesMeta, undefined);
   for (const section of [
     'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
   ]) {
@@ -1396,9 +1394,7 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     PUBLICATION_ALLOWED_PEER_DEPENDENCIES,
     'Publication peer dependencies must remain test-only',
   );
-  assert.deepEqual(publicationManifest.peerDependenciesMeta, {
-    vitest: { optional: true },
-  });
+  assert.equal(publicationManifest.peerDependenciesMeta, undefined);
   for (const section of [
     'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
   ]) {
@@ -1500,9 +1496,7 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     RETRIEVAL_ALLOWED_PEER_DEPENDENCIES,
     'retrieval peer dependencies must remain test-only',
   );
-  assert.deepEqual(retrievalManifest.peerDependenciesMeta, {
-    vitest: { optional: true },
-  });
+  assert.equal(retrievalManifest.peerDependenciesMeta, undefined);
   for (const section of [
     'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
   ]) {
@@ -1632,9 +1626,7 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     CONTRIBUTION_ALLOWED_PEER_DEPENDENCIES,
     'contribution peer dependencies must remain test-only',
   );
-  assert.deepEqual(contributionManifest.peerDependenciesMeta, {
-    vitest: { optional: true },
-  });
+  assert.equal(contributionManifest.peerDependenciesMeta, undefined);
   for (const section of [
     'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
   ]) {
@@ -1762,9 +1754,7 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     Object.keys(traceManifest.peerDependencies ?? {}).sort(),
     TRACE_ALLOWED_PEER_DEPENDENCIES,
   );
-  assert.deepEqual(traceManifest.peerDependenciesMeta, {
-    vitest: { optional: true },
-  });
+  assert.equal(traceManifest.peerDependenciesMeta, undefined);
   for (const directory of evidenceDirectories.filter((entry) => entry !== 'trace' && entry !== 'trace-decode')) {
     assertBoundary(
       join(packages, directory, 'src'),
@@ -1858,9 +1848,7 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     Object.keys(traceDecodeManifest.peerDependencies ?? {}).sort(),
     TRACE_DECODE_ALLOWED_PEER_DEPENDENCIES,
   );
-  assert.deepEqual(traceDecodeManifest.peerDependenciesMeta, {
-    vitest: { optional: true },
-  });
+  assert.equal(traceDecodeManifest.peerDependenciesMeta, undefined);
   for (const section of [
     'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
   ]) {
@@ -1973,9 +1961,7 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     Object.keys(offerManifest.peerDependencies ?? {}).sort(),
     OFFER_ALLOWED_PEER_DEPENDENCIES,
   );
-  assert.deepEqual(offerManifest.peerDependenciesMeta, {
-    vitest: { optional: true },
-  });
+  assert.equal(offerManifest.peerDependenciesMeta, undefined);
   for (const section of [
     'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
   ]) {
@@ -2076,7 +2062,7 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     Object.keys(gateManifest.peerDependencies ?? {}).sort(),
     GATE_ALLOWED_PEER_DEPENDENCIES,
   );
-  assert.deepEqual(gateManifest.peerDependenciesMeta, { vitest: { optional: true } });
+  assert.equal(gateManifest.peerDependenciesMeta, undefined);
   for (const section of [
     'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
   ]) {

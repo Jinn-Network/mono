@@ -595,6 +595,7 @@ describe('cross-operator discovery key resolution over a real catalog (#2525)', 
       bindingResolver: trust.resolverFor({ family: 'observations', purpose: `native:${role}-discovery` }),
       keyCatalog: { candidateKeys: async (agent: string) => [...trust.candidateKeys(agent)] },
       verifier: trust.rawSignatureVerifier,
+      revocationAuthority: trust,
     });
   }
 

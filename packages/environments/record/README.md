@@ -32,3 +32,7 @@ inside an open node, an `undefined` array element. All four carry
 `category: "invalid-document"`; catch on that, not on `InvalidDocumentError` by class.
 
 Design reference: `../../../docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md` §4 — a claim this record never makes on its own behalf.
+
+## Vitest
+
+`@jinn-network/environment-record/testing` needs `vitest` installed. `vitest` is not a dependency of this package, so add it to your own project. The other entry points do not need it.

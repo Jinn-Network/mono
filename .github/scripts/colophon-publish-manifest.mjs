@@ -64,6 +64,12 @@ const VERIFY_020_RECEIPT_KEYS = [
 ];
 const VERIFY_020_PRODUCT_KEYS = ['packageName', 'version'];
 const VERIFY_020_PACKAGE_KEYS = ['name', 'version', 'gitHead', 'integrity', 'provenanceUrl'];
+// A receipt that records each package's own `latest` dist-tag, as npm served it when the receipt was
+// read, in place of one `platformLatestVersion` it assumed for every package. Earlier receipts keep
+// the shape they were sealed in: their digests cannot change.
+const LATEST_PER_PACKAGE_RECEIPT_KEYS = VERIFY_020_RECEIPT_KEYS.filter((key) => key !== 'platformLatestVersion');
+const LATEST_PER_PACKAGE_KEYS = [...VERIFY_020_PACKAGE_KEYS, 'latestVersion'];
+const EXACT_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.]+)?$/u;
 const VERIFY_020_PLATFORM_CLOSURE = [
   '@jinn-network/benchmarking-aggregate',
   '@jinn-network/benchmarking-evidence',
@@ -111,6 +117,28 @@ const CORE_010_PLATFORM_CLOSURE = [
   '@jinn-network/trust-core',
 ];
 const CLI_010_PLATFORM_CLOSURE = [];
+// The checker's closure once `@jinn-network/verify` is its runtime dependency (issue #5120): the 15
+// above, plus `verify` and the two it brings that the checker did not already hold.
+const CHECK_022_PLATFORM_CLOSURE = [
+  '@jinn-network/benchmarking-aggregate',
+  '@jinn-network/benchmarking-evidence',
+  '@jinn-network/benchmarking-interop',
+  '@jinn-network/benchmarking-local',
+  '@jinn-network/benchmarking-protocol',
+  '@jinn-network/benchmarking-records',
+  '@jinn-network/benchmarking-run',
+  '@jinn-network/environment-record',
+  '@jinn-network/evidence-offer',
+  '@jinn-network/evidence-protocol',
+  '@jinn-network/record-discovery-protocol',
+  '@jinn-network/task-admission',
+  '@jinn-network/task-execution-profiles',
+  '@jinn-network/task-execution-protocol',
+  '@jinn-network/trust-core',
+  '@jinn-network/trust-resolve',
+  '@jinn-network/trust-testing',
+  '@jinn-network/verify',
+];
 const PRODUCT_RELEASES = {
   '@colophon-claims/verify@0.2.0': {
     decision: 'DR-2026-08-22-a',
@@ -146,6 +174,33 @@ const PRODUCT_RELEASES = {
     stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/38246145514/attempts/1',
     receiptSha256: 'd9963a3d7eb18f5fad4a91bdc2aaab3cf94a2f572744ff92581d44e0db1835ba',
     closure: VERIFY_020_PLATFORM_CLOSURE,
+  },
+  // The checker's runtime move to `@jinn-network/verify` (issue #5120), at the canary of #5158's
+  // merge. These receipts record each package's own `latest`: the maintainer pointed
+  // `@jinn-network/verify`'s at a canary build.
+  '@colophon-claims/core@0.1.1': {
+    decision: 'operator-authorization-2026-10-30-issue-5120',
+    latestPerPackage: true,
+    platformSourceSha: 'f2aa6f30f2c7d7bcfc4c11e1f6b69f3f44c28603',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41639352404/attempts/1',
+    receiptSha256: '718001f48001d4311ddd43fb77562d1b0ebd488e5687884a5594a1a56db9be0a',
+    closure: CORE_010_PLATFORM_CLOSURE,
+  },
+  '@colophon-claims/cli@0.1.1': {
+    decision: 'operator-authorization-2026-10-30-issue-5120',
+    latestPerPackage: true,
+    platformSourceSha: 'f2aa6f30f2c7d7bcfc4c11e1f6b69f3f44c28603',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41639352404/attempts/1',
+    receiptSha256: '21c0ed4fced453d8699a4323d6704de51dcbcd7ebdcee33a09d13cd47a2df83e',
+    closure: CLI_010_PLATFORM_CLOSURE,
+  },
+  '@colophon-claims/check@0.2.2': {
+    decision: 'operator-authorization-2026-10-30-issue-5120',
+    latestPerPackage: true,
+    platformSourceSha: 'f2aa6f30f2c7d7bcfc4c11e1f6b69f3f44c28603',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/41639352404/attempts/1',
+    receiptSha256: '67ef705484ce6facb65b8b37e834ffb830cd4799fc544b3e443e69ecb2816cd3',
+    closure: CHECK_022_PLATFORM_CLOSURE,
   },
 };
 const PRODUCT_RELEASE_IDS = Object.keys(PRODUCT_RELEASES);
@@ -250,11 +305,15 @@ function loadProductReleasePlatformPins(repoRoot) {
 }
 
 export function validateProductReleasePlatformPin(pin, manifest) {
-  if (!hasExactKeys(pin, VERIFY_020_RECEIPT_KEYS) || !hasExactKeys(pin.product, VERIFY_020_PRODUCT_KEYS)) {
+  const releaseId = `${pin?.product?.packageName}@${pin?.product?.version}`;
+  const release = PRODUCT_RELEASES[releaseId];
+  const latestPerPackage = release?.latestPerPackage === true;
+  if (
+    !hasExactKeys(pin, latestPerPackage ? LATEST_PER_PACKAGE_RECEIPT_KEYS : VERIFY_020_RECEIPT_KEYS)
+    || !hasExactKeys(pin.product, VERIFY_020_PRODUCT_KEYS)
+  ) {
     throw new Error('product-release pin must retain the immutable verifier 0.2 receipt shape');
   }
-  const releaseId = `${pin.product.packageName}@${pin.product.version}`;
-  const release = PRODUCT_RELEASES[releaseId];
   if (
     release === undefined
     || pin?.decision !== release.decision
@@ -274,7 +333,7 @@ export function validateProductReleasePlatformPin(pin, manifest) {
   }
   if (
     pin.platformDistTag !== 'canary'
-    || pin.platformLatestVersion !== '0.0.0'
+    || (!latestPerPackage && pin.platformLatestVersion !== '0.0.0')
     || pin.stackPublishRunUrl !== release.stackPublishRunUrl
   ) {
     throw new Error('product-release pin must retain its recorded stack-canary receipt');
@@ -293,8 +352,11 @@ export function validateProductReleasePlatformPin(pin, manifest) {
     throw new Error('product-release pin must include every direct Jinn dependency');
   }
   for (const pkg of packages) {
-    if (!hasExactKeys(pkg, VERIFY_020_PACKAGE_KEYS)) {
+    if (!hasExactKeys(pkg, latestPerPackage ? LATEST_PER_PACKAGE_KEYS : VERIFY_020_PACKAGE_KEYS)) {
       throw new Error(`product-release pin package row shape drift for ${pkg?.name ?? '<missing>'}`);
+    }
+    if (latestPerPackage && !EXACT_VERSION.test(String(pkg.latestVersion))) {
+      throw new Error(`product-release pin must record the exact version npm's latest tag served for ${pkg.name}`);
     }
     if (
       pkg.version !== pin.platformVersion
@@ -417,11 +479,12 @@ export function applyColophonPublishManifest(manifestPath, pin, options = {}) {
  *
  * It is deliberately not derived from `PRODUCT_RELEASES`. A platform receipt attests one publish
  * run; a registered release is any version this tree may resolve against. `verify@0.1.0` predates
- * the receipt file and `verify@0.2.2` is the alias, which carries no Jinn closure to attest.
+ * the receipt file and `verify@0.2.2` and `0.2.3` are the alias, which carries no Jinn closure to
+ * attest.
  */
 const READER_RELEASES = {
-  '@colophon-claims/check': ['0.2.1'],
-  '@colophon-claims/verify': ['0.1.0', '0.2.0', '0.2.1', '0.2.2'],
+  '@colophon-claims/check': ['0.2.1', '0.2.2'],
+  '@colophon-claims/verify': ['0.1.0', '0.2.0', '0.2.1', '0.2.2', '0.2.3'],
 };
 
 export function registeredReaderReleases(packageName) {

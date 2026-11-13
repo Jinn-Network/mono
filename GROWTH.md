@@ -40,7 +40,7 @@ The claim-first CTA is deliberate: the value on offer is a more credible decisio
 
 ## 4. The engine: the model
 
-Growth runs as a self-improving system on the **loadout-instrument engine**. A mutable **loadout** (eight knobs, §5) is iterated by a single skill that forces a written prediction *before* each attempt and a structured verdict *after*. The verdict is judged by position and movement on the **Mayfield participation curve** (Mayfield 2006, *The Power Law of Participation*):
+Growth runs as a self-improving system on the **loadout-instrument engine**. A mutable **loadout** (nine knobs: pitch, audience, channel, format, proof, ask, cadence, voice and amplifiers; the engine's own knobs are in §5) is iterated by a single skill that forces a written prediction *before* each attempt and a structured verdict *after*. The verdict is judged by position and movement on the **Mayfield participation curve** (Mayfield 2006, *The Power Law of Participation*):
 
 | # | Rung | Jinn example | Metric |
 |---|---|---|---|
@@ -70,7 +70,7 @@ The instrument is the binding constraint, not the search rule. **Resolution befo
 
 ## 6. The three artifacts
 
-- **[`growth/.local/growth-loadout.md`](growth/.local/growth-loadout.md)** — current loadout: eight knobs, version tag, changelog. Operator-private.
+- **[`growth/.local/growth-loadout.md`](growth/.local/growth-loadout.md)** — current loadout: nine knobs, version tag, changelog. Operator-private.
 - **[`growth/.local/growth-experiment-log.md`](growth/.local/growth-experiment-log.md)** — append-only log of attempts: predictions, actuals by rung, verdicts. Operator-private.
 - **[`.claude/skills/growth-experiment/`](.claude/skills/growth-experiment/)** — the skill that drives the cycle (PLAN → LOG → EVOLVE). Committed.
 

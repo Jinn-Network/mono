@@ -96,7 +96,11 @@ function resolvedBinding(
   revocations: readonly ResolvedRevocation[] = [],
 ): ResolvedBinding {
   return {
-    envelopeBytes: new TextEncoder().encode("fixture-binding"),
+    envelopeBytes: sealDsseEnvelope({
+      payloadBytes: new TextEncoder().encode("fixture-binding"),
+      payloadType: "application/vnd.jinn.trust.key-binding.v1+json",
+      signatures: [{ signature: Uint8Array.of(1), keyid: key }],
+    }),
     bindingDigest: `sha256:${"8".repeat(64)}`,
     effectiveStart: "2026-01-01T00:00:00Z",
     isGenesis: true,
@@ -149,11 +153,16 @@ function makePorts(
   omittedKey?: string,
   solverAgent: string = SOLVER_AGENT,
   requesterRevocations: readonly ResolvedRevocation[] = [],
+  settlementRevocations: readonly ResolvedRevocation[] = [],
 ): VerdictObservationGatePorts {
   const entries = [
     { key: ADMISSION_KEY, agent: ADMISSION_AGENT, binding: resolvedBinding(ADMISSION_KEY, ADMISSION_AGENT, [ADMISSION_RECEIPT_TRUST_SCOPE]) },
     { key: VERDICT_KEY, agent: EVALUATOR_AGENT, binding: resolvedBinding(VERDICT_KEY, EVALUATOR_AGENT, ["verdicts"]) },
-    { key: SETTLEMENT_KEY, agent: EVALUATOR_AGENT, binding: resolvedBinding(SETTLEMENT_KEY, EVALUATOR_AGENT, ["settlements"]) },
+    {
+      key: SETTLEMENT_KEY,
+      agent: EVALUATOR_AGENT,
+      binding: resolvedBinding(SETTLEMENT_KEY, EVALUATOR_AGENT, ["settlements"], "controls", settlementRevocations),
+    },
     { key: SOLVER_KEY, agent: solverAgent, binding: resolvedBinding(SOLVER_KEY, solverAgent, ["deliveries"]) },
     {
       key: REQUESTER_KEY,
@@ -621,6 +630,64 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
       decisionGrade: false,
       failures: [{ check: "settlement-join", detail: expect.any(String) }],
     });
+  });
+
+  test("fails closed when a key entitled to revoke the settlement declaration revoked it before the claim", async () => {
+    const fixture = makeFixture();
+    const ports = makePorts(undefined, SOLVER_AGENT, [], [revocationEntry(REQUESTER_VOUCHER, CLAIM_BLOCK_TIME)]);
+    expect(await gateVerdictObservation(fixture.input, ports)).toEqual({
+      decisionGrade: false,
+      failures: [{ check: "settlement-join", detail: expect.stringContaining("settlement leg is revoked at claim time") }],
+    });
+  });
+
+  describe("over a resolver holding more than the fixture's keys", () => {
+    const COLD_KEY = "did:key:z6MkfCOLD1111111111111111111111111111111";
+
+    function withBinding(ports: VerdictObservationGatePorts, key: string, binding: ResolvedBinding): VerdictObservationGatePorts {
+      return {
+        ...ports,
+        bindingResolver: {
+          resolveBinding: async (query, atTime) => (query.key === key ? binding : ports.bindingResolver.resolveBinding(query, atTime)),
+        },
+      };
+    }
+
+    test("counts a revocation by a revoker whose ceremony only the witness leg verifies", async () => {
+      const cold = resolvedBinding(COLD_KEY, EVALUATOR_AGENT, ["bindings"]);
+      const ports = withBinding(
+        makePorts(undefined, SOLVER_AGENT, [], [revocationEntry(COLD_KEY, CLAIM_BLOCK_TIME)]),
+        COLD_KEY,
+        {
+          ...cold,
+          bindingDigest: `sha256:${"9".repeat(64)}`,
+          binding: { ...cold.binding, ceremony: { type: "safe", digest: `sha256:${"7".repeat(64)}` } },
+          witness: { chainId: 84532, blockNumber: 1, blockHash: `0x${"c".repeat(64)}`, verifier: EVALUATOR_AGENT, envelopeBytes: Uint8Array.of(1) },
+        },
+      );
+      expect(await gateVerdictObservation(makeFixture().input, ports)).toEqual({
+        decisionGrade: false,
+        failures: [{ check: "settlement-join", detail: expect.stringContaining("settlement leg is revoked at claim time") }],
+      });
+    });
+
+    test("fails closed when the settlement declaration has no chain to the genesis", async () => {
+      const ports = withBinding(
+        makePorts(),
+        SETTLEMENT_KEY,
+        { ...resolvedBinding(SETTLEMENT_KEY, EVALUATOR_AGENT, ["settlements"]), isGenesis: false },
+      );
+      expect(await gateVerdictObservation(makeFixture().input, ports)).toEqual({
+        decisionGrade: false,
+        failures: [{ check: "settlement-join", detail: expect.stringContaining("settlement leg does not stand") }],
+      });
+    });
+  });
+
+  test("a revocation of the settlement declaration with no authority changes nothing", async () => {
+    const fixture = makeFixture();
+    const ports = makePorts(undefined, SOLVER_AGENT, [], [revocationEntry(UNAUTHORIZED_REVOKER, CLAIM_BLOCK_TIME)]);
+    await expect(gateVerdictObservation(fixture.input, ports)).resolves.toEqual({ decisionGrade: true, failures: [] });
   });
 
   test("fails closed when the verdict signer has no evaluator binding", async () => {

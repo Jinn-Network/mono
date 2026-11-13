@@ -42,7 +42,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   // `verification` is tier 3 and takes exactly the two package edges design §3.3 gives it:
   // the record kind it verifies, and trust/core for DSSE + JCS + hashing. `trust-testing` is
   // a test-only devDependency: the conformance kit signs with real deterministic keys.
-  // (This map records Jinn dependencies only; `vitest` is an optional peer, asserted below.)
+  // (This map records Jinn dependencies only.)
   ['verification', {
     dependencies: [
       '@jinn-network/environment-record',
@@ -199,7 +199,7 @@ test('environments package Jinn dependencies and portal resolutions match the ap
   }
 });
 
-test('every environments package declares Vitest as an exact optional peer where it ships a kit', () => {
+test('every environments package ships an approved export map and declares no Vitest peer', () => {
   const expectedExports = new Map([
     ['record', ['.', './fixtures/*', './schemas/*', './testing']],
     ['verification', ['.', './fixtures/*', './testing']],
@@ -213,7 +213,7 @@ test('every environments package declares Vitest as an exact optional peer where
     const manifest = readPackage(directory);
     assert.deepEqual(Object.keys(manifest.exports).sort(), expectedExports.get(directory),
       `${directory} has an unapproved export map`);
-    assert.equal(manifest.peerDependencies?.vitest, '^4.1.8');
-    assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+    assert.equal(manifest.peerDependencies, undefined, `${directory} must not declare a peer`);
+    assert.equal(manifest.peerDependenciesMeta, undefined, `${directory} must not declare a peer`);
   }
 });

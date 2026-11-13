@@ -207,11 +207,6 @@ __metadata:
     typescript: "npm:^5.9.3"
     vitest: "npm:^4.1.8"
     zod: "npm:4.4.3"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: unknown
   linkType: soft
 
@@ -221,11 +216,6 @@ __metadata:
   dependencies:
     "@jinn-network/trust-core": "npm:0.1.0"
     zod: "npm:4.4.3"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
@@ -243,11 +233,6 @@ __metadata:
   resolution: "@jinn-network/evidence-repository@portal:../repository::locator=%40jinn-network%2Fevidence-gate%40workspace%3A."
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
   languageName: node
   linkType: soft
 
