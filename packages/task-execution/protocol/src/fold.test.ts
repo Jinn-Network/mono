@@ -297,6 +297,20 @@ describe("foldObservations", () => {
       expect(once.state).toBe("running");
     });
 
+    test("one engagement id under two sources is two engagements, not a refusal", () => {
+      // Same id and same sequence, different envelope source, different payload. The dedupe key is
+      // source and id, so these are two engagements; keyed by id alone they would disagree.
+      const own = engagedPinning(SOURCE, { source: SOURCE, id: "evt-engaged" });
+      const theirs = engagedPinning(HIGH, { source: HIGH, id: "evt-engaged" });
+      (theirs.data as { effectiveDeadline: string }).effectiveDeadline = "2026-08-01T02:00:00Z";
+      const later = started({ sequence: "0000000000000002" });
+      const derived = foldObservations([own, theirs, later]);
+      // SOURCE sorts first, so its engagement pins the source and the other producer's is set aside.
+      expect(derived.effectiveDeadline).toBe("2026-08-01T01:00:00Z");
+      expect(derived.state).toBe("running");
+      expect(foldObservations([later, theirs, own])).toEqual(derived);
+    });
+
     test("an engagement sharing its pair with another type is not this case", () => {
       // Only one of them is an engagement, and it pins a source the pair's own source is not.
       const pin = engagedPinning(LOW, { id: "evt-shared", sequence: "0000000000000001" });
