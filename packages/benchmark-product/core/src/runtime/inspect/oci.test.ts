@@ -331,3 +331,22 @@ test("a non-zero exit is reported as that exit even when a descendant still hold
   expect((failure as Error).message).toContain("OCI runtime command exited 3");
   expect(Date.now() - startedAt).toBeLessThan(5_000);
 });
+
+/**
+ * #5163. The command is still running when the bound expires and a descendant holds its stdout.
+ * SIGTERM ends the command, but nothing signals the descendant, so only abandoning the pipes lets
+ * the refusal arrive. Without that step the call waits for the descendant, many seconds past the bound.
+ */
+test("a command still running at the bound with a descendant holding stdout expires promptly as a typed timeout", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "jinn-oci-running-held-stdout-"));
+  temporaryDirectories.push(directory);
+  process.env.JINN_INSPECT_OCI_COMMAND_TIMEOUT_MS = "500";
+  const hostBinding = driftCheckBinding(writeDriftCheckFakeDocker(directory, DRIFT_CHECK_COMMANDS[0].selectedBy, "sleep 8 & sleep 8"));
+
+  const startedAt = Date.now();
+  const failure = await assertInspectOciHostUndrifted(hostBinding, undriftedManifest(hostBinding)).catch((cause: unknown) => cause);
+
+  expect(failure).toBeInstanceOf(InspectOciCommandTimeoutError);
+  expect((failure as Error).message).toContain("timed out after 500 ms: docker version");
+  expect(Date.now() - startedAt).toBeLessThan(4_000);
+});
