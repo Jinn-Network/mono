@@ -1103,10 +1103,10 @@ describe("runResume — re-dispatches only outstanding cells", () => {
     );
     if (captured?.kind !== "submission-captured") throw new Error("fixture produced no captured Submission");
 
-    const invalidBytes = new TextEncoder().encode(JSON.stringify({
+    const invalidBytes = utf8({
       submission: "not-a-urn",
       deadline: "2030-01-01T00:00:00.000Z",
-    }));
+    });
     const invalidSha256 = putSealedBytes(workspaceDir, invalidBytes);
 
     // `journaledSubmissions` last-wins: a later `submission-accepted` would otherwise keep the
@@ -1147,7 +1147,7 @@ describe("runResume — re-dispatches only outstanding cells", () => {
         }],
       },
     });
-    expect(recoveries).not.toContain("not-a-urn");
+    expect(recoveries).toHaveLength(0);
     expect(submits).toHaveLength(0);
   });
 
