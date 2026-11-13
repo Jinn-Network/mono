@@ -38,7 +38,7 @@ import {
   type SourceAppendIntentStore,
   type SourceStateStore,
 } from "@jinn-network/record-discovery-serve";
-import { createArchiveHttpHandler, createFsBlobStore, IMMUTABLE_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL } from "@jinn-network/record-discovery-transport-http";
+import { computeEtag, createArchiveHttpHandler, createFsBlobStore, IMMUTABLE_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL } from "@jinn-network/record-discovery-transport-http";
 import { sha256 as publicationSha256, type CasResult, type PublicationJournal, type PublicationJournalStore } from "@jinn-network/record-publication";
 import { atomicWriteFileSync, fsyncDirectorySync, readFileIfExistsSync } from "../fs/atomic.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
@@ -477,12 +477,13 @@ export function createWorkspacePublicationJournal(workspaceDir: string, draftId:
  * literal so this handler does not import that module (it already imports this one).
  */
 const PUBLICATION_LOCK_INDEX_HTTP_PATH = "/lock-index.json";
+const PUBLICATION_LOCK_INDEX_CONTENT_TYPE = "application/json";
 
 /** Plain Request/Response composition for the web mount and `publication serve`. */
 export function createWorkspacePublicationHttpHandler(workspaceDir: string): (request: Request) => Promise<Response> {
   const root = publicationServeRoot(workspaceDir);
   const confinedReader = {
-    async get(path: string): Promise<{ bytes: Uint8Array; contentType: string } | undefined> {
+    async get(path: string, fixedContentType?: string): Promise<{ bytes: Uint8Array; contentType: string } | undefined> {
       const rootReal = await realpath(root);
       const candidate = resolve(root, `.${path.startsWith("/") ? path : `/${path}`}`);
       if (candidate !== resolve(root) && !candidate.startsWith(resolve(root) + sep)) throw new Error("unsafe publication path");
@@ -504,6 +505,8 @@ export function createWorkspacePublicationHttpHandler(workspaceDir: string): (re
       };
       const bytes = await readConfined(candidate);
       if (bytes === undefined) return undefined;
+      // A fixed type is the caller's own, so the sidecar is neither read nor trusted (#4878).
+      if (fixedContentType !== undefined) return { bytes, contentType: fixedContentType };
       const declared = await readConfined(`${candidate}.content-type`);
       const contentType = declared === undefined
         ? "application/octet-stream"
@@ -539,16 +542,22 @@ export function createWorkspacePublicationHttpHandler(workspaceDir: string): (re
       }
       if (path === PUBLICATION_LOCK_INDEX_HTTP_PATH) {
         if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
-        const object = await confinedReader.get(path);
+        // The generator fixes this type (#4878), so it is pinned here instead of read from a sidecar.
+        const object = await confinedReader.get(path, PUBLICATION_LOCK_INDEX_CONTENT_TYPE);
         if (object === undefined) return new Response(null, { status: 404 });
-        return new Response(request.method === "HEAD" ? null : object.bytes, {
-          status: 200,
-          headers: {
-            "content-type": object.contentType,
-            "cache-control": REVALIDATE_CACHE_CONTROL,
-            "x-content-type-options": "nosniff",
-          },
+        const etag = computeEtag(object.bytes);
+        const headers = new Headers({
+          "content-type": object.contentType,
+          "cache-control": REVALIDATE_CACHE_CONTROL,
+          "x-content-type-options": "nosniff",
+          etag,
         });
+        const ifNoneMatch = request.headers.get("if-none-match");
+        if (ifNoneMatch !== null && ifNoneMatch.split(",").some((candidate) => candidate.trim() === etag)) {
+          return new Response(null, { status: 304, headers });
+        }
+        headers.set("content-length", String(object.bytes.length));
+        return new Response(request.method === "HEAD" ? null : object.bytes, { status: 200, headers });
       }
       const response = await archive(request);
       const headers = new Headers(response.headers);
