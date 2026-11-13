@@ -1,4 +1,4 @@
-import { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace';
 
 export const IDENTITY_SCRUB_VERSION = '1.0.0';
 

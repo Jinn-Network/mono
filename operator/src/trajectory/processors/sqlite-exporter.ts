@@ -16,7 +16,7 @@
  *
  * Spec: spec/2026-05-07-telemetry-collector-and-task-generator.md §4.3
  */
-import { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace';
 import type { CapturesStore } from '../../store/captures.js';
 import { SENTINEL_PATTERN } from './sentinel.js';
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base';
+import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace';
 import { TrajectoryCollector } from '../../src/trajectory/collector.js';
 import { computeGenesisHash, computePrevSpanHash } from '../../src/trajectory/hash-chain.js';
 

@@ -1,4 +1,4 @@
-import { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace';
 import { SENTINEL_PATTERN } from './sentinel.js';
 
 export const MANIFEST_BUILDER_VERSION = '1.0.0';

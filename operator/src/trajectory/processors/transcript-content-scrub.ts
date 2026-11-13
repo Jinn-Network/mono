@@ -1,4 +1,4 @@
-import { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace';
 import {
   CREDENTIAL_REDACTED,
   isSensitiveCredentialKey,

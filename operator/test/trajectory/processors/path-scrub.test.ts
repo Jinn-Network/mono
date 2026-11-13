@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PathScrubProcessor, PATH_SCRUB_VERSION } from '../../../src/trajectory/processors/path-scrub.js';
-import { ReadableSpan } from '@opentelemetry/sdk-trace-base';
+import { ReadableSpan } from '@opentelemetry/sdk-trace';
 
 function fakeSpan(attrs: Record<string, unknown>): ReadableSpan {
   return {
