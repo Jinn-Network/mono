@@ -67,7 +67,7 @@ export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
  * (PR #4774, commit ad0c43659, 2026-09-26), was lawful only because no `/10` bundle could exist
  * yet: npm then served this package only as the `0.0.0` name reservation, which reads no format,
  * so nothing a published reader could verify had been rendered. That permission ended when the
- * first release that reads `/10`, `@colophon-claims/check@0.2.1`, was published (2026-10-21;
+ * first release that reads `/10`, check 0.2.1, was published (2026-10-21;
  * `0.2.2` followed on 2026-11-04). Since then a change to any byte `/10` presents -- `index.html`,
  * `README.md`, or the capability list behind them -- breaks every published `/10` bundle under the
  * command printed on its own page, and needs a new format number instead of an edit. The tree
