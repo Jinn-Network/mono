@@ -131,9 +131,10 @@ prompted — its claim carries `method.parameters.promptedScreeningProfile ===
 "prompted-codex-screening/v1"` — pins `@0.2.1`, with `@0.2` as the compatible
 line and `@0.2.0` on bundles materialized before `0.2.1` existed. Prompted
 screening does not move the format, so such a bundle is still `.../2`, and the
-`@0.1` line does verify it: claim-package/1 states no reader requirement of its
-own, so no line refuses it on the pin. What the bundle's own `index.html` and
-share text instruct, and what reproduces the producer's exact release, is the
+released `@colophon-claims/verify@0.1.0` refuses it at `claim-consistency`: that
+reader rebuilds the verification command with its own `@0.1.0` line, which
+differs from the `@0.2.1` line the claim seals. Read it with `@0.2`. What the bundle's own
+`index.html` and share text instruct, and what reproduces the producer's exact release, is the
 `@0.2.1` line its claim names. Take the line from the claim package's
 `verification.command` rather than inferring it from the format string.
 
@@ -883,7 +884,7 @@ Installing or running a Colophon package needs Node 22 or newer, with the npm th
 | `bundle.json` format | Pinned line | Compatible line | Checks | Anchor flags |
 | --- | --- | --- | --- | --- |
 | `benchmark-product-public-bundle/2`, unprompted | `@0.1.0` | `@0.1` | six | not applicable |
-| `benchmark-product-public-bundle/2`, prompted screening | `@0.2.1` (`@0.2.0` on a bundle materialized before `0.2.1` existed) | `@0.2`; `@0.1` also verifies, since claim-package/1 states no reader requirement | six | not applicable |
+| `benchmark-product-public-bundle/2`, prompted screening | `@0.2.1` (`@0.2.0` on a bundle materialized before `0.2.1` existed) | `@0.2`; `@0.1` refuses it at `claim-consistency` | six | not applicable |
 | `benchmark-product-public-bundle/4`, unprompted | `@0.1.0` | `@0.1` | six | not applicable |
 | `benchmark-product-public-bundle/4`, prompted screening | `@0.2.1` (`@0.2.0` on a bundle materialized before `0.2.1` existed) | `@0.2`, which reads either pin; `@0.1` refuses | six | not applicable |
 | `benchmark-product-public-bundle/5` | `@0.1` | none pinned | seven | not applicable |

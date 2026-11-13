@@ -332,14 +332,18 @@ describe("product documentation consistency", () => {
     expect(section).toContain("`benchmark-product.claim-package/3`");
     expect(section).toContain("metadata-first");
     expect(section).toContain("not fetched");
-    // Fresh instructions print the current reader name. Both v5 profiles (full-evidence and
-    // metadata-first) are served by `@colophon-claims/check@0.2`; the `@0.1` line still refuses
-    // metadata-first, which the prose states. Sealed historical pins live in PUBLIC-BUNDLE.md.
+    // A full-evidence `/5` claim seals `verify@0.1`, so the line it pins is quoted as sealed
+    // (#4874); that is the one legacy-name line this section may show. Fresh instructions print the
+    // current reader name: both v5 profiles are served by `@colophon-claims/check@0.2`, while the
+    // `@0.1` line refuses metadata-first, which the prose states.
     const stated = fenceBodies(section)
       .flatMap((body) => body.split("\n"))
       .filter((line) => line.includes("npx "))
-      .map(readerLine);
-    expect([...new Set(stated)].sort()).toEqual(["@0.2"]);
+      .map(readerSpecifier);
+    expect(stated).toContain(readerSpecifier(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND));
+    expect([...new Set(stated)].sort()).toEqual(
+      [readerSpecifier(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND), "check@0.2"].sort(),
+    );
   });
 
   it("mirrors the sealed venue sentences verbatim, the sixth included (issue #3401)", () => {
@@ -1058,10 +1062,17 @@ const sweptMarkdownFiles: readonly string[] = walkFiles(productRoot).filter((pat
  * sealed byte is not issuing an instruction. The alias package's own README still documents the
  * old name so that command keeps resolving. The product README's reader line predates the first
  * `@colophon-claims/check` release and still prints the alias, which npm serves.
- * `EXTERNAL-VERIFICATION.md` is deliberately absent: it issues a fresh instruction to a cold
- * external verifier, so it prints the current name.
+ * `EXTERNAL-VERIFICATION.md` is listed for one line only: its v5 section quotes the line a
+ * full-evidence `/5` claim seals (`verify@0.1`), which is a sealed byte, not a fresh instruction.
+ * Every fresh instruction to a cold external verifier there still prints the current name, and the
+ * v5 section test above pins the two lines it may show.
  */
-const LEGACY_COMMAND_MARKDOWN = ["PUBLIC-BUNDLE.md", "verify/README.md", "README.md"] as const;
+const LEGACY_COMMAND_MARKDOWN = [
+  "PUBLIC-BUNDLE.md",
+  "EXTERNAL-VERIFICATION.md",
+  "verify/README.md",
+  "README.md",
+] as const;
 
 /**
  * The exact multiset of retired-name literals each frozen file carries, keyed by product-relative

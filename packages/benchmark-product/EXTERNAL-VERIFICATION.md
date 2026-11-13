@@ -497,8 +497,10 @@ Its seven checks split as follows.
 The reference verifier runs all seven. The line a full-evidence v5 claim pins is:
 
 ```bash
-npx @colophon-claims/check@0.2 <bundle-dir>
+npx @colophon-claims/verify@0.1 <bundle-dir>
 ```
+
+A cold verifier with no claim package to read runs the current reader, `npx @colophon-claims/check@0.2 <bundle-dir>`, which reads this format too.
 
 A metadata-first bundle omits the evidence artifact bodies. There,
 `artifact-integrity` reports **not fetched**, which is neither a pass nor a

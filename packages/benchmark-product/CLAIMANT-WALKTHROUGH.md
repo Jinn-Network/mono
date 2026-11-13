@@ -33,6 +33,10 @@ The two `harbor run` commands were not run again for this document. Harbor 0.21.
 - A key for the model your agent calls, in the environment variable its provider names: `ANTHROPIC_API_KEY` for an `anthropic/` model, `OPENROUTER_API_KEY` for an `openrouter/` model. Harbor reads it from the environment you run `harbor run` in. No Colophon command asks for it.
 - Two arms. A run compares configurations, so a draft needs at least two. A claim about one arm alone is not supported in this release (decision 3 of [DR-2026-10-06](../../log/decisions/2026-10-06-terminal-bench-2-1-bring-your-run.md)). If you have one agent, add Harbor's `oracle` agent as the second. It applies each task's reference solution and calls no model. It is your control: an oracle that fails a task on your machine tells you not to trust that machine's result for the task.
 
+What you do next is publish with that failure in the claim. You cannot run the oracle again for a task: step 9 allows one job per arm, resuming does not re-run a finished trial, and step 10 drops no slot. The oracle's cell for that task is then a graded cell with "Verdict: fail" and "0 reward", and it counts in the oracle's pass rate like any other. Readers of the claim see it beside the other arm's result for the same task, and nothing on the page marks it as a failed control. Tell them yourself, next to the address you host the bundle at, which task it was and what you found.
+
+One failure is expected in this slice. The oracle is expected to score 0 on `build-cython-ext`, for a cause in the upstream task: its reference solution installs pyknotid's dependencies unpinned, and newer networkx and planarity releases fail one of pyknotid's own tests. It is tracked upstream at https://github.com/harbor-framework/terminal-bench-2-1/issues/240. Treat that cell as the task's failure, not your machine's or your agent's.
+
 Install Harbor at that version before anything else. The command needs [uv](https://docs.astral.sh/uv/getting-started/installation/). `uv --version` prints a version if you have it. If you do not, install uv with the command that page gives for Linux and macOS, `curl -LsSf https://astral.sh/uv/install.sh | sh`, then open a new shell.
 
 ```sh
@@ -365,9 +369,11 @@ published draft tb21: bundle 73b9b7eb9e06ee2554a4344e92f300e2540a76fb15e2e1a9e2b
 
 `publish` uploads nothing. It writes one directory on your disk. The path it prints is inside the workspace, so the directory is `./ws/artifacts/tb21/public-bundles/<bundle identity>`. That directory is the whole claim.
 
+Before you host it, review what it holds. Everything in it becomes public when you host it, and it includes the trial files, which carry your local paths and everything your agent read and wrote. [What is published](#what-is-published) below lists the files and says what to look for.
+
 ## Host it
 
-Check the directory yourself first. This is the command the claim prints, with your directory in it.
+Review the directory's contents first, as the end of step 13 says. Then check it yourself. This is the command the claim prints, with your directory in it.
 
 ```sh
 npx @colophon-claims/check@0.2.1 ./ws/artifacts/tb21/public-bundles/<bundle identity>
@@ -547,7 +553,7 @@ The bundle holds the sealed method, the records of every cell, the signed report
 
 No file in the bundle has these names. Each is stored by its content, as `records/<sha256>.bin`. The bundle's `README.md` lists each trial's files under its task and arm, in the order of the table, without the ones the trial does not have. The names are in the cell's delivery record. `matrix.json` gives each cell's arm and its `delivery`, written `sha256:<digest>`. The delivery record is `records/<digest>.bin`, and its `outputs` give each file's name and digest.
 
-Read them before you publish. They are the same bytes as the files in your `jobs` directory, so that is the easiest place to read them. A trial's `result.json` holds the path of the trial directory on your machine and, for a trial that raised an error, a stack trace. A trajectory holds the task instruction as the agent saw it and everything the agent then read and wrote.
+Read them before you host the directory, which is the step that makes them public. They are the same bytes as the files in your `jobs` directory, so that is the easiest place to read them. A trial's `result.json` holds the path of the trial directory on your machine and, for a trial that raised an error, a stack trace. A trajectory holds the task instruction as the agent saw it and everything the agent then read and wrote.
 
 A slot that was not delivered carries no evidence file. The slot and its reason are in `external-import.json`.
 
