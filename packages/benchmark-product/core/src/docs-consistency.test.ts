@@ -463,6 +463,7 @@ describe("product documentation consistency", () => {
     expect(lookup[4]).toBe("");
     const zone = cells("The party controlling the bound domain's zone is the party it appears to be");
     expect(zone[2]).toBe("");
+    expect(zone[3]).toBe("");
     expect(zone[4]).toMatch(/no tool/i);
   });
 
