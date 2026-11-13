@@ -1,8 +1,10 @@
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { RUNTIME_DEPENDENCY_SECTIONS, loadCatalogPackages } from './platform-catalog.mjs';
 import { DEPENDENCY_SECTIONS } from './stack-package-graph.mjs';
 
 export const COLOPHON_PUBLISH_WORKFLOW = 'colophon-npm-publish.yml';
@@ -401,6 +403,152 @@ export function validateProductReleasePlatformPins(pins, manifest) {
 export function loadProductReleasePlatformPin(repoRoot, manifest) {
   const pins = loadProductReleasePlatformPins(repoRoot);
   return validateProductReleasePlatformPins(pins, manifest);
+}
+
+/**
+ * Refuses a receipt row that is not what npm serves for that package and version.
+ *
+ * The validator above compares the receipts file with `PRODUCT_RELEASES`, and both are files in the
+ * dispatched commit, so a row edited together with its digest passes it. The registry is not in the
+ * commit. Every row of every receipt is read, not only the one being published: a `cli` install
+ * brings in `core` and the checker, whose receipts record what it gets (issue #5044).
+ *
+ * Fails closed: a version npm does not serve, or a registry that cannot be read, refuses.
+ */
+export async function assertReceiptRowsServed(receipts, fetchImpl = fetch) {
+  const served = new Map();
+  for (const receipt of receipts) {
+    const releaseId = `${receipt.product.packageName}@${receipt.product.version}`;
+    for (const row of receipt.platformPackages) {
+      const id = `${row.name}@${row.version}`;
+      if (!served.has(id)) {
+        const response = await fetchImpl(`https://registry.npmjs.org/${row.name.replace('/', '%2f')}/${encodeURIComponent(row.version)}`);
+        if (response.status === 404) throw new Error(`the ${releaseId} receipt row ${id} names a version npm does not serve`);
+        if (!response.ok) throw new Error(`cannot check the ${releaseId} receipt row ${id} against npm: HTTP ${response.status}`);
+        served.set(id, await response.json());
+      }
+      const document = served.get(id);
+      for (const [field, recorded, actual] of [
+        ['integrity', row.integrity, document?.dist?.integrity],
+        ['gitHead', row.gitHead, document?.gitHead],
+      ]) {
+        if (recorded !== actual) {
+          throw new Error(`the ${releaseId} receipt row ${id} records ${field} ${recorded}, but npm serves ${actual ?? 'none'} for that version`);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * The tree directory of every platform package a publish of `manifest` installs, sorted by name:
+ * the `@jinn-network` dependencies the manifest names in any section, and those of each in-tree
+ * `@colophon-claims` package it depends on, followed through the runtime dependencies of each.
+ * A `cli` install brings in `core` and the checker, and the `cli` build compiles the private web
+ * application from these directories through portals (#5045).
+ */
+export function platformSourceDirectories(repoRoot, manifest) {
+  const catalog = new Map(loadCatalogPackages(repoRoot).map((pkg) => [pkg.name, pkg]));
+  const platform = new Set();
+  const products = new Set();
+  const visitProduct = (product) => {
+    if (products.has(product.name)) return;
+    products.add(product.name);
+    for (const section of DEPENDENCY_SECTIONS) {
+      for (const dependency of Object.keys(product[section] ?? {})) {
+        if (dependency.startsWith('@jinn-network/')) platform.add(dependency);
+        else if (dependency.startsWith('@colophon-claims/') && catalog.has(dependency)) visitProduct(catalog.get(dependency).manifest);
+      }
+    }
+  };
+  visitProduct(manifest);
+  const pending = [...platform];
+  while (pending.length > 0) {
+    const name = pending.pop();
+    const pkg = catalog.get(name);
+    if (pkg === undefined) throw new Error(`cannot find the source of ${name} in this tree`);
+    for (const section of RUNTIME_DEPENDENCY_SECTIONS) {
+      for (const dependency of Object.keys(pkg.manifest[section] ?? {})) {
+        if (dependency.startsWith('@jinn-network/') && !platform.has(dependency)) {
+          platform.add(dependency);
+          pending.push(dependency);
+        }
+      }
+    }
+  }
+  return [...platform].sort().map((name) => ({ name, directory: catalog.get(name).directory }));
+}
+
+/**
+ * The files under `directories` that differ between `platformSourceSha` and `HEAD`, from git.
+ *
+ * The publish job checks out one commit, so the receipt's commit is fetched by sha when it is not
+ * there. Fails closed: a commit that cannot be fetched or compared refuses, and a value that is not
+ * a commit sha never reaches git.
+ */
+export function gitChangedFiles(repoRoot, platformSourceSha, directories) {
+  if (!COMMIT_SHA.test(String(platformSourceSha))) {
+    throw new Error(`a receipt's platform commit must be a 40-character commit sha, got ${platformSourceSha ?? '<missing>'}`);
+  }
+  const git = (...args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8' });
+  const failure = (result) => (result.stderr ?? '').trim() || result.error?.message || `exit ${result.status}`;
+  if (git('cat-file', '-e', `${platformSourceSha}^{commit}`).status !== 0) {
+    const fetched = git('fetch', '--quiet', '--no-tags', '--depth=1', 'origin', platformSourceSha);
+    if (fetched.status !== 0) {
+      throw new Error(`cannot fetch platform commit ${platformSourceSha} from origin: ${failure(fetched)}`);
+    }
+  }
+  const diff = git('diff', '--name-only', '--no-renames', platformSourceSha, 'HEAD', '--', ...directories);
+  if (diff.status !== 0) {
+    throw new Error(`cannot compare platform commit ${platformSourceSha} with HEAD: ${failure(diff)}`);
+  }
+  return diff.stdout.split('\n').filter(Boolean);
+}
+
+/**
+ * A file no published platform package is built or packed from: a test, or its vitest config.
+ * Every package in a Colophon closure builds with a `tsconfig.build.json` that excludes each
+ * `*.test.ts` under `src`, and none lists either in `files` (#5045).
+ */
+function isPlatformTestFile(path) {
+  return /\.test\.ts$/u.test(path) || /(?:^|\/)vitest\.config\.ts$/u.test(path);
+}
+
+/**
+ * Refuses a receipt whose platform commit is not the platform source of the dispatched commit.
+ *
+ * A publish installs the canary the receipt names, while this tree's products are built and tested
+ * against this tree's platform source, and the `cli` build compiles the web application from it. A
+ * receipt that names an older canary passes every other check here, and a reader built against it
+ * can refuse what the tree's own bundles use: the checker receipt before #5030 named a canary
+ * without the `external-verifier` family (issue #5044). Only tests are exempt.
+ */
+export function assertPlatformSourceMatchesReceipt(pin, sources, changedFiles) {
+  const releaseId = `${pin.product.packageName}@${pin.product.version}`;
+  const differing = changedFiles(pin.platformSourceSha, sources.map(({ directory }) => directory))
+    .filter((path) => !isPlatformTestFile(path));
+  if (differing.length > 0) {
+    throw new Error([
+      `the ${releaseId} receipt pins the platform canary built from ${pin.platformSourceSha}, but this commit's platform source differs from that commit in ${differing.length} ${differing.length === 1 ? 'file' : 'files'}:`,
+      ...differing.map((path) => `  ${path}`),
+      'Publish from a commit whose platform source is that commit\'s, or re-pin the receipt to a canary of this commit\'s platform source.',
+    ].join('\n'));
+  }
+}
+
+/**
+ * The `--check-receipt` step: the registered receipt for `manifest`, refused unless npm serves every
+ * row of every receipt as recorded and the dispatched commit's platform source is the receipt's.
+ */
+export async function checkProductReleaseReceipt(repoRoot, manifest, {
+  fetchImpl = fetch,
+  changedFiles = (sha, directories) => gitChangedFiles(repoRoot, sha, directories),
+} = {}) {
+  const pins = loadProductReleasePlatformPins(repoRoot);
+  const pin = validateProductReleasePlatformPins(pins, manifest);
+  await assertReceiptRowsServed(pins.receipts, fetchImpl);
+  assertPlatformSourceMatchesReceipt(pin, platformSourceDirectories(repoRoot, manifest), changedFiles);
+  return pin;
 }
 
 export function transformColophonManifestForPublish(manifest, pin, { gitHead } = {}) {
@@ -872,7 +1020,7 @@ export async function checkClaimPins(repoRoot, manifest, published, fetchImpl = 
   );
 }
 
-const MODES = ['--apply', '--check-claim-pins'];
+const MODES = ['--apply', '--check-claim-pins', '--check-receipt'];
 
 function parseArgs(argv) {
   if (!MODES.includes(argv[0]) || !argv[1]) {
@@ -893,6 +1041,11 @@ if (
     if (mode === '--check-claim-pins') {
       await checkClaimPins(repoRoot, manifest);
       process.stdout.write(`claim pins agree with ${manifest.name}@${manifest.version}\n`);
+    } else if (mode === '--check-receipt') {
+      const pin = await checkProductReleaseReceipt(repoRoot, manifest);
+      process.stdout.write(
+        `the ${manifest.name}@${manifest.version} receipt matches npm, and this commit's platform source matches ${pin.platformSourceSha} (tests aside)\n`,
+      );
     } else {
       const pin = loadProductReleasePlatformPin(repoRoot, manifest);
       const gitHead = COMMIT_SHA.test(process.env.GITHUB_SHA ?? '') ? process.env.GITHUB_SHA : undefined;
