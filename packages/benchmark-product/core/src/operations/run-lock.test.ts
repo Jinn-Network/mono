@@ -157,10 +157,11 @@ describe("runLock — lifecycle transition", () => {
  *
  * `quote` asks the local venue what it could run, which says nothing about a run made on the
  * claimant's own harness. A draft that `method terminal-bench-2.1` bound to the official slate,
- * with no evaluation runtime, is brought: `run import --from harbor` is the only way its results
- * arrive. Every other unquoted draft is a run on a venue Colophon controls, and is still refused.
+ * with no evaluation runtime, is brought: its results arrive through `run import --from harbor`,
+ * the one import that slate accepts. Every other unquoted draft is a run on a venue Colophon
+ * controls, and is still refused.
  */
-describe("runLock — an unquoted draft for a brought run", () => {
+describe("runLock: an unquoted draft for a brought run", () => {
   async function setUpSlateDraft(clock: () => string, draftId: string): Promise<void> {
     const bound = await selectMethod(contextFor(clock), { draftId, ref: "terminal-bench-2.1", cwd: workspaceDir, slice: "1" });
     expect(bound.ok, JSON.stringify(bound)).toBe(true);

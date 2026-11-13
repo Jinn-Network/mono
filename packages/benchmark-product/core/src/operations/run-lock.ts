@@ -195,7 +195,7 @@ function unquotedRunState(workspaceDir: string, draftId: string, document: Draft
  * The advisory a lock of this draft would print and seal (issue #2978), so an operator surface can
  * show the width BEFORE the irreversible seal and `runLock` can seal the same numbers afterwards.
  *
- * `undefined` for a draft no lock could seal right now — not quoted (and not a brought run, which
+ * `undefined` for a draft no lock could seal right now: not quoted (and not a brought run, which
  * locks unquoted), or carrying no benchmark, so there is no item count and therefore no n.
  * Returning `undefined` rather than refusing keeps this a pure advisory: the caller gating on it
  * does not have to restate the lock's own preconditions, and `runLock` stays the one place that
