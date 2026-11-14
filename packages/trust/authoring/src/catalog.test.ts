@@ -3,7 +3,16 @@
 import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { sealTrustPolicy, validateTrustPolicy, type TrustPolicy } from "@jinn-network/trust-core";
+import {
+  dssePreAuthEncoding,
+  parseExactDsseEnvelope,
+  sealRevocation,
+  sealTrustPolicy,
+  TRUST_REVOCATION_FORMAT,
+  validateKeyBinding,
+  validateTrustPolicy,
+  type TrustPolicy,
+} from "@jinn-network/trust-core";
 import { describe, expect, it } from "vitest";
 
 import { TrustAuthoringError } from "./errors.js";
@@ -16,6 +25,7 @@ import {
   completePolicyPurposes,
   revokeBinding,
   sealPolicySuccessor,
+  voucherAccountSigner,
 } from "./catalog.js";
 import { performEoaCeremony } from "./ceremony.js";
 import { openCatalogAuthority, openRoleSigners } from "./signers.js";
@@ -535,10 +545,55 @@ describe("revokeBinding", () => {
   it("is designed but deliberately unimplemented (§3.3)", async () => {
     await expect(revokeBinding({
       catalogPath: "/tmp/whatever.json",
-      authority: { keyId: "did:key:z", dsseSigner: async () => [{ keyid: "did:key:z", signature: new Uint8Array(64) }] },
+      voucher: signer,
       target: ANCHOR_A,
       effectiveTime: TIME_A,
       anchor: declaration(ANCHOR_A, "ab"),
     })).rejects.toThrow(/designed but not implemented/u);
+  });
+
+  it("signs as the binding's voucher account: its did:pkh, EIP-191 over the DSSE pre-authentication encoding", async () => {
+    const { bindings } = await genesis();
+    const target = bindings[0]!;
+    const asked: Uint8Array[] = [];
+    const voucher = {
+      address: EOA,
+      async signMessage(input: { readonly message: { readonly raw: Uint8Array } }): Promise<`0x${string}`> {
+        asked.push(input.message.raw);
+        return `0x${"44".repeat(65)}`;
+      },
+    };
+
+    const account = voucherAccountSigner(voucher);
+    // Key authority section 8, "The voucher account": `revokedBy` is the did:pkh of the binding's voucher.
+    expect(validateKeyBinding(target.envelopeBytes).value!.voucher).toMatchObject({
+      did: account.keyId,
+      contractAccount: false,
+    });
+    const sealed = await sealRevocation({
+      protocol: TRUST_REVOCATION_FORMAT,
+      target: target.digest,
+      revokedBy: account.keyId,
+      anchors: [{ digest: ANCHOR_B }],
+      effectiveFrom: TIME_B,
+    }, account.dsseSigner);
+    const envelope = parseExactDsseEnvelope(sealed.envelopeBytes);
+    expect(envelope.signatures).toEqual([
+      { keyid: account.keyId, sig: Buffer.from("44".repeat(65), "hex").toString("base64") },
+    ]);
+    // "An account's signature": over the pre-authentication encoding, never the bare payload.
+    expect(asked).toEqual([dssePreAuthEncoding(envelope.payloadType, envelope.payloadBytes)]);
+  });
+
+  it("refuses an account signature that is not 65 bytes", async () => {
+    const voucher = { address: EOA, async signMessage(): Promise<`0x${string}`> { return `0x${"44".repeat(64)}`; } };
+    const account = voucherAccountSigner(voucher);
+    await expect(sealRevocation({
+      protocol: TRUST_REVOCATION_FORMAT,
+      target: ANCHOR_A,
+      revokedBy: account.keyId,
+      anchors: [{ digest: ANCHOR_B }],
+      effectiveFrom: TIME_B,
+    }, account.dsseSigner)).rejects.toThrow(/65 bytes/u);
   });
 });
