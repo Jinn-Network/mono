@@ -38,8 +38,8 @@ import {
   sealRevocation,
   type DsseSigner,
 } from '@jinn-network/trust-core';
-import { createTrustAdapter } from '@jinn-network/record-discovery-client';
-import { MEDIA_HEAD, sealJson } from '@jinn-network/record-discovery-protocol';
+import { createTrustAdapter, type Transport } from '@jinn-network/record-discovery-client';
+import { MEDIA_HEAD, RECORD_DISCOVERY_VERSION, sealJson, type SourceHead } from '@jinn-network/record-discovery-protocol';
 import { DISCOVERY_SIGNING_SCOPE } from '@jinn-network/record-discovery-protocol';
 import { ADMISSION_RECEIPT_TRUST_SCOPE } from '@jinn-network/marketplace-binding';
 import { hexToBytes } from 'viem';
@@ -53,6 +53,8 @@ import {
   openRoleIdentitySet,
   type NativeRoleIdentityRole,
 } from '../../src/daemon/role-identities.js';
+import { buildNativeDiscoverySources } from '../../src/daemon/native-discovery-trust.js';
+import { Store } from '../../src/store/store.js';
 
 const PASSWORD = 'trust-authoring-round-trip-password';
 const AGENT_A = 'urn:uuid:11111111-1111-4111-8111-111111111111';
@@ -88,6 +90,15 @@ function ownershipFor(safe: `0x${string}`, owners: readonly `0x${string}`[]) {
         && owners.some((owner) => owner.toLowerCase() === signer.toLowerCase());
     },
   };
+}
+
+/** Key authority section 8: the account signs the DSSE pre-authentication encoding with EIP-191. */
+function accountSigner(account: typeof ceremonyAccountA): DsseSigner {
+  const keyid = didPkh(84532, account.address);
+  return async ({ preAuthEncoding }) => [{
+    keyid,
+    signature: hexToBytes(await account.signMessage({ message: { raw: preAuthEncoding } })),
+  }];
 }
 
 /** The only other stand-in: the finalized-anchor read. Every declared anchor reads back finalized. */
@@ -734,15 +745,6 @@ describe('role identities apply the revocation authority rule over a real catalo
   const REVOKED_ROLE = 'solver-delivery' as const;
   const SOLVER_ROLES: readonly NativeRoleIdentityRole[] = ['solver-delivery', 'solver-settlement', 'solver-discovery'];
 
-  /** Key authority section 8: the account signs the DSSE pre-authentication encoding with EIP-191. */
-  function accountSigner(account: typeof ceremonyAccountA): DsseSigner {
-    const keyid = didPkh(84532, account.address);
-    return async ({ preAuthEncoding }) => [{
-      keyid,
-      signature: hexToBytes(await account.signMessage({ message: { raw: preAuthEncoding } })),
-    }];
-  }
-
   async function catalogRevokedBy(revoker: 'voucher-account' | 'unbound-key') {
     const genesis = await genesisForOperatorA();
     const target = genesis.bindings.find(({ role, agent }) => role === REVOKED_ROLE && agent === AGENT_A)!;
@@ -822,5 +824,134 @@ describe('role identities apply the revocation authority rule over a real catalo
       family: 'deliveries',
       atTime: revokedAt,
     })).rejects.toThrow(/revoked/u);
+  });
+});
+
+/**
+ * One revoked discovery key stops only itself (#5212). An Agent that runs two roles holds a
+ * discovery key for each, and the consumer of either of its sources resolves both. Revoking one, to
+ * retire or rotate it, must leave what the other signs verifiable. The family resolver threw on the
+ * revoked candidate instead, so every read of the Agent was refused from the revocation on.
+ *
+ * Production code throughout: an authored catalog, the shipped opener, and the source
+ * `native-discovery-trust.ts` builds. The revocation is the voucher account's, sealed with
+ * trust-core as in the block above, since `trust-authoring` authors none yet.
+ */
+describe('a revoked discovery key stops only itself over a real catalog (#5212)', () => {
+  const SOURCE = { agent: AGENT_A, name: 'native-requester' } as const;
+
+  async function catalogWithRevokedDiscoveryKey() {
+    const genesis = await genesisForOperatorA();
+    // Agent A's solver-discovery key is revoked. Its requester-discovery key, bound to the same
+    // Agent by the same account, is not.
+    const target = genesis.bindings.find(({ role, agent }) => role === 'solver-discovery' && agent === AGENT_A)!;
+    const anchorDigest = recordDigest(new TextEncoder().encode('discovery-revocation-anchor'));
+    const chain = anchorChain(1_786_000_600);
+    const locator = await submitAnchor({
+      walletClient: chain.walletClient,
+      publicClient: chain.publicClient,
+      target: '0x00000000000000000000000000000000000a11c0',
+      digest: anchorDigest,
+    });
+    const revocation = await sealRevocation({
+      protocol: 'https://spec.jinn.network/trust/revocation/v1',
+      target: target.digest,
+      revokedBy: didPkh(84532, ceremonyAccountA.address),
+      anchors: [{ digest: anchorDigest }],
+      effectiveFrom: locator.anchorTime,
+    }, accountSigner(ceremonyAccountA));
+    const catalog = JSON.parse(await readFile(genesis.catalogPath, 'utf8')) as {
+      anchors: unknown[];
+      revocations: unknown[];
+    };
+    catalog.anchors.push(anchorDeclaration(anchorDigest, locator));
+    catalog.revocations.push({
+      digest: revocation.recordDigest,
+      envelope: Buffer.from(revocation.envelopeBytes).toString('base64'),
+    });
+    await writeFile(genesis.catalogPath, JSON.stringify(catalog));
+
+    const trust = await openNativeTrustCatalog({
+      path: genesis.catalogPath,
+      expectedPolicyGenesisDigest: genesis.policyGenesisDigest,
+      anchorClient: anchorClientFor([
+        { digest: genesis.anchor.digest, anchorTime: genesis.anchorTime, transactionHash: genesis.anchor.locator.transactionHash },
+        { digest: anchorDigest, anchorTime: locator.anchorTime, transactionHash: locator.transactionHash },
+      ]),
+      settlementOwnershipClient: ownershipFor(SAFE_A, [ceremonyAccountA.address]),
+      now: new Date(locator.anchorTime),
+    });
+    const solver = await openRoleSigners({
+      storePath: genesis.solverStore,
+      password: PASSWORD,
+      ownedRoles: ['solver-delivery', 'solver-settlement', 'solver-discovery'],
+      create: false,
+    });
+    const requester = await openRoleSigners({
+      storePath: genesis.requesterStore,
+      password: PASSWORD,
+      ownedRoles: ['requester-submission', 'requester-discovery'],
+      create: false,
+    });
+    expect(solver.get('solver-discovery')!.keyId).toBe(target.keyId);
+    return {
+      trust,
+      before: genesis.anchorTime,
+      revokedAt: locator.anchorTime,
+      revoked: solver.get('solver-discovery')!,
+      valid: requester.get('requester-discovery')!,
+    };
+  }
+
+  /** A head of Agent A's requester source, signed by `signer` at `at`, judged at `at`. */
+  async function verifyHeadAt(
+    trust: Awaited<ReturnType<typeof openNativeTrustCatalog>>,
+    at: string,
+    signer: RoleSigner,
+  ) {
+    const head: SourceHead = {
+      protocol: RECORD_DISCOVERY_VERSION,
+      origin: `${SOURCE.agent}/${SOURCE.name}`,
+      sequence: '0000000000000001',
+      entry: recordDigest(new TextEncoder().encode('discovery-entry')),
+      issuedAt: at,
+      refreshBy: new Date(Date.parse(at) + 3_600_000).toISOString(),
+    };
+    const bytes = sealJson(head).bytes;
+    const [signature] = await signer.dsseSigner({
+      preAuthEncoding: dssePreAuthEncoding(MEDIA_HEAD, bytes),
+      payloadType: MEDIA_HEAD,
+      payloadBytes: bytes,
+    });
+    const noFetch: Transport = {
+      async fetch(url: string) { throw new Error(`head revalidation must not fetch ${url}`); },
+    };
+    const [source] = buildNativeDiscoverySources({
+      configured: [{ role: 'requester', agent: SOURCE.agent, name: SOURCE.name, baseUrl: 'https://requester.example' }],
+      store: new Store(':memory:'),
+      transport: noFetch,
+      trust,
+      now: () => new Date(at),
+    });
+    return source!.verifyHead({
+      source: SOURCE,
+      head,
+      signature: {
+        payloadType: MEDIA_HEAD,
+        payload: Buffer.from(bytes).toString('base64'),
+        signatures: [{ keyid: signer.keyId, sig: Buffer.from(signature!.signature).toString('base64') }],
+      },
+    });
+  }
+
+  it("verifies what the Agent's other discovery key signs after one is revoked", async () => {
+    const { trust, revokedAt, valid } = await catalogWithRevokedDiscoveryKey();
+    await expect(verifyHeadAt(trust, revokedAt, valid)).resolves.toEqual({ status: 'ok' });
+  });
+
+  it('refuses what the revoked key signs from its revocation on, and only from then', async () => {
+    const { trust, before, revokedAt, revoked } = await catalogWithRevokedDiscoveryKey();
+    await expect(verifyHeadAt(trust, before, revoked)).resolves.toEqual({ status: 'ok' });
+    await expect(verifyHeadAt(trust, revokedAt, revoked)).resolves.toEqual({ status: 'unauthorized-signer' });
   });
 });
