@@ -17,6 +17,10 @@
  * mutation of a quoted draft's content invalidates the quote, because a quote
  * always describes the exact draft it priced.
  *
+ * `lock` on a `draft` skips the quote, for a brought run only (DR-2026-10-06,
+ * decision 4): a quote describes a venue Colophon controls, and a brought run is
+ * made on none. The table admits the edge; `runLock` decides which drafts take it.
+ *
  * `cancel` is modeled here as a legal event on `running`, landing on `closed` —
  * the same terminal state `close-boundary` reaches. This packet only wires the
  * state transition; the full accounting semantics (`runOutcome: cancelled`, the
@@ -77,6 +81,7 @@ const TRANSITIONS: Readonly<Record<LifecycleState, Readonly<Partial<Record<Lifec
     edit: "draft",
     preview: "draft",
     quote: "quoted",
+    lock: "locked",
   },
   quoted: {
     preview: "quoted",
