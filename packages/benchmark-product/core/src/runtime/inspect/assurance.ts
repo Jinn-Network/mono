@@ -34,6 +34,18 @@ export function deriveInspectEvaluationStrategy(
     : "separate-log-verification";
 }
 
+/**
+ * Whether a run bound to the Inspect adapter under `assurance` can be brought with `run import`.
+ * Separate log verification needs a verifier to re-read each cell's native log, and an import has
+ * none: `report` would seal a sentence saying its verdicts were verified that way, and no bundle of
+ * the run could pass the checker.
+ */
+export function inspectImportMeetsAssurance(
+  assurance: Readonly<Partial<ResolvedAssurance>> | undefined,
+): boolean {
+  return deriveInspectEvaluationStrategy(assurance) !== "separate-log-verification";
+}
+
 export function inspectLogVerifierMethod(
   manifest: InspectSelectionManifest,
   selectionManifestSha256: string,

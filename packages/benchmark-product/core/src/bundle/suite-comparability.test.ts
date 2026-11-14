@@ -33,6 +33,8 @@ import {
 import { createHash } from "node:crypto";
 import { runPublish } from "../operations/publish.js";
 import { runReport } from "../operations/report.js";
+import { readDraftDocument } from "../operations/drafts.js";
+import { readRunJournalEntries } from "../run/journal.js";
 import { readRunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { publicBundlePath } from "../workspace/layout.js";
@@ -43,6 +45,7 @@ import { SWE_BENCH_VERIFIED_DATASET_INSTANCE_COUNT, SWE_BENCH_VERIFIED_DATASET_R
 import { APEX_AGENTS_DATASET_REVISION, APEX_AGENTS_DATASET_TASK_COUNT, APEX_AGENTS_SELECTION_ROLE } from "../runtime/apex-agents/manifest.js";
 import { APEX_SWE_DEV_SELECTION_ROLE } from "../runtime/apex-swe-dev/manifest.js";
 import { INSPECT_EVAL_SELECTION_SCHEMA } from "../runtime/inspect-eval/manifest.js";
+import { INSPECT_RUN_IMPORT_EVIDENCE_NAME } from "../intake/inspect-run-records.js";
 import { TERMINAL_BENCH_2_1_DATASET_REF } from "../runtime/terminal-bench-2-1/manifest.js";
 import { TERMINAL_BENCH_3_0_DATASET_REF } from "../runtime/terminal-bench-3-0/manifest.js";
 import { DEEP_SWE_V11_GIT_SHA, DEEP_SWE_V11_TASK_COUNT, DEEP_SWE_V11_TASKS_TREE_SHA } from "../runtime/deep-swe-v1.1/manifest.js";
@@ -54,7 +57,11 @@ import {
   importedInspectEvalRun,
   importedSwebenchRun,
   importedTerminalBench30Run,
+  importInspectEvalLogs,
+  inspectReaderImportedInspectEvalRun,
   launchedHarborSuiteRun,
+  launchedInspectEvalRun,
+  lockedInspectEvalRun,
   writeRetainedHarborTrials,
   type SuiteRun,
 } from "./testing/suite-runs.js";
@@ -229,6 +236,101 @@ describe("leaderboardSubmitReady is re-derived from carried evidence (#4761, #47
   }, 240_000);
 });
 
+describe("a suite-bound Inspect eval run with delivered cells publishes, each cell bound to its carried selection (#5244)", () => {
+  /** The solve Delivery outputs the published assembly records for each cell. */
+  function solveOutputs(published: Published): readonly (readonly string[])[] {
+    const header = JSON.parse(readFileSync(join(published.bundleDir, "verification", "assembly.jsonl"), "utf8").split("\n")[0]!) as {
+      graph: { solveDeliveries: { outputs: { name: string }[] }[] };
+    };
+    return header.graph.solveDeliveries.map((delivery) => delivery.outputs.map((output) => output.name).sort());
+  }
+
+  test("brought with run import --from inspect: every cell is delivered and graded, the run is ready, and the checker passes", async () => {
+    const run = await inspectReaderImportedInspectEvalRun(root);
+    const published = await reportAndPublish(run);
+    expect(published.manifest.capabilities).toContain(SUITE_COMPARABILITY_CAPABILITY);
+    // Two samples by two arms at the eval's one epoch, each carrying the native EvalLog the named
+    // Inspect reader read, and no summary: the reader never invents one.
+    expect(solveOutputs(published)).toEqual(Array.from({ length: 4 }, () => ["inspect-log.eval"]));
+    expect(published.claim.suiteComparability).toEqual({ executionConformance: true, coverage: "full", leaderboardSubmitReady: true });
+    await verifyPublicBundle(published.bundleDir);
+  }, 240_000);
+
+  test("driven: every cell's native log and summary bind the arm and template of the carried selection, and the checker passes", async () => {
+    const run = await launchedInspectEvalRun(root);
+    const published = await reportAndPublish(run);
+    expect(published.manifest.capabilities).toContain(SUITE_COMPARABILITY_CAPABILITY);
+    expect(solveOutputs(published)).toEqual(Array.from({ length: 4 }, () => ["inspect-log", "inspect-summary", "verdict"]));
+    expect(published.claim.suiteComparability).toEqual({ executionConformance: true, coverage: "full", leaderboardSubmitReady: true });
+    await verifyPublicBundle(published.bundleDir);
+  }, 240_000);
+
+  test("driven: a cell whose summary names a scorer the carried selection did not seal is refused", async () => {
+    const run = await launchedInspectEvalRun(root, { summaryScorer: "includes" });
+    const reported = await runReport(run.context, { draftId: run.draftId });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    const published = await runPublish(run.context, { draftId: run.draftId, includeNativeArtifacts: true });
+    expect(published.ok).toBe(false);
+    if (published.ok) return;
+    expect(published.error.detail).toMatch(/legacy Inspect summary differs from its sealed scorer selection/u);
+  }, 240_000);
+
+  test("imported: a delivered cell whose outputs are not the named Inspect reader's native log is refused", async () => {
+    // A generic record for each slot, opened as if the named reader had written it: the cell is
+    // delivered with a file the reader never carries.
+    const run = await importedInspectEvalRun(root, { outcomeFor: () => "ungradeable" });
+    const reported = await runReport(run.context, { draftId: run.draftId });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    const published = await runPublish(run.context, { draftId: run.draftId, includeNativeArtifacts: true });
+    expect(published.ok).toBe(false);
+    if (published.ok) return;
+    expect(published.error.detail).toMatch(/Inspect eval Delivery does not carry exactly the native log the named Inspect reader imports/u);
+  }, 240_000);
+
+  test("imported: a delivered cell that carries the reader's native log and another output is refused", async () => {
+    const run = await importedInspectEvalRun(root, {
+      outcomeFor: () => "ungradeable",
+      ungradeableEvidence: ["inspect-log.eval", "harness-output"],
+    });
+    const reported = await runReport(run.context, { draftId: run.draftId });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    const published = await runPublish(run.context, { draftId: run.draftId, includeNativeArtifacts: true });
+    expect(published.ok).toBe(false);
+    if (published.ok) return;
+    expect(published.error.detail).toMatch(/Inspect eval Delivery does not carry exactly the native log the named Inspect reader imports/u);
+  }, 240_000);
+
+  test("imported: a delivered cell on an arm the carried selection does not configure is refused", async () => {
+    // A Run arm, `extra`, for which the sealed Inspect template has no arm.
+    const run = await importedInspectEvalRun(root, {
+      extraArm: true,
+      outcomeFor: () => "ungradeable",
+      ungradeableEvidence: ["inspect-log.eval"],
+    });
+    const reported = await runReport(run.context, { draftId: run.draftId });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    const published = await runPublish(run.context, { draftId: run.draftId, includeNativeArtifacts: true });
+    expect(published.ok).toBe(false);
+    if (published.ok) return;
+    expect(published.error.detail).toMatch(/Inspect Delivery has no exact selected arm configuration/u);
+  }, 240_000);
+
+  test.each([
+    [{ preset: "separate-evaluator" }, /the "separate-evaluator" assurance, under which/u],
+    [{ preset: "direct-check", overrides: { distinctEvaluator: true } }, /the "direct-check" assurance with overrides \{"distinctEvaluator":true\}, under which/u],
+  ] as const)("run import --from inspect refuses an Inspect eval run under %j before writing anything", async (assurance, named) => {
+    const run = await lockedInspectEvalRun(root, { coverage: "full", assurance });
+    const imported = await importInspectEvalLogs(run, root);
+    expect(imported.ok).toBe(false);
+    if (imported.ok) return;
+    expect(imported.error.code).toBe("conflict");
+    expect(imported.error.detail).toMatch(named);
+    expect(imported.error.detail).toMatch(/each Inspect verdict must be separately verified from the cell's native log/u);
+    expect(readDraftDocument(run.workspaceDir, run.draftId).state).toBe("locked");
+    expect(readRunJournalEntries(run.workspaceDir, run.draftId)).toEqual([]);
+  }, 240_000);
+});
+
 describe("a reader refuses a suite-bound bundle whose claim or evidence the carried bytes do not back (#4761, #4762)", () => {
   /** A copy of a published bundle with `edit` applied and the manifest re-sealed over the tree as it
    * now stands, so what the reader refuses is the inconsistency and not a stale digest. */
@@ -334,6 +436,7 @@ describe("the checker restates core's registration roles and leaderboard pins ex
     expect(check.APEX_AGENTS_SELECTION_ROLE).toBe(APEX_AGENTS_SELECTION_ROLE);
     expect(check.APEX_SWE_DEV_SELECTION_ROLE).toBe(APEX_SWE_DEV_SELECTION_ROLE);
     expect(check.INSPECT_EVAL_SELECTION_SCHEMA).toBe(INSPECT_EVAL_SELECTION_SCHEMA);
+    expect(check.INSPECT_EVAL_IMPORTED_LOG_OUTPUT).toBe(INSPECT_RUN_IMPORT_EVIDENCE_NAME);
     expect(check.TERMINAL_BENCH_2_1_LEADERBOARD_DATASET_REF).toBe(TERMINAL_BENCH_2_1_DATASET_REF);
     expect(check.TERMINAL_BENCH_3_0_LEADERBOARD_DATASET_REF).toBe(TERMINAL_BENCH_3_0_DATASET_REF);
     expect(check.DEEP_SWE_V11_LEADERBOARD_GIT_SHA).toBe(DEEP_SWE_V11_GIT_SHA);

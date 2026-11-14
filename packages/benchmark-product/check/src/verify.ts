@@ -97,7 +97,12 @@ import {
 } from "./profile/external-import.js";
 import { assertTaskSelectionConsistency, assertTaskSelectionDeclaration } from "./profile/task-selection.js";
 import { assertTerminalBench21ComparabilityDeclaration } from "./profile/terminal-bench-2-1-comparability.js";
-import { assertInspectEvalTask, resolveCarriedSuite, type CarriedSuite } from "./profile/suite-evidence.js";
+import {
+  INSPECT_EVAL_IMPORTED_LOG_OUTPUT,
+  assertInspectEvalTask,
+  resolveCarriedSuite,
+  type CarriedSuite,
+} from "./profile/suite-evidence.js";
 import { buildPublicAssets } from "./assets.js";
 import { derivePublicComparison, type PublicComparisonView } from "./comparison.js";
 import {
@@ -1391,6 +1396,17 @@ export async function verifyPublicBundleSnapshot(
   }
 
   unique(assembly.header.graph.solveDeliveries.map((edge) => edge.cellKey), "verification.graph.solveDeliveries.cells");
+  const importedRun = composed !== undefined && composed.capabilities.includes(EXTERNAL_IMPORT_CAPABILITY);
+  // An imported Inspect eval run has no separate log verifier: no process re-read its native logs.
+  // A Run whose assurance derives separate log verification would otherwise rebuild a Report saying
+  // its official verdicts were separately verified from the native log.
+  if (
+    importedRun
+    && carriedSuite?.selection.kind === "inspect-eval"
+    && deriveInspectEvaluationStrategy(run.policy.evaluation) === "separate-log-verification"
+  ) {
+    refuse("record-integrity", "evidence-closure", "an imported Inspect eval run cannot satisfy separate Inspect log verification");
+  }
   const solveDeliveryByCell = new Map<string, (typeof assembly.header.graph.solveDeliveries)[number]>();
   const inspectClosureByCell = new Map<string, {
     readonly summary: InspectCellSummary;
@@ -1428,7 +1444,20 @@ export async function verifyPublicBundleSnapshot(
     solveDeliveryByCell.set(edge.cellKey, edge);
 
     const task = taskSpecs.get(cell.taskDigest);
-    if (task?.profile.uri === INSPECT_TASK_PROFILE_URI) {
+    // Issue #5244: an Inspect eval Task names no selection of its own, so each delivered Inspect eval
+    // cell is bound to the arm and template of the one selection its Run registered, carried under
+    // `suite-comparability`, never to a per-Task selection.
+    const inspectEval = carriedSuite?.selection.kind === "inspect-eval" ? carriedSuite.selection : undefined;
+    if (task?.profile.uri === INSPECT_TASK_PROFILE_URI && inspectEval !== undefined && importedRun) {
+      // Brought with `run import --from inspect`: no venue ran the cell, so there is no summary, and
+      // its Delivery carries exactly the native EvalLog the named reader read.
+      if (!inspectEval.template.arms.some((candidate) => candidate.armId === cell.armId)) {
+        refuse("record-integrity", "evidence-closure", "Inspect Delivery has no exact selected arm configuration");
+      }
+      if (edge.outputs.length !== 1 || edge.outputs[0]!.name !== INSPECT_EVAL_IMPORTED_LOG_OUTPUT) {
+        refuse("record-integrity", "evidence-closure", "Inspect eval Delivery does not carry exactly the native log the named Inspect reader imports");
+      }
+    } else if (task?.profile.uri === INSPECT_TASK_PROFILE_URI) {
       const nativeLog = edge.outputs.find((output) => output.name === "inspect-log");
       const summaryOutput = edge.outputs.find((output) => output.name === "inspect-summary");
       const verdictOutput = edge.outputs.find((output) => output.name === "verdict");
@@ -1452,8 +1481,11 @@ export async function verifyPublicBundleSnapshot(
         || sha256(nativeBytes) !== nativeLog.sha256
       ) refuse("record-integrity", "evidence-closure", "Inspect summary does not bind the exact native log");
 
-      const selectionSha256 = (task.payload as { selectionManifestSha256?: unknown }).selectionManifestSha256;
-      const selection = typeof selectionSha256 === "string" ? inspectSelections.get(selectionSha256) : undefined;
+      const selectionSha256 = inspectEval === undefined
+        ? (task.payload as { selectionManifestSha256?: unknown }).selectionManifestSha256
+        : carriedSuite!.runtimeSelectionSha256;
+      const selection = inspectEval?.template
+        ?? (typeof selectionSha256 === "string" ? inspectSelections.get(selectionSha256) : undefined);
       const arm = selection?.arms.find((candidate) => candidate.armId === cell.armId);
       if (selection === undefined || arm === undefined) {
         refuse("record-integrity", "evidence-closure", "Inspect Delivery has no exact selected arm configuration");

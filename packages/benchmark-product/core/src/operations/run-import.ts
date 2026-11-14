@@ -37,6 +37,10 @@
  * - **`policy.evaluation.minVerdicts > 1`.** Fanning one external result into N evaluator legs
  *   would manufacture agreement between evaluators that never independently existed — the
  *   distinct-is-not-independent laundering `PRINCIPLES.md` forbids naming outright.
+ * - **An Inspect run whose assurance derives separate log verification.** That strategy needs a
+ *   verifier to re-read each cell's native log, and an import brings none: `report` would seal a
+ *   sentence saying the verdicts were verified that way, and no bundle of the run could pass the
+ *   checker.
  * - **Anything but `--from harbor` on the official Terminal-Bench 2.1 slate.** The Harbor reader
  *   holds each trial's package ref and dataset revision against what the slate seals for that
  *   task. A generic dump row names a slot and nothing else, so it could place any result on any
@@ -66,6 +70,8 @@ import {
 } from "../run/external-import.js";
 import { requireRunState, writeRunState } from "../run/state.js";
 import { isInspectRuntimeAdapterId } from "../runtime/adapter.js";
+import { inspectImportMeetsAssurance } from "../runtime/inspect/assurance.js";
+import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";
@@ -185,6 +191,18 @@ export function importRunRecords(
           `this Run pre-registered minVerdicts=${minVerdicts}, but an external dump carries one `
             + "result per slot. Splitting it across several evaluator legs would assert agreement "
             + "between evaluators that never independently existed.",
+        );
+      }
+      if (adapterId === INSPECT_ADAPTER_ID && !inspectImportMeetsAssurance(runRecord.policy.evaluation)) {
+        const { preset, overrides } = document.spec.assurance;
+        refuse(
+          "conflict",
+          `runs.${input.draftId}.policy.evaluation`,
+          `this Run pre-registered the "${preset}" assurance`
+            + `${overrides === undefined ? "" : ` with overrides ${JSON.stringify(overrides)}`}, under which `
+            + "each Inspect verdict must be separately verified from the cell's native log. An import "
+            + "brings no log verifier, so an imported Inspect run cannot meet that assurance. Lock the "
+            + "run under the \"direct-check\" assurance to bring its results with run import.",
         );
       }
       const benchmarkSha256 = document.spec.taskSet.benchmarkSha256;

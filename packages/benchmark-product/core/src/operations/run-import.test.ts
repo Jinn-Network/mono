@@ -552,6 +552,52 @@ describe("run.import — refusals", () => {
     expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
   });
 
+  test("refuses an Inspect-bound draft whose assurance needs separate log verification, before writing anything", async () => {
+    const clock = makeClock();
+    initWorkspace(contextFor(clock));
+    createDraft(contextFor(clock), { draftId: "draft-1", name: "Separate evaluator" });
+    const sample = await sampleInit(contextFor(clock), { draftId: "draft-1" });
+    expect(sample.ok).toBe(true);
+    armAdd(contextFor(clock), { draftId: "draft-1", armId: "baseline", pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } });
+    armAdd(contextFor(clock), { draftId: "draft-1", armId: "sample", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } });
+    const patched = updateDraft(contextFor(clock), { draftId: "draft-1", patch: { assurance: { preset: "separate-evaluator" } } });
+    expect(patched.ok, JSON.stringify(patched)).toBe(true);
+    expect((await runQuote(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+    expect(runLock(contextFor(clock), { draftId: "draft-1" }).ok).toBe(true);
+    // The plain Inspect runtime binding, patched onto the locked draft as the tests above do.
+    const { atomicWriteFileSync } = await import("../fs/atomic.js");
+    const { draftPath } = await import("../workspace/layout.js");
+    const document = readDraftDocument(workspaceDir, "draft-1");
+    atomicWriteFileSync(draftPath(workspaceDir, "draft-1"), JSON.stringify({
+      ...document,
+      spec: {
+        ...document.spec,
+        evaluationRuntime: { adapterId: "inspect", selectionManifestSha256: "0".repeat(64) },
+      },
+    }, null, 2));
+    if (document.spec.taskSet.kind !== "benchmark") throw new Error("unreachable");
+    const runState = readRunState(workspaceDir, "draft-1")!;
+    runOpenAt = runState.lockedAt!;
+    const cellKeys = expectedCellSet(
+      parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256)),
+      parseRun(getSealedBytes(workspaceDir, runState.runSha256!)),
+    ).map((coord) => coord.cellKey);
+
+    const outcome = await importRunRecords(contextFor(clock), {
+      draftId: "draft-1",
+      records: mixedRows(cellKeys),
+      source: { harness: "inspect", version: "0.3.255" },
+      evidenceRoot,
+      namedReader: "inspect",
+    });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("conflict");
+    expect(outcome.error.detail).toMatch(/the "separate-evaluator" assurance, under which each Inspect verdict must be separately verified from the cell's native log/u);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+    expect(readRunJournalEntries(workspaceDir, "draft-1")).toEqual([]);
+  });
+
   test("refuses minVerdicts > 1 rather than fanning one result across evaluator legs", async () => {
     const clock = makeClock();
     initWorkspace(contextFor(clock));

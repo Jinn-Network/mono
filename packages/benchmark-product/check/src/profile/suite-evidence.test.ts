@@ -16,7 +16,12 @@ import { cellKey } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { BenchmarkProductError } from "./errors.js";
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "./binary-judge-manifest.js";
-import { SUPPORTED_INSPECT_VERSION } from "./inspect-manifest.js";
+import {
+  INSPECT_SELECTION_SCHEMA,
+  InspectSelectionTemplateSchema,
+  SUPPORTED_INSPECT_VERSION,
+  SUPPORTED_INSPECT_WHEEL_SHA256,
+} from "./inspect-manifest.js";
 import {
   ARCHIPELAGO_ADAPTER_ID,
   ARCHIPELAGO_COMMIT_PIN,
@@ -61,6 +66,33 @@ const ARMS = [{ armId: "one", pinning: {} }, { armId: "two", pinning: {} }] as c
 const encode = (value: unknown): Uint8Array => canonicalJsonBytes(value as never);
 const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 const taskSha = (name: string): string => sha256(new TextEncoder().encode(name));
+
+/** The shared Inspect pin an Inspect eval selection seals under `inspect`: no single sampleId. */
+const INSPECT_TEMPLATE = InspectSelectionTemplateSchema.parse({
+  schema: INSPECT_SELECTION_SCHEMA,
+  runtime: {
+    adapterVersion: "1",
+    workerSha256: "c".repeat(64),
+    inspectVersion: SUPPORTED_INSPECT_VERSION,
+    inspectWheelSha256: SUPPORTED_INSPECT_WHEEL_SHA256,
+    pythonVersion: "3.11.9",
+    pythonExecutableSha256: "a".repeat(64),
+    pythonEnvironmentSha256: "d".repeat(64),
+    inspectDistributionSha256: "e".repeat(64),
+  },
+  task: {
+    reference: "eval.py@hermetic",
+    args: {},
+    resolvedName: "hermetic",
+    resolvedVersion: "1.0",
+    resolvedSandbox: null,
+    source: { kind: "project-file", path: "eval.py", sha256: "b".repeat(64), projectTreeSha256: "f".repeat(64) },
+    dataset: { name: "hermetic", location: null, samples: 2 },
+  },
+  arms: ARMS.map(({ armId }) => ({ armId, model: `mockllm/${armId}` })),
+  scorer: { name: "match", passValue: "C", definition: { name: "match", options: {}, metrics: [] } },
+  runOptions: {},
+});
 
 function suite(protocol: SuiteProtocolId, names: readonly string[], overrides: Record<string, unknown> = {}): SuiteProtocolSelection {
   const shared = {
@@ -311,6 +343,7 @@ describe("APEX-SWE-dev and Inspect eval decide the flag without evidence files",
       },
       suite: selected,
       selectedSampleIds: ["s0", "s1"],
+      template: INSPECT_TEMPLATE,
     };
     const ready = derive(selection, new Map(), matrixFor(selected, () => "unscorable"), 1);
     expect(ready.comparability.leaderboardSubmitReady).toBe(true);
@@ -367,6 +400,24 @@ describe("reading a Run's registered selection", () => {
       suite: inspectSuite,
     };
     expect(() => readRegisteredSuiteSelection(INSPECT_SELECTION_CORRELATION_ROLE, encode(value), "m")).toThrow(/selected samples differ/u);
+  });
+
+  test("an Inspect eval selection carries the Inspect template its cells are bound to, and one that is not a template is refused", () => {
+    const inspectSuite = suite("inspect-eval", ["s0", "s1"]);
+    const value = {
+      schema: INSPECT_EVAL_SELECTION_SCHEMA,
+      inspect: INSPECT_TEMPLATE,
+      catalog: { specifiedEpochs: 1, snapshotSha256: "c".repeat(64) },
+      selectedSamples: [{ sampleId: "s0" }, { sampleId: "s1" }],
+      solver: "task-default",
+      sampleLimit: null,
+      suite: inspectSuite,
+    };
+    const read = readRegisteredSuiteSelection(INSPECT_SELECTION_CORRELATION_ROLE, encode(value), "m");
+    expect(read?.kind === "inspect-eval" ? read.template : undefined).toEqual(INSPECT_TEMPLATE);
+    const { scorer: _scorer, ...unscored } = INSPECT_TEMPLATE as typeof INSPECT_TEMPLATE & { scorer: unknown };
+    expect(() => readRegisteredSuiteSelection(INSPECT_SELECTION_CORRELATION_ROLE, encode({ ...value, inspect: unscored }), "m"))
+      .toThrow(/not a Inspect eval selection template/u);
   });
 });
 
@@ -478,6 +529,7 @@ describe("an Inspect eval Task is bound by its sample id", () => {
     },
     suite: selected,
     selectedSampleIds: ["s0", "s1"],
+    template: INSPECT_TEMPLATE,
   };
   const bind = (payload: unknown, taskDigest = taskSha("s0")) => () => assertInspectEvalTask({ selection, payload, taskDigest, cellKey: "cell" });
 

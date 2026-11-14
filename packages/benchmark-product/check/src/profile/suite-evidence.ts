@@ -21,6 +21,7 @@ import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { z } from "zod";
 import { refuse } from "./errors.js";
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "./binary-judge-manifest.js";
+import { InspectSelectionTemplateSchema, type InspectSelectionTemplate } from "./inspect-manifest.js";
 import {
   deriveSuiteComparability,
   methodLeaderboardEligible,
@@ -648,6 +649,9 @@ export type RegisteredSuiteSelection =
     readonly suite: SuiteProtocolSelection;
     /** The selected sample ids, as the Task payloads carry them. */
     readonly selectedSampleIds: readonly (string | number)[];
+    /** The one Inspect template every cell runs, with its arms: an Inspect eval Task names no
+     * selection of its own, so each delivered cell is bound to this. */
+    readonly template: InspectSelectionTemplate;
   };
 
 const RUNTIME_SELECTION_ROLES: ReadonlySet<string> = new Set([
@@ -756,11 +760,13 @@ export function readRegisteredSuiteSelection(role: string, bytes: Uint8Array, pa
   if (names.join("\0") !== manifest.suite.selectedTaskNames.join("\0")) {
     refuse("record-integrity", path, "Inspect eval selected samples differ from its suite's selected task names");
   }
+  const template = parseFacts(InspectSelectionTemplateSchema, (value as { readonly inspect?: unknown }).inspect, path, "Inspect eval selection template");
   return {
     kind: "inspect-eval",
     manifest,
     suite: manifest.suite,
     selectedSampleIds: manifest.selectedSamples.map((sample) => sample.sampleId),
+    template,
   };
 }
 
@@ -1061,6 +1067,13 @@ export function resolveCarriedSuite(input: {
     evidenceSha256s: [...new Set(index.files.map((file) => file.sha256))],
   };
 }
+
+/**
+ * The one output an imported Inspect eval cell's Delivery carries: the native EvalLog that the named
+ * Inspect reader (`run import --from inspect`) read, under the name it imports it with. The reader
+ * never writes an `inspect-summary`, and no venue ran the cell, so it carries nothing else.
+ */
+export const INSPECT_EVAL_IMPORTED_LOG_OUTPUT = "inspect-log.eval" as const;
 
 /**
  * An Inspect eval Task carries only `sampleId`. It belongs to the run exactly when its sample is one
