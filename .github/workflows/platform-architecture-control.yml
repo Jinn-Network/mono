@@ -243,9 +243,18 @@ jobs:
     needs:
       - verification-selection
       - platform-verification-reusable
+      - platform-release-surface
     if: always()
     runs-on: ubuntu-latest
     steps:
+      # `platform-release-surface` is not a required context of its own, so this gate
+      # carries it: a failed, cancelled, or skipped run fails `platform-verification`
+      # whether or not verification is selected (issue #5262). The job has no `if:` and
+      # no `needs:`, so it runs whenever this workflow does and only exact success passes.
+      - name: Require exact release-surface success
+        env:
+          RELEASE_SURFACE_RESULT: ${{ needs.platform-release-surface.result }}
+        run: test "${RELEASE_SURFACE_RESULT}" = success
       # When verification is selected the bar is unchanged: exact success. When it is
       # not selected the reusable call must be exactly `skipped` — a failed or
       # cancelled call still fails this gate, so unselection can never launder a red.
