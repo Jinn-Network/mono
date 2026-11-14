@@ -142,9 +142,11 @@ The premise behind the origin-free rule was that `spec.jinn.network` did not ser
 The rule is now:
 
 - A protocol identifier under `https://spec.jinn.network/` prints whole when its path matches, exactly, a document path in the inventory of spec release `v0.1.0`, less that release's conformance fixtures. The match is by exact path, not by the inventory's served path prefixes, because the release serves some paths under a prefix and not others (for example `task-profiles/binary-judgment/2.0` but not `1.0`).
-- A name that does not resolve that way is aliased, as before: the origin is dropped and the name or path remainder is shown.
+- A name that does not resolve that way is aliased, as before. On the `/10` page (`index.html` and `README.md`) the origin is dropped and the name or path remainder is shown. In the CLI's human output the identifier is replaced by `<identifier: see --json>`.
 - Identifiers stay unchanged in sealed records and `--json` output.
 
-The pinned inventory is `SPEC_RELEASE_SERVED_PATHS` in `packages/benchmark-product/check/src/identifier-presentation.ts`, a copy of the `v0.1.0` inventory paths. The `/10` page is byte-pinned, so a later spec release's paths reach `/10` only through a newly registered presentation capability. Frozen `/2` to `/8` pages are unchanged.
+The pinned inventory is `SPEC_RELEASE_SERVED_PATHS` in `packages/benchmark-product/check/src/identifier-presentation.ts`, a copy of the `v0.1.0` inventory paths. The `/10` page is byte-pinned, so a later spec release's paths reach `/10` only through a newly registered presentation capability. Frozen `/2`, `/4`, `/5`, `/6`, `/7` and `/8` pages are unchanged.
+
+Decision 4's stable hold is unchanged; its statement that `$id` and `profile` URLs do not dereference now holds only for identifiers outside that inventory.
 
 Decision 5's disclosure of the host gap still describes the first cut as published. This amendment does not claim that the stable-host verification named in Decision 3 has been observed.
