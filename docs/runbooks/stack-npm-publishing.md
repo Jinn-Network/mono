@@ -262,3 +262,20 @@ version first: the receipt integrity there counts as published and the post-publ
 log with its attempt number. The walk stops as it does for a failed publish. Rerun the failed
 job: the preflight skips what is already published, within the `canary`-tag and four-day artifact
 limits above. Otherwise the next push to `next` publishes a new canary version.
+
+**A leg that fails after its publication receipt was stored:** for example `Failed to
+FinalizeArtifact` on "Upload final publication receipt" while the run still lists
+`platform-publication-receipt-<group>`, as in
+[run 43066987003](https://github.com/Jinn-Network/mono/actions/runs/43066987003). Every package in
+the group is published and its receipt is attested and stored, so nothing is missing; rerun the
+failed job, within the four-day artifact window above, only to turn the leg green. The rerun
+publishes nothing and rebuilds the receipt from the same-run inputs. It then downloads the receipt
+the earlier attempt stored, because upload-artifact refuses a duplicate artifact name only within
+one attempt: a rerun's upload of that name would succeed and leave the run two receipts for the
+group. When the two receipts are byte-identical, the rerun does not upload a second copy. When they
+differ, the leg stops with `publication receipt for <group> differs from the one an earlier attempt
+of this run stored`, names both digests, and uploads nothing, so the stored receipt stands for that
+run. A rerun of the failed job alone reads the same same-run inputs, so a difference means they
+were rebuilt (a rerun of all jobs) or the registry changed; do not rerun again, and the next push
+to `next` is the retry. A rerun after a later run has moved the `canary` tag stops at preflight
+first, as above.

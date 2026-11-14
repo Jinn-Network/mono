@@ -102,9 +102,29 @@ function commitCount(dir) {
   return Number(git(dir, ['rev-list', '--count', 'HEAD']).trim());
 }
 
-function refresh(bundleDir, hostDir, sourceSha = SHA, expectedGroups = GROUPS, lane = 'canary') {
-  return run({ bundleDir, hostDir, sourceSha, workflowPath: WORKFLOW_PATH, expectedGroups, lane });
+// GitHub's compare, answered from the order these fixture commits reached `next`: SHA, then
+// NEXT_SHA. Any other call is a 404, as GitHub answers an unknown commit. Calls are recorded
+// so a test can say what was asked, and in which direction.
+const NEXT_ORDER = [SHA, NEXT_SHA];
+function compareOnNext(calls = []) {
+  return (command, args) => {
+    calls.push([command, ...args]);
+    const match = /^repos\/Jinn-Network\/mono\/compare\/([0-9a-f]{40})\.\.\.([0-9a-f]{40})$/u.exec(args[1] ?? '');
+    const source = NEXT_ORDER.indexOf(match?.[1]);
+    const other = NEXT_ORDER.indexOf(match?.[2]);
+    if (command !== 'gh' || args[0] !== 'api' || args.length !== 4 || source < 0 || other < 0) {
+      return { status: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)' };
+    }
+    const order = other < source ? 'behind' : other > source ? 'ahead' : 'identical';
+    return { status: 0, stdout: `${order}\n`, stderr: '' };
+  };
 }
+
+function refresh(bundleDir, hostDir, sourceSha = SHA, expectedGroups = GROUPS, lane = 'canary', exec = compareOnNext()) {
+  return run({ bundleDir, hostDir, sourceSha, workflowPath: WORKFLOW_PATH, expectedGroups, lane, exec });
+}
+
+const COMPARE_ARGS = (source, other) => ['gh', 'api', `repos/Jinn-Network/mono/compare/${source}...${other}`, '--jq', '.status'];
 
 // --- the mirror ------------------------------------------------------------
 
@@ -237,6 +257,109 @@ test('a document dropped from the bundle is deleted from the host', () => {
     'a mirror replaces the host tree; an overlay would serve the withdrawn document forever',
   );
   cleanup(first, second, host);
+});
+
+// --- never an older source over a newer one (#5242) ------------------------
+
+// A host whose last content change came from NEXT_SHA, the later of the two commits.
+function hostServingNextSha() {
+  const host = makeHostRepo();
+  const later = makeBundle({
+    commit: NEXT_SHA,
+    documents: { 'schemas/task.schema.json': '{"$id":"task","title":"later"}\n' },
+  });
+  refresh(later, host, NEXT_SHA);
+  cleanup(later);
+  return host;
+}
+
+function assertHostStillServesNextSha(host, head) {
+  assert.equal(git(host, ['rev-parse', 'HEAD']).trim(), head, 'nothing was committed');
+  assert.equal(git(host, ['status', '--porcelain']).trim(), '', 'nothing was mirrored');
+  assert.equal(
+    readFileSync(path.join(host, 'schemas/task.schema.json'), 'utf8'),
+    '{"$id":"task","title":"later"}\n',
+  );
+  assert.deepEqual(inspectProvenance(host, WORKFLOW_PATH), { canonical: true, sourceSha: NEXT_SHA });
+}
+
+test('a rerun of an older source is refused before it mirrors when the host marker names a later commit', () => {
+  const host = hostServingNextSha();
+  const head = git(host, ['rev-parse', 'HEAD']).trim();
+  const older = makeBundle();
+  const calls = [];
+
+  assert.throws(
+    () => refresh(older, host, SHA, GROUPS, 'canary', compareOnNext(calls)),
+    (error) => /^profile host refresh refused: /u.test(error.message)
+      && error.message.includes(`Jinn-Network/mono@${NEXT_SHA}, a later commit than this run's source ${SHA}`)
+      && /docs\/runbooks\/jinn-network-profile-hosting\.md/u.test(error.message),
+  );
+  // compare/<source>...<marker>: `ahead` is the marker descending from this run's source.
+  assert.deepEqual(calls, [COMPARE_ARGS(SHA, NEXT_SHA)]);
+  assertHostStillServesNextSha(host, head);
+  cleanup(older, host);
+});
+
+test('a host marker whose order GitHub cannot give fails closed before anything is mirrored', () => {
+  for (const [scenario, answer, reason] of [
+    ['diverged', { status: 0, stdout: 'diverged\n', stderr: '' }, /neither commit descends from the other \(GitHub compare: diverged\)/u],
+    ['compare fails', { status: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)' }, /GitHub compare failed: gh: Not Found \(HTTP 404\)/u],
+    ['another answer', { status: 0, stdout: '{}\n', stderr: '' }, /GitHub compare returned "\{\}"/u],
+  ]) {
+    const host = hostServingNextSha();
+    const head = git(host, ['rev-parse', 'HEAD']).trim();
+    const older = makeBundle();
+
+    assert.throws(
+      () => refresh(older, host, SHA, GROUPS, 'canary', () => answer),
+      (error) => /^profile host order check failed: /u.test(error.message)
+        && error.message.includes(NEXT_SHA)
+        && error.message.includes(SHA)
+        && reason.test(error.message),
+      scenario,
+    );
+    assertHostStillServesNextSha(host, head);
+    cleanup(older, host);
+  }
+});
+
+test('the order is asked only when a canonical host marker names another commit', () => {
+  const asked = [];
+  const host = makeHostRepo();
+  const first = makeBundle();
+
+  // No marker yet, then a rerun at the marker's own commit: nothing to order.
+  refresh(first, host, SHA, GROUPS, 'canary', compareOnNext(asked));
+  refresh(makeBundle(), host, SHA, GROUPS, 'canary', compareOnNext(asked));
+  assert.deepEqual(asked, []);
+
+  // A later source asks once, with the marker's commit as `other`, and `behind` proceeds.
+  const later = makeBundle({ commit: NEXT_SHA });
+  assert.equal(refresh(later, host, NEXT_SHA, GROUPS, 'canary', compareOnNext(asked)).changed, true);
+  assert.deepEqual(asked, [COMPARE_ARGS(NEXT_SHA, SHA)]);
+
+  // A malformed marker names no commit worth ordering and is repaired as before, even by an
+  // older source: the acceptance criteria leave that path as it was.
+  writeFileSync(path.join(host, '.jinn-profile-host-source'), 'source: hand-edited\n');
+  git(host, ['add', '-A']);
+  git(host, ['commit', '-q', '-m', 'hand-edited the marker']);
+  asked.length = 0;
+  assert.equal(refresh(makeBundle(), host, SHA, GROUPS, 'canary', compareOnNext(asked)).changed, true);
+  assert.deepEqual(asked, []);
+  assert.deepEqual(inspectProvenance(host, WORKFLOW_PATH), { canonical: true, sourceSha: SHA });
+  cleanup(first, later, host);
+});
+
+test('the runbook says what a refused or unordered host refresh means for a rerun', () => {
+  const runbook = readFileSync(
+    path.join(import.meta.dirname, '../../docs/runbooks/jinn-network-profile-hosting.md'),
+    'utf8',
+  );
+  const section = runbook.slice(runbook.indexOf('## Automatic host refresh'), runbook.indexOf('## Hosting and key-provisioning checklist'));
+  assert.match(section, /`profile host refresh refused`/u);
+  assert.match(section, /`profile host order check failed`/u);
+  assert.match(section, /Do not rerun/u);
 });
 
 test('the mirror keeps .git and the provenance marker and drops a hand-added stray', () => {
@@ -756,4 +879,39 @@ test('the CLI emits changed= to $GITHUB_OUTPUT and importing the module runs not
   // unguarded it would have thrown on the absent env before any test started.
   assert.equal(commitCount(host), 2, 'the CLI committed exactly once');
   cleanup(bundle, host, path.dirname(outputFile));
+});
+
+test('the CLI asks GitHub through gh and refuses an older source with both shas named', () => {
+  const host = hostServingNextSha();
+  const head = git(host, ['rev-parse', 'HEAD']).trim();
+  const older = makeBundle();
+  // A stand-in `gh` first on PATH: it records its arguments and answers as GitHub's compare
+  // does when the marker's commit descends from the run's source.
+  const bin = mkdtempSync(path.join(tmpdir(), 'jinn-profile-host-gh-'));
+  const argsFile = path.join(bin, 'gh-args');
+  writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$GH_ARGS_FILE"\necho ahead\n', { mode: 0o755 });
+
+  const result = spawnSync(process.execPath, [HELPER], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+      GH_ARGS_FILE: argsFile,
+      BUNDLE_DIR: older,
+      HOST_DIR: host,
+      SOURCE_SHA: SHA,
+      WORKFLOW_PATH,
+      LANE: 'canary',
+      EXPECTED_RELEASE_GROUPS: GROUPS.join(','),
+    },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stdout + result.stderr,
+    new RegExp(`::error::profile host refresh refused: .*${NEXT_SHA}, a later commit than this run's source ${SHA}`, 'u'),
+  );
+  assert.deepEqual(readFileSync(argsFile, 'utf8').split('\n'), [...COMPARE_ARGS(SHA, NEXT_SHA).slice(1), '']);
+  assertHostStillServesNextSha(host, head);
+  cleanup(older, host, bin);
 });
