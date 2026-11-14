@@ -957,6 +957,39 @@ describe("verifyEnvelopeBinding", () => {
         .register({ key: CONSENT_KEY, agent: AGENT, resolved: authorityBinding(peer) });
       expect(await verifyKey2(resolver)).toMatchObject({ ok: true });
     });
+
+    // A row is told from another row filed under its digest by what it holds. One whose
+    // contents cannot be written out cannot be told apart, so it stands for nothing.
+    test("a genesis binding whose stored row cannot be written out has no chain", async () => {
+      const resolver = new FakeBindingResolver().register({
+        key: KEY_2,
+        agent: AGENT,
+        resolved: resolvedBinding({ binding: own, ceremonyEvidence: { written: 1n } as never }),
+      });
+      expect(await verifyKey2(resolver)).toMatchObject({
+        ok: false,
+        reason: "consent-chain-violation",
+        detail: "the binding's stored row cannot be written out, so it cannot be told from another row.",
+      });
+    });
+
+    test.each([
+      { held: "can be written out", evidence: { written: "1" }, verdict: { ok: true } },
+      { held: "cannot be written out", evidence: { written: 1n }, verdict: { ok: false, reason: "consent-chain-violation" } },
+    ])("an incumbent whose stored row $held gives authority accordingly", async ({ evidence, verdict }) => {
+      const resolver = new FakeBindingResolver()
+        .register({
+          key: KEY_2,
+          agent: AGENT,
+          resolved: resolvedBinding({ binding: own, isGenesis: false, incumbentControls: [{ key: CONSENT_KEY, voucher }] }),
+        })
+        .register({
+          key: CONSENT_KEY,
+          agent: AGENT,
+          resolved: authorityBinding(peer, { ceremonyEvidence: evidence as never }),
+        });
+      expect(await verifyKey2(resolver)).toMatchObject(verdict);
+    });
   });
 
   describe("an agentId voucher (§7.2)", () => {
@@ -1707,6 +1740,60 @@ describe("checkBindingRevocation (§7.5 step 4, §7.4b)", () => {
 
     test("does not count when it fails that ceremony", async () => {
       expect(await checkBindingRevocation(revoked, "2026-03-01T00:00:00Z", over(false))).toEqual({ ok: true });
+    });
+  });
+
+  // A row that cannot be written out cannot be told from another row, so nothing shows it
+  // unrevoked: not even the absence of a revocation, and not a revocation by its own key that
+  // only the same-act path could read, as when the resolver reports no `targetScope`.
+  describe("a row that cannot be written out", () => {
+    const OWN_KEY = "did:key:z6MkfUNWRITTEN1111111111111111111111111111";
+    const SETTLEMENT_KEY = "did:key:z6MkfUNWRITTENSETTLE11111111111111111111";
+    const ownRevocation = revocationEntry(OWN_KEY, "2026-02-01T00:00:00Z");
+    const unwritten = (revocations: readonly ResolvedRevocation[]) => resolvedBinding({
+      binding: keyBinding({
+        agent: AGENT,
+        key: { publicKey: "0x00", keyid: OWN_KEY, algorithm: "ed25519", didKey: OWN_KEY },
+        voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+        scope: ["verdicts", "bindings"],
+      }),
+      ceremonyEvidence: { written: 1n } as never,
+      revocations,
+    });
+    const revokedByItsOwnKey = unwritten([
+      { ...ownRevocation, revocation: { ...ownRevocation.revocation, target: `sha256:${"b".repeat(64)}` } },
+    ]);
+    const settlementLeg = authorityBinding(keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: SETTLEMENT_KEY, algorithm: "ed25519", didKey: SETTLEMENT_KEY },
+      voucher: { kind: "account", did: OTHER_VOUCHER_DID, contractAccount: false },
+      scope: ["settlements"],
+    }));
+    const deps = {
+      bindingResolver: new FakeBindingResolver()
+        .register({ key: OWN_KEY, agent: AGENT, resolved: revokedByItsOwnKey })
+        .register({ key: SETTLEMENT_KEY, agent: AGENT, resolved: settlementLeg }),
+      witnessVerifier: fakeWitnessVerifier,
+      dsseVerifier: trustingDsseVerifier,
+    };
+
+    test("is refused by checkBindingRevocation and as a verdict leg when its own key revoked it", async () => {
+      expect(await checkBindingRevocation(revokedByItsOwnKey, "2026-03-01T00:00:00Z", deps)).toMatchObject({ ok: false });
+      expect(await settlementJoinCheck(
+        {
+          verdictKey: OWN_KEY,
+          settlementDeclarationKey: SETTLEMENT_KEY,
+          claimedEvaluatorAgent: AGENT,
+          family: "verdicts",
+          envelopeEffectiveTime: "2026-03-01T00:00:00Z",
+          claimTime: "2026-03-05T00:00:00Z",
+        },
+        deps,
+      )).toMatchObject({ ok: false });
+    });
+
+    test("is refused by checkBindingRevocation with no revocation at all", async () => {
+      expect(await checkBindingRevocation(unwritten([]), "2026-03-01T00:00:00Z", deps)).toMatchObject({ ok: false });
     });
   });
 });
