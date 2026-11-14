@@ -223,6 +223,6 @@ and the per-package loop, so every later package in that release group's walk (t
 the wave and all later waves) is not published; every other matrix group is unaffected,
 since `canary-publish` runs its release groups as a `fail-fast: false` matrix. Register the missing package with the CLI
 path above, then rerun. Rerunning only works while this run's `platform-verification-artifacts`
-artifact still exists (`retention-days: 1` in `platform-verification.yml`); once that window
-passes, the next push to `next` is the retry, not a manual rerun of the old run. Do not treat
+artifact still exists (`retention-days: 3` in `platform-verification.yml`, about 4.8 MB per run); once that
+three-day window passes, the next push to `next` is the retry, not a manual rerun of the old run. Do not treat
 a partial walk as a successful canary.

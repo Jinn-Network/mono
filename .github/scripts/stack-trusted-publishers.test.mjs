@@ -211,7 +211,13 @@ test('the stack publishing runbook tracks the generated set, CLI registration, a
 
   // Non-blocking: the rerun advice must name the artifact retention window.
   assert.match(runbook, /platform-verification-artifacts/);
-  assert.match(runbook, /retention-days: 1/);
+  assert.match(runbook, /retention-days: 3/);
+  const verification = readFileSync(join(repoRoot, '.github/workflows/platform-verification.yml'), 'utf8');
+  assert.match(
+    verification,
+    /name: platform-verification-artifacts\n[\s\S]{0,160}?retention-days: 3\n/,
+    'a failed canary leg must stay re-runnable for three days',
+  );
   assert.match(runbook, /next push to `next` is the retry/);
 
   // An exhausted wait ends the leg, so the timeout arithmetic is about waits that succeed, and
