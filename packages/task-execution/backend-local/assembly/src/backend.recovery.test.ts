@@ -882,7 +882,9 @@ describe("restart reconstruction and §6.4 actions", () => {
     const ready = join(root, "harness-ready");
     const release = join(root, "harness-release");
     // afterEach runs these before it drains, and draining waits for the resumed worker, which
-    // waits for this harness. Release it however the test ends.
+    // waits for this harness. Release it when a backend worker is waiting on it. With no worker
+    // waiting, afterEach removes the root right after writing the file, so the harness also exits
+    // once its ready file is gone, and when the test process is gone.
     releaseBarriers.push(() => writeFileSync(release, "1"));
     const pause = barrier();
     // The harness blocks on a file this test writes, so the shim is alive for exactly as long as
@@ -898,7 +900,7 @@ describe("restart reconstruction and §6.4 actions", () => {
           + `const owner = ${process.pid};`
           + `const timer = setInterval(() => {`
           + ` let ownerAlive = true; try { process.kill(owner, 0); } catch { ownerAlive = false; }`
-          + ` if (!ownerAlive || fs.existsSync(${JSON.stringify(release)})) { clearInterval(timer); process.exit(0); }`
+          + ` if (!ownerAlive || fs.existsSync(${JSON.stringify(release)}) || !fs.existsSync(${JSON.stringify(ready)})) { clearInterval(timer); process.exit(0); }`
           + `}, 10);`,
         ],
         env: {},
