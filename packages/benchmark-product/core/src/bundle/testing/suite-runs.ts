@@ -13,6 +13,7 @@ import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expectedCellSet, parseBenchmark, parseRun } from "@jinn-network/benchmarking-records";
 import type { ExternalRunRecord } from "../../intake/external-run-records.js";
+import { readInspectRunImport } from "../../intake/inspect-run-records.js";
 import { armAdd } from "../../operations/arms.js";
 import type { OperationContext } from "../../operations/context.js";
 import { createDraft, readDraftDocument } from "../../operations/drafts.js";
@@ -24,6 +25,7 @@ import { runLaunch } from "../../operations/run-launch.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
 import type { OperationResult } from "../../operations/result.js";
+import { dumpIdentityFromPath } from "../../run/external-import.js";
 import { readRunState } from "../../run/state.js";
 import { APEX_AGENTS_DATASET_ID, APEX_AGENTS_DATASET_REVISION } from "../../runtime/apex-agents/manifest.js";
 import { APEX_SWE_DEV_DATASET_ID, APEX_SWE_DEV_DATASET_REVISION } from "../../runtime/apex-swe-dev/manifest.js";
@@ -32,11 +34,13 @@ import type { HarborSelectionManifest } from "../../runtime/harbor/manifest.js";
 import { createDefaultBenchmarkRuntimeHost } from "../../runtime/host-port.js";
 import { harborArmJobsDir } from "../../runtime/harbor/arm-job.js";
 import { harborArmJobName } from "../../runtime/harbor/launcher.js";
+import { inspectWorkerSha256 } from "../../runtime/inspect/host.js";
 import {
   INSPECT_SELECTION_SCHEMA,
   InspectSelectionManifestSchema,
   SUPPORTED_INSPECT_VERSION,
   SUPPORTED_INSPECT_WHEEL_SHA256,
+  type InspectSelectionManifest,
 } from "../../runtime/inspect/manifest.js";
 import { SWE_BENCH_VERIFIED_DATASET_ID, SWE_BENCH_VERIFIED_DATASET_REVISION } from "../../runtime/swe-bench-verified/manifest.js";
 import { ARCHIPELAGO_COMMIT_PIN } from "../../runtime/suite-protocol/comparability.js";
@@ -461,6 +465,7 @@ process.exit(64);
 // ── Inspect eval ──────────────────────────────────────────────────────────────────────────────
 
 const INSPECT_SAMPLE_IDS = ["sample-0", "sample-1"] as const;
+const INSPECT_SCORER_DEFINITION = { name: "match", options: {}, metrics: [] };
 
 const inspectManifest = InspectSelectionManifestSchema.parse({
   schema: INSPECT_SELECTION_SCHEMA,
@@ -487,11 +492,11 @@ const inspectManifest = InspectSelectionManifestSchema.parse({
     { armId: "control", model: "mockllm/control" },
     { armId: "candidate", model: "mockllm/candidate" },
   ],
-  scorer: { name: "match", passValue: "C", definition: { name: "match", options: {}, metrics: [] } },
+  scorer: { name: "match", passValue: "C", definition: INSPECT_SCORER_DEFINITION },
   runOptions: { maxSamples: 1 },
 });
 
-function inspectRuntimeHost() {
+function inspectRuntimeHost(manifest: InspectSelectionManifest = inspectManifest, pythonPath = "/usr/bin/python3") {
   const runtimeHost = createDefaultBenchmarkRuntimeHost();
   return {
     ...runtimeHost,
@@ -504,8 +509,8 @@ function inspectRuntimeHost() {
       datasetSampleCount: INSPECT_SAMPLE_IDS.length,
     }),
     resolveInspectSelection: async () => ({
-      manifest: inspectManifest,
-      binding: { pythonPath: "/usr/bin/python3", projectDir: "/tmp/inspect-project" },
+      manifest,
+      binding: { pythonPath, projectDir: "/tmp/inspect-project" },
     }),
   };
 }
@@ -552,27 +557,145 @@ function inspectQuoteVenue(): LocalVenue {
   };
 }
 
-/**
- * A run bound to Inspect eval over a two-sample catalog, imported and collected. Every slot is
- * imported as `unrun` by default: a delivered Inspect eval cell carries no `inspect-summary`, and
- * the checker's per-cell Inspect delivery check still refuses it (a known gap, not this fixture's).
- */
-export async function importedInspectEvalRun(root: string, options: ImportedSuiteRunOptions = {}): Promise<SuiteRun> {
+/** Selects Inspect eval over the two-sample catalog, quotes and locks it. */
+async function lockedInspectEvalRun(
+  root: string,
+  coverage: "one_task" | "full",
+  manifest: InspectSelectionManifest = inspectManifest,
+  pythonPath = "/usr/bin/python3",
+): Promise<SuiteRun> {
   const base = workspace(root, []);
-  const context: OperationContext = { ...base.context, runtimeHost: inspectRuntimeHost() as never };
+  const context: OperationContext = { ...base.context, runtimeHost: inspectRuntimeHost(manifest, pythonPath) as never };
   const run = { ...base, context };
   ok("selectInspectEvalRuntime", await selectInspectEvalRuntime(context, {
     draftId: run.draftId,
-    coverage: options.coverage ?? "one_task",
-    pythonPath: "/usr/bin/python3",
+    coverage,
+    pythonPath,
     projectDir: "/tmp/inspect-project",
     taskReference: "eval.py@hermetic",
-    arms: inspectManifest.arms,
+    arms: manifest.arms,
     scorer: { name: "match", passValue: "C" },
   }));
   ok("runQuote", await runQuote(context, { draftId: run.draftId }, { createVenue: () => inspectQuoteVenue() }));
   ok("runLock", runLock(context, { draftId: run.draftId }));
+  return run;
+}
+
+/**
+ * A run bound to Inspect eval over a two-sample catalog, imported and collected. Every slot is
+ * imported as `unrun` by default; {@link inspectReaderImportedInspectEvalRun} and
+ * {@link launchedInspectEvalRun} are the runs whose cells were delivered.
+ */
+export async function importedInspectEvalRun(root: string, options: ImportedSuiteRunOptions = {}): Promise<SuiteRun> {
+  const run = await lockedInspectEvalRun(root, options.coverage ?? "one_task");
   await importEveryCell(run, root, options.outcomeFor ?? (() => "unrun"), { harness: "inspect", version: SUPPORTED_INSPECT_VERSION }, "inspect");
-  ok("runCollect", await runCollect(context, { draftId: run.draftId }));
+  ok("runCollect", await runCollect(run.context, { draftId: run.draftId }));
+  return run;
+}
+
+/**
+ * A full-coverage run bound to Inspect eval, brought the claimant's way: `run import --from inspect`
+ * over one Inspect `read_eval_log` JSON EvalLog per arm, each scoring every selected sample at
+ * epoch 1, read by the named Inspect reader and collected. Every slot is delivered and graded.
+ */
+export async function inspectReaderImportedInspectEvalRun(root: string): Promise<SuiteRun> {
+  const run = await lockedInspectEvalRun(root, "full");
+  const logs = join(root, "eval-logs");
+  mkdirSync(logs, { recursive: true });
+  for (const arm of inspectManifest.arms) {
+    writeFileSync(join(logs, `${arm.armId}.json`), JSON.stringify({
+      version: 2,
+      status: "success",
+      eval: { task: "hermetic", model: arm.model, metadata: { "jinn.arm_id": arm.armId } },
+      samples: INSPECT_SAMPLE_IDS.map((id) => ({ id, epoch: 1, scores: { match: { value: "C" } } })),
+    }));
+  }
+  const dump = readInspectRunImport({ workspaceDir: run.workspaceDir, draftId: run.draftId, evalLogOrDir: logs });
+  ok("importRunRecords", await importRunRecords(run.context, {
+    draftId: run.draftId,
+    records: dump.records,
+    source: dump.source,
+    evidenceRoot: dump.evidenceRoot,
+    dump: dumpIdentityFromPath(logs, dump.records),
+    namedReader: "inspect",
+  }));
+  ok("runCollect", await runCollect(run.context, { draftId: run.draftId }));
+  return run;
+}
+
+/**
+ * A fake Inspect worker for the local-Python host: it answers the catalog and selection probes the
+ * launch-time drift check sends, and for each cell writes a native log and a
+ * `inspect-cell-summary/1` that binds it, scored `pass` under `scorer`.
+ */
+function fakeInspectWorker(root: string, manifest: InspectSelectionManifest, scorer: string): string {
+  const catalog = {
+    sampleIds: [...INSPECT_SAMPLE_IDS],
+    specifiedEpochs: 1,
+    datasetName: "hermetic",
+    datasetLocation: null,
+    datasetSampleCount: INSPECT_SAMPLE_IDS.length,
+  };
+  const probe = { runtime: manifest.runtime, task: manifest.task, scorer: INSPECT_SCORER_DEFINITION };
+  // No PATH crosses the worker boundary, so the interpreter is named absolutely.
+  return executable(join(root, "python"), `#!${process.execPath}
+import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const [operation, file] = process.argv.slice(3);
+const reply = (value) => process.stdout.write(JSON.stringify({ ok: true, value }));
+if (operation === "catalog" || operation === "probe") {
+  readFileSync(0);
+  reply(operation === "catalog" ? ${JSON.stringify(catalog)} : ${JSON.stringify(probe)});
+} else if (operation === "run") {
+  const config = JSON.parse(readFileSync(file, "utf8"));
+  const log = Buffer.from(JSON.stringify({
+    status: "success",
+    eval: { model: config.arm.model, metadata: { "jinn.arm_id": config.arm.armId } },
+    samples: [{ id: config.manifest.runOptions.sampleId, epoch: config.repetition, scores: { match: { value: "C" } } }],
+  }));
+  writeFileSync(join(config.outputDir, "inspect.eval"), log);
+  const summary = {
+    schema: "jinn.network/benchmark-product/inspect-cell-summary/1",
+    terminal: "scored",
+    inspectStatus: "success",
+    expectedSamples: 1,
+    observedSamples: 1,
+    erroredSamples: 0,
+    missingScoreSamples: 0,
+    invalidated: false,
+    scorer: ${JSON.stringify(scorer)},
+    verdict: "pass",
+    measurement: true,
+    evaluatedAt: new Date().toISOString(),
+    nativeLogSha256: createHash("sha256").update(log).digest("hex"),
+    nativeLogBytes: log.length,
+  };
+  writeFileSync(join(config.outputDir, "inspect-summary.json"), JSON.stringify(summary));
+  reply(summary);
+} else {
+  process.exit(64);
+}
+`);
+}
+
+/**
+ * A full-coverage run bound to Inspect eval, driven: launched on the local venue against
+ * {@link fakeInspectWorker} and collected, so every cell carries the native log and summary the
+ * Inspect adapter writes. `summaryScorer` names the scorer the worker reports.
+ */
+export async function launchedInspectEvalRun(
+  root: string,
+  options: { readonly summaryScorer?: string } = {},
+): Promise<SuiteRun> {
+  // The launch-time drift probe pins the real worker's digest, so the sealed selection does too.
+  const manifest = InspectSelectionManifestSchema.parse({
+    ...inspectManifest,
+    runtime: { ...inspectManifest.runtime, workerSha256: inspectWorkerSha256() },
+  });
+  const python = fakeInspectWorker(root, manifest, options.summaryScorer ?? INSPECT_SCORER_DEFINITION.name);
+  const run = await lockedInspectEvalRun(root, "full", manifest, python);
+  ok("runLaunch", await runLaunch(run.context, { draftId: run.draftId }));
+  ok("runCollect", await runCollect(run.context, { draftId: run.draftId }));
   return run;
 }

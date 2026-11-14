@@ -54,7 +54,9 @@ import {
   importedInspectEvalRun,
   importedSwebenchRun,
   importedTerminalBench30Run,
+  inspectReaderImportedInspectEvalRun,
   launchedHarborSuiteRun,
+  launchedInspectEvalRun,
   writeRetainedHarborTrials,
   type SuiteRun,
 } from "./testing/suite-runs.js";
@@ -226,6 +228,58 @@ describe("leaderboardSubmitReady is re-derived from carried evidence (#4761, #47
     );
     expect(published.suiteEvidence.files).toEqual([]);
     await verifyPublicBundle(published.bundleDir);
+  }, 240_000);
+});
+
+describe("a suite-bound Inspect eval run with delivered cells publishes, each cell bound to its carried selection (#5244)", () => {
+  /** The solve Delivery outputs the published assembly records for each cell. */
+  function solveOutputs(published: Published): readonly (readonly string[])[] {
+    const header = JSON.parse(readFileSync(join(published.bundleDir, "verification", "assembly.jsonl"), "utf8").split("\n")[0]!) as {
+      graph: { solveDeliveries: { outputs: { name: string }[] }[] };
+    };
+    return header.graph.solveDeliveries.map((delivery) => delivery.outputs.map((output) => output.name).sort());
+  }
+
+  test("brought with run import --from inspect: every cell is delivered and graded, the run is ready, and the checker passes", async () => {
+    const run = await inspectReaderImportedInspectEvalRun(root);
+    const published = await reportAndPublish(run);
+    expect(published.manifest.capabilities).toContain(SUITE_COMPARABILITY_CAPABILITY);
+    // Two samples by two arms at the eval's one epoch, each carrying the native EvalLog the named
+    // Inspect reader read, and no summary: the reader never invents one.
+    expect(solveOutputs(published)).toEqual(Array.from({ length: 4 }, () => ["inspect-log.eval"]));
+    expect(published.claim.suiteComparability).toEqual({ executionConformance: true, coverage: "full", leaderboardSubmitReady: true });
+    await verifyPublicBundle(published.bundleDir);
+  }, 240_000);
+
+  test("driven: every cell's native log and summary bind the arm and template of the carried selection, and the checker passes", async () => {
+    const run = await launchedInspectEvalRun(root);
+    const published = await reportAndPublish(run);
+    expect(published.manifest.capabilities).toContain(SUITE_COMPARABILITY_CAPABILITY);
+    expect(solveOutputs(published)).toEqual(Array.from({ length: 4 }, () => ["inspect-log", "inspect-summary", "verdict"]));
+    expect(published.claim.suiteComparability).toEqual({ executionConformance: true, coverage: "full", leaderboardSubmitReady: true });
+    await verifyPublicBundle(published.bundleDir);
+  }, 240_000);
+
+  test("driven: a cell whose summary names a scorer the carried selection did not seal is refused", async () => {
+    const run = await launchedInspectEvalRun(root, { summaryScorer: "includes" });
+    const reported = await runReport(run.context, { draftId: run.draftId });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    const published = await runPublish(run.context, { draftId: run.draftId, includeNativeArtifacts: true });
+    expect(published.ok).toBe(false);
+    if (published.ok) return;
+    expect(published.error.detail).toMatch(/legacy Inspect summary differs from its sealed scorer selection/u);
+  }, 240_000);
+
+  test("imported: a delivered cell whose outputs are not the named Inspect reader's native log is refused", async () => {
+    // A generic record for each slot, opened as if the named reader had written it: the cell is
+    // delivered with a file the reader never carries.
+    const run = await importedInspectEvalRun(root, { outcomeFor: () => "ungradeable" });
+    const reported = await runReport(run.context, { draftId: run.draftId });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    const published = await runPublish(run.context, { draftId: run.draftId, includeNativeArtifacts: true });
+    expect(published.ok).toBe(false);
+    if (published.ok) return;
+    expect(published.error.detail).toMatch(/Inspect eval Delivery does not carry exactly the native log the named Inspect reader imports/u);
   }, 240_000);
 });
 
