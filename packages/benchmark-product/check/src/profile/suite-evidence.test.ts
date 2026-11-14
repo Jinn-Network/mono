@@ -47,6 +47,7 @@ import {
   assertInspectEvalTask,
   buildSuiteEvidenceIndex,
   deriveSuiteComparabilityFromEvidence,
+  harborTrialConfigProjection,
   harborTrialDirectory,
   readRegisteredSuiteSelection,
   resolveCarriedSuite,
@@ -274,6 +275,22 @@ describe("a real Harbor 0.21 job: prefixed task names, unnumbered attempts, a pr
     expect(harborTrialDirectory(tree, "task-a", 1)).toBe("task-a__EZiYZgD");
     expect(harborTrialDirectory(tree, "task-a", 2)).toBe("task-a__eiRCBED");
     expect(harborTrialDirectory(tree, "task-b", 1)).toBe("task-b__abcdefg");
+  });
+
+  test("a trial config.json is read as the part of it that names its task and attempt, and that part reads back the same", () => {
+    const text = (bytes: Uint8Array | undefined) => bytes === undefined ? undefined : new TextDecoder().decode(bytes);
+    const cases: readonly [Uint8Array, string | undefined][] = [
+      [harbor021TrialConfig("one", "task-a", "EZiYZgD"), '{"task":{"name":"task-a"}}'],
+      [encode({ task: { name: "terminal-bench/task-a" }, attempt_number: 3, trials_dir: PRIVATE_JOBS_DIR }), '{"attempt":3,"task":{"name":"task-a"}}'],
+      [encode({ task: { path: "/private/work/.jinn-harbor/dataset/task-a" }, attempt: 2 }), '{"attempt":2,"task":{"name":"task-a"}}'],
+      [encode({ trial_name: "odd/name__EZiYZgD" }), '{"trial_name":"odd/name"}'],
+      [encode({ trials_dir: PRIVATE_JOBS_DIR }), undefined],
+      [new TextEncoder().encode("not json"), undefined],
+    ];
+    for (const [bytes, projected] of cases) {
+      expect(text(harborTrialConfigProjection(bytes))).toBe(projected);
+      if (projected !== undefined) expect(text(harborTrialConfigProjection(new TextEncoder().encode(projected)))).toBe(projected);
+    }
   });
 });
 
