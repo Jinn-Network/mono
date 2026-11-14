@@ -55,3 +55,13 @@ cannot be checked here either. A revocation has no field for §7.4b's "fresh cer
 §7.4c's rule on a witness older than an owner change needs a chain fact and the
 evidence's time, and neither reaches any interface here: `verifyHostedCeremony` is
 handed only the record. So nothing applies that rule yet.
+
+## What a ceremony's message must name
+
+§7.2 pins a dedicated ceremony `domain` and `uri`. A ceremony verifies only when its
+message names the domain `trust.jinn.network` and, for its type, the URI
+`https://trust.jinn.network/ceremony/key-binding` (an EOA key-binding ceremony) or
+`https://trust.jinn.network/ceremony/authorization` (a ReCap authorization ceremony),
+each compared exactly. These are the profile's values, not a deployment setting, and
+every ceremony `@jinn-network/trust-authoring` signs carries them. A genuine signature
+over a message naming another site or another purpose binds nothing.
