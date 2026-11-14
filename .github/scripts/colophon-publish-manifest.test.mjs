@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
+import { pathToFileURL } from 'node:url';
 
 import {
   CLAIM_PIN_SOURCES,
@@ -14,14 +16,19 @@ import {
   applyColophonPublishManifest,
   assertClaimPinsMatchPublish,
   assertClaimReaderPinsMatchPublish,
+  assertPlatformSourceMatchesReceipt,
   assertReaderInstructionPinsResolve,
+  assertReceiptRowsServed,
   checkClaimPins,
+  checkProductReleaseReceipt,
   collectClaimReaderPins,
   collectPinsFromSource,
   collectReaderInstructionPins,
   fetchPublishedReaderVersions,
+  gitChangedFiles,
   loadFirstCutPlatformPin,
   loadProductReleasePlatformPin,
+  platformSourceDirectories,
   registeredReaderReleases,
   transformColophonManifestForPublish,
   transformColophonReadmeForPublish,
@@ -1220,4 +1227,459 @@ test('the publish workflow guards core and cli on served reader pins before rewr
   assert.ok(guard < apply, 'the guard must refuse before the manifest is rewritten for publish');
   const step = workflow.slice(workflow.lastIndexOf('- name:', guard), guard);
   assert.match(step, /if: \$\{\{ github\.event\.inputs\.package == 'core' \|\| github\.event\.inputs\.package == 'cli' \}\}/u);
+});
+
+// The receipt against npm and against the dispatched commit's platform source (issue #5044).
+//
+// The offline validator compares the receipts file with PRODUCT_RELEASES, two files in the same
+// commit. So a row edited together with its digest passes it, and so does a receipt whose canary
+// predates the platform source the tree's own products are built and tested against. The
+// `--check-receipt` step reads npm for every row and git for the source, before anything is
+// rewritten or published.
+
+/** The script's canonical JSON, so a test can recompute the digest PRODUCT_RELEASES holds. */
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function receiptDigest(receipt) {
+  return createHash('sha256').update(canonicalJson(receipt)).digest('hex');
+}
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\/]/gu, '\\$&');
+}
+
+function currentReceipts() {
+  return JSON.parse(readFileSync(join(repoRoot, PRODUCT_RELEASE_PLATFORM_PINS_PATH), 'utf8')).receipts;
+}
+
+/**
+ * What npm serves for each version the receipts record, as `name@version` to version document. On
+ * 2026-11-13 the registry served all 117 rows of the eight receipts with exactly these `gitHead` and
+ * `integrity` values. `edit` makes it serve something else.
+ */
+function servedAsRecorded(receipts, edit = () => {}) {
+  const documents = new Map();
+  for (const receipt of receipts) {
+    for (const row of receipt.platformPackages) {
+      documents.set(`${row.name}@${row.version}`, {
+        name: row.name,
+        version: row.version,
+        gitHead: row.gitHead,
+        dist: { integrity: row.integrity },
+      });
+    }
+  }
+  edit(documents);
+  return documents;
+}
+
+/** A registry stand-in serving the version documents in `documents`; any other version 404s. */
+function registryServingVersions(documents) {
+  return async (url) => {
+    const { origin, pathname } = new URL(url);
+    assert.equal(origin, 'https://registry.npmjs.org');
+    const at = pathname.lastIndexOf('/');
+    const id = `${decodeURIComponent(pathname.slice(1, at))}@${decodeURIComponent(pathname.slice(at + 1))}`;
+    const document = documents.get(id);
+    return document === undefined
+      ? { ok: false, status: 404 }
+      : { ok: true, status: 200, json: async () => structuredClone(document) };
+  };
+}
+
+/** The same stand-in for a spawned script: loaded with `--import`, it replaces `fetch`. */
+const REGISTRY_STUB_SOURCE = `import { readFileSync } from 'node:fs';
+const served = JSON.parse(readFileSync(process.env.COLOPHON_RECEIPT_TEST_REGISTRY, 'utf8'));
+globalThis.fetch = async (url) => {
+  const { pathname } = new URL(url);
+  const at = pathname.lastIndexOf('/');
+  const id = decodeURIComponent(pathname.slice(1, at)) + '@' + decodeURIComponent(pathname.slice(at + 1));
+  return Object.hasOwn(served, id)
+    ? { ok: true, status: 200, json: async () => served[id] }
+    : { ok: false, status: 404 };
+};
+`;
+
+const noPlatformSourceChange = () => [];
+// A row only the checker's 0.2.2 receipt records, so a refusal on it names one receipt.
+const VERIFY_ROW = `@jinn-network/verify@${RELEASE_PIN_VERSION}`;
+const OTHER_INTEGRITY = `sha512-${Buffer.alloc(64, 7).toString('base64')}`;
+
+/**
+ * The `@colophon-claims/check@0.2.1` receipt as it stood before #5030 re-pinned it, on platform
+ * canary 1c023eb, whose task-execution-profiles has no `external-verifier` family. Every field but
+ * the row integrities follows from the commit; the test below holds it to the digest
+ * PRODUCT_RELEASES recorded for it then.
+ */
+const PRE_5030_CHECK_SHA = '1c023eb4c24201435e665ddae9d297f286a196bc';
+const PRE_5030_CHECK_DIGEST = '9560178d3a2bceb5998d8953ef9ab7c41880b928c037be774778149000b5cacc';
+const PRE_5030_CHECK_INTEGRITIES = {
+  '@jinn-network/benchmarking-aggregate': 'sha512-mh+1RiyWiTiAHY1Hal/0ubrA4zqy/lNxlpA/b7r01g7fq3puXl6JYw62Wx1XoAvp9FfQtvPa4MXc0VYMLVB9RA==',
+  '@jinn-network/benchmarking-evidence': 'sha512-0ay6dBdpGbgmJmL9C0UaigN2JNt81iYp1McIwLsrvB19kgRVNnFSIXmZxe4lGF0tXzZtEOdA2No+jRb63BjMoQ==',
+  '@jinn-network/benchmarking-interop': 'sha512-TY+Io4dYcseBq6LybEYaa8juIZNWUEpB3aSRfFfXZb7K4FDEs/ppha4QfUXBJUG8XNM62zW8FpWsxSc/IvvH5g==',
+  '@jinn-network/benchmarking-local': 'sha512-PMYOKMf119jlEQB7dRh2ryAufc9YS2hA8rid979UN4pIJcsQDCEcqN7w8v9VGr9HeAr9t06qUjxBd8CwH3es0A==',
+  '@jinn-network/benchmarking-protocol': 'sha512-vv2BkDNfMcJtbww3COLlUM+x+Ed8E+KSJ2/UVJd+M8EnQcIZ0s7FwbNittgxfRSBNNYMvyn8qQtggoWaHXff5Q==',
+  '@jinn-network/benchmarking-records': 'sha512-E9Rc116V993LcETtIuRQtktXWTu0i5DKjodP66wtizuqZpdPtVenN/kpVG3EHHbTE7v/HLlOvXqPWYqP7zTHNQ==',
+  '@jinn-network/benchmarking-run': 'sha512-Xo+9dcKzQFuCJWHNTGB5x3gqOcyB1/YedmVpzwcg9pDlsiazVv3lvmFF0rZHRZc/N0qNytWV0QPlwIm1Aqy74g==',
+  '@jinn-network/environment-record': 'sha512-+72SXtYQexIWs2hbyeW+kM8GsMfJFy/HhP+IR6XEHNGzQL3iKs5v51Ca/RY7fvFVqnG1eQ3SM4lvLBEjWCncGQ==',
+  '@jinn-network/evidence-protocol': 'sha512-S3fH7zBySD+tXl62NhXQbGM/bXY8VmE6NjPK45pZaZrd4QFYU6EhUAHtxlZaEW2d0wWsnqt7aR7txmvYwL0wnQ==',
+  '@jinn-network/task-admission': 'sha512-hfT/C1l6ulTeukkAvR8Aj6NVshJhf6jh62Ld5Xd+W6/tCf3pQ73GElxOWgYwoMqN8cfzG7tRiliy+4WrufIaAw==',
+  '@jinn-network/task-execution-profiles': 'sha512-md/E54HkYXXcCXawE1zPfSZJWir6v0tHCGhNQuQdQRc/MeacUANsDG7Q8RkWmoEoi0JS8Mmk1vGIUAaz8hztpw==',
+  '@jinn-network/task-execution-protocol': 'sha512-XCaHbFRjdXLNYwBJBgl0Cs8833e990Zuj0sZfyFpP9FsNvBcEZMiZ/eicraAa5Y59YeQNdg3ivp/dz9ZcWZqhw==',
+  '@jinn-network/trust-core': 'sha512-VDS7QL+ySi+zb/R1exOKIjpsYAoy7zgct5HmdRyHxbeTREJ6g5Yo/VPLxNsvlcZtJ6Rvnw4fYqhmi8COTDtuMw==',
+  '@jinn-network/trust-resolve': 'sha512-A/3y6l6sW/mIDlVK0yS0wBuqpvGlxkGlZC+30pu3pzX40EVdLpEsck7KjxFjm6YfEQ5WTrB7nn3YzhDVDvAM/g==',
+  '@jinn-network/trust-testing': 'sha512-mhipGBPO28ZgfrN5xy3o0zw4wYosFKnTO4rwk0vUQT7SDACzd/bgeps8LF7S7L2DfiF+1DqTa74A1or+EjMeCA==',
+};
+
+function pre5030CheckReceipt() {
+  const platformVersion = `0.1.0-canary.sha.${PRE_5030_CHECK_SHA}`;
+  return {
+    decision: 'operator-authorization-2026-09-23-issue-4733',
+    product: { packageName: '@colophon-claims/check', version: '0.2.1' },
+    platformSourceSha: PRE_5030_CHECK_SHA,
+    platformVersion,
+    platformDistTag: 'canary',
+    platformLatestVersion: '0.0.0',
+    stackPublishRunUrl: 'https://github.com/Jinn-Network/mono/actions/runs/36838465494/attempts/1',
+    platformPackages: Object.entries(PRE_5030_CHECK_INTEGRITIES).map(([name, integrity]) => ({
+      name,
+      version: platformVersion,
+      gitHead: PRE_5030_CHECK_SHA,
+      integrity,
+      provenanceUrl: `https://registry.npmjs.org/-/npm/v1/attestations/${encodeURIComponent(name)}@${platformVersion}`,
+    })),
+  };
+}
+
+test('the check receipt as it stood before #5030 stops a check dispatch: its canary predates the platform source (issue #5044)', async () => {
+  const receipt = pre5030CheckReceipt();
+  assert.equal(receiptDigest(receipt), PRE_5030_CHECK_DIGEST, 'the fixture is the receipt PRODUCT_RELEASES accepted before #5030');
+  // npm still serves exactly what it records, so no registry read tells this receipt apart.
+  await assertReceiptRowsServed([receipt], registryServingVersions(servedAsRecorded([receipt])));
+
+  // The checker as it stood then, before it depended on @jinn-network/verify.
+  const manifest = { ...legacyVerifyManifest(), name: '@colophon-claims/check' };
+  const sources = platformSourceDirectories(repoRoot, manifest);
+  // Part of what `git diff --name-only 1c023eb 272455a -- packages/task-execution/profiles` lists:
+  // the family's source, a fixture it ships, and a test, which no published file is built from.
+  const differing = [
+    'packages/task-execution/profiles/fixtures/evaluation-spec/golden/external-verifier-minimal.json',
+    'packages/task-execution/profiles/src/evaluation-spec/family-blocks.test.ts',
+    'packages/task-execution/profiles/src/evaluation-spec/schema.ts',
+  ];
+  const asked = [];
+  assert.throws(
+    () => assertPlatformSourceMatchesReceipt(receipt, sources, (sha, directories) => {
+      asked.push({ sha, directories });
+      return differing;
+    }),
+    (error) => {
+      assert.match(error.message, /^the @colophon-claims\/check@0\.2\.1 receipt pins the platform canary built from 1c023eb4c24201435e665ddae9d297f286a196bc, but this commit's platform source differs from that commit in 2 files/u);
+      assert.match(error.message, /\n {2}packages\/task-execution\/profiles\/src\/evaluation-spec\/schema\.ts\n/u);
+      assert.match(error.message, /\n {2}packages\/task-execution\/profiles\/fixtures\/evaluation-spec\/golden\/external-verifier-minimal\.json\n/u);
+      assert.doesNotMatch(error.message, /\.test\.ts/u);
+      return true;
+    },
+  );
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].sha, PRE_5030_CHECK_SHA);
+  assert.ok(asked[0].directories.includes('packages/task-execution/profiles'));
+});
+
+test('a receipt row that differs from what npm serves stops a dispatch of any of the three packages (issue #5044)', async () => {
+  const receipts = currentReceipts();
+  assert.deepEqual(
+    receipts
+      .filter((receipt) => receipt.platformPackages.some((row) => `${row.name}@${row.version}` === VERIFY_ROW))
+      .map((receipt) => `${receipt.product.packageName}@${receipt.product.version}`),
+    ['@colophon-claims/check@0.2.2'],
+  );
+  const recorded = receipts.at(-1).platformPackages.find((row) => row.name === '@jinn-network/verify');
+  const prefix = `the @colophon-claims/check@0\\.2\\.2 receipt row ${escapeRegExp(VERIFY_ROW)} records`;
+  for (const product of ['check', 'core', 'cli']) {
+    const manifest = productManifest(product);
+    const served = registryServingVersions(servedAsRecorded(receipts));
+    const pin = await checkProductReleaseReceipt(repoRoot, manifest, { fetchImpl: served, changedFiles: noPlatformSourceChange });
+    assert.equal(`${pin.product.packageName}@${pin.product.version}`, `${manifest.name}@${manifest.version}`);
+    // Every row of every receipt is read. The cli receipt records no row of its own, and its
+    // install still brings in the checker's packages through core.
+    await assert.rejects(
+      () => checkProductReleaseReceipt(repoRoot, manifest, {
+        fetchImpl: registryServingVersions(servedAsRecorded(receipts, (documents) => {
+          documents.get(VERIFY_ROW).dist.integrity = OTHER_INTEGRITY;
+        })),
+        changedFiles: noPlatformSourceChange,
+      }),
+      new RegExp(`${prefix} integrity ${escapeRegExp(recorded.integrity)}, but npm serves ${escapeRegExp(OTHER_INTEGRITY)} for that version`, 'u'),
+      product,
+    );
+    await assert.rejects(
+      () => checkProductReleaseReceipt(repoRoot, manifest, {
+        fetchImpl: registryServingVersions(servedAsRecorded(receipts, (documents) => {
+          documents.get(VERIFY_ROW).gitHead = 'b'.repeat(40);
+        })),
+        changedFiles: noPlatformSourceChange,
+      }),
+      new RegExp(`${prefix} gitHead ${RELEASE_PIN_SHA}, but npm serves ${'b'.repeat(40)} for that version`, 'u'),
+      product,
+    );
+  }
+});
+
+test('a dispatch of any of the three packages stops when this commit\'s platform source is not its receipt\'s (issue #5044)', async () => {
+  const served = registryServingVersions(servedAsRecorded(currentReceipts()));
+  // The one source file #5045 found changed after the canary, before #5049 held it back.
+  const changed = 'packages/benchmarking/aggregate/src/paired-majority-delta-method.ts';
+  for (const product of ['check', 'core', 'cli']) {
+    const manifest = productManifest(product);
+    const asked = [];
+    await assert.rejects(
+      () => checkProductReleaseReceipt(repoRoot, manifest, {
+        fetchImpl: served,
+        changedFiles: (sha, directories) => {
+          asked.push(sha);
+          return directories.includes('packages/benchmarking/aggregate') ? [changed] : [];
+        },
+      }),
+      new RegExp(
+        `the ${escapeRegExp(`${manifest.name}@${manifest.version}`)} receipt pins the platform canary built from ${RELEASE_PIN_SHA}, but this commit's platform source differs from that commit in 1 file:\\n {2}${escapeRegExp(changed)}\\n`,
+        'u',
+      ),
+      product,
+    );
+    assert.deepEqual(asked, [RELEASE_PIN_SHA], product);
+  }
+});
+
+test('the registry check fails closed and names the row when npm does not serve it or cannot be read (issue #5044)', async () => {
+  const receipts = currentReceipts();
+  await assertReceiptRowsServed(receipts, registryServingVersions(servedAsRecorded(receipts)));
+  await assert.rejects(
+    () => assertReceiptRowsServed(receipts, registryServingVersions(servedAsRecorded(receipts, (documents) => {
+      documents.delete(VERIFY_ROW);
+    }))),
+    new RegExp(`the @colophon-claims/check@0\\.2\\.2 receipt row ${escapeRegExp(VERIFY_ROW)} names a version npm does not serve`, 'u'),
+  );
+  await assert.rejects(
+    () => assertReceiptRowsServed(receipts, async () => ({ ok: false, status: 503 })),
+    /cannot check the @colophon-claims\/verify@0\.2\.0 receipt row @jinn-network\/benchmarking-aggregate@0\.1\.0-canary\.sha\.e00b2fc47fc5635b007eb349fb1e41aa81bb3c50 against npm: HTTP 503/u,
+  );
+  // A version document that lacks the field does not match it.
+  await assert.rejects(
+    () => assertReceiptRowsServed(receipts, registryServingVersions(servedAsRecorded(receipts, (documents) => {
+      delete documents.get(VERIFY_ROW).dist;
+    }))),
+    /records integrity sha512-[^,]+, but npm serves none for that version/u,
+  );
+});
+
+test('a row edited together with its PRODUCT_RELEASES digest passes --apply and is still refused by --check-receipt (issue #5044)', () => {
+  const stage = mkdtempSync(join(tmpdir(), 'colophon-receipt-row-'));
+  try {
+    cpSync(join(repoRoot, '.github/scripts'), join(stage, '.github/scripts'), { recursive: true });
+    for (const product of ['check', 'core', 'cli']) {
+      mkdirSync(join(stage, 'packages/benchmark-product', product), { recursive: true });
+      copyFileSync(
+        join(repoRoot, 'packages/benchmark-product', product, 'package.json'),
+        join(stage, 'packages/benchmark-product', product, 'package.json'),
+      );
+    }
+    const pins = JSON.parse(readFileSync(join(repoRoot, PRODUCT_RELEASE_PLATFORM_PINS_PATH), 'utf8'));
+    const served = servedAsRecorded(pins.receipts);
+    const receipt = pins.receipts.find(({ product }) => `${product.packageName}@${product.version}` === '@colophon-claims/check@0.2.2');
+    const row = receipt.platformPackages.find(({ name }) => name === '@jinn-network/verify');
+    const servedIntegrity = row.integrity;
+    const recordedDigest = receiptDigest(receipt);
+    row.integrity = OTHER_INTEGRITY;
+    writeFileSync(join(stage, PRODUCT_RELEASE_PLATFORM_PINS_PATH), `${JSON.stringify(pins, null, 2)}\n`);
+    const scriptPath = join(stage, '.github/scripts/colophon-publish-manifest.mjs');
+    const script = readFileSync(scriptPath, 'utf8');
+    assert.equal(script.split(`receiptSha256: '${recordedDigest}'`).length, 2, 'PRODUCT_RELEASES holds the checker receipt digest once');
+    writeFileSync(scriptPath, script.replace(`receiptSha256: '${recordedDigest}'`, `receiptSha256: '${receiptDigest(receipt)}'`));
+
+    // Both files of the commit were edited, so the offline validator behind --apply accepts them.
+    const env = { ...process.env };
+    delete env.GITHUB_SHA;
+    const applyDir = join(stage, 'apply');
+    mkdirSync(applyDir);
+    copyFileSync(join(repoRoot, 'packages/benchmark-product/check/package.json'), join(applyDir, 'package.json'));
+    const applied = spawnSync(process.execPath, [scriptPath, '--apply', join(applyDir, 'package.json')], { env, encoding: 'utf8' });
+    assert.equal(applied.status, 0, applied.stderr);
+
+    // npm is not in the commit. Each dispatch reads it and stops on the edited row.
+    const registryPath = join(stage, 'registry.json');
+    writeFileSync(registryPath, JSON.stringify(Object.fromEntries(served)));
+    const stubPath = join(stage, 'registry-stub.mjs');
+    writeFileSync(stubPath, REGISTRY_STUB_SOURCE);
+    for (const product of ['check', 'core', 'cli']) {
+      const checked = spawnSync(
+        process.execPath,
+        ['--import', pathToFileURL(stubPath).href, scriptPath, '--check-receipt', `packages/benchmark-product/${product}/package.json`],
+        { env: { ...env, COLOPHON_RECEIPT_TEST_REGISTRY: registryPath }, encoding: 'utf8' },
+      );
+      assert.equal(checked.status, 1, `${product}: ${checked.stdout}${checked.stderr}`);
+      assert.match(
+        checked.stderr,
+        new RegExp(`the @colophon-claims/check@0\\.2\\.2 receipt row ${escapeRegExp(VERIFY_ROW)} records integrity ${escapeRegExp(OTHER_INTEGRITY)}, but npm serves ${escapeRegExp(servedIntegrity)}`, 'u'),
+        product,
+      );
+    }
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+  }
+});
+
+test('the platform source check counts every file a package is built or published from, and ignores only its tests (issue #5044)', () => {
+  const manifest = checkerManifest();
+  const pin = loadProductReleasePlatformPin(repoRoot, manifest);
+  const sources = platformSourceDirectories(repoRoot, manifest);
+  const aggregate = 'packages/benchmarking/aggregate';
+  const asked = [];
+  const compare = (files) => () => assertPlatformSourceMatchesReceipt(pin, sources, (sha, directories) => {
+    asked.push({ sha, directories });
+    return files;
+  });
+  assert.doesNotThrow(compare([]));
+  assert.deepEqual(asked[0], { sha: RELEASE_PIN_SHA, directories: sources.map(({ directory }) => directory) });
+  // Every package in the closure builds with a tsconfig.build.json that excludes src/**/*.test.ts,
+  // and none lists a test or its vitest config in `files` (#5045).
+  assert.doesNotThrow(compare([`${aggregate}/src/paired-majority-delta-method.test.ts`, `${aggregate}/vitest.config.ts`]));
+  // The source file #5045 found changed after the canary, held back by #5049 and tracked by #5048,
+  // and the other files a build or a tarball reads.
+  for (const file of [
+    `${aggregate}/src/paired-majority-delta-method.ts`,
+    `${aggregate}/package.json`,
+    `${aggregate}/yarn.lock`,
+    `${aggregate}/README.md`,
+    `${aggregate}/tsconfig.build.json`,
+    'packages/task-execution/profiles/fixtures/evaluation-spec/golden/external-verifier-minimal.json',
+  ]) {
+    assert.throws(
+      compare([`${aggregate}/src/registry.test.ts`, file]),
+      (error) => {
+        assert.match(error.message, new RegExp(`^the @colophon-claims/check@0\\.2\\.2 receipt pins the platform canary built from ${RELEASE_PIN_SHA}, but this commit's platform source differs from that commit in 1 file`, 'u'));
+        assert.match(error.message, new RegExp(`\\n {2}${escapeRegExp(file)}\\n`, 'u'));
+        assert.doesNotMatch(error.message, /registry\.test\.ts/u);
+        return true;
+      },
+      file,
+    );
+  }
+  // A comparison that cannot run refuses; it never reads as no difference.
+  assert.throws(
+    () => assertPlatformSourceMatchesReceipt(pin, sources, () => {
+      throw new Error('cannot fetch platform commit');
+    }),
+    /cannot fetch platform commit/u,
+  );
+});
+
+test('the platform source compared is every platform package the dispatched package installs (issue #5044)', () => {
+  const directories = (product) => platformSourceDirectories(repoRoot, productManifest(product));
+  const checkPin = loadProductReleasePlatformPin(repoRoot, checkerManifest());
+  const corePin = loadProductReleasePlatformPin(repoRoot, productManifest('core'));
+  const check = directories('check');
+  // The checker's receipt records its whole install closure.
+  assert.deepEqual(check.map(({ name }) => name), checkPin.platformPackages.map(({ name }) => name));
+  assert.ok(check.some(({ name, directory }) =>
+    name === '@jinn-network/task-execution-profiles' && directory === 'packages/task-execution/profiles'));
+  // core's receipt records its direct dependencies. Its install also brings what they bring, and
+  // the checker's packages.
+  const core = directories('core');
+  for (const { name } of [...corePin.platformPackages, ...checkPin.platformPackages]) {
+    assert.ok(core.some((source) => source.name === name), name);
+  }
+  assert.ok(core.length > corePin.platformPackages.length);
+  // cli records none and installs core and the checker. Its build also compiles the private web
+  // application from this tree's platform source (#5045).
+  assert.deepEqual(directories('cli'), core);
+  assert.throws(
+    () => platformSourceDirectories(repoRoot, {
+      name: '@colophon-claims/check',
+      version: '0.2.2',
+      dependencies: { '@jinn-network/not-in-this-tree': '0.1.0' },
+    }),
+    /cannot find the source of @jinn-network\/not-in-this-tree in this tree/u,
+  );
+});
+
+test('the source comparison reads git, fetching the receipt commit a shallow checkout lacks, and fails closed (issue #5044)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'colophon-receipt-git-'));
+  const env = {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: join(root, 'no-global-config'),
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_AUTHOR_NAME: 'test',
+    GIT_AUTHOR_EMAIL: 'test@example.invalid',
+    GIT_COMMITTER_NAME: 'test',
+    GIT_COMMITTER_EMAIL: 'test@example.invalid',
+  };
+  const git = (cwd, ...args) => {
+    const result = spawnSync('git', args, { cwd, env, encoding: 'utf8' });
+    assert.equal(result.status, 0, `git ${args.join(' ')}: ${result.stderr}`);
+    return result.stdout.trim();
+  };
+  const write = (repository, files) => {
+    for (const [path, text] of Object.entries(files)) {
+      mkdirSync(join(repository, path, '..'), { recursive: true });
+      writeFileSync(join(repository, path), text);
+    }
+  };
+  try {
+    const origin = join(root, 'origin');
+    mkdirSync(origin);
+    git(origin, 'init', '--quiet');
+    write(origin, { 'pkg/a/src/index.ts': 'one\n', 'pkg/a/src/index.test.ts': 'one\n', 'pkg/b/index.ts': 'one\n', 'other.txt': 'one\n' });
+    git(origin, 'add', '.');
+    git(origin, 'commit', '--quiet', '--no-verify', '-m', 'canary');
+    const canary = git(origin, 'rev-parse', 'HEAD');
+    write(origin, { 'pkg/a/src/index.ts': 'two\n', 'pkg/a/src/index.test.ts': 'two\n', 'other.txt': 'two\n' });
+    git(origin, 'commit', '--quiet', '--no-verify', '-am', 'next');
+    const clone = join(root, 'clone');
+    git(root, 'clone', '--quiet', '--depth=1', pathToFileURL(origin).href, clone);
+    assert.notEqual(
+      spawnSync('git', ['cat-file', '-e', `${canary}^{commit}`], { cwd: clone, env }).status,
+      0,
+      'the shallow clone starts without the canary commit',
+    );
+
+    assert.deepEqual(gitChangedFiles(clone, canary, ['pkg/a', 'pkg/b']), ['pkg/a/src/index.test.ts', 'pkg/a/src/index.ts']);
+    assert.deepEqual(gitChangedFiles(clone, canary, ['pkg/b']), []);
+    assert.deepEqual(gitChangedFiles(clone, git(clone, 'rev-parse', 'HEAD'), ['pkg/a']), []);
+    assert.throws(
+      () => gitChangedFiles(clone, 'c'.repeat(40), ['pkg/a']),
+      new RegExp(`cannot fetch platform commit ${'c'.repeat(40)} from origin`, 'u'),
+    );
+    // A diff git cannot run is a refusal, never an empty list.
+    assert.throws(
+      () => gitChangedFiles(clone, canary, [':(not-a-magic)pkg/a']),
+      new RegExp(`cannot compare platform commit ${canary} with HEAD`, 'u'),
+    );
+    for (const value of ['--upload-pack=true', canary.slice(0, 12), undefined]) {
+      assert.throws(() => gitChangedFiles(clone, value, ['pkg/a']), /must be a 40-character commit sha/u, String(value));
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('every dispatch checks its receipt against npm and this commit before anything is rewritten or published (issue #5044)', () => {
+  const publish = jobSteps(COLOPHON_PUBLISH_WORKFLOW, 'publish-colophon');
+  const step = stepNamed(publish, 'Refuse a receipt that npm or this commit\'s platform source contradicts');
+  assert.deepEqual(runLines(step), [
+    'node .github/scripts/colophon-publish-manifest.mjs --check-receipt packages/benchmark-product/${{ github.event.inputs.package }}/package.json',
+  ]);
+  assert.ok(!step.some((line) => /^ {8}if:/u.test(line)), 'the step runs for check, core and cli alike');
+  const at = publish.indexOf(step);
+  const rewritesOrPublishes = publish.filter((other) => /--apply |npm publish/u.test(other.join('\n')));
+  assert.equal(rewritesOrPublishes.length, 5, 'two --apply steps and three npm publish steps');
+  for (const other of rewritesOrPublishes) {
+    assert.ok(publish.indexOf(other) > at, `${other[0].trim()} must come after the receipt check`);
+  }
 });
