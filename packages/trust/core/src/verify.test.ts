@@ -5,10 +5,12 @@ import type { KeyObject } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import { describe, expect, test } from "vitest";
 
 import { canonicalJsonBytes } from "./canonical-json.js";
-import { ceremonyEvidenceDigest } from "./ceremony.js";
+import { ceremonyEvidenceDigest, serializeCeremonyMessage } from "./ceremony.js";
 import type { EoaCeremonyEvidence } from "./ceremony.js";
 import { dssePreAuthEncoding, parseDsseEnvelope, sealDsseEnvelope } from "./dsse.js";
 import {
@@ -332,6 +334,57 @@ describe("verifyEnvelopeBinding", () => {
     expect(outcome.ok).toBe(false);
     expect(outcome.reason).toBe("ceremony-verification-failed");
     expect(outcome.detail).toMatch(/ceremony evidence digest/);
+  });
+
+  test.each([
+    ["the profile's domain and URI", {}, undefined],
+    ["another domain", { domain: "login.example" }, /ceremony domain "login\.example"/],
+    ["another URI", { uri: "https://trust.jinn.network/login" }, /ceremony URI "https:\/\/trust\.jinn\.network\/login"/],
+  ])("a genuine EOA ceremony with %s, committed by its record (§7.2)", async (_label, overrides, refusal) => {
+    // The secp256k1 secret key 1, a test value with no other use, signs the ceremony for real.
+    const secretKey = Uint8Array.from({ length: 32 }, (_, index) => (index === 31 ? 1 : 0));
+    const address = "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf" as const;
+    const message: EoaCeremonyEvidence["message"] = { ...eoaFixture.message, address, ...overrides };
+    const messageBytes = serializeCeremonyMessage("eoa", message);
+    const prefix = new TextEncoder().encode(`\x19Ethereum Signed Message:\n${messageBytes.length}`);
+    const recovered = secp256k1.sign(keccak_256(Uint8Array.of(...prefix, ...messageBytes)), secretKey, {
+      prehash: false,
+      format: "recovered",
+    });
+    const evidence: EoaCeremonyEvidence = {
+      type: "eoa",
+      message,
+      messageBytes,
+      signature: Uint8Array.of(...recovered.slice(1), recovered[0]! + 27),
+    };
+    const binding = keyBinding({
+      agent: eoaFixture.agentIri,
+      key: { publicKey: "0x04", keyid: eoaFixture.didKey, algorithm: "secp256k1", didKey: eoaFixture.didKey },
+      voucher: { kind: "account", did: didPkh(eoaFixture.voucherChainId, address), contractAccount: false },
+      ceremony: { type: "eoa", digest: ceremonyEvidenceDigest(evidence) },
+      scope: ["deliveries", "verdicts"],
+    });
+    const resolver = new FakeBindingResolver().register({
+      key: eoaFixture.didKey,
+      agent: eoaFixture.agentIri,
+      resolved: resolvedBinding({ binding, ceremonyEvidence: evidence }),
+    });
+
+    const outcome = await verifyEnvelopeBinding(
+      {
+        envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, eoaFixture.didKey),
+        key: eoaFixture.didKey,
+        agent: eoaFixture.agentIri,
+        family: "deliveries",
+        atTime: "2026-03-01T00:00:00Z",
+      },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
+    );
+    if (refusal === undefined) {
+      expect(outcome).toMatchObject({ ok: true });
+    } else {
+      expect(outcome).toMatchObject({ ok: false, reason: "ceremony-verification-failed", detail: expect.stringMatching(refusal) });
+    }
   });
 
   test("step 1 rejects an envelope with no valid signature from the claimed key", async () => {
