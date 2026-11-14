@@ -62,6 +62,21 @@ export const BUNDLE_V8_FORMAT = "benchmark-product-public-bundle/8" as const;
  * byte-pinned -- `verifyPublicBundleSnapshot` rebuilds every presentation asset and byte-compares
  * it, so changing a rendered string in place would break every already-published bundle under the
  * command printed on its own page.
+ *
+ * Every in-place edit this page took before its first reader release was lawful only because no
+ * `/10` bundle could exist yet. The page was allocated with `report-prose-singularity` alone
+ * (PR #4230); PR #4771 appended `declared-strict-denominators`, PR #4774 appended
+ * `origin-free-identifiers` (commit ad0c43659, 2026-09-26), and PR #4985 appended
+ * `zero-judged-rate-unstated`, all merged between 2026-09-26 and 2026-10-07. While they landed, npm
+ * served this package only as the `0.0.0` name reservation, which reads no format, so nothing a
+ * published reader could verify had been rendered. That permission ended when the first release
+ * that reads `/10`, check 0.2.1, was published (2026-10-21; `0.2.2` followed on 2026-11-04). Since
+ * then a change to any byte `/10` presents -- `index.html`, `badge.svg`, `social-card.svg`,
+ * `README.md`, `share.txt`, or the capability list behind them -- breaks every published `/10`
+ * bundle under the command printed on its own page, and needs a new format number instead of an
+ * edit. The tree records that first release as `READER_RELEASE_LINES["check@0.2.1"]` in
+ * `capabilities.ts`, and `npm view @colophon-claims/check time` gives its publication date, so a
+ * reader can tell whether the precondition still holds.
  */
 export const BUNDLE_V10_FORMAT = "benchmark-product-public-bundle/10" as const;
 /**

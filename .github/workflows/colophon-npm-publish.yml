@@ -194,6 +194,14 @@ jobs:
       - name: Install npm 11.19.0
         run: npm install -g npm@11.19.0
 
+      # The `--apply` steps below compare the receipts with PRODUCT_RELEASES, two files in this
+      # commit. This step reads what is not in it, for every package: npm, for each receipt row's
+      # `integrity` and `gitHead`, and git, for whether this commit's platform source is the commit
+      # the receipt's canary was built from (tests aside). The checkout is shallow, so the script
+      # fetches that commit by sha (issue #5044).
+      - name: Refuse a receipt that npm or this commit's platform source contradicts
+        run: node .github/scripts/colophon-publish-manifest.mjs --check-receipt packages/benchmark-product/${{ github.event.inputs.package }}/package.json
+
       - name: Refuse a publish the in-tree claim pins do not name
         if: ${{ github.event.inputs.package == 'check' }}
         run: node .github/scripts/colophon-publish-manifest.mjs --check-claim-pins packages/benchmark-product/check/package.json

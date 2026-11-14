@@ -211,6 +211,7 @@ function publisherArgs(fixture, overrides = {}) {
     registry: NPM_REGISTRY,
     repository: REPOSITORY,
     outputPath: fixture.outputPath,
+    log: () => {},
     ...overrides,
   };
 }
@@ -242,6 +243,11 @@ function registryExec(fixture, options = {}) {
   const exec = (command, args, cwd) => {
     calls.push({ command, args: [...args], cwd });
     if (command === 'gh') {
+      if (args[0] === 'api') {
+        const compared = options.compare?.(args);
+        if (compared) return compared;
+        throw new Error(`unexpected gh ${args.join(' ')}`);
+      }
       if (options.failAttestationPath && args[2] === options.failAttestationPath) {
         return { status: 1, stdout: '', stderr: 'attestation verification failed' };
       }
@@ -663,6 +669,193 @@ test('an existing integrity or canary tag mismatch aborts the full-set preflight
   }
 });
 
+const EARLIER_SHA = 'a'.repeat(40);
+const OTHER_SHA = 'b'.repeat(40);
+const LATER_SHA = 'e'.repeat(40);
+
+function canaryVersion(sha) {
+  return `0.1.0-canary.sha.${sha}`;
+}
+
+function tagged(version) {
+  return { status: 0, stdout: JSON.stringify(version), stderr: '' };
+}
+
+// The canary dist-tag a package carries before this leg publishes it.
+function canaryTagsBeforePublish(tagFor) {
+  return ({ field, name, publishedNames }) => (
+    field === 'dist-tags.canary' && !publishedNames.has(name) ? tagFor(name) : undefined
+  );
+}
+
+// GitHub's compare of this run's source with the commit a canary tag names.
+function compareBySha(resultBySha) {
+  const prefix = `repos/${REPOSITORY}/compare/${SHA}...`;
+  return (args) => {
+    assert.equal(args[0], 'api');
+    assert.ok(args[1].startsWith(prefix), `compare starts from this run's source: ${args[1]}`);
+    assert.deepEqual(args.slice(2), ['--jq', '.status']);
+    const result = resultBySha[args[1].slice(prefix.length)];
+    return typeof result === 'string' ? { status: 0, stdout: `${result}\n`, stderr: '' } : result;
+  };
+}
+
+function compareCalls(calls) {
+  return calls.filter(({ command, args }) => command === 'gh' && args[0] === 'api');
+}
+
+function firstPublishAt(calls) {
+  return calls.findIndex(({ command, args }) => command === 'npm' && args[0] === 'publish');
+}
+
+test('a leg with every version missing is refused before any publish while canary points at a later sha on next', async () => {
+  for (const [scenario, tagFor] of [
+    ['every package', () => tagged(canaryVersion(LATER_SHA))],
+    ['after a partial later walk', (name, fixture) => tagged(canaryVersion(
+      name === fixture.receipt.packageOrder[0] ? LATER_SHA : EARLIER_SHA,
+    ))],
+  ]) {
+    const fixture = publicationFixture();
+    const fake = registryExec(fixture, {
+      viewOverride: canaryTagsBeforePublish((name) => tagFor(name, fixture)),
+      compare: compareBySha({ [LATER_SHA]: 'ahead', [EARLIER_SHA]: 'behind' }),
+    });
+    try {
+      await assert.rejects(
+        publishVerifiedPlatform(publisherArgs(fixture, { exec: fake.exec })),
+        (error) => {
+          assert.match(error.message, /^canary rollback refused for platform-v1: /u, scenario);
+          assert.ok(error.message.includes(fixture.receipt.packageOrder[0]), scenario);
+          assert.ok(error.message.includes(LATER_SHA), `${scenario}: names the later sha`);
+          assert.ok(error.message.includes(SHA), `${scenario}: names this run's sha`);
+          assert.match(error.message, /nothing was published/u, scenario);
+          return true;
+        },
+      );
+      assert.deepEqual(publishCalls(fake.calls), [], `${scenario} publishes nothing`);
+      assert.equal(existsSync(fixture.outputPath), false);
+      assert.ok(
+        compareCalls(fake.calls).some(({ args }) => args[1].endsWith(`...${LATER_SHA}`)),
+        `${scenario} asks GitHub for the order`,
+      );
+    } finally {
+      cleanup(fixture);
+    }
+  }
+});
+
+test('missing versions whose canary tags come from an earlier sha on next publish and move canary forward', async () => {
+  const fixture = publicationFixture();
+  const fake = registryExec(fixture, {
+    viewOverride: canaryTagsBeforePublish(() => tagged(canaryVersion(EARLIER_SHA))),
+    compare: compareBySha({ [EARLIER_SHA]: 'behind' }),
+  });
+  try {
+    const receipt = await publishVerifiedPlatform(publisherArgs(fixture, { exec: fake.exec }));
+    assert.deepEqual(
+      publishCalls(fake.calls).map(({ args }) => tarballByName(fixture, args[1])),
+      fixture.receipt.packageOrder,
+    );
+    assert.ok(receipt.observedRegistry.every(({ taggedVersion }) => taggedVersion === fixture.packageVersion));
+    const compares = compareCalls(fake.calls);
+    assert.deepEqual(compares.map(({ args }) => args), [
+      ['api', `repos/${REPOSITORY}/compare/${SHA}...${EARLIER_SHA}`, '--jq', '.status'],
+    ]);
+    assert.ok(fake.calls.indexOf(compares[0]) < firstPublishAt(fake.calls), 'the order is known before any publish');
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('a canary tag whose order against this run cannot be determined fails closed before any publish', async () => {
+  const cases = [
+    {
+      scenario: 'neither commit descends from the other',
+      tag: () => tagged(canaryVersion(OTHER_SHA)),
+      compare: { [OTHER_SHA]: 'diverged' },
+      message: new RegExp(`${OTHER_SHA}.*diverged`, 'u'),
+    },
+    {
+      scenario: 'GitHub compare fails',
+      tag: () => tagged(canaryVersion(OTHER_SHA)),
+      compare: { [OTHER_SHA]: { status: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)' } },
+      message: new RegExp(`${OTHER_SHA}.*GitHub compare failed: gh: Not Found \\(HTTP 404\\)`, 'u'),
+    },
+    {
+      scenario: 'GitHub compare answers something else',
+      tag: () => tagged(canaryVersion(OTHER_SHA)),
+      compare: { [OTHER_SHA]: { status: 0, stdout: '{}', stderr: '' } },
+      message: new RegExp(`${OTHER_SHA}.*GitHub compare returned "\\{\\}"`, 'u'),
+    },
+    {
+      scenario: 'the tagged version names no commit',
+      tag: () => tagged('0.0.1'),
+      compare: {},
+      message: /"0\.0\.1".*names no source commit/u,
+    },
+    {
+      scenario: 'the tag cannot be read',
+      tag: () => ({ status: 1, stdout: '', stderr: 'ECONNREFUSED registry unavailable' }),
+      compare: {},
+      message: /registry query failed for .* dist-tags\.canary: ECONNREFUSED/u,
+    },
+  ];
+  for (const { scenario, tag, compare, message } of cases) {
+    const fixture = publicationFixture();
+    const fake = registryExec(fixture, {
+      viewOverride: canaryTagsBeforePublish(tag),
+      compare: compareBySha(compare),
+    });
+    try {
+      await assert.rejects(
+        publishVerifiedPlatform(publisherArgs(fixture, { exec: fake.exec })),
+        (error) => {
+          assert.match(error.message, /^canary rollback check failed for platform-v1: /u, scenario);
+          assert.match(error.message, message, scenario);
+          assert.ok(error.message.includes(SHA), `${scenario}: names this run's sha`);
+          assert.match(error.message, /nothing was published/u, scenario);
+          return true;
+        },
+      );
+      assert.deepEqual(publishCalls(fake.calls), [], `${scenario} publishes nothing`);
+      assert.equal(existsSync(fixture.outputPath), false);
+    } finally {
+      cleanup(fixture);
+    }
+  }
+});
+
+test('missing packages with no canary tag yet are published without an order query', async () => {
+  const fixture = publicationFixture();
+  const reserved = fixture.receipt.packageOrder[0];
+  const fake = registryExec(fixture, {
+    // A name reserved under another tag prints nothing for dist-tags.canary; the others are not on npm.
+    viewOverride: canaryTagsBeforePublish((name) => (
+      name === reserved ? { status: 0, stdout: '', stderr: '' } : undefined
+    )),
+  });
+  try {
+    await publishVerifiedPlatform(publisherArgs(fixture, { exec: fake.exec }));
+    assert.equal(publishCalls(fake.calls).length, fixture.receipt.packageOrder.length);
+    assert.deepEqual(compareCalls(fake.calls), []);
+    const tagReadsBeforePublish = fake.calls.slice(0, firstPublishAt(fake.calls))
+      .filter(({ command, args }) => command === 'npm' && args[0] === 'view' && args[2] === 'dist-tags.canary')
+      .map(({ args }) => args[1]);
+    assert.deepEqual(tagReadsBeforePublish.sort(), [...fixture.receipt.packageOrder].sort());
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('the runbook names both rollback refusals', () => {
+  const runbook = readFileSync(
+    join(import.meta.dirname, '../../docs/runbooks/stack-npm-publishing.md'),
+    'utf8',
+  );
+  assert.match(runbook, /canary rollback refused for <group>/u);
+  assert.match(runbook, /canary rollback check failed for <group>/u);
+});
+
 test('malformed or unreachable registry state fails closed before publication', async () => {
   for (const options of [
     { stateMutations: (states, fixture) => states.set(fixture.receipt.packageOrder[0], {
@@ -867,6 +1060,253 @@ test('an equivalent transparency-log conflict retries in a fresh npm process and
     assert.deepEqual(refusedSleeps, []);
   } finally {
     cleanup(refusedFixture);
+  }
+});
+
+const TLOG_CONFLICT_STDERR = 'npm error code TLOG_CREATE_ENTRY_ERROR\nnpm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log';
+const REPUBLISH_REFUSED = {
+  status: 1,
+  stdout: '',
+  stderr: 'npm error code E403\nnpm error 403 Forbidden - You cannot publish over the previously published versions',
+};
+
+function publishCallsFor(fixture, calls, name) {
+  return publishCalls(calls).filter(({ args }) => tarballByName(fixture, args[1]) === name);
+}
+
+function versionQueriesAfterFirstPublish(calls, fixture, name) {
+  const spec = `${name}@${fixture.packageVersion}`;
+  const firstPublishAt = calls.findIndex(({ command, args }) => (
+    command === 'npm' && args[0] === 'publish' && tarballByName(fixture, args[1]) === name
+  ));
+  return calls.slice(firstPublishAt).filter(({ command, args }) => (
+    command === 'npm' && args[0] === 'view' && args[1] === spec && args[2] === 'version'
+  )).length;
+}
+
+test('every npm publish attempt is logged with its attempt number and its own output', async () => {
+  const fixture = publicationFixture();
+  const target = fixture.receipt.packageOrder[0];
+  const spec = `${target}@${fixture.packageVersion}`;
+  const logs = [];
+  let attempts = 0;
+  const fake = registryExec(fixture, {
+    publishOverride: ({ tarball, states, publishedNames }) => {
+      if (tarball.name !== target) return undefined;
+      attempts += 1;
+      if (attempts < 3) {
+        return {
+          status: 1,
+          stdout: `attempt-${attempts}-stdout`,
+          stderr: `${TLOG_CONFLICT_STDERR}\nattempt-${attempts}-stderr`,
+        };
+      }
+      states.set(tarball.name, {
+        version: fixture.packageVersion,
+        integrity: tarball.integrity,
+        tag: fixture.packageVersion,
+      });
+      publishedNames.add(tarball.name);
+      return { status: 0, stdout: 'attempt-3-stdout', stderr: 'npm notice attempt-3-stderr' };
+    },
+  });
+  try {
+    await publishVerifiedPlatform(publisherArgs(fixture, {
+      exec: fake.exec,
+      log: (line) => logs.push(line),
+      registryRetryDelayMs: 1,
+      sleep: () => {},
+      tlogConflictRetryAttempts: 3,
+    }));
+    const targetLogs = logs.filter((line) => line.includes(`npm publish ${spec} attempt`));
+    assert.equal(targetLogs.length, 3);
+    for (const [index, line] of targetLogs.entries()) {
+      const attempt = index + 1;
+      assert.match(line, new RegExp(`attempt ${attempt} of 3`, 'u'));
+      assert.match(line, new RegExp(`attempt-${attempt}-stdout`, 'u'));
+      assert.match(line, new RegExp(`attempt-${attempt}-stderr`, 'u'));
+    }
+    for (const name of fixture.receipt.packageOrder.filter((packageName) => packageName !== target)) {
+      assert.ok(
+        logs.some((line) => line.includes(`npm publish ${name}@${fixture.packageVersion} attempt 1 of 3`)),
+        `${name} attempt is logged`,
+      );
+    }
+  } finally {
+    cleanup(fixture);
+  }
+
+  const exhaustedFixture = publicationFixture();
+  const exhaustedLogs = [];
+  let exhaustedAttempts = 0;
+  const exhausted = registryExec(exhaustedFixture, {
+    publishOverride: () => {
+      exhaustedAttempts += 1;
+      return {
+        status: 1,
+        stdout: `exhausted-${exhaustedAttempts}-stdout`,
+        stderr: `${TLOG_CONFLICT_STDERR}\nexhausted-${exhaustedAttempts}-stderr`,
+      };
+    },
+  });
+  try {
+    await assert.rejects(publishVerifiedPlatform(publisherArgs(exhaustedFixture, {
+      exec: exhausted.exec,
+      log: (line) => exhaustedLogs.push(line),
+      registryRetryDelayMs: 1,
+      sleep: () => {},
+      tlogConflictRetryAttempts: 3,
+    })));
+    for (const attempt of [1, 2, 3]) {
+      assert.ok(exhaustedLogs.some((line) => (
+        line.includes(`attempt ${attempt} of 3`)
+        && line.includes(`exhausted-${attempt}-stdout`)
+        && line.includes(`exhausted-${attempt}-stderr`)
+      )), `attempt ${attempt} output is kept`);
+    }
+  } finally {
+    cleanup(exhaustedFixture);
+  }
+});
+
+test('after a transparency-log conflict the exact receipt tarball already on the registry is success', async () => {
+  const fixture = publicationFixture();
+  const target = fixture.receipt.packageOrder[0];
+  const sleeps = [];
+  const fake = registryExec(fixture, {
+    publishOverride: ({ tarball, states, publishedNames }) => {
+      if (states.has(tarball.name)) return REPUBLISH_REFUSED;
+      if (tarball.name !== target) return undefined;
+      // Another publisher landed the exact bytes; this process got the 409.
+      states.set(tarball.name, {
+        version: fixture.packageVersion,
+        integrity: tarball.integrity,
+        tag: fixture.packageVersion,
+      });
+      publishedNames.add(tarball.name);
+      return { status: 1, stdout: '', stderr: TLOG_CONFLICT_STDERR };
+    },
+  });
+  try {
+    const receipt = await publishVerifiedPlatform(publisherArgs(fixture, {
+      exec: fake.exec,
+      registryRetryDelayMs: 1,
+      sleep: (ms) => sleeps.push(ms),
+      tlogConflictRetryAttempts: 3,
+    }));
+    assert.equal(publishCallsFor(fixture, fake.calls, target).length, 1);
+    assert.equal(publishCalls(fake.calls).length, fixture.receipt.packageOrder.length);
+    assert.deepEqual(sleeps, []);
+    const observed = receipt.observedRegistry.find(({ name }) => name === target);
+    assert.equal(observed.integrity, fixture.receipt.tarballs.find(({ name }) => name === target).integrity);
+    assert.equal(observed.taggedVersion, fixture.packageVersion);
+    assert.equal(readFileSync(fixture.outputPath, 'utf8'), canonicalJsonBytes(receipt));
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('after a transparency-log conflict a registry version with other bytes fails closed', async () => {
+  const fixture = publicationFixture();
+  const target = fixture.receipt.packageOrder[0];
+  const fake = registryExec(fixture, {
+    publishOverride: ({ tarball, states }) => {
+      if (states.has(tarball.name)) return REPUBLISH_REFUSED;
+      if (tarball.name !== target) return undefined;
+      states.set(tarball.name, {
+        version: fixture.packageVersion,
+        integrity: 'sha512-OTHER',
+        tag: fixture.packageVersion,
+      });
+      return { status: 1, stdout: '', stderr: TLOG_CONFLICT_STDERR };
+    },
+  });
+  try {
+    await assert.rejects(
+      publishVerifiedPlatform(publisherArgs(fixture, {
+        exec: fake.exec,
+        registryRetryDelayMs: 1,
+        sleep: () => {},
+        tlogConflictRetryAttempts: 3,
+      })),
+      /post-conflict integrity mismatch for .*: receipt sha512-.*, registry sha512-OTHER/u,
+    );
+    assert.equal(publishCalls(fake.calls).length, 1);
+    assert.equal(existsSync(fixture.outputPath), false);
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('a version recovered after a transparency-log conflict still waits for and enforces the canary tag', async () => {
+  const fixture = publicationFixture();
+  const target = fixture.receipt.packageOrder[0];
+  const sleeps = [];
+  const fake = registryExec(fixture, {
+    publishOverride: ({ tarball, states }) => {
+      if (states.has(tarball.name)) return REPUBLISH_REFUSED;
+      if (tarball.name !== target) return undefined;
+      states.set(tarball.name, {
+        version: fixture.packageVersion,
+        integrity: tarball.integrity,
+        tag: '0.0.1',
+      });
+      return { status: 1, stdout: '', stderr: TLOG_CONFLICT_STDERR };
+    },
+  });
+  try {
+    await assert.rejects(
+      publishVerifiedPlatform(publisherArgs(fixture, {
+        exec: fake.exec,
+        registryRetryAttempts: 2,
+        registryRetryDelayMs: 1,
+        sleep: (ms) => sleeps.push(ms),
+        tlogConflictRetryAttempts: 3,
+      })),
+      /post-publish canary mismatch for .*: expected .*, got 0\.0\.1/u,
+    );
+    assert.equal(publishCalls(fake.calls).length, 1);
+    assert.deepEqual(sleeps, [1]);
+    assert.equal(existsSync(fixture.outputPath), false);
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('a transparency-log conflict on every attempt with the version absent fails with an actionable message', async () => {
+  const fixture = publicationFixture();
+  const target = fixture.receipt.packageOrder[0];
+  const sleeps = [];
+  const fake = registryExec(fixture, {
+    publishOverride: ({ tarball }) => (
+      tarball.name === target ? { status: 1, stdout: '', stderr: TLOG_CONFLICT_STDERR } : undefined
+    ),
+  });
+  try {
+    await assert.rejects(
+      publishVerifiedPlatform(publisherArgs(fixture, {
+        exec: fake.exec,
+        registryRetryDelayMs: 7,
+        sleep: (ms) => sleeps.push(ms),
+        tlogConflictRetryAttempts: 3,
+      })),
+      (error) => {
+        assert.ok(error.message.startsWith(`npm publication failed for ${target}@${fixture.packageVersion}: `));
+        assert.match(error.message, /TLOG_CREATE_ENTRY_ERROR 409 on all 3 attempts/u);
+        assert.match(error.message, /the transparency-log entry exists and the package is missing from the registry/u);
+        assert.match(error.message, /Rerun the failed job/u);
+        assert.match(error.message, /the next push to next publishes a new canary version/u);
+        assert.match(error.message, /docs\/runbooks\/stack-npm-publishing\.md/u);
+        return true;
+      },
+    );
+    assert.equal(publishCallsFor(fixture, fake.calls, target).length, 3);
+    assert.equal(publishCalls(fake.calls).length, 3);
+    assert.equal(versionQueriesAfterFirstPublish(fake.calls, fixture, target), 3);
+    assert.deepEqual(sleeps, [7, 7]);
+    assert.equal(existsSync(fixture.outputPath), false);
+  } finally {
+    cleanup(fixture);
   }
 });
 

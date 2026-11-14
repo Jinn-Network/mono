@@ -15,7 +15,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { SpanKind, SpanStatusCode, type HrTime, type SpanContext } from '@opentelemetry/api';
-import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base';
+import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace';
 import type { Span, RedactionManifest } from './schema.js';
 import { computeGenesisHash, computePrevSpanHash } from './hash-chain.js';
 import { scrubAttributes } from './secret-scrub.js';

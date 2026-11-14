@@ -16,7 +16,7 @@
 import { createServer, type Server as HttpServer } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { SpanKind, SpanStatusCode, type HrTime, type SpanContext } from '@opentelemetry/api';
-import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base';
+import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace';
 import type { Resource } from '@opentelemetry/resources';
 import type { InstrumentationScope } from '@opentelemetry/core';
 import * as grpc from '@grpc/grpc-js';

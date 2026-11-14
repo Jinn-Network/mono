@@ -409,7 +409,7 @@ const EXPECTED_CARRIED_ROLES = [
 ] as const;
 
 describe("freeze repository rendered bytes", () => {
-  test("renders to the pinned commit id, so a renderer change is a format bump and not silent drift", () => {
+  test("renders to the pinned commit id, so a renderer change that alters or withholds an already-acceptable bundle's tree is a format bump and not silent drift", () => {
     expect(renderFreezeRepo(snapshotOf()).commitId).toBe(GOLDEN_COMMIT_ID);
   });
 
@@ -467,8 +467,9 @@ describe("the verifier README's accepted-format list", () => {
     // Whole backticked format strings, not two-character `v8` substrings: a substring pin on `v`
     // plus a digit is satisfied by incidental prose -- this section names the
     // `public-bundle-conformance-v1` fixture directory, which is no bundle format at all, and a
-    // refused closure would pass a `v2` pin on its version alone (issue #3632). The product-side
-    // docs-consistency pin uses the same token.
+    // refused closure named for its version alone -- `benchmark-product-public-bundle/2` -- would
+    // satisfy a pin keyed to the version digit rather than the whole format string (issue #3632).
+    // The product-side docs-consistency pin uses the same token.
     const readme = readFileSync(join(import.meta.dirname, "..", "README.md"), "utf8");
     const start = readme.indexOf("\n## Freeze-artifact repositories\n");
     expect(start, "the freeze-artifact section must exist").toBeGreaterThan(-1);

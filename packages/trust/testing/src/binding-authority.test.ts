@@ -237,6 +237,17 @@ class World {
   verdictInStoredOrder(key: string, atTime: string = NOW) {
     return this.verifyOver(this.records, key, atTime);
   }
+
+  /** The keys the real resolver lists as incumbents of what resolves for `key`, in its order. */
+  async incumbentKeys(key: string, atTime: string = NOW): Promise<string[]> {
+    const resolved = await this.authorityOver(this.records).bindingResolver.resolveBinding({ key, agent: AGENT }, atTime);
+    return (resolved?.incumbentControls ?? []).map((incumbent) => incumbent.key);
+  }
+}
+
+/** Files `record` under `under`'s digest, as a store that takes digests as given may. */
+function fileUnder(w: World, record: SealedKeyBindingRecord, under: SealedKeyBindingRecord): void {
+  w.records[w.records.indexOf(record)] = { ...record, bindingDigest: under.bindingDigest };
 }
 
 /** Mints with a fresh key until the record's digest sorts the wanted side of `than`'s. */
@@ -716,11 +727,6 @@ describe.each([
   });
 
   describe("a record a store files under the genesis binding's digest (§7.3)", () => {
-    /** Files `record` under `under`'s digest, as a store that takes digests as given may. */
-    function fileUnder(w: World, record: SealedKeyBindingRecord, under: SealedKeyBindingRecord): void {
-      w.records[w.records.indexOf(record)] = { ...record, bindingDigest: under.bindingDigest };
-    }
-
     test("is not the genesis binding for sharing its digest", async () => {
       const w = world();
       const genesis = await bindGenesis(w);
@@ -792,6 +798,67 @@ describe.each([
       const { ceremonyEvidence: _evidence, ...bare } = genesis;
       w.records.splice(w.records.indexOf(genesis), 1, bare, { ...bare, ceremonyEvidence: null as unknown as EoaCeremonyEvidence });
       expect(await w.verdict(GENESIS_KEY)).toMatchObject({ ok: false, reason: "ceremony-verification-failed" });
+    });
+  });
+
+  describe("a row filed under another record's digest is judged on its own (§7.4a, §7.4b)", () => {
+    test.each([
+      { order: "before", sortsBefore: true },
+      { order: "after", sortsBefore: false },
+    ])("a row under the genesis digest whose ceremony fails, listed $order it, leaves the founder's self-extension standing", async ({ sortsBefore }) => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1 });
+      let unsoundKey: string | undefined;
+      for (let attempt = 0; attempt < 4096 && unsoundKey === undefined; attempt += 1) {
+        const key = testDidKey(`binding-authority-unsound-${attempt}`);
+        // eslint-disable-next-line no-await-in-loop -- minting until the resolver lists it on the wanted side.
+        const unsound = await w.bind({ key, signer: OWNER, validFrom: T0, withoutCeremonyEvidence: true });
+        fileUnder(w, unsound, genesis);
+        // eslint-disable-next-line no-await-in-loop -- minting until the resolver lists it on the wanted side.
+        const incumbents = await w.incumbentKeys(NEXT_KEY);
+        if ((incumbents.indexOf(key) < incumbents.indexOf(GENESIS_KEY)) === sortsBefore) unsoundKey = key;
+        else w.records.pop();
+      }
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+      expect(await w.verdict(unsoundKey!)).toMatchObject({ ok: false, reason: "ceremony-verification-failed" });
+    });
+
+    test("a row with no chain, filed under the digest of a record that stands, leaves that record's chain to it", async () => {
+      const w = world();
+      await bindGenesis(w, { expiresAt: T1 });
+      await w.bind({ key: COLD_KEY, signer: SECOND_OWNER, validFrom: "2026-01-15T00:00:00.000Z", consentBy: GENESIS_KEY });
+      const consented = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T3, consentBy: COLD_KEY });
+      const orphan = await w.bind({ key: STRANGER_KEY, signer: OWNER, validFrom: T2 });
+      fileUnder(w, orphan, consented);
+      await w.bind({ key: THIRD_KEY, signer: OWNER, validFrom: T4 });
+      expect(await w.verdict(STRANGER_KEY)).toMatchObject(refusedChain);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+      expect(await w.verdict(THIRD_KEY)).toMatchObject(stands);
+    });
+
+    test("a stranger's row under the genesis digest does not make the stranger's revocation of it the genesis key's own", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      const strangers = await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T1 });
+      fileUnder(w, strangers, genesis);
+      await w.revoke(genesis, STRANGER_KEY, T2);
+      await w.bind({ key: THIRD_KEY, signer: SECOND_OWNER, validFrom: T3, consentBy: GENESIS_KEY });
+      expect(await w.verdict(STRANGER_KEY)).toMatchObject(refusedChain);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+      expect(await w.verdict(THIRD_KEY)).toMatchObject(stands);
+      expect(await w.notRevoked(GENESIS_KEY, NOW)).toBe(true);
+    });
+
+    test("a stranger's verdict leg under the genesis digest does not hide the founding account's revocation from the settlement leg", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w, { scope: ["verdicts", "bindings", "settlements"] });
+      const strangers = await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T1 });
+      fileUnder(w, strangers, genesis);
+      await w.revoke(genesis, accountVoucher(84532, OWNER.address).did, T2);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject({ ok: false, reason: "revoked" });
+      expect(await w.join(STRANGER_KEY, GENESIS_KEY, T3, T4)).toMatchObject({ ok: false });
     });
   });
 

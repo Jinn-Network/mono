@@ -14,7 +14,7 @@
     "directory": "operator"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.22"
   },
   "bin": {
     "jinn": "./dist/bin/jinn.js",
@@ -288,13 +288,13 @@
     "@noble/curves": "^2.0.0",
     "@noble/ed25519": "^3.1.0",
     "@noble/hashes": "^2.2.0",
-    "@opentelemetry/api": "^1.9.1",
-    "@opentelemetry/core": "^2.7.1",
-    "@opentelemetry/exporter-trace-otlp-grpc": "^0.223.0",
-    "@opentelemetry/exporter-trace-otlp-http": "^0.223.0",
-    "@opentelemetry/resources": "^2.7.1",
-    "@opentelemetry/sdk-node": "^0.223.0",
-    "@opentelemetry/sdk-trace-base": "^2.7.1",
+    "@opentelemetry/api": "~1.10.0",
+    "@opentelemetry/core": "^3.0.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "^0.301.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.301.0",
+    "@opentelemetry/resources": "^3.0.0",
+    "@opentelemetry/sdk-node": "^0.301.0",
+    "@opentelemetry/sdk-trace": "^3.0.0",
     "@safe-global/protocol-kit": "^8.0.3",
     "@safe-global/safe-deployments": "^1.37.56",
     "@safe-global/types-kit": "^4.0.1",
@@ -313,7 +313,7 @@
     "better-sqlite3": "^12.10.0",
     "bs58": "^6.0.0",
     "canonicalize": "^3.0.0",
-    "chokidar": "^5.0.0",
+    "chokidar": "^6.0.0",
     "dotenv": "^18.0.2",
     "hono": "^4.12.10",
     "node-pty": "^1.1.0",

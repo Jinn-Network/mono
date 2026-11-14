@@ -1,4 +1,4 @@
-import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base';
+import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace';
 import { CapturesStore } from '../store/captures.js';
 import type { Receiver } from '../trajectory/receiver.js';
 import { startSyntheticSpanProvider, emitSyntheticSpan } from '../trajectory/synthetic-span-builder.js';

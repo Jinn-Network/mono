@@ -23,8 +23,8 @@ function rewriteRule(source: string): Record<string, string | undefined> {
     served: declaration("resolvesAtSpecOrigin"),
     alias: declaration("presentProtocolAlias"),
     // The verifier passes its alias in as `alias`; this copy calls `presentProtocolAlias` directly.
-    replacer: /^ {2}return text\.replace\(PROTOCOL_IDENTIFIER_CANDIDATE, [\s\S]*?^ {2}\}\);$/mu
-      .exec(source)?.[0].replaceAll("presentProtocolAlias(", "alias("),
+    replacer: /^export function (?:rewriteInternalProtocolIdentifiers|presentProtocolText)\([\s\S]*?\): string \{\n([\s\S]*?^\})$/mu
+      .exec(source)?.[1].replaceAll("presentProtocolAlias(", "alias("),
   };
 }
 
@@ -79,5 +79,11 @@ describe("rewrite rule", () => {
     expect(Object.entries(verifier).filter(([, part]) => part === undefined).map(([name]) => name)).toEqual([]);
     expect(rewriteRule(readFileSync(fileURLToPath(new URL("./present-protocol-profile.ts", import.meta.url)), "utf8")))
       .toEqual(verifier);
+  });
+
+  test("the verifier's reader pass hands its alias through unchanged", () => {
+    expect(verifierFile("src/identifier-presentation.ts")).toMatch(
+      /^export function presentInternalProtocolIdentifiers\(text: string\): string \{\n {2}return rewriteInternalProtocolIdentifiers\(text, presentProtocolAlias\);\n\}$/mu,
+    );
   });
 });

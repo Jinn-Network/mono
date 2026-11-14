@@ -7,7 +7,10 @@
  * README left `quote` out although `lock` accepts only a quoted draft. The help texts are rendered
  * from this list or tested against it, so a step added here reaches all of them.
  *
- * `quote` is on the path because `lock` requires a quoted draft today (`operations/run-lock.ts`).
+ * `quote` is on the path because the published `lock` requires a quoted draft. `lock` now takes an
+ * unquoted draft for a brought run (`operations/run-lock.ts`, DR-2026-10-06 decision 4), but this
+ * list, the claimant walkthrough, the CLI help and the README describe the published packages, and
+ * `quote` leaves all of them together once a release ships that `lock` (issue #5164).
  * `anchor` is the one optional step: a claim publishes without it, and a lock anchor is only
  * obtainable before `run import`, which is why it sits where it does.
  */

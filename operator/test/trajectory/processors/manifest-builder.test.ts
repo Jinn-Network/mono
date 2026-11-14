@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ManifestBuilderProcessor } from '../../../src/trajectory/processors/manifest-builder.js';
-import { ReadableSpan } from '@opentelemetry/sdk-trace-base';
+import { ReadableSpan } from '@opentelemetry/sdk-trace';
 
 function fakeSpan(name: string, spanId: string, attrs: Record<string, unknown>): ReadableSpan {
   return {

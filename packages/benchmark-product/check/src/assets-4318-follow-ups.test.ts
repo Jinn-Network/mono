@@ -23,12 +23,16 @@ const VOCABULARY_SPEC_PATH = fileURLToPath(new URL(`../../../../${VOCABULARY_SPE
 
 const DEAD_SIGNPOST = "Verified qualification signpost · full evidence at index.html";
 
-function functionSource(source: string, name: string): string {
+/**
+ * From `function <name>` to the next top-level `function` declaration, or to the end of the file
+ * when it is the last one. The span therefore includes any comment block between the two, so it
+ * is the "source from this function up to the next one", not the named function alone.
+ */
+function sourceFromFunction(source: string, name: string): string {
   const start = source.indexOf(`function ${name}`);
   expect(start, `${name} in assets.ts`).toBeGreaterThanOrEqual(0);
   const next = source.slice(start + 1).search(/\nfunction /);
-  expect(next, `function following ${name}`).toBeGreaterThanOrEqual(0);
-  return source.slice(start, start + 1 + next);
+  return next === -1 ? source.slice(start) : source.slice(start, start + 1 + next);
 }
 
 function section42(spec: string): string {
@@ -41,28 +45,31 @@ function section42(spec: string): string {
 
 describe("PR #4318 follow-ups (#4418, #4419, #4420)", () => {
   test("#4418: pairedCompactFragment excludes BinaryFacts and does not emit the dead signpost", () => {
-    const fragment = functionSource(ASSETS_SRC, "pairedCompactFragment");
+    const fragment = sourceFromFunction(ASSETS_SRC, "pairedCompactFragment");
     expect(fragment).toContain("Exclude<MethodFacts, BinaryFacts>");
     expect(fragment).not.toContain('facts.kind === "binary"');
     expect(fragment).not.toContain(DEAD_SIGNPOST);
-    // The string must not remain anywhere in this file as a rendered literal. Comments that
-    // quote it as a historical name (the vocabulary spec, not this emitter) are out of scope.
+    // The string must not remain anywhere in this file, comments included: the whole-file
+    // assertion is deliberately stricter than the fragment ones above. The vocabulary spec, not
+    // this emitter, is where it may be quoted as a historical name.
     expect(ASSETS_SRC).not.toContain(DEAD_SIGNPOST);
   });
 
   test("#4419: the #4270 hold is recorded at the emission site after the GitHub issue was auto-closed", () => {
-    const hold = functionSource(ASSETS_SRC, "buildBadge");
-    // The comment lives immediately above `buildBadge`; `functionSource` starts at the function,
-    // so read the preceding comment block from the full file instead.
+    // The comment lives immediately above `buildBadge`, so read the span before the function
+    // from the full file.
     const badgeAt = ASSETS_SRC.indexOf("function buildBadge");
-    const holdComment = ASSETS_SRC.slice(ASSETS_SRC.lastIndexOf("// The retired verdict word", badgeAt), badgeAt);
+    expect(badgeAt, "buildBadge in assets.ts").toBeGreaterThanOrEqual(0);
+    const holdAnchor = "// The retired verdict word (issue #2982)";
+    const commentAt = ASSETS_SRC.lastIndexOf(holdAnchor, badgeAt);
+    expect(commentAt, `hold-comment anchor "${holdAnchor}" above buildBadge`).toBeGreaterThanOrEqual(0);
+    const holdComment = ASSETS_SRC.slice(commentAt, badgeAt);
     expect(holdComment).toContain("#4270");
     expect(holdComment).toContain("bundle-format allocation");
     expect(holdComment).toContain("auto-closed after PR #4318");
     expect(holdComment).toContain("#4419");
     // #4836 ruled that split deliberately; the comment must keep pointing at that ruling.
     expect(holdComment).toContain("#4836");
-    expect(hold, "buildBadge remains the emission site").toContain("function buildBadge");
 
     const spec = readFileSync(VOCABULARY_SPEC_PATH, "utf8");
     expect(spec).toContain("auto-closed after PR #4318");
