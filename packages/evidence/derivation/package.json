@@ -41,7 +41,7 @@
   },
   "dependencies": {
     "@jinn-network/evidence-protocol": "0.1.0",
-    "@noble/hashes": "2.2.0",
+    "@noble/hashes": "^2.2.0",
     "@secretlint/core": "13.0.4",
     "@secretlint/secretlint-rule-preset-recommend": "13.0.4",
     "canonicalize": "3.0.0",
