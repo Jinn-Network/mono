@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
+import type { ReadableSpan } from '@opentelemetry/sdk-trace';
 import { scrubArtifactBytes } from '../../../src/harnesses/engine/artifact-scrub.js';
 import { CredentialScrubProcessor } from '../../../src/trajectory/processors/credential-scrub.js';
 import { IdentityScrubProcessor } from '../../../src/trajectory/processors/identity-scrub.js';

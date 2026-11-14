@@ -2236,7 +2236,7 @@
           "@opentelemetry/exporter-trace-otlp-http",
           "@opentelemetry/resources",
           "@opentelemetry/sdk-node",
-          "@opentelemetry/sdk-trace-base",
+          "@opentelemetry/sdk-trace",
           "@safe-global/protocol-kit",
           "@safe-global/safe-deployments",
           "@safe-global/types-kit",

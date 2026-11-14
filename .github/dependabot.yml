@@ -134,12 +134,14 @@ updates:
       # Lift: remove when packages/core no longer pins it to one exact version.
       - dependency-name: "@lmoe/gliner-onnx"
         update-types: ["version-update:semver-patch", "version-update:semver-minor", "version-update:semver-major"]
-      # better-sqlite3 13 needs Node 22, but this package declares engines
-      # node >=20 and range ^12.10.0; `resolutions` already holds 13.0.1.
+      # better-sqlite3 13 needs Node 22. This package now declares engines
+      # node >=22.22, but its range is still ^12.10.0 and `resolutions`
+      # already holds 13.0.1.
       # Dependabot measures from that resolved 13.0.1, so it files 13.x as a
       # patch or minor and rewrites the declared range to ^13, which the
       # shared major hold cannot match. This holds minor and patch.
-      # Lift: remove when this package's engines floor moves to Node 22.
+      # Lift: remove once the declared range is moved to ^13 (the engines
+      # floor is already Node 22).
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-minor", "version-update:semver-patch"]
       # canonicalize 4 and 5 change canonical output for inputs Jinn hashes

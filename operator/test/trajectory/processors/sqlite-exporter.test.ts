@@ -3,7 +3,7 @@ import { Store } from '../../../src/store/store.js';
 import { CapturesStore } from '../../../src/store/captures.js';
 import { SqliteExporterProcessor } from '../../../src/trajectory/processors/sqlite-exporter.js';
 import { TranscriptContentScrubProcessor } from '../../../src/trajectory/processors/transcript-content-scrub.js';
-import { ReadableSpan } from '@opentelemetry/sdk-trace-base';
+import { ReadableSpan } from '@opentelemetry/sdk-trace';
 
 function fakeSpan(opts: {
   spanId: string;

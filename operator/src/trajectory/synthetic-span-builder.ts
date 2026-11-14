@@ -29,9 +29,9 @@ import {
   type Tracer,
 } from '@opentelemetry/api';
 import {
-  BasicTracerProvider,
+  TracerProvider,
   BatchSpanProcessor,
-} from '@opentelemetry/sdk-trace-base';
+} from '@opentelemetry/sdk-trace';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import type { TranscriptEvent, TranscriptParser } from './transcript-parsers/types.js';
 
@@ -77,12 +77,13 @@ export function startSyntheticSpanProvider(
   const exporter = new OTLPTraceExporter(
     cfg.otlpHttpEndpoint ? { url: cfg.otlpHttpEndpoint } : {},
   );
-  const processor = new BatchSpanProcessor(exporter, {
+  const processor = new BatchSpanProcessor({
+    exporter,
     // Tight bounds: synthetic spans should land in the receiver fast so the
     // flush() awaitable in tests is honest about what's been exported.
     scheduledDelayMillis: 50,
   });
-  const provider = new BasicTracerProvider({
+  const provider = new TracerProvider({
     spanProcessors: [processor],
   });
 
@@ -133,7 +134,7 @@ export function emitSyntheticSpan(
 ): void {
   const root = getOrCreateSessionRoot(provider, input.sessionId, input.tool);
   // Pass the session-root span as the explicit parent context. Avoids
-  // depending on a globally-registered ContextManager (BasicTracerProvider
+  // depending on a globally-registered ContextManager (TracerProvider
   // does not auto-register one); the third arg of `Tracer.startSpan` is the
   // parent context, and `trace.setSpan(ctx, root)` injects the root as the
   // parent so the new span inherits its traceId.
