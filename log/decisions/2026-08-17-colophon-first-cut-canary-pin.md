@@ -135,7 +135,7 @@ and web stay `never`.
 
 ## Amendment 2026-11-14 (issue #4893): served identifiers print whole
 
-The original text above is kept as written. This amendment changes the presentation rule that the 2026-09-02 note under Decision 5 set, and nothing else.
+The original text above is kept as written. This amendment changes the presentation rule that the 2026-09-02 note under Decision 5 set, and narrows one clause of Decision 4 to match. Nothing else changes.
 
 The premise behind the origin-free rule was that `spec.jinn.network` did not serve protocol documents. Release `v0.1.0` of the protocol spec repository (`Jinn-Network/spec`, published 2026-09-24, https://github.com/Jinn-Network/spec/releases/tag/v0.1.0) is now served at `https://spec.jinn.network/`. Pull request #4774 (merged 2026-09-29) changed the reader surfaces to match.
 
@@ -147,6 +147,6 @@ The rule is now:
 
 The pinned inventory is `SPEC_RELEASE_SERVED_PATHS` in `packages/benchmark-product/check/src/identifier-presentation.ts`, a copy of the `v0.1.0` inventory paths. The `/10` page is byte-pinned, so a later spec release's paths reach `/10` only through a newly registered presentation capability. Frozen `/2`, `/4`, `/5`, `/6`, `/7` and `/8` pages are unchanged.
 
-Decision 4's stable hold is unchanged; its statement that `$id` and `profile` URLs do not dereference now holds only for identifiers outside that inventory.
+Decision 4's stable hold is unchanged. Its clause "no claim that `$id` / `profile` URLs currently dereference at `spec.jinn.network`" now covers only identifiers outside that inventory.
 
 Decision 5's disclosure of the host gap still describes the first cut as published. This amendment does not claim that the stable-host verification named in Decision 3 has been observed.
