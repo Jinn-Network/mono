@@ -561,11 +561,11 @@ describe("reader path: the copied bundle, checked with the workspace gone", () =
     expect(withRoot.anchors?.anchors[0]).toMatchObject({ status: "verified", trustMaterial: "supplied" });
 
     expect(cliBare.exitCode, cliBare.stdout + cliBare.stderr).toBe(0);
-    expect(cliBare.stdout).toContain(`  lock anchor · authority-time · present · ${ANCHOR_GEN_TIME}\n`);
-    expect(cliBare.stdout).toContain("    time basis not evaluated: no trust material supplied\n");
+    expect(cliBare.stdout).toContain(`  lock timestamp proof · authority-time · present · ${ANCHOR_GEN_TIME}\n`);
+    expect(cliBare.stdout).toContain("    what the timestamp covers was not evaluated: no trust anchors supplied\n");
     expect(cliWithRoot.exitCode, cliWithRoot.stdout + cliWithRoot.stderr).toBe(0);
-    expect(cliWithRoot.stdout).toContain(`  lock anchor · authority-time · verified · ${ANCHOR_GEN_TIME}\n`);
-    expect(cliWithRoot.stdout).toContain("    time basis evaluated against trust material you supplied\n");
+    expect(cliWithRoot.stdout).toContain(`  lock timestamp proof · authority-time · verified · ${ANCHOR_GEN_TIME}\n`);
+    expect(cliWithRoot.stdout).toContain("    what the timestamp covers was evaluated against trust anchors you supplied\n");
   });
 
   test("the Run digest the checker prints is, as a string, the one lock printed", () => {
