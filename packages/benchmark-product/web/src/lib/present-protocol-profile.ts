@@ -7,7 +7,7 @@
  *
  * This package does not depend on `@colophon-claims/check`, so the rule is a copy of that package's
  * `src/identifier-presentation.ts`. `present-protocol-profile.test.ts` fails when the two served
- * sets differ.
+ * sets, or the rewrite rule's source, differ.
  */
 
 /** The protocol spec origin. No other Jinn host serves protocol documents. */
