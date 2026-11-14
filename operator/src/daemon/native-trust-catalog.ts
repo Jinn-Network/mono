@@ -525,7 +525,8 @@ export async function openNativeTrustCatalog(input: {
    * rather than absent. `authorize` runs in full at each such instant and its throws propagate, so
    * an out-of-window binding with a failing ceremony, a broken consent chain, a conflict or a
    * policy refusal still stops the consumer, and a key with no record it signed is still refused.
-   * A start computed wrongly here resolves nothing and so cannot skip a key.
+   * The skip rests on the binding resolver resolving the pair at that instant, so a start computed
+   * wrongly can leave a key refused but cannot skip one that is in effect at no instant.
    */
   async function inEffectAtAnotherInstant(inputValue: {
     readonly key: string;
