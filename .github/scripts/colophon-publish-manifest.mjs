@@ -482,7 +482,7 @@ export function platformSourceDirectories(repoRoot, manifest) {
   return [...platform].sort().map((name) => ({
     name,
     directory: catalog.get(name).directory,
-    files: catalog.get(name).manifest.files ?? [],
+    files: catalog.get(name).manifest.files,
   }));
 }
 
@@ -512,16 +512,21 @@ export function gitChangedFiles(repoRoot, platformSourceSha, directories) {
   return diff.stdout.split('\n').filter(Boolean);
 }
 
+// npm packs these at a package's root whatever its `files` says.
+const ALWAYS_PACKED_ROOT_FILE = /^(?:readme|license|licence|copying)(?:\.[^/]*)?$/iu;
+
 /**
- * Whether a `files` entry of a package covers `relative`, a path inside the package. Entries are
- * plain paths or directories, with `*` and `**` as wildcards; a negated entry covers nothing.
+ * Whether a `files` entry of a package may ship `relative`, a path inside the package, when npm
+ * packs it. A plain path covers itself and everything under it, with or without a leading `./` or
+ * `/`. This check does not evaluate globs, so an entry with glob syntax covers every path, and a file
+ * it might ship is never exempt. A negated entry only removes files, so it covers nothing, and a
+ * file it removes is still compared.
  */
 function filesEntryCovers(entry, relative) {
-  const normalized = String(entry).replace(/^\.\//u, '').replace(/\/+$/u, '');
-  if (normalized === '' || normalized.startsWith('!')) return false;
-  const source = normalized
-    .split('**').map((part) => part.split('*').map((piece) => piece.replace(/[.+?^${}()|[\]\\]/gu, '\\$&')).join('[^/]*')).join('.*');
-  return new RegExp(`^${source}(?:/|$)`, 'u').test(relative);
+  const normalized = String(entry).replace(/^\.\//u, '').replace(/^\/+|\/+$/gu, '');
+  if (normalized.startsWith('!')) return false;
+  if (normalized === '' || /[*?[\]{}]/u.test(normalized)) return true;
+  return relative === normalized || relative.startsWith(`${normalized}/`);
 }
 
 /**
@@ -537,7 +542,8 @@ function isUnshippedTestFile(path, sources) {
     .sort((a, b) => b.directory.length - a.directory.length)[0];
   if (owner === undefined) return false;
   const relative = path.slice(owner.directory.length + 1);
-  return !(owner.files ?? []).some((entry) => filesEntryCovers(entry, relative));
+  if (!Array.isArray(owner.files) || ALWAYS_PACKED_ROOT_FILE.test(relative)) return false;
+  return !owner.files.some((entry) => filesEntryCovers(entry, relative));
 }
 
 /**
@@ -557,7 +563,7 @@ export function assertPlatformSourceMatchesReceipt(pin, sources, changedFiles) {
     throw new Error([
       `the ${releaseId} receipt pins the platform canary built from ${pin.platformSourceSha}, but this commit's platform source differs from that commit in ${differing.length} ${differing.length === 1 ? 'file' : 'files'}:`,
       ...differing.map((path) => `  ${path}`),
-      'Every version on next is already published, so the receipt cannot be moved. Publish a new version with its own receipt, or, for an alias-only publish, retry the dispatch from the commit of the first run.',
+      `If npm already serves ${releaseId}, its receipt cannot change: publish a new version with its own receipt, or, for an alias-only publish, retry the dispatch from the commit of the first run. If npm does not serve ${releaseId} yet, record its receipt against a canary built from this commit's platform source.`,
     ].join('\n'));
   }
 }

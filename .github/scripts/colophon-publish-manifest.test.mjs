@@ -1611,6 +1611,22 @@ test('the platform source check ignores only test files that no files entry of t
   assert.doesNotThrow(compare([`${evidence}/src/slug.test.ts`, `${evidence}/vitest.config.ts`]));
 });
 
+test('self-test: the exemption refuses every test file npm may ship and passes only unshipped ones (issue #5214)', () => {
+  const manifest = checkerManifest();
+  const pin = loadProductReleasePlatformPin(repoRoot, manifest);
+  const check = (files, changed) => () => assertPlatformSourceMatchesReceipt(
+    pin,
+    [{ name: 'x', directory: 'packages/x', ...(files === undefined ? {} : { files }) }],
+    () => changed,
+  );
+  assert.throws(check(['/fixtures'], ['packages/x/fixtures/a.test.ts']), /fixtures\/a\.test\.ts/u);
+  assert.throws(check(['dist/**/*.ts'], ['packages/x/dist/a.test.ts']), /dist\/a\.test\.ts/u);
+  assert.throws(check(undefined, ['packages/x/src/a.test.ts']), /src\/a\.test\.ts/u);
+  assert.throws(check(['dist/'], ['packages/x/README.test.ts']), /README\.test\.ts/u);
+  // Near miss: tests that no entry can reach are not flagged.
+  assert.doesNotThrow(check(['dist/', 'fixtures/'], ['packages/x/src/a.test.ts', 'packages/x/vitest.config.ts']));
+});
+
 test('the refusal names the real remedies, not a re-pin (issue #5214)', () => {
   const manifest = checkerManifest();
   const pin = loadProductReleasePlatformPin(repoRoot, manifest);
@@ -1619,8 +1635,8 @@ test('the refusal names the real remedies, not a re-pin (issue #5214)', () => {
     () => assertPlatformSourceMatchesReceipt(pin, sources, () => ['packages/benchmarking/aggregate/src/index.ts']),
     (error) => {
       assert.doesNotMatch(error.message, /re-pin/u);
-      assert.match(error.message, /new version with its own receipt/u);
-      assert.match(error.message, /retry the dispatch from the commit of the first run/u);
+      assert.match(error.message, /If npm already serves \S+, its receipt cannot change: publish a new version with its own receipt, or, for an alias-only publish, retry the dispatch from the commit of the first run\./u);
+      assert.match(error.message, /If npm does not serve \S+ yet, record its receipt against a canary built from this commit's platform source\./u);
       return true;
     },
   );
