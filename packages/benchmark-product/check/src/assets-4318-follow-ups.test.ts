@@ -9,8 +9,9 @@
  * site and in the spec row, not by an open GitHub issue.
  *
  * #4836 then ruled that split deliberately, after finding the closer's `Deferred` escape
- * hatch: a durable reopen was available and was declined. The pin below guards the ruling
- * and the corrected v1.9 sentence, which had read as though no reopen could ever hold.
+ * hatch: a reopen that survives the debt-sweep closer was available and was declined (it would
+ * not survive a later residue sweep). The pins below guard the ruling, the corrected v1.9
+ * sentence, which had read as though no reopen could ever hold, and the §4.1 row's cross-reference.
  */
 
 import { readFileSync } from "node:fs";
@@ -39,7 +40,7 @@ function section42(spec: string): string {
   return spec.slice(start, end);
 }
 
-describe("PR #4318 follow-ups (#4418, #4419, #4420)", () => {
+describe("PR #4318 follow-ups (#4418, #4419, #4420, #4836)", () => {
   test("#4418: pairedCompactFragment excludes BinaryFacts and does not emit the dead signpost", () => {
     const fragment = functionSource(ASSETS_SRC, "pairedCompactFragment");
     expect(fragment).toContain("Exclude<MethodFacts, BinaryFacts>");
@@ -74,6 +75,8 @@ describe("PR #4318 follow-ups (#4418, #4419, #4420)", () => {
     // The v1.9 sentence claimed reopening #4270 could not hold. It can: the member closer in
     // Autopilot's `fileDebtSweep`/`fileResidueSweep` skips any member named under a `Deferred`
     // heading on the merged sweep PR body (`parseDeferredMembers`).
+    // An exact-string guard on purpose: a shape-based match would also hit the v1.10 entry,
+    // which quotes the corrected claim, so a reworded reintroduction is left to review.
     expect(spec).not.toContain("Reopening it would be closed again by the same closer");
 
     const start = spec.indexOf("- **v1.10** (#4836");
@@ -86,6 +89,15 @@ describe("PR #4318 follow-ups (#4418, #4419, #4420)", () => {
     expect(v110).toContain("parseDeferredMembers");
     expect(v110).toContain("`Deferred` heading");
     expect(v110).toContain("**declined**");
+    // The scope is stated in the entry's opening clause, not only in a later qualifier.
+    expect(v110.slice(0, v110.indexOf("**declined**"))).toContain("debt-sweep closer");
+
+    // The §4.1 v4-badge row names the same scope and keeps its #4836 cross-reference.
+    const row = spec.split("\n").find((line) => line.startsWith("| Colophon · verified qualification (v4 badge)"));
+    expect(row, `${VOCABULARY_SPEC} §4.1 v4-badge row`).toBeDefined();
+    expect(row).toContain("#4836");
+    expect(row).toContain("surviving the debt-sweep closer");
+    expect(row).not.toContain("durable reopen");
   });
 
   test("#4420: vocabulary spec §4.2 no longer defers the three rows to #2982", () => {
