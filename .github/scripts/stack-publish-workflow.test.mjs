@@ -254,6 +254,19 @@ test('the runbook says what to do when a leg fails after its receipt was stored'
   assert.match(recovery, /refuses a duplicate artifact name only within\s+one attempt/u);
 });
 
+// refresh-profile-host.mjs asks GitHub's compare whether the commit the host marker names is
+// earlier than this run's source (#5242); the job's mono checkout is too shallow to answer.
+test('only the host refresh mirror step holds the job token, to order the host marker on GitHub', () => {
+  const block = workflow.slice(workflow.indexOf('canary-host-refresh:'), workflow.indexOf('resolve-stable-source:'));
+  const tokenSteps = block.split(/\n {6}- /u).slice(1)
+    .filter((step) => step.includes('github.token'))
+    .map((step) => step.split('\n')[0].trim());
+  assert.deepEqual(tokenSteps, ['name: Mirror the bundle into the host checkout']);
+  assert.match(block, /^ {10}GH_TOKEN: \$\{\{ github\.token \}\}$/mu);
+  // A read of mono's compare endpoint needs nothing beyond the job's contents: read.
+  assert.match(block, /^ {4}permissions:\n {6}contents: read\n {4}env:/mu);
+});
+
 test('the canary host refresh copies same-run attested bytes to the host and pushes only on change', () => {
   const refreshAt = workflow.indexOf('canary-host-refresh:');
   const stableAt = workflow.indexOf('resolve-stable-source:');
