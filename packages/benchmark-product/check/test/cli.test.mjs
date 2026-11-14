@@ -93,6 +93,11 @@ test("usage exits 2 and states the exit contract", async () => {
   assert.match(result.stderr, /could not be\n {5}rendered from the bundle/);
   assert.match(result.stderr, /Protocol identifiers are names, not addresses/);
   assert.match(result.stderr, /platform bytes installed from npm/);
+  // The reader's words for what the caller supplies and what it checks: trust anchors and
+  // timestamp proofs, not "trust material" or a bare "anchor" (reader-facing vocabulary §4.2).
+  assert.match(result.stderr, /Trust anchors are yours, not the bundle's: with none supplied a well-formed\ntimestamp proof reports present rather than verified/);
+  assert.doesNotMatch(result.stderr, /[Tt]rust material/);
+  assert.doesNotMatch(result.stderr, /well-formed anchor/);
   assert.doesNotMatch(result.stderr, /jinn\.network/);
   assert.doesNotMatch(result.stderr, /not hosted/);
 });
@@ -304,7 +309,7 @@ test("the default human surface discloses every carried anchor and every subject
           trustMaterial: "supplied",
         },
         // Material was supplied for this profile and still did not carry the anchor to `verified`
-        // — a root that does not chain, say. Disclosing "no trust material supplied" here would
+        // — a root that does not chain, say. Disclosing "no trust anchors supplied" here would
         // state the opposite of what this reader did.
         {
           recordSha256: "4".repeat(64),
@@ -326,23 +331,23 @@ test("the default human surface discloses every carried anchor and every subject
   assert.match(output, /^Recomputed: 7 of 7 checks passed/m);
   assert.match(output, /integrity-anchors\s+passed/);
   // Each carried anchor: subject, time basis, status, and its byte-embedded time or height.
-  assert.match(output, /lock anchor · authority-time · present · 2026-01-01T12:00:00Z/);
-  assert.match(output, /time basis not evaluated: no trust material supplied/);
-  // Supplied-but-unverifying is disclosed as itself, never as "no trust material supplied".
-  assert.match(output, /lock anchor · authority-time · present · 2026-02-02T12:00:00Z/);
-  assert.match(output, /time basis not evaluated: the trust material you supplied does not verify this anchor/);
-  assert.match(output, /matrix anchor · chain-time · verified · block 880017/);
-  assert.match(output, /time basis evaluated against trust material you supplied — 2026-08-17T12:00:00Z/);
+  assert.match(output, /lock timestamp proof · authority-time · present · 2026-01-01T12:00:00Z/);
+  assert.match(output, /what the timestamp covers was not evaluated: no trust anchors supplied/);
+  // Supplied-but-unverifying is disclosed as itself, never as "no trust anchors supplied".
+  assert.match(output, /lock timestamp proof · authority-time · present · 2026-02-02T12:00:00Z/);
+  assert.match(output, /what the timestamp covers was not evaluated: the trust anchors you supplied do not verify this timestamp proof/);
+  assert.match(output, /matrix timestamp proof · chain-time · verified · block 880017/);
+  assert.match(output, /what the timestamp covers was evaluated against trust anchors you supplied — 2026-08-17T12:00:00Z/);
   // An authority-time proof whose evaluated instant is the genTime already on the head line does
   // not repeat it.
   assert.doesNotMatch(output, /supplied — 2026-01-01T12:00:00Z/);
   assert.match(output, new RegExp(`record ${"1".repeat(64)}`));
-  assert.match(output, /Anchor subjects\n {2}lock: anchored\n {2}matrix: anchored/);
-  assert.match(output, /An anchor dates the bytes it covers and says nothing/);
+  assert.match(output, /Timestamp coverage\n {2}lock: timestamped\n {2}matrix: timestamped/);
+  assert.match(output, /A timestamp proof dates the bytes it covers and says nothing/);
   assert.match(output, /not\s+that results were produced after it/);
 });
 
-test("the default human surface names an absent and a declared-but-absent subject explicitly", async () => {
+test("the default human surface names a missing and a promised-but-missing timestamp explicitly", async () => {
   const { renderVerifiedBundle } = await import("../dist/index.js");
   const output = renderVerifiedBundle({
     format: "benchmark-product-public-bundle/6",
@@ -362,10 +367,10 @@ test("the default human surface names an absent and a declared-but-absent subjec
       invalid: [],
     },
   });
-  assert.match(output, /no anchor records carried/);
-  assert.match(output, /lock: declared-but-absent — this run declared rfc3161-tsa\/v1 and the bundle carries no matching anchor/);
+  assert.match(output, /no timestamp proofs carried/);
+  assert.match(output, /lock: promised but missing — this run promised rfc3161-tsa\/v1 and the bundle carries no matching timestamp proof/);
   assert.doesNotMatch(output, /jinn\.network/);
-  assert.match(output, /matrix: absent — no anchor was carried and none was declared/);
+  assert.match(output, /matrix: none — no timestamp proof was carried and none was promised/);
 });
 
 test("a pending anchor prints its own status and reason, never a completed one's", async () => {
@@ -389,7 +394,7 @@ test("a pending anchor prints its own status and reason, never a completed one's
       invalid: [],
     },
   });
-  assert.match(output, /lock anchor · chain-time · pending\n/);
+  assert.match(output, /lock timestamp proof · chain-time · pending\n/);
   assert.match(output, /the proof carries only calendar promises/);
   assert.doesNotMatch(output, /block \d/);
 });
@@ -440,8 +445,8 @@ test("an unanchored bundle's human surface is unchanged — no anchor section at
     ...V6_IDENTITIES,
   });
   assert.doesNotMatch(output, /Anchors/);
-  assert.doesNotMatch(output, /Anchor subjects/);
-  assert.doesNotMatch(output, /An anchor dates the bytes/);
+  assert.doesNotMatch(output, /Timestamp coverage/);
+  assert.doesNotMatch(output, /A timestamp proof dates the bytes/);
 });
 
 test("usage documents the trust-material flags and that none ships", async () => {
@@ -589,7 +594,7 @@ test("the anchored qualification closure counts its seven checks, not the unanch
   assert.match(output, /^Recomputed: 7 of 7 checks passed/m);
   assert.match(output, /^Format: benchmark-product-public-bundle\/7$/m);
   assert.match(output, /integrity-anchors\s+passed/);
-  assert.match(output, /lock anchor · authority-time · present · 2026-01-01T12:00:00Z/);
+  assert.match(output, /lock timestamp proof · authority-time · present · 2026-01-01T12:00:00Z/);
 });
 
 /** @type {readonly import("../dist/index.js").PublicBundleSigner[]} */
@@ -1553,7 +1558,7 @@ test("the caveat enumerates the anchored closure's seventh check (issue #3691)",
   });
   assert.match(output, /^Recomputed: 7 of 7 checks passed$/m);
   const caveat = caveatOf(output);
-  assert.match(caveat, /anchor well-formedness/);
+  assert.match(caveat, /timestamp proof well-formedness/);
   // The check the pre-#3691 hand-list dropped.
   assert.match(caveat, /signing trust/);
   assert.doesNotMatch(caveat, /undefined/);
@@ -1571,7 +1576,7 @@ test("the caveat enumerates the disclosed closure's eighth check (issue #3691)",
   assert.match(output, /^Recomputed: 8 of 8 checks passed$/m);
   const caveat = caveatOf(output);
   assert.match(caveat, /the disclosure specification/);
-  assert.match(caveat, /anchor well-formedness/);
+  assert.match(caveat, /timestamp proof well-formedness/);
   assert.doesNotMatch(caveat, /undefined/);
 });
 

@@ -166,8 +166,8 @@ function usage(): string {
     + "                 signing keys to a domain. Checked offline as far as the bytes allow;\n"
     + "                 the lookup at the domain itself stays yours.\n"
     + "  --help, -h     Print this usage and exit 0.\n"
-    + "Trust material is yours, not the bundle's: with none supplied a well-formed anchor reports\n"
-    + "present rather than verified, and none ships with this tool.\n"
+    + "Trust anchors are yours, not the bundle's: with none supplied a well-formed\n"
+    + "timestamp proof reports present rather than verified, and none ships with this tool.\n"
     + "Exit 0: valid bundle; 1: invalid bundle, or a freeze repository that drifted from it;\n"
     + "     2: usage or operational failure, including a freeze repository that could not be\n"
     + "     rendered from the bundle — the bundle's own verdict is still reported.\n"
@@ -214,7 +214,7 @@ function evaluationNote(entry: AnchorVerificationEntry): string {
     const evaluated = entry.time !== undefined && entry.time !== anchoredValue(entry)
       ? ` — ${entry.time}`
       : "";
-    return `time basis evaluated against trust material you supplied${evaluated}`;
+    return `what the timestamp covers was evaluated against trust anchors you supplied${evaluated}`;
   }
   // A provider's free-form reason is authenticated report data, not CLI prose. Keep the exact value
   // in `--json`, but alias raw identifiers before this untrusted text enters the human report.
@@ -230,15 +230,15 @@ function evaluationNote(entry: AnchorVerificationEntry): string {
   // `present` with material supplied is a different disclosure from `present` with none: this
   // reader did have material for the profile, and it did not carry this anchor to `verified`.
   return entry.trustMaterial === "supplied"
-    ? "time basis not evaluated: the trust material you supplied does not verify this anchor"
-    : "time basis not evaluated: no trust material supplied";
+    ? "what the timestamp covers was not evaluated: the trust anchors you supplied do not verify this timestamp proof"
+    : "what the timestamp covers was not evaluated: no trust anchors supplied";
 }
 
 function renderAnchor(entry: AnchorVerificationEntry): string {
   const value = anchoredValue(entry);
   const head = [
-    `  ${entry.subject ?? "unresolved"} anchor`,
-    entry.timeBasis ?? "unknown time basis",
+    `  ${entry.subject ?? "unresolved"} timestamp proof`,
+    entry.timeBasis ?? "what the timestamp covers: unknown",
     entry.status,
     ...(value === undefined ? [] : [value]),
   ].join(" · ");
@@ -252,18 +252,18 @@ function anchorProfileName(profile: string): string {
 
 function renderSubject(subject: AnchorSubjectReport): string {
   if (subject.outcome === "declared-but-absent") {
-    return `  ${subject.subject}: declared-but-absent — this run declared `
-      + `${subject.declaredProfiles?.map(anchorProfileName).join(", ") ?? "an anchor provider"} and the bundle carries no matching anchor`;
+    return `  ${subject.subject}: promised but missing — this run promised `
+      + `${subject.declaredProfiles?.map(anchorProfileName).join(", ") ?? "a timestamp provider"} and the bundle carries no matching timestamp proof`;
   }
-  if (subject.outcome === "absent") return `  ${subject.subject}: absent — no anchor was carried and none was declared`;
-  return `  ${subject.subject}: anchored`;
+  if (subject.outcome === "absent") return `  ${subject.subject}: none — no timestamp proof was carried and none was promised`;
+  return `  ${subject.subject}: timestamped`;
 }
 
 function renderAnchorReport(report: IntegrityAnchorsReport): string {
   const anchors = report.anchors.length === 0
-    ? "  no anchor records carried"
+    ? "  no timestamp proofs carried"
     : report.anchors.map(renderAnchor).join("\n");
-  return `\nAnchors\n${anchors}\n\nAnchor subjects\n${report.subjects.map(renderSubject).join("\n")}\n`;
+  return `\nTimestamps\n${anchors}\n\nTimestamp coverage\n${report.subjects.map(renderSubject).join("\n")}\n`;
 }
 
 const SIGNER_ROLE_NAMES: Record<PublicBundleSignerRole, string> = {
@@ -415,7 +415,7 @@ export function renderVerifiedBundle(
     : "\nEverything above was checked against the bytes this bundle carries. The artifact\ncontents themselves were not read, so nothing here says what they contain.";
   const anchorLimits = anchors === ""
     ? ""
-    : "\nAn anchor dates the bytes it covers and says nothing else about the run: not\nthat results were produced after it, and not that the anchoring authority is\nindependent of the bundle's owner.";
+    : "\nA timestamp proof dates the bytes it covers and says nothing else about the\nrun: not that results were produced after it, and not that the timestamping\nauthority is independent of the bundle's owner.";
   // "Verified" is the most overloaded word in this market and claims more than this tool does: it
   // recomputes the arithmetic, closure, and consistency of bytes someone handed it, and reads
   // nothing about whether the recorded outcomes reflect real executions (issue #2982). The verdict
