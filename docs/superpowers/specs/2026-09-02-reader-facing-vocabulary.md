@@ -1,9 +1,9 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.11
+- **Version:** 1.12
 - **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-12; v1.4: 2026-09-16;
   v1.5: 2026-09-17; v1.6: 2026-09-18; v1.7: 2026-09-19; v1.8: 2026-09-24; v1.9: 2026-09-26;
-  v1.10: 2026-09-29; v1.11: 2026-11-14)
+  v1.10: 2026-09-29; v1.11: 2026-11-14; v1.12: 2026-11-14)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
@@ -101,6 +101,11 @@
   coverage*. Both rows mark their heading as a heading form of **timestamp proof**, and §5's
   headings rule now names them. The *Anchor (the record)* row's gloss is now carried by the
   reader's closing paragraph. No other disposition changes.
+- **v1.12** (#4894): brings §4.2's `IDENTIFIER_DISCLOSURE` row up to the sentence the reader now
+  prints. The spec origin now serves its release, and #4774 made the reader print the identifiers
+  that release serves whole, so *names, not addresses* was true only of the rest. The sentence now
+  says served identifiers resolve to their documents and the rest are names, still without
+  naming the origin. The ruling stays *keep*. No disposition changes.
 
 ## 1. Scope
 
@@ -380,7 +385,7 @@ rows that needed it, not retrofitted across the document.
 | `--json` keys (`ok`, `code`, `message`, `verifierVersion`, `supportedFormats`, …) | keep | — | **Contract.** Machine surface; not a reader surface. |
 | `Not checked by this tool: whether the machine that produced this bundle was honest, and whether the compared identities are independent parties. What is recomputed is …` | keep | — | The `caveats` block (`cli.ts`, in `renderVerifiedBundle`). A rewrite in two passes, not a moved line: the hand-written five-check list closing with *It does not prove…* that this row once quoted no longer exists. #2982 inverted the paragraph — deleted the trailing *This checks … It does not prove …* and put the limits first, beneath the verdict block (the `Recomputed` row above). #3691 then replaced the remaining hand-written enumeration with `describeRecomputedChecks(outcome)`: that list had dropped `trust` and pinned one lineage's closure, naming five subjects beneath a verdict reading `of 6`, `of 7` or `of 8` — one check behind the base closure, two or three behind the anchored and disclosed ones. The enumeration is glossed from `CHECK_SUBJECTS` (`outcome.ts`), keyed by the check union and derived from the same outcome the denominator is, so it cannot undercount its own verdict. Ruling unchanged — keep; "evidence closure" is a check name, glossed by the row above rather than renamed. |
 | `Checks run against the exact platform bytes installed from npm.` | keep | — | `PLATFORM_BYTES_SENTENCE`. The reserved noun this row deferred on is already gone: #2982 replaced the verdict-surface *Verification uses …* with the verb-family it ruled, and #3675 then replaced the shortened `usage()` copy — which had kept the pre-#2982 wording — with the same `const`. There is no separate shortened form any more either: de-duplicating the sentence was the other half of #3675's fix, the two copies having drifted apart while both were hand-maintained, and one `const` has fed the verdict surface and `usage()` alike ever since. The wrapper that carries it to both today, `IDENTIFIER_DISCLOSURE`, arrived later, with #2981's origin-free rewrite of the row below. |
-| `Protocol identifiers are names, not addresses — this verifier fetches nothing from them.` | keep | — | `IDENTIFIER_DISCLOSURE`. A different claim from this row's earlier quotation, not a moved line: the old string named the `https://spec.jinn.network/…` origin and disclosed that it was not hosted; the current one declines to hand a reader an unresolvable origin at all and states the fetch-nothing property in its place. Ruling unchanged — keep; both halves load-bearing. This constant also carries the platform-bytes sentence in the row above, so those two rows now describe one merged string. |
+| `Protocol identifiers the protocol spec release serves resolve to their documents; the rest are names, not addresses. This verifier fetches nothing from them.` | keep | — | `IDENTIFIER_DISCLOSURE`. Reworded twice, never re-ruled. The first string named the `https://spec.jinn.network/…` origin and disclosed that it was not hosted; the second declined to hand a reader an unresolvable origin and called every protocol identifier a name, not an address; the current one (#4894) tells the identifiers the spec release serves, which resolve, from the rest, which are names, still without naming the origin. Ruling unchanged — keep; both halves load-bearing. This constant also carries the platform-bytes sentence in the row above, so those two rows now describe one merged string. |
 | Usage text | rename where §4.1 renames | — | Follows the same glossary. Reaches the usage and error text in full, `usage()` included; the three closing-paragraph rows above are ruled explicitly so that reach is not left to inference. |
 
 The gloss column stops at `colophon-verify`. The product CLI's `colophon bundle verify` line

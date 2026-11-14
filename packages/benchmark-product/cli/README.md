@@ -129,7 +129,8 @@ pin a later line without changing their format.
 
 ## What this does not yet prove
 
-Protocol identifiers in the installed platform packages are names, not addresses.
+Protocol identifiers in the installed platform packages that the protocol spec
+release serves resolve to their documents; the rest are names, not addresses.
 This CLI fetches nothing from them. Checks run against the exact `@jinn-network/*`
 platform bytes installed from npm, and those bytes are the whole basis of every
 check it reports.

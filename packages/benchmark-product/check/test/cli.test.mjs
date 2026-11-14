@@ -91,7 +91,8 @@ test("usage exits 2 and states the exit contract", async () => {
   // A bundle that cannot be rendered as a freeze repository is not an invalid bundle, and the
   // usage text has to say which exit code that is.
   assert.match(result.stderr, /could not be\n {5}rendered from the bundle/);
-  assert.match(result.stderr, /Protocol identifiers are names, not addresses/);
+  assert.match(result.stderr, /Protocol identifiers the protocol spec release serves resolve to their\ndocuments; the rest are names, not addresses/);
+  assert.doesNotMatch(result.stderr, /Protocol identifiers are names/);
   assert.match(result.stderr, /platform bytes installed from npm/);
   // The reader's words for what the caller supplies and what it checks: trust anchors and
   // timestamp proofs, not "trust material" or a bare "anchor" (reader-facing vocabulary §4.2).
@@ -190,7 +191,8 @@ test("human success names all six checks and states the verification limit", asy
   assert.match(output, /Format: benchmark-product-public-bundle\/4/);
   assert.match(output, /Not checked by this tool: whether the machine that produced this bundle was/);
   assert.match(output, /No files were uploaded/);
-  assert.match(output, /Protocol identifiers are names, not addresses/);
+  assert.match(output, /Protocol identifiers the protocol spec release serves resolve to their\ndocuments; the rest are names, not addresses/);
+  assert.doesNotMatch(output, /Protocol identifiers are names/);
   assert.match(output, /platform bytes installed from npm/);
   assert.doesNotMatch(output, /jinn\.network/);
   assert.doesNotMatch(output, /not hosted/);
@@ -1164,6 +1166,31 @@ test("non-Jinn URLs survive the human refusal surface", async () => {
   assert.equal(human.exitCode, 2);
   assert.match(human.stderr, /https:\/\/alice\.btc\.calendar\.opentimestamps\.org\//);
   assert.doesNotMatch(human.stderr, /<identifier: see --json>/);
+});
+
+test("one human refusal prints the served spec identifier whole and aliases the unserved one (issue #4894)", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  // The two differ only in their version: the spec release serves binary-judgment 2.0 and not 1.0,
+  // so only the exact served-path rule tells them apart, and one refusal carries both.
+  const served = "https://spec.jinn.network/task-profiles/binary-judgment/2.0";
+  const unserved = "https://spec.jinn.network/task-profiles/binary-judgment/1.0";
+  const message = `admission: the task profile is ${unserved}, but this bundle's format requires ${served}`;
+  const deps = {
+    verify: () => Promise.reject(Object.assign(new Error(message), { code: "record-integrity" })),
+  };
+
+  const human = await runVerifierCli(["bundle"], deps);
+  assert.equal(human.exitCode, 1);
+  assert.equal(
+    human.stderr,
+    "colophon-check: admission: the task profile is <identifier: see --json>, "
+      + `but this bundle's format requires ${served}\n`,
+  );
+  assert.equal(human.stderr.includes(unserved), false);
+
+  const json = await runVerifierCli(["bundle", "--json"], deps);
+  assert.equal(json.exitCode, 1);
+  assert.equal(JSON.parse(json.stdout).message, message);
 });
 
 // ---------------------------------------------------------------------------

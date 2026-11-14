@@ -64,7 +64,8 @@ library; they are not the claimant path. A claimant brings a finished run with
 
 No account, API key, funds, or Docker are needed for the bundled sample.
 
-Protocol identifiers in the installed platform packages are names, not addresses.
+Protocol identifiers in the installed platform packages that the protocol spec
+release serves resolve to their documents; the rest are names, not addresses.
 This CLI fetches nothing from them. Checks run against the exact platform bytes
 installed from npm.
 `;
