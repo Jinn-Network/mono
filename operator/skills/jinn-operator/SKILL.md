@@ -49,7 +49,7 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 
 ### Prerequisites
 
-- **Node.js 22+** — `node --version` to check
+- **Node.js 22.22 or newer** — `node --version` to check
 - **Claude Code CLI** — the daemon spawns Claude as a subprocess for restoration work. It must be installed; if auth or runtime setup is needed, `jinn run` opens the operator app and guides the user through it.
 
 ### CLI verb reference
