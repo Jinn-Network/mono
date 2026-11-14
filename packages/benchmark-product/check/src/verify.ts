@@ -1397,6 +1397,16 @@ export async function verifyPublicBundleSnapshot(
 
   unique(assembly.header.graph.solveDeliveries.map((edge) => edge.cellKey), "verification.graph.solveDeliveries.cells");
   const importedRun = composed !== undefined && composed.capabilities.includes(EXTERNAL_IMPORT_CAPABILITY);
+  // An imported Inspect eval run has no separate log verifier: no process re-read its native logs.
+  // A Run whose assurance derives separate log verification would otherwise rebuild a Report saying
+  // its official verdicts were separately verified from the native log.
+  if (
+    importedRun
+    && carriedSuite?.selection.kind === "inspect-eval"
+    && deriveInspectEvaluationStrategy(run.policy.evaluation) === "separate-log-verification"
+  ) {
+    refuse("record-integrity", "evidence-closure", "an imported Inspect eval run cannot satisfy separate Inspect log verification");
+  }
   const solveDeliveryByCell = new Map<string, (typeof assembly.header.graph.solveDeliveries)[number]>();
   const inspectClosureByCell = new Map<string, {
     readonly summary: InspectCellSummary;

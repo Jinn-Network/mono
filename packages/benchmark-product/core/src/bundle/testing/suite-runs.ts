@@ -14,15 +14,16 @@
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expectedCellSet, parseBenchmark, parseRun } from "@jinn-network/benchmarking-records";
+import type { Assurance } from "../../domain/draft.js";
 import type { ExternalRunRecord } from "../../intake/external-run-records.js";
 import { readInspectRunImport } from "../../intake/inspect-run-records.js";
 import { armAdd } from "../../operations/arms.js";
 import type { OperationContext } from "../../operations/context.js";
-import { createDraft, readDraftDocument } from "../../operations/drafts.js";
+import { createDraft, readDraftDocument, updateDraft } from "../../operations/drafts.js";
 import { initWorkspace } from "../../operations/init.js";
 import { selectInspectEvalRuntime } from "../../operations/inspect-eval.js";
 import { runCollect } from "../../operations/run-collect.js";
-import { importRunRecords } from "../../operations/run-import.js";
+import { importRunRecords, type RunImportResult } from "../../operations/run-import.js";
 import { runLaunch } from "../../operations/run-launch.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
@@ -268,6 +269,7 @@ async function importEveryCell(
   outcomeFor: (index: number) => ImportOutcome,
   source: { readonly harness: string; readonly version: string },
   namedReader?: "harbor" | "inspect",
+  ungradeableEvidence: readonly string[] = ["harness-output"],
 ): Promise<void> {
   const document = readDraftDocument(run.workspaceDir, run.draftId);
   if (document.spec.taskSet.kind !== "benchmark") throw new Error("draft has no attached benchmark");
@@ -296,13 +298,17 @@ async function importEveryCell(
       };
     }
     // An ungradeable slot carries the output the harness could not grade.
-    writeFileSync(join(evidenceRoot, `cell-${index}.txt`), `harness output for slot ${index}\n`);
+    const evidence = ungradeableEvidence.map((name, file) => {
+      const path = file === 0 ? `cell-${index}.txt` : `cell-${index}-${file}.txt`;
+      writeFileSync(join(evidenceRoot, path), file === 0 ? `harness output for slot ${index}\n` : `${name} for slot ${index}\n`);
+      return { name, path };
+    });
     return {
       row: index + 1,
       cellKey: cell.cellKey,
       outcome,
       reason: "the harness could not grade this slot",
-      evidence: [{ name: "harness-output", path: `cell-${index}.txt` }],
+      evidence,
     };
   });
   ok("importRunRecords", await importRunRecords(run.context, {
@@ -559,25 +565,47 @@ function inspectQuoteVenue(): LocalVenue {
   };
 }
 
+export interface InspectEvalRunOptions {
+  readonly coverage?: "one_task" | "full";
+  /** The assurance the draft is locked under; the draft's default when absent. */
+  readonly assurance?: Assurance;
+  /** Adds a Run arm, `extra`, that the sealed Inspect selection has no configuration for. */
+  readonly extraArm?: boolean;
+}
+
 /** Selects Inspect eval over the two-sample catalog, quotes and locks it. */
-async function lockedInspectEvalRun(
+export async function lockedInspectEvalRun(
   root: string,
-  coverage: "one_task" | "full",
-  manifest: InspectSelectionManifest = inspectManifest,
-  pythonPath = "/usr/bin/python3",
+  options: InspectEvalRunOptions & { readonly manifest?: InspectSelectionManifest; readonly pythonPath?: string } = {},
 ): Promise<SuiteRun> {
+  const manifest = options.manifest ?? inspectManifest;
+  const pythonPath = options.pythonPath ?? "/usr/bin/python3";
   const base = workspace(root, []);
   const context: OperationContext = { ...base.context, runtimeHost: inspectRuntimeHost(manifest, pythonPath) as never };
   const run = { ...base, context };
   ok("selectInspectEvalRuntime", await selectInspectEvalRuntime(context, {
     draftId: run.draftId,
-    coverage,
+    coverage: options.coverage ?? "one_task",
     pythonPath,
     projectDir: "/tmp/inspect-project",
     taskReference: "eval.py@hermetic",
     arms: manifest.arms,
     scorer: { name: "match", passValue: "C" },
   }));
+  if (options.assurance !== undefined) {
+    ok("updateDraft", updateDraft(context, { draftId: run.draftId, patch: { assurance: options.assurance } }));
+  }
+  if (options.extraArm === true) {
+    // Pinned within the venue's inventory, and distinct from both selected arms as a Run requires.
+    const arms = readDraftDocument(run.workspaceDir, run.draftId).spec.arms;
+    const control = arms.find((arm) => arm.armId === "control")!;
+    const candidate = arms.find((arm) => arm.armId === "candidate")!;
+    ok("armAdd extra", armAdd(context, {
+      draftId: run.draftId,
+      armId: "extra",
+      pinning: { ...control.pinning, model: candidate.pinning["model"] },
+    }));
+  }
   ok("runQuote", await runQuote(context, { draftId: run.draftId }, { createVenue: () => inspectQuoteVenue() }));
   ok("runLock", runLock(context, { draftId: run.draftId }));
   return run;
@@ -588,9 +616,23 @@ async function lockedInspectEvalRun(
  * imported as `unrun` by default; {@link inspectReaderImportedInspectEvalRun} and
  * {@link launchedInspectEvalRun} are the runs whose cells were delivered.
  */
-export async function importedInspectEvalRun(root: string, options: ImportedSuiteRunOptions = {}): Promise<SuiteRun> {
-  const run = await lockedInspectEvalRun(root, options.coverage ?? "one_task");
-  await importEveryCell(run, root, options.outcomeFor ?? (() => "unrun"), { harness: "inspect", version: SUPPORTED_INSPECT_VERSION }, "inspect");
+export async function importedInspectEvalRun(
+  root: string,
+  options: InspectEvalRunOptions & {
+    readonly outcomeFor?: (index: number) => ImportOutcome;
+    /** The outputs each `ungradeable` slot carries, by name. */
+    readonly ungradeableEvidence?: readonly string[];
+  } = {},
+): Promise<SuiteRun> {
+  const run = await lockedInspectEvalRun(root, options);
+  await importEveryCell(
+    run,
+    root,
+    options.outcomeFor ?? (() => "unrun"),
+    { harness: "inspect", version: SUPPORTED_INSPECT_VERSION },
+    "inspect",
+    options.ungradeableEvidence,
+  );
   ok("runCollect", await runCollect(run.context, { draftId: run.draftId }));
   return run;
 }
@@ -600,8 +642,21 @@ export async function importedInspectEvalRun(root: string, options: ImportedSuit
  * over one Inspect `read_eval_log` JSON EvalLog per arm, each scoring every selected sample at
  * epoch 1, read by the named Inspect reader and collected. Every slot is delivered and graded.
  */
-export async function inspectReaderImportedInspectEvalRun(root: string): Promise<SuiteRun> {
-  const run = await lockedInspectEvalRun(root, "full");
+export async function inspectReaderImportedInspectEvalRun(
+  root: string,
+  options: Pick<InspectEvalRunOptions, "assurance"> = {},
+): Promise<SuiteRun> {
+  const run = await lockedInspectEvalRun(root, { coverage: "full", ...options });
+  ok("importRunRecords", await importInspectEvalLogs(run, root));
+  ok("runCollect", await runCollect(run.context, { draftId: run.draftId }));
+  return run;
+}
+
+/**
+ * `run import --from inspect` on a locked Inspect eval run: one Inspect `read_eval_log` JSON
+ * EvalLog per arm, each scoring every selected sample at epoch 1, read by the named Inspect reader.
+ */
+export async function importInspectEvalLogs(run: SuiteRun, root: string): Promise<OperationResult<RunImportResult>> {
   const logs = join(root, "eval-logs");
   mkdirSync(logs, { recursive: true });
   for (const arm of inspectManifest.arms) {
@@ -613,16 +668,14 @@ export async function inspectReaderImportedInspectEvalRun(root: string): Promise
     }));
   }
   const dump = readInspectRunImport({ workspaceDir: run.workspaceDir, draftId: run.draftId, evalLogOrDir: logs });
-  ok("importRunRecords", await importRunRecords(run.context, {
+  return importRunRecords(run.context, {
     draftId: run.draftId,
     records: dump.records,
     source: dump.source,
     evidenceRoot: dump.evidenceRoot,
     dump: dumpIdentityFromPath(logs, dump.records),
     namedReader: "inspect",
-  }));
-  ok("runCollect", await runCollect(run.context, { draftId: run.draftId }));
-  return run;
+  });
 }
 
 /**
@@ -696,7 +749,7 @@ export async function launchedInspectEvalRun(
     runtime: { ...inspectManifest.runtime, workerSha256: inspectWorkerSha256() },
   });
   const python = fakeInspectWorker(root, manifest, options.summaryScorer ?? INSPECT_SCORER_DEFINITION.name);
-  const run = await lockedInspectEvalRun(root, "full", manifest, python);
+  const run = await lockedInspectEvalRun(root, { coverage: "full", manifest, pythonPath: python });
   ok("runLaunch", await runLaunch(run.context, { draftId: run.draftId }));
   ok("runCollect", await runCollect(run.context, { draftId: run.draftId }));
   return run;

@@ -33,6 +33,8 @@ import {
 import { createHash } from "node:crypto";
 import { runPublish } from "../operations/publish.js";
 import { runReport } from "../operations/report.js";
+import { readDraftDocument } from "../operations/drafts.js";
+import { readRunJournalEntries } from "../run/journal.js";
 import { readRunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { publicBundlePath } from "../workspace/layout.js";
@@ -55,9 +57,11 @@ import {
   importedInspectEvalRun,
   importedSwebenchRun,
   importedTerminalBench30Run,
+  importInspectEvalLogs,
   inspectReaderImportedInspectEvalRun,
   launchedHarborSuiteRun,
   launchedInspectEvalRun,
+  lockedInspectEvalRun,
   writeRetainedHarborTrials,
   type SuiteRun,
 } from "./testing/suite-runs.js";
@@ -281,6 +285,49 @@ describe("a suite-bound Inspect eval run with delivered cells publishes, each ce
     expect(published.ok).toBe(false);
     if (published.ok) return;
     expect(published.error.detail).toMatch(/Inspect eval Delivery does not carry exactly the native log the named Inspect reader imports/u);
+  }, 240_000);
+
+  test("imported: a delivered cell that carries the reader's native log and another output is refused", async () => {
+    const run = await importedInspectEvalRun(root, {
+      outcomeFor: () => "ungradeable",
+      ungradeableEvidence: ["inspect-log.eval", "harness-output"],
+    });
+    const reported = await runReport(run.context, { draftId: run.draftId });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    const published = await runPublish(run.context, { draftId: run.draftId, includeNativeArtifacts: true });
+    expect(published.ok).toBe(false);
+    if (published.ok) return;
+    expect(published.error.detail).toMatch(/Inspect eval Delivery does not carry exactly the native log the named Inspect reader imports/u);
+  }, 240_000);
+
+  test("imported: a delivered cell on an arm the carried selection does not configure is refused", async () => {
+    // A Run arm, `extra`, for which the sealed Inspect template has no arm.
+    const run = await importedInspectEvalRun(root, {
+      extraArm: true,
+      outcomeFor: () => "ungradeable",
+      ungradeableEvidence: ["inspect-log.eval"],
+    });
+    const reported = await runReport(run.context, { draftId: run.draftId });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    const published = await runPublish(run.context, { draftId: run.draftId, includeNativeArtifacts: true });
+    expect(published.ok).toBe(false);
+    if (published.ok) return;
+    expect(published.error.detail).toMatch(/Inspect Delivery has no exact selected arm configuration/u);
+  }, 240_000);
+
+  test.each([
+    [{ preset: "separate-evaluator" }, /the "separate-evaluator" assurance, under which/u],
+    [{ preset: "direct-check", overrides: { distinctEvaluator: true } }, /the "direct-check" assurance with overrides \{"distinctEvaluator":true\}, under which/u],
+  ] as const)("run import --from inspect refuses an Inspect eval run under %j before writing anything", async (assurance, named) => {
+    const run = await lockedInspectEvalRun(root, { coverage: "full", assurance });
+    const imported = await importInspectEvalLogs(run, root);
+    expect(imported.ok).toBe(false);
+    if (imported.ok) return;
+    expect(imported.error.code).toBe("conflict");
+    expect(imported.error.detail).toMatch(named);
+    expect(imported.error.detail).toMatch(/each Inspect verdict must be separately verified from the cell's native log/u);
+    expect(readDraftDocument(run.workspaceDir, run.draftId).state).toBe("locked");
+    expect(readRunJournalEntries(run.workspaceDir, run.draftId)).toEqual([]);
   }, 240_000);
 });
 
