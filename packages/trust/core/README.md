@@ -42,10 +42,13 @@ A store files each record under a digest, and a store that takes digests as give
 file two different rows under one. So the §7.4 walk names a binding by its row, as
 `@jinn-network/trust-resolve` does, never by its digest alone: whether a binding is
 sound, whether its chain holds, and whether a revocation counts against it are decided
-for its row, which is its digest together with its record, its envelope and its
-evidence. Rows alike in all of that are one row. A row filed under another's digest
-takes nothing from it and costs it nothing. A row whose contents cannot be written out
-cannot be told from another, so it gives no authority and has no chain.
+for its row, which is its digest together with its record, its envelope, its ceremony
+evidence and its witness. Rows alike in all of that are one row. A row filed under
+another's digest takes nothing from it and costs it nothing. For rows a store reads from
+JSON this tells any two rows apart. Values JSON cannot hold, which only a caller building
+rows in memory can supply, are outside that: some are written out alike, and a row that
+cannot be written out at all cannot be told from another, so it gives no authority, has
+no chain, and `checkBindingRevocation` never shows it unrevoked.
 
 ## What a ceremony does not show
 

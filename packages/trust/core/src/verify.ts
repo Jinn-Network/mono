@@ -256,9 +256,12 @@ const rows = new WeakMap<ResolvedBinding, string | null>();
 /**
  * Which stored row a resolved binding is, as the resolver weighs it. A store files each row
  * under a digest, and one that takes digests as given can file different rows under one, so
- * the digest alone names no binding: its row is the digest with its record, its envelope and
- * its evidence. Rows alike in all of that are one row. `undefined` for a row that cannot be
- * written out, which cannot be told from another: it gives no authority and has no chain.
+ * the digest alone names no binding: its row is the digest with its record, its envelope, its
+ * ceremony evidence and its witness. Rows alike in all of that are one row. `undefined` for a
+ * row that cannot be written out, which cannot be told from another: it gives no authority, has
+ * no chain, and nothing shows it unrevoked. For rows a store reads from JSON this tells any two
+ * rows apart; values JSON cannot hold, which only a caller building rows in memory can supply,
+ * may be written out alike.
  */
 function rowOf(resolved: ResolvedBinding): string | undefined {
   const known = rows.get(resolved);
@@ -588,19 +591,20 @@ async function checkRevocation(
   walk: AuthorityWalk,
   revocationsThatCount: RevocationsThatCount = "all",
 ): Promise<{ ok: boolean; detail?: string }> {
-  // A row that cannot be written out has nothing to remember an answer by.
+  // A row that cannot be written out cannot be told from another, so nothing shows it unrevoked.
   const row = rowOf(resolved);
+  if (row === undefined) {
+    return { ok: false, detail: "the binding's stored row cannot be written out, so it cannot be told from another row." };
+  }
   for (const entry of resolved.revocations) {
     if (revocationsThatCount === "voucher-signed" && !entry.revocation.revokedBy.startsWith("did:pkh:")) continue;
     // §7.4b: never retroactive -- a revocation anchored after the
     // evidence's effective time attributes nothing before it.
     const comparison = compareCalendarStrictRfc3339Instants(entry.effectiveTime, atTime);
     if (comparison !== undefined && (comparison > 0 || (comparison === 0 && boundary === "before"))) continue;
-    const authorized = () => isRevocationAuthorized(resolved, entry, walk);
+    const fact = `revocation\u001f${row}\u001f${recordDigest(entry.envelopeBytes)}`;
     // eslint-disable-next-line no-await-in-loop -- revocations lists are small; sequential is fine.
-    if (!(await (row === undefined
-      ? authorized()
-      : settle(walk, `revocation\u001f${row}\u001f${recordDigest(entry.envelopeBytes)}`, authorized)))) continue;
+    if (!(await settle(walk, fact, () => isRevocationAuthorized(resolved, entry, walk)))) continue;
     // Authority comes first: a time nobody can read refuses only when someone
     // with standing wrote it, or any record naming this binding would revoke it.
     return {
