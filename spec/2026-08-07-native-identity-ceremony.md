@@ -1,6 +1,8 @@
 # Native Identity Ceremony — production trust-artifact provisioning
 
-**Version:** 0.6 (corrects §3.2b's and §7's statement of the escaped-revocation residual after
+**Version:** 0.7 (§3.2's deferred `revokeBinding` signs as the target binding's voucher account,
+not the catalog authority, whose revocation has no effect under key authority section 8, after
+issue #5211. v0.6 corrected §3.2b's and §7's statement of the escaped-revocation residual after
 issue #5144: records for one key under one voucher now share revocations, and the residual's actor
 was never only the catalog author. v0.5 sharpened §3.2b's and §10 (e)'s statement of the fresh-anchor
 coverage gap — wholesale across every role, which both left implicit — and pointed §3.2b and
@@ -366,14 +368,45 @@ export function appendOperator(input: { …catalogPath, authority, newBindings,
 /** Succession without membership change — the §5 refresh tool. */
 export function sealPolicySuccessor(input: { … }): Promise<…>;
 
+// ── revocation signer (key authority section 8) ─────────────────────────────
+/** The revocation signer for a binding's voucher account. keyId, which is the
+ * revocation's revokedBy, is didPkh(84532, voucher.address), spelled as
+ * authorRoleBinding spells the voucher; the signature is a 65-byte EIP-191
+ * personal_sign over the DSSE pre-authentication encoding. */
+export function voucherAccountSigner(voucher: CeremonySigner): {
+  readonly keyId: DidPkh;
+  readonly dsseSigner: DsseSigner;
+};
+
 // ── designed, implementation deferred (follow-up issue) ─────────────────────
 /** Seals a Revocation targeting a binding digest (schema + resolver support
  * already shipped: catalog schema `revocations`, native-trust-catalog.ts:57,77,
  * 298-306; binding-resolver applies anchored revocations at effective time), and
  * the rebind flow (revoke + authorRoleBinding for the replacement key + new
- * anchor). Surface fixed here so rotation needs no schema change. */
-export function revokeBinding(input: { … }): Promise<…>;
+ * anchor). Surface fixed here so rotation needs no schema change. Signed by the
+ * target binding's voucher account through voucherAccountSigner, never by the
+ * catalog authority (see below). */
+export function revokeBinding(input: {
+  readonly catalogPath: string;
+  readonly voucher: CeremonySigner;    // performEoaCeremony's EOA signer shape
+  readonly target: `sha256:${string}`;
+  readonly effectiveTime: string;
+  readonly anchor: AnchorDeclaration;
+}): Promise<…>;
 ```
+
+**Who signs a revocation (v0.7).** `revokeBinding` takes the target binding's **voucher
+account**: the ceremony EOA that `authorRoleBinding` named as the binding's `did:pkh` voucher.
+[Key authority section 8](https://github.com/Jinn-Network/spec/blob/main/documents/profiles/key-authority/v1/specification.md)
+gives a revocation effect only from the voucher account, from the bound key itself when its
+record holds `bindings` scope, or from a standing `bindings` key of the Agent. No native role
+binding holds `bindings` scope (§3.2a), so neither the bound key nor any other role key of the
+Agent can revoke one, and the voucher account is the one signer whose revocation of a native role
+binding counts. Its `revokedBy` and DSSE `keyid` are the voucher's `did:pkh`
+and its signature is section 8's account signature. Up to v0.6 this surface took the catalog
+authority. That key signs trust policies and holds no binding to any Agent, so every revocation
+it signed would have revoked nothing in any reader, and a rotation built on it would have left
+the retired key usable.
 
 ### 3.2a Authored binding scope (normative amendment, ruled 2026-08-07)
 
