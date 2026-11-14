@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { CHECK_COUNT_PATTERN } from "@/test/check-count";
 
 const verifyPublicBundleMock = vi.hoisted(() => vi.fn());
 vi.mock("@colophon-claims/core", async (importOriginal) => ({
@@ -78,6 +79,6 @@ describe("guided verify bundle action", () => {
     expect(state.status).toBe("error");
     const detail = state.status === "error" ? state.error.detail : "";
     expect(detail).toContain("did not pass the bundle checks");
-    expect(detail).not.toMatch(/\b(?:six|seven|[0-9]+)\s+(?:bundle\s+)?checks\b/iu);
+    expect(detail).not.toMatch(CHECK_COUNT_PATTERN);
   });
 });

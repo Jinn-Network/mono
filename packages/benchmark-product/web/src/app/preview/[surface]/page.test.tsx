@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import PreviewPage from "./page";
+import { CHECK_COUNT_PATTERN } from "@/test/check-count";
 
 // MOCK_JUSTIFICATION: Next navigation is a framework boundary; PreviewPage only needs notFound as a stub.
 vi.mock("next/navigation", () => ({
@@ -20,6 +21,6 @@ describe("hosted preview surfaces", () => {
     // renders on every /preview/<surface> route (issue #3817).
     expect(markup).toContain("What is real today");
     expect(markup).toContain("standalone verifier");
-    expect(markup).not.toMatch(/\b(?:six|seven|[0-9]+)[\s-]+(?:bundle\s+)?checks?\b/iu);
+    expect(markup).not.toMatch(CHECK_COUNT_PATTERN);
   });
 });

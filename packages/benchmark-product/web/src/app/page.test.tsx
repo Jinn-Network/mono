@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import { Button } from "@/components/ui/button";
+import { CHECK_COUNT_PATTERN } from "@/test/check-count";
 import Page from "./page";
 
 vi.mock("next/navigation", () => ({
@@ -27,7 +28,7 @@ describe("landing page", () => {
     // The verify surface serves several bundle formats with different closure sizes, so a numeral
     // on the submit label is a denominator the reader cannot rely on (issue #3311).
     expect(markup).toContain("Verify a bundle");
-    expect(markup).not.toMatch(/\b(?:six|seven|[0-9]+)\s+(?:bundle\s+)?checks\b/iu);
+    expect(markup).not.toMatch(CHECK_COUNT_PATTERN);
   });
 
   test("keeps expert work behind an advanced disclosure", () => {

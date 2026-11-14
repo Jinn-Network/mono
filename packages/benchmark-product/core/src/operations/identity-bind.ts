@@ -101,7 +101,7 @@ export function identityBind(
       // moment the operator is still in front of it.
       const verified = verifyDomainBinding(documentBytes, [key.keyId]);
 
-      const documentPath = join(context.workspaceDir, "venue", DOCUMENT_FILE_NAME);
+      const documentPath = join(clocked.workspaceDir, "venue", DOCUMENT_FILE_NAME);
       atomicWriteFileSync(documentPath, Buffer.from(documentBytes), 0o600);
       return {
         domain: verified.domain,
