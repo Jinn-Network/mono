@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { WELL_KNOWN_PATH } from "@jinn-network/record-discovery-protocol";
 import { parseWellKnownDocument } from "@jinn-network/record-discovery-serve";
-import { createFsBlobStore } from "@jinn-network/record-discovery-transport-http";
+import { computeEtag, createFsBlobStore } from "@jinn-network/record-discovery-transport-http";
 import { createWorkspaceLayout } from "../workspace/workspace.js";
 import { publicationServeRoot } from "../workspace/layout.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
@@ -129,6 +129,85 @@ describe("workspace public source composition", () => {
     expect((await handler(new Request("http://loopback.test/lock-index.json", { method: "HEAD" }))).status).toBe(200);
     expect((await handler(new Request("http://loopback.test/lock-index.json", { method: "POST" }))).status).toBe(405);
     expect((await handler(new Request("http://loopback.test/lock-index.json/not-this"))).status).toBe(404);
+  });
+
+  test("serves /lock-index.json as application/json whatever its sidecar says (#4878)", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "publication-lock-index-type-"));
+    createWorkspaceLayout(workspaceDir, "2026-08-13T12:00:00Z");
+    const serveRoot = publicationServeRoot(workspaceDir);
+    const index = new TextEncoder().encode('{"format":"colophon-archive-lock-index/1","locks":[]}\n');
+    await createFsBlobStore(serveRoot).put("/lock-index.json", index, "application/json");
+    const handler = createWorkspacePublicationHttpHandler(workspaceDir);
+    const sidecar = join(serveRoot, "lock-index.json.content-type");
+
+    unlinkSync(sidecar);
+    const missing = await handler(new Request("http://loopback.test/lock-index.json"));
+    expect(missing.status).toBe(200);
+    expect(missing.headers.get("content-type")).toBe("application/json");
+    expect(new Uint8Array(await missing.arrayBuffer())).toEqual(index);
+
+    writeFileSync(sidecar, "text/html");
+    expect((await handler(new Request("http://loopback.test/lock-index.json"))).headers.get("content-type")).toBe("application/json");
+    writeFileSync(sidecar, "not a content type\r\nx-injected: 1");
+    const corrupted = await handler(new Request("http://loopback.test/lock-index.json"));
+    expect(corrupted.status).toBe(200);
+    expect(corrupted.headers.get("content-type")).toBe("application/json");
+    expect(corrupted.headers.get("x-injected")).toBeNull();
+  });
+
+  test("does not serve the lock-index sidecar and refuses a symlinked lock index (#4879)", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "publication-lock-index-edges-"));
+    createWorkspaceLayout(workspaceDir, "2026-08-13T12:00:00Z");
+    const serveRoot = publicationServeRoot(workspaceDir);
+    const index = new TextEncoder().encode('{"format":"colophon-archive-lock-index/1","locks":[]}\n');
+    await createFsBlobStore(serveRoot).put("/lock-index.json", index, "application/json");
+    const handler = createWorkspacePublicationHttpHandler(workspaceDir);
+    expect((await handler(new Request("http://loopback.test/lock-index.json.content-type"))).status).toBe(404);
+
+    const outside = join(mkdtempSync(join(tmpdir(), "publication-lock-index-outside-")), "elsewhere.json");
+    writeFileSync(outside, index);
+    unlinkSync(join(serveRoot, "lock-index.json"));
+    symlinkSync(outside, join(serveRoot, "lock-index.json"));
+    expect((await handler(new Request("http://loopback.test/lock-index.json"))).status).toBe(404);
+
+    // A link that stays inside the root is refused too: only the no-follow open catches it.
+    unlinkSync(join(serveRoot, "lock-index.json"));
+    writeFileSync(join(serveRoot, "inside.json"), index);
+    symlinkSync(join(serveRoot, "inside.json"), join(serveRoot, "lock-index.json"));
+    expect((await handler(new Request("http://loopback.test/lock-index.json"))).status).toBe(404);
+  });
+
+  test("gives /lock-index.json an ETag and content-length, and answers a matching If-None-Match with 304 (#4880)", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "publication-lock-index-etag-"));
+    createWorkspaceLayout(workspaceDir, "2026-08-13T12:00:00Z");
+    const index = new TextEncoder().encode('{"format":"colophon-archive-lock-index/1","locks":[]}\n');
+    await createFsBlobStore(publicationServeRoot(workspaceDir)).put("/lock-index.json", index, "application/json");
+    const handler = createWorkspacePublicationHttpHandler(workspaceDir);
+    const url = "http://loopback.test/lock-index.json";
+
+    const get = await handler(new Request(url));
+    const etag = get.headers.get("etag");
+    expect(etag).toBe(computeEtag(index));
+    expect(get.headers.get("content-length")).toBe(String(index.length));
+    expect(get.headers.get("x-content-type-options")).toBe("nosniff");
+
+    const head = await handler(new Request(url, { method: "HEAD" }));
+    expect(head.status).toBe(200);
+    expect(head.headers.get("etag")).toBe(etag);
+    expect(head.headers.get("content-length")).toBe(String(index.length));
+    expect(head.headers.get("content-type")).toBe("application/json");
+    expect(new Uint8Array(await head.arrayBuffer()).length).toBe(0);
+
+    const matched = await handler(new Request(url, { headers: { "if-none-match": `"other", ${etag}` } }));
+    expect(matched.status).toBe(304);
+    expect(matched.headers.get("etag")).toBe(etag);
+    expect(matched.headers.get("cache-control")).toBe("no-cache");
+    expect(matched.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(new Uint8Array(await matched.arrayBuffer()).length).toBe(0);
+
+    const stale = await handler(new Request(url, { headers: { "if-none-match": '"sha256-stale"' } }));
+    expect(stale.status).toBe(200);
+    expect(new Uint8Array(await stale.arrayBuffer())).toEqual(index);
   });
 
   test("refuses encoded traversal and symlinked objects or content-type sidecars", async () => {
