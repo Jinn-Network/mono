@@ -49,23 +49,30 @@ describe("createArchiveHttpHandler", () => {
 
   it("answers 304 for a weak tag, a wildcard, and a list containing the tag", async () => {
     const etag = computeEtag(HEAD_BYTES);
-    for (const value of [`W/${etag}`, "*", `"sha256-other", ${etag}`, `"sha256-other", W/${etag}`]) {
+    for (const value of [`W/${etag}`, "*", `"sha256-other", ${etag}`, `"sha256-other", W/${etag}`, `${etag},`, `, ${etag}`, `"sha256-a", , ${etag}`]) {
       const response = await fixtureHandler()(new Request("http://host/sources/feed/head", { headers: { "if-none-match": value } }));
       expect(response.status, value).toBe(304);
       expect(response.headers.get("etag")).toBe(etag);
       expect(response.headers.get("cache-control")).toBe(REVALIDATE_CACHE_CONTROL);
       expect(response.headers.has("content-type")).toBe(false);
-      expect(response.headers.has("accept-ranges")).toBe(false);
       expect(await response.text()).toBe("");
     }
   });
 
   it("answers 200 for a non-matching list and for malformed If-None-Match values", async () => {
     const etag = computeEtag(HEAD_BYTES);
-    for (const value of ['"sha256-a", W/"sha256-b"', "", `${etag.slice(1, -1)}`, `${etag} ${etag}`, `"sha256-a" ${etag}`, `*, ${etag}`, `${etag},`]) {
+    for (const value of ['"sha256-a", W/"sha256-b"', "", `${etag.slice(1, -1)}`, `${etag} ${etag}`, `"sha256-a" ${etag}`, `*, ${etag}`, '","']) {
       const response = await fixtureHandler()(new Request("http://host/sources/feed/head", { headers: { "if-none-match": value } }));
       expect(response.status, value).toBe(200);
     }
+  });
+
+  it("answers 304 on a record route without accept-ranges and with the immutable policy", async () => {
+    const response = await fixtureHandler()(new Request(`http://host/records/${HEX64}`, { headers: { "if-none-match": `W/${computeEtag(RECORD_BYTES)}` } }));
+    expect(response.status).toBe(304);
+    expect(response.headers.get("cache-control")).toBe(IMMUTABLE_CACHE_CONTROL);
+    expect(response.headers.has("accept-ranges")).toBe(false);
+    expect(response.headers.has("content-type")).toBe(false);
   });
 
   it("answers 200 when If-None-Match is stale", async () => {

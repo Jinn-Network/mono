@@ -162,6 +162,10 @@ describe("workspace public source composition", () => {
     const etag = head.headers.get("etag")!;
     const weak = await handler(new Request("http://loopback.test/sources/colophon-benchmarks/head", { headers: { "if-none-match": `W/${etag}` } }));
     expect(weak.status).toBe(304);
+    expect(weak.headers.get("etag")).toBe(etag);
+    expect(weak.headers.get("cache-control")).toBe("no-cache");
+    expect(weak.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(weak.headers.has("content-type")).toBe(false);
     const any = await handler(new Request("http://loopback.test/sources/colophon-benchmarks/head", { headers: { "if-none-match": "*" } }));
     expect(any.status).toBe(304);
   });

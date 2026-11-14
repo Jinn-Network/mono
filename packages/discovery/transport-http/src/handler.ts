@@ -54,7 +54,7 @@ function opaqueTag(tag: string): string {
  * caller answers 304 (RFC 9110 section 13.1.2). It uses the weak comparison:
  * `W/` is ignored on both sides and the opaque tags are compared, so a tag
  * weakened by a compressing proxy still matches. `*` alone matches any existing
- * representation. A comma-separated list matches when any member does. A header
+ * representation. A comma-separated list matches when any member does. Empty list elements are ignored (RFC 9110 section 5.6.1.2). A header
  * that is not exactly `*` or a well-formed list of entity tags never matches,
  * so a malformed value gets the full response.
  */
@@ -65,11 +65,16 @@ export function ifNoneMatchSatisfied(header: string | null, currentEtag: string)
   const members: string[] = [];
   let rest = value;
   while (rest !== "") {
+    // RFC 9110 section 5.6.1.2: a recipient ignores empty list elements.
+    const empty = /^,[ \t]*/.exec(rest);
+    if (empty !== null) {
+      rest = rest.slice(empty[0].length);
+      continue;
+    }
     const next = /^((?:W\/)?"[^"]*")[ \t]*(?:,[ \t]*|$)/.exec(rest);
     if (next === null) return false;
     members.push(next[1]!);
     rest = rest.slice(next[0].length);
-    if (rest === "" && next[0].trimEnd().endsWith(",")) return false;
   }
   if (members.length === 0 || !ENTITY_TAG.test(currentEtag)) return false;
   const current = opaqueTag(currentEtag);
