@@ -175,9 +175,9 @@ function ceremonyStatement(type: "eoa" | "recap"): string {
 // for as a web login, or for another purpose, is never read as a ceremony.
 // EIP-4361 has the wallet compare `domain` with the site that asks for the
 // signature, so a message naming any other domain may have been asked for by
-// any site. These are the profile's values, not a deployment setting: every
-// ceremony this layer authors carries them (`@jinn-network/trust-authoring`'s
-// `performEoaCeremony`).
+// any site. These are the values of the one deployment this layer serves, fixed
+// here rather than read from configuration: every ceremony this layer authors
+// carries them (`@jinn-network/trust-authoring`'s `performEoaCeremony`).
 const CEREMONY_DOMAIN = "trust.jinn.network";
 const KEY_BINDING_CEREMONY_URI = "https://trust.jinn.network/ceremony/key-binding";
 const AUTHORIZATION_CEREMONY_URI = "https://trust.jinn.network/ceremony/authorization";

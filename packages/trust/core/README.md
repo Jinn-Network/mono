@@ -62,6 +62,7 @@ handed only the record. So nothing applies that rule yet.
 message names the domain `trust.jinn.network` and, for its type, the URI
 `https://trust.jinn.network/ceremony/key-binding` (an EOA key-binding ceremony) or
 `https://trust.jinn.network/ceremony/authorization` (a ReCap authorization ceremony),
-each compared exactly. These are the profile's values, not a deployment setting, and
-every ceremony `@jinn-network/trust-authoring` signs carries them. A genuine signature
-over a message naming another site or another purpose binds nothing.
+each compared exactly. They are the values of the one deployment this package serves,
+fixed here rather than read from configuration, and every ceremony
+`@jinn-network/trust-authoring` signs carries them. A genuine signature over a message
+naming another site or another purpose binds nothing.
