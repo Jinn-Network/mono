@@ -131,6 +131,45 @@ describe("workspace public source composition", () => {
     expect((await handler(new Request("http://loopback.test/lock-index.json/not-this"))).status).toBe(404);
   });
 
+  test("answers /lock-index.json revalidation with the weak comparison, wildcard and lists (#5207)", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "publication-lock-index-inm-"));
+    createWorkspaceLayout(workspaceDir, "2026-08-13T12:00:00Z");
+    const index = new TextEncoder().encode('{"format":"colophon-archive-lock-index/1","locks":[]}\n');
+    await createFsBlobStore(publicationServeRoot(workspaceDir)).put("/lock-index.json", index, "application/json");
+    const handler = createWorkspacePublicationHttpHandler(workspaceDir);
+    const etag = (await handler(new Request("http://loopback.test/lock-index.json"))).headers.get("etag")!;
+    for (const value of [etag, `W/${etag}`, "*", `"sha256-other", W/${etag}`]) {
+      const response = await handler(new Request("http://loopback.test/lock-index.json", { headers: { "if-none-match": value } }));
+      expect(response.status, value).toBe(304);
+      expect(response.headers.get("etag")).toBe(etag);
+      expect(response.headers.get("cache-control")).toBe("no-cache");
+      expect(response.headers.has("content-type")).toBe(false);
+      expect(await response.text()).toBe("");
+    }
+    for (const value of ['"sha256-a", "sha256-b"', `W/${etag.slice(1, -1)}`, `*, ${etag}`]) {
+      const response = await handler(new Request("http://loopback.test/lock-index.json", { headers: { "if-none-match": value } }));
+      expect(response.status, value).toBe(200);
+    }
+  });
+
+  test("answers the source head revalidation with a weak tag through the publication handler (#5207)", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "publication-head-inm-"));
+    createWorkspaceLayout(workspaceDir, "2026-08-13T12:00:00Z");
+    await createFsBlobStore(publicationServeRoot(workspaceDir)).put("/sources/colophon-benchmarks/head", new TextEncoder().encode('{"sequence":"0000000000000001"}'), "application/json");
+    const handler = createWorkspacePublicationHttpHandler(workspaceDir);
+    const head = await handler(new Request("http://loopback.test/sources/colophon-benchmarks/head"));
+    expect(head.status).toBe(200);
+    const etag = head.headers.get("etag")!;
+    const weak = await handler(new Request("http://loopback.test/sources/colophon-benchmarks/head", { headers: { "if-none-match": `W/${etag}` } }));
+    expect(weak.status).toBe(304);
+    expect(weak.headers.get("etag")).toBe(etag);
+    expect(weak.headers.get("cache-control")).toBe("no-cache");
+    expect(weak.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(weak.headers.has("content-type")).toBe(false);
+    const any = await handler(new Request("http://loopback.test/sources/colophon-benchmarks/head", { headers: { "if-none-match": "*" } }));
+    expect(any.status).toBe(304);
+  });
+
   test("serves /lock-index.json as application/json whatever its sidecar says (#4878)", async () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "publication-lock-index-type-"));
     createWorkspaceLayout(workspaceDir, "2026-08-13T12:00:00Z");
