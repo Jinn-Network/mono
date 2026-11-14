@@ -253,10 +253,28 @@ describe("Colophon install surface", () => {
       }
     });
 
+    // Issue #5198: the help exemption read `--help` differently from core's parseArgs.
+    test("refuses when --help comes only after --, where core reads it as a word and runs quote", async () => {
+      const { cwd, context: target } = onTarget(unqualified);
+      const answer = await runColophonCli([...argv, "--", "--help"], target);
+      expect(answer.exitCode).toBe(1);
+      expect(`${answer.stdout}${answer.stderr}`).toContain("not qualified for linux/arm64");
+      expect(readdirSync(cwd)).toEqual([]);
+    });
+
+    test("prints help for --help=<value>, as core does, instead of refusing", async () => {
+      const { context: target } = onTarget(unqualified);
+      const answer = await runColophonCli(["quote", "--help=1"], target);
+      expect(answer.exitCode).toBe(0);
+      expect(answer.stdout).toContain("quote");
+      expect(answer.stderr).toBe("");
+    });
+
     test("a flag before the verb still reaches core on a qualified platform, and help stays readable", async () => {
       const { context: qualified } = onTarget({ platform: "linux", architecture: "x64" });
       const quoted = await runColophonCli(["--json", ...argv], qualified);
       expect(quoted.exitCode).not.toBe(0);
+      expect(quoted.stdout).toContain("draft draft-1 does not exist");
       expect(`${quoted.stdout}${quoted.stderr}`).not.toContain("not qualified");
 
       const { context: target } = onTarget(unqualified);
@@ -280,6 +298,7 @@ describe("Colophon install surface", () => {
       const quoted = await runColophonCli(argv, qualified);
       // It reaches core, which refuses because the workspace named does not exist.
       expect(quoted.exitCode).not.toBe(0);
+      expect(quoted.stderr).toContain("draft draft-1 does not exist");
       expect(quoted.stderr).not.toContain("not qualified");
 
       // Verbs that never run the native helper are not gated: init works wherever the CLI starts.
