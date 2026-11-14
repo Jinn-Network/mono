@@ -119,11 +119,46 @@ jobs:
             --registry https://registry.npmjs.org/ \
             --repository "${GITHUB_REPOSITORY}" \
             --out ".platform-publication/${{ matrix.release_group }}/publication-receipt.json"
+      # A rerun of this leg may follow an attempt that stored its receipt and then failed
+      # (run 43066987003: FinalizeArtifact reported failure, the artifact was stored).
+      # upload-artifact refuses a duplicate name only within one attempt, so a rerun's upload
+      # would succeed and leave the run two artifacts of that name. The receipt is a pure
+      # function of this run's inputs, so a rerun compares instead: identical skips the
+      # upload, different refuses it. A pattern downloads nothing, and succeeds, when no
+      # earlier attempt stored one; a name would fail the first attempt of every run.
+      - name: Find the receipt an earlier attempt of this run stored
+        uses: actions/download-artifact@v8
+        with:
+          pattern: platform-publication-receipt-${{ matrix.release_group }}
+          path: .platform-publication-stored/${{ matrix.release_group }}
+      - name: Compare with the stored receipt
+        id: stored-receipt
+        env:
+          RELEASE_GROUP: ${{ matrix.release_group }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob dotglob
+          receipt=".platform-publication/${RELEASE_GROUP}/publication-receipt.json"
+          stored=".platform-publication-stored/${RELEASE_GROUP}/publication-receipt.json"
+          entries=(".platform-publication-stored/${RELEASE_GROUP}"/*)
+          if [ "${#entries[@]}" -eq 0 ]; then
+            echo "upload=true" >> "${GITHUB_OUTPUT}"
+          elif [ "${#entries[@]}" -ne 1 ] || [ -L "${stored}" ] || [ ! -f "${stored}" ]; then
+            echo "::error::the stored platform-publication-receipt-${RELEASE_GROUP} artifact does not hold exactly publication-receipt.json; nothing was uploaded"
+            exit 1
+          elif cmp -s "${stored}" "${receipt}"; then
+            echo "::notice::an earlier attempt of this run stored this publication receipt for ${RELEASE_GROUP}; not uploading a second copy"
+            echo "upload=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::error::publication receipt for ${RELEASE_GROUP} differs from the one an earlier attempt of this run stored (stored $(sha256sum "${stored}"), this attempt $(sha256sum "${receipt}")); nothing was uploaded. See the Recovery section of docs/runbooks/stack-npm-publishing.md."
+            exit 1
+          fi
       - name: Attest final publication receipt
         uses: actions/attest@v4
         with:
           subject-path: .platform-publication/${{ matrix.release_group }}/publication-receipt.json
       - name: Upload final publication receipt
+        if: steps.stored-receipt.outputs.upload == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: platform-publication-receipt-${{ matrix.release_group }}

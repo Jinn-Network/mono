@@ -245,9 +245,13 @@ test('the stored-receipt comparison uploads a first receipt, skips an identical 
 
 test('the runbook says what to do when a leg fails after its receipt was stored', () => {
   const recovery = publishingRunbook.slice(publishingRunbook.indexOf('## Recovery'));
-  assert.match(recovery, /\*\*A leg that fails after its publication receipt was stored\*\*/u);
-  assert.match(recovery, /publication receipt for <group> differs from the one an earlier attempt of this run stored/u);
+  assert.match(recovery, /\*\*A leg that fails after its publication receipt was stored:\*\*/u);
+  assert.match(
+    recovery,
+    /`publication receipt for <group> differs from the one an earlier attempt\s+of this run stored`/u,
+  );
   assert.match(recovery, /platform-publication-receipt-<group>/u);
+  assert.match(recovery, /refuses a duplicate artifact name only within\s+one attempt/u);
 });
 
 test('the canary host refresh copies same-run attested bytes to the host and pushes only on change', () => {
