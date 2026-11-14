@@ -55,3 +55,15 @@ export function verbOf(argv: readonly string[]): string | undefined {
   }
   return undefined;
 }
+
+/**
+ * Whether core's `parseArgs` sees the `help` flag: `--help` or `--help=<value>` before any `--`.
+ * After `--` every token is a word, so `-- --help` is not a help request. (Issue #5198)
+ */
+export function helpRequested(argv: readonly string[]): boolean {
+  for (const token of argv) {
+    if (token === "--") return false;
+    if (token === "--help" || token.startsWith("--help=")) return true;
+  }
+  return false;
+}
