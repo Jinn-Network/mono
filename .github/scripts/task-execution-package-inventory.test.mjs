@@ -30,14 +30,20 @@ const HASH_PRODUCERS = [
   'packages/task-execution/profiles',
   'packages/task-execution/protocol',
   'packages/evidence/protocol',
+  'packages/evidence/trace',
+  'packages/evidence/derivation',
+  'packages/task-supply/derivation',
+  'packages/task-supply/chain-scenarios',
 ];
-// This guard still owns only the declared task-execution / HASH_PRODUCERS set.
-// Remaining exact pins (packages/task-supply/{derivation,chain-scenarios},
-// packages/evidence/{trace,derivation} at 2.2.0) and the five @noble/hashes
-// resolutions overrides (packages/benchmark-product/{web,verify,cli} at 2.2.0,
-// packages/benchmarking/{native-capture,evaluation} at 2.3.0) are #4174. They
-// are deferred from this .github sweep: aligning them is lockfile regeneration
-// across those packages, not an extension of this inventory's declared set.
+// Manifests outside the task-execution tree that must also select @noble/hashes through the
+// range above rather than a resolutions override (aligned from the exact pins and overrides
+// that remained after the task-execution portal chain).
+const OVERRIDE_FREE_MANIFESTS = [
+  'packages/benchmark-product/cli',
+  'packages/benchmark-product/web',
+  'packages/benchmarking/evaluation',
+  'packages/benchmarking/native-capture',
+];
 
 // Packages OUTSIDE the task-execution tree that a task-execution package may legitimately
 // portal-resolve (backend plan program §7.7: the assembly consumes the evidence CONTRACT
@@ -282,6 +288,7 @@ test('no manifest overrides the @noble/hashes resolution', () => {
   const directories = [
     ...TASK_EXECUTION_PACKAGES.map(([directory]) => join('packages', 'task-execution', directory)),
     ...HASH_PRODUCERS,
+    ...OVERRIDE_FREE_MANIFESTS,
   ];
   for (const directory of new Set(directories)) {
     const manifest = JSON.parse(readFileSync(join(root, directory, 'package.json'), 'utf8'));

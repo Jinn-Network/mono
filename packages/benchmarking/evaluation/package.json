@@ -51,7 +51,6 @@
     "@jinn-network/benchmarking-protocol": "portal:../protocol",
     "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
     "@jinn-network/evidence-repository": "portal:../../evidence/repository",
-    "@jinn-network/trust-core": "portal:../../trust/core",
-    "@noble/hashes": "2.3.0"
+    "@jinn-network/trust-core": "portal:../../trust/core"
   }
 }

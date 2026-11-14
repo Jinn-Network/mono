@@ -47,7 +47,7 @@
     "@jinn-network/task-admission": "0.1.0",
     "@jinn-network/task-execution-profiles": "0.1.0",
     "@jinn-network/task-execution-protocol": "0.1.0",
-    "@noble/hashes": "2.2.0",
+    "@noble/hashes": "^2.2.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
