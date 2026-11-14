@@ -236,7 +236,7 @@
     "better-sqlite3": "13.0.1",
     "fast-uri": "^3.1.2",
     "protobufjs": "^8.0.3",
-    "viem": "2.57.7"
+    "viem": "2.57.17"
   },
   "dependencies": {
     "@ethereumjs/wallet": "^10.0.0",
