@@ -20,14 +20,20 @@
 // makes "we deployed this commit's attested artifact" a property of the copied bytes
 // rather than trust in the download step.
 //
+// NEVER BACKWARDS. A rerun of an older run rebuilds that older bundle, sees changed content,
+// and would push it over a later one. `refuseOlderSource` therefore requires the commit the
+// host marker names to be this run's source or one of its ancestors, asked of GitHub's
+// compare because the job's mono checkout is shallow -- the rule the stack canary
+// publisher applies to its `canary` tag (`github-commit-order.mjs`).
+//
 // The offline-testable functions (validateSourceSha, validateBundleDir,
-// validateHostCheckout, mirrorContent, write/inspectProvenance, treeChanged,
-// buildCommitMessage) plus the local orchestrator `run()` are exported and never call
-// process.exit, so the test suite drives them offline against temp git repos. `run()`
-// may call git in the host checkout -- a local op needing no token -- but does no
-// GitHub-specific side effect. Only `git push` is privileged, and it stays in the YAML,
-// gated on the `changed` this file emits. The CLI entry is guarded so `import` is
-// side-effect-free.
+// validateHostCheckout, refuseOlderSource, mirrorContent, write/inspectProvenance,
+// treeChanged, buildCommitMessage) plus the local orchestrator `run()` are exported and
+// never call process.exit, so the test suite drives them offline against temp git repos.
+// `run()` may call git in the host checkout -- a local op needing no token -- but does no
+// GitHub-specific side effect; its one GitHub read, the compare, goes through the `exec`
+// its caller passes. Only `git push` is privileged, and it stays in the YAML, gated on the
+// `changed` this file emits. The CLI entry is guarded so `import` is side-effect-free.
 //
 // The shape -- validate → mirror → stage → detect change → provenance → local commit,
 // with auth git in YAML and non-auth git here -- is taken from
@@ -48,10 +54,11 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { HOST_CONFIG_FILE_NAME, MANIFEST_FILE_NAME } from './build-profile-host-bundle.mjs';
+import { githubCommitOrder } from './github-commit-order.mjs';
 import { hasGitControlSegment } from './public-surface-assets.mjs';
 import { SIGNATURE_FILE_NAME } from './sign-profile-manifest.mjs';
 
@@ -368,6 +375,33 @@ export function inspectProvenance(hostDir, workflowPath) {
 }
 
 /**
+ * Refuse to serve an older source over a newer one. A canonical marker names the commit of
+ * the host's last content change; when that is another commit than this run's, GitHub's
+ * compare must show it to be an ancestor of this run's source. A later commit is refused,
+ * and an order that cannot be told fails closed. A missing or malformed marker names no
+ * commit worth ordering and is left to the repair `run()` already makes.
+ * @param {{ hostDir: string, workflowPath: string, sourceSha: string, exec: Function }} args
+ */
+export function refuseOlderSource({ hostDir, workflowPath, sourceSha, exec }) {
+  const { canonical, sourceSha: hostSha } = inspectProvenance(hostDir, workflowPath);
+  if (!canonical || hostSha === sourceSha) return;
+  const { order, reason } = githubCommitOrder({
+    exec,
+    cwd: hostDir,
+    repository: 'Jinn-Network/mono',
+    source: sourceSha,
+    other: hostSha,
+  });
+  if (order === 'behind') return;
+  const served = `the host serves Jinn-Network/mono@${hostSha}`;
+  const outcome = "nothing was mirrored, committed or pushed. See docs/runbooks/jinn-network-profile-hosting.md, 'Automatic host refresh'.";
+  if (order === 'ahead') {
+    throw new Error(`profile host refresh refused: ${served}, a later commit than this run's source ${sourceSha}; ${outcome}`);
+  }
+  throw new Error(`profile host order check failed: ${served}, and its order against this run's source ${sourceSha} is unknown: ${reason}; ${outcome}`);
+}
+
+/**
  * Stage the whole host tree, ignore rules included. See the call site in `run()` for why
  * `--force` is load-bearing rather than defensive. It overrides ignore rules and nothing
  * else -- a content filter still rewrites the blob it stages -- so what it guarantees is
@@ -419,16 +453,20 @@ export function buildCommitMessage({ sourceSha, lane, groups }) {
  * local checkout needs no token, so it folds in here; only `git push` (in the YAML) is
  * privileged. Pure of GitHub-specific side effects -- no `::error::`, no `process.exit`,
  * no `$GITHUB_OUTPUT`.
- * @param {{ bundleDir: string, hostDir: string, sourceSha: string, workflowPath: string, expectedGroups: string[], lane: string }} args
+ * `exec` runs the one GitHub read `refuseOlderSource` makes, as `exec(command, args, cwd)`
+ * returning `{ status, stdout, stderr }`.
+ * @param {{ bundleDir: string, hostDir: string, sourceSha: string, workflowPath: string, expectedGroups: string[], lane: string, exec: Function }} args
  * @returns {{ changed: boolean, message: string, groups: string[], lane: string }}
  */
-export function run({ bundleDir, hostDir, sourceSha, workflowPath, expectedGroups, lane }) {
+export function run({ bundleDir, hostDir, sourceSha, workflowPath, expectedGroups, lane, exec }) {
   validateSourceSha(sourceSha);
   if (lane !== 'canary' && lane !== 'stable') {
     throw new Error(`LANE must be canary or stable, got ${lane ?? '<missing>'}`);
   }
   const { groups } = validateBundleDir(bundleDir, { sourceSha, expectedGroups });
   validateHostCheckout(bundleDir, hostDir);
+  // Before the mirror, which deletes the host tree: a refused rerun leaves it as served.
+  refuseOlderSource({ hostDir, workflowPath, sourceSha, exec });
   mirrorContent(bundleDir, hostDir);
   // `--force` is what makes the staged tree cover every mirrored path, and so what makes
   // `treeChanged` a sound idempotency oracle rather than a proxy for one: a plain
@@ -484,6 +522,12 @@ if (
     .map((group) => group.trim())
     .filter((group) => group !== '');
 
+  // `gh` reads GH_TOKEN from the environment the job's mirror step sets.
+  const exec = (command, args, cwd) => {
+    const child = spawnSync(command, args, { cwd, encoding: 'utf8' });
+    return { status: child.status, stdout: child.stdout ?? '', stderr: child.stderr || child.error?.message || '' };
+  };
+
   let result;
   try {
     result = run({
@@ -493,6 +537,7 @@ if (
       workflowPath,
       expectedGroups,
       lane: process.env.LANE,
+      exec,
     });
   } catch (error) {
     console.log(`::error::${error?.message ?? error}`);

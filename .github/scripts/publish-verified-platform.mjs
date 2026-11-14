@@ -20,6 +20,7 @@ import {
   canonicalJsonBytes,
   catalogSha256,
 } from './build-prepublication-bundle.mjs';
+import { githubCommitOrder } from './github-commit-order.mjs';
 import { createVerificationReceipt } from './platform-verification-receipt.mjs';
 import {
   loadLanePublishableCatalogPackages,
@@ -548,13 +549,13 @@ function refuseCanaryRollback(receipt, missing, { exec, repoRoot, registry, repo
   }
 
   for (const [taggedSha, { version, names }] of taggedBySha) {
-    const result = exec('gh', [
-      'api',
-      `repos/${repository}/compare/${sourceSha}...${taggedSha}`,
-      '--jq',
-      '.status',
-    ], repoRoot);
-    const order = result.status === 0 ? result.stdout.trim() : null;
+    const { order, reason } = githubCommitOrder({
+      exec,
+      cwd: repoRoot,
+      repository,
+      source: sourceSha,
+      other: taggedSha,
+    });
     if (order === 'behind') continue;
     const tagged = `the ${receipt.distTag} tag of ${packagesLabel(names)} points at ${version}, from ${taggedSha}`;
     if (order === 'ahead') {
@@ -564,11 +565,6 @@ function refuseCanaryRollback(receipt, missing, { exec, repoRoot, registry, repo
         + `Publishing ${receipt.packageVersion} would move ${receipt.distTag} back`,
       );
     }
-    const reason = order === null
-      ? `GitHub compare failed: ${(result.stderr || result.stdout || `status ${result.status}`).trim()}`
-      : order === 'diverged'
-        ? 'neither commit descends from the other (GitHub compare: diverged)'
-        : `GitHub compare returned ${JSON.stringify(order)}`;
     throw refusal('check failed', `${tagged}, and its order against this run's source ${sourceSha} is unknown: ${reason}`);
   }
 }

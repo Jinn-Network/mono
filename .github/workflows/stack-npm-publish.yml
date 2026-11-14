@@ -306,6 +306,10 @@ jobs:
           # `manifest.json` is not silently adopted as a release group, and a bundle built
           # from a short `--root` list cannot mirror a whole group off the live origin.
           EXPECTED_RELEASE_GROUPS: ${{ steps.bundle.outputs.release_groups }}
+          # The mirror refuses to serve an older source than the commit the host marker names,
+          # and asks GitHub's compare which is later: the mono checkout above is shallow. The
+          # job token's contents: read covers that read; nothing else in this job uses it.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           node mono/.github/scripts/refresh-profile-host.mjs
