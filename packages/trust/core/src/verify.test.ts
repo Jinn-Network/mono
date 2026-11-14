@@ -1742,6 +1742,60 @@ describe("checkBindingRevocation (§7.5 step 4, §7.4b)", () => {
       expect(await checkBindingRevocation(revoked, "2026-03-01T00:00:00Z", over(false))).toEqual({ ok: true });
     });
   });
+
+  // A row that cannot be written out cannot be told from another row, so nothing shows it
+  // unrevoked: not even the absence of a revocation, and not a revocation by its own key that
+  // only the same-act path could read, as when the resolver reports no `targetScope`.
+  describe("a row that cannot be written out", () => {
+    const OWN_KEY = "did:key:z6MkfUNWRITTEN1111111111111111111111111111";
+    const SETTLEMENT_KEY = "did:key:z6MkfUNWRITTENSETTLE11111111111111111111";
+    const ownRevocation = revocationEntry(OWN_KEY, "2026-02-01T00:00:00Z");
+    const unwritten = (revocations: readonly ResolvedRevocation[]) => resolvedBinding({
+      binding: keyBinding({
+        agent: AGENT,
+        key: { publicKey: "0x00", keyid: OWN_KEY, algorithm: "ed25519", didKey: OWN_KEY },
+        voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+        scope: ["verdicts", "bindings"],
+      }),
+      ceremonyEvidence: { written: 1n } as never,
+      revocations,
+    });
+    const revokedByItsOwnKey = unwritten([
+      { ...ownRevocation, revocation: { ...ownRevocation.revocation, target: `sha256:${"b".repeat(64)}` } },
+    ]);
+    const settlementLeg = authorityBinding(keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: SETTLEMENT_KEY, algorithm: "ed25519", didKey: SETTLEMENT_KEY },
+      voucher: { kind: "account", did: OTHER_VOUCHER_DID, contractAccount: false },
+      scope: ["settlements"],
+    }));
+    const deps = {
+      bindingResolver: new FakeBindingResolver()
+        .register({ key: OWN_KEY, agent: AGENT, resolved: revokedByItsOwnKey })
+        .register({ key: SETTLEMENT_KEY, agent: AGENT, resolved: settlementLeg }),
+      witnessVerifier: fakeWitnessVerifier,
+      dsseVerifier: trustingDsseVerifier,
+    };
+
+    test("is refused by checkBindingRevocation and as a verdict leg when its own key revoked it", async () => {
+      expect(await checkBindingRevocation(revokedByItsOwnKey, "2026-03-01T00:00:00Z", deps)).toMatchObject({ ok: false });
+      expect(await settlementJoinCheck(
+        {
+          verdictKey: OWN_KEY,
+          settlementDeclarationKey: SETTLEMENT_KEY,
+          claimedEvaluatorAgent: AGENT,
+          family: "verdicts",
+          envelopeEffectiveTime: "2026-03-01T00:00:00Z",
+          claimTime: "2026-03-05T00:00:00Z",
+        },
+        deps,
+      )).toMatchObject({ ok: false });
+    });
+
+    test("is refused by checkBindingRevocation with no revocation at all", async () => {
+      expect(await checkBindingRevocation(unwritten([]), "2026-03-01T00:00:00Z", deps)).toMatchObject({ ok: false });
+    });
+  });
 });
 
 describe("authenticateRequester (§7.5b)", () => {
