@@ -29,7 +29,9 @@
                 "verdict",
                 "judge-instrument",
                 "analysis-context",
-                "label-resolution"
+                "label-resolution",
+                "suite-protocol-selection",
+                "suite-evidence"
               ]
             },
             "minItems": 1

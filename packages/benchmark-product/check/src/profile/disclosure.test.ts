@@ -123,7 +123,10 @@ describe("T20 — appending the role moves no existing vocabulary", () => {
   const PRE_APPEND_V4_ROLES_SHA256 = "82fc4d363cc74637d2afe62ff6533fafab4e44ad8a551459ee3b3c610792daff";
 
   test("the /2 catalog vocabulary is byte-unchanged", () => {
-    expect(digestOf(BUNDLE_EVIDENCE_ROLES)).toBe(PRE_APPEND_V2_ROLES_SHA256);
+    // Issues #4759 and #4762 appended the two `suite-comparability` roles at the very end; the
+    // prefix every existing /2-graph bundle's role arrays were written in does not move.
+    expect(BUNDLE_EVIDENCE_ROLES.slice(-2)).toEqual(["suite-protocol-selection", "suite-evidence"]);
+    expect(digestOf(BUNDLE_EVIDENCE_ROLES.slice(0, -2))).toBe(PRE_APPEND_V2_ROLES_SHA256);
     expect(BUNDLE_EVIDENCE_ROLES).not.toContain(DISCLOSURE_SPECIFICATION_BUNDLE_ROLE);
   });
 
@@ -132,8 +135,9 @@ describe("T20 — appending the role moves no existing vocabulary", () => {
   });
 
   test("the v4 vocabulary grows by exactly one token, at the very end, with its prefix unmoved", () => {
-    expect(BUNDLE_V4_EVIDENCE_ROLES.at(-1)).toBe(DISCLOSURE_SPECIFICATION_BUNDLE_ROLE);
-    const prefix = BUNDLE_V4_EVIDENCE_ROLES.slice(0, -1);
+    // Issues #4759 and #4762 appended the two `suite-comparability` roles after it.
+    expect(BUNDLE_V4_EVIDENCE_ROLES.slice(-3)).toEqual([DISCLOSURE_SPECIFICATION_BUNDLE_ROLE, "suite-protocol-selection", "suite-evidence"]);
+    const prefix = BUNDLE_V4_EVIDENCE_ROLES.slice(0, -3);
     expect(digestOf(prefix)).toBe(PRE_APPEND_V4_ROLES_SHA256);
     expect(prefix).toHaveLength(41);
   });

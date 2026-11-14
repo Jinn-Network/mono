@@ -66,7 +66,7 @@ function entry(token: string, order: number, overrides: Partial<CapabilityEntry>
 }
 
 describe("the registered capabilities", () => {
-  test("exactly seven, under their stable wire tokens", () => {
+  test("exactly eight, under their stable wire tokens", () => {
     expect(CAPABILITY_REGISTRY.map((capability) => capability.token)).toEqual([
       "binary-qualification",
       "anchoring",
@@ -75,8 +75,9 @@ describe("the registered capabilities", () => {
       "task-selection",
       "owner-controlled-publication",
       "terminal-bench-2-1-comparability",
+      "suite-comparability",
     ]);
-    expect(CAPABILITY_REGISTRY.map((capability) => capability.order)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(CAPABILITY_REGISTRY.map((capability) => capability.order)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
   });
 
   test("the registry satisfies every invariant", () => {
@@ -410,7 +411,8 @@ describe("must-understand resolution", () => {
 
 describe("reader instructions", () => {
   test("releases compare by their place in the table, not by version (issue #4746)", () => {
-    expect(Object.keys(READER_RELEASE_LINES)).toEqual(["verify@0.1.0", "verify@0.2.1", "check@0.2.1"]);
+    expect(Object.keys(READER_RELEASE_LINES)).toEqual(["verify@0.1.0", "verify@0.2.1", "check@0.2.1", "check@0.3.0"]);
+    expect(compareReaderReleases("check@0.3.0", "check@0.2.1")).toBeGreaterThan(0);
     expect(compareReaderReleases("verify@0.1.0", "verify@0.2.1")).toBeLessThan(0);
     expect(compareReaderReleases("verify@0.2.1", "verify@0.2.1")).toBe(0);
     // The two 0.2.1 releases share a version and are still two readers: only the checker reads /10.
@@ -461,7 +463,25 @@ describe("reader instructions", () => {
       "owner-controlled-publication": "check@0.2.1",
       // Operator ruling of 2026-10-06, decision 7: it lands before the first checker release.
       "terminal-bench-2-1-comparability": "check@0.2.1",
+      // Issues #4759, #4761, #4762: the first token added after a published checker read /10, so its
+      // first reader is a release no published one predates (issue #4759 ruling: `0.3.0`).
+      "suite-comparability": "check@0.3.0",
     });
+  });
+
+  test("suite-comparability carries its evidence index and three role edges, pins its own reader, and adds no check (#4759)", () => {
+    const suite = CAPABILITY_REGISTRY.find((entry) => entry.token === "suite-comparability")!;
+    expect(suite.mandatoryFiles).toEqual(["suite-evidence.json"]);
+    expect(suite.roleDerivations.map((derivation) => derivation.role)).toEqual(["runtime-selection", "suite-protocol-selection", "suite-evidence"]);
+    expect(suite.claimSection).toBe("suiteComparability");
+    expect(suite.checks).toEqual([]);
+    expect(READER_RELEASE_LINES["check@0.3.0"]).toEqual({
+      command: "npx @colophon-claims/check@0.3.0 <bundle-dir>",
+      compatibleCommand: "npx @colophon-claims/check@0.3 <bundle-dir>",
+    });
+    expect(readerInstructions(["suite-comparability"])).toBe(READER_RELEASE_LINES["check@0.3.0"]);
+    // Every vector without it keeps the line it pinned before.
+    expect(readerInstructions(["owner-controlled-publication"])).toBe(READER_RELEASE_LINES["check@0.2.1"]);
   });
 
   test("the derivation is a maximum over the declared capabilities and the base", () => {
@@ -480,6 +500,7 @@ describe("producer-side activation", () => {
     importedRun: false,
     declaresTaskSelection: false,
     officialTerminalBench21Slate: false,
+    suiteProtocolBound: false,
   };
   // Interoperability profile section 9.3: a self-run publisher's publication source is
   // owner-controlled. Every bundle this product builds is self-run, so every composed vector
@@ -500,6 +521,7 @@ describe("producer-side activation", () => {
       importedRun: false,
       declaresTaskSelection: false,
       officialTerminalBench21Slate: false,
+      suiteProtocolBound: false,
     })).toEqual(["anchoring", "binary-qualification", "disclosure-specification", PUBLICATION]);
     expect(activeCapabilityVector({
       anchoredClosure: true,
@@ -508,6 +530,7 @@ describe("producer-side activation", () => {
       importedRun: true,
       declaresTaskSelection: true,
       officialTerminalBench21Slate: false,
+      suiteProtocolBound: false,
     })).toEqual(["anchoring", "binary-qualification", "disclosure-specification", "external-import", PUBLICATION, "task-selection"]);
     expect(activeCapabilityVector({
       anchoredClosure: true,
@@ -516,6 +539,7 @@ describe("producer-side activation", () => {
       importedRun: true,
       declaresTaskSelection: true,
       officialTerminalBench21Slate: true,
+      suiteProtocolBound: false,
     })).toEqual([
       "anchoring",
       "binary-qualification",
@@ -525,6 +549,12 @@ describe("producer-side activation", () => {
       "task-selection",
       "terminal-bench-2-1-comparability",
     ]);
+  });
+
+  test("suite-comparability turns on exactly for a run bound to an official suite, whatever it projects (#4759)", () => {
+    expect(activeCapabilityVector({ ...NONE, suiteProtocolBound: true })).toEqual([PUBLICATION, "suite-comparability"]);
+    expect(activeCapabilityVector({ ...NONE, importedRun: true, suiteProtocolBound: true }))
+      .toEqual(["external-import", PUBLICATION, "suite-comparability"]);
   });
 
   test("terminal-bench-2-1-comparability needs the official slate and the import together", () => {
@@ -565,16 +595,19 @@ describe("producer-side activation", () => {
           for (const importedRun of [false, true]) {
             for (const declaresTaskSelection of [false, true]) {
               for (const officialTerminalBench21Slate of [false, true]) {
-                const facts = {
-                  anchoredClosure,
-                  projectsBinaryQualification,
-                  declaresDisclosure,
-                  importedRun,
-                  declaresTaskSelection,
-                  officialTerminalBench21Slate,
-                };
-                expect(() => composeClosure(activeCapabilityVector(facts)), JSON.stringify(facts)).not.toThrow();
-                expect(activeCapabilityVector(facts), JSON.stringify(facts)).toContain(PUBLICATION);
+                for (const suiteProtocolBound of [false, true]) {
+                  const facts = {
+                    anchoredClosure,
+                    projectsBinaryQualification,
+                    declaresDisclosure,
+                    importedRun,
+                    declaresTaskSelection,
+                    officialTerminalBench21Slate,
+                    suiteProtocolBound,
+                  };
+                  expect(() => composeClosure(activeCapabilityVector(facts)), JSON.stringify(facts)).not.toThrow();
+                  expect(activeCapabilityVector(facts), JSON.stringify(facts)).toContain(PUBLICATION);
+                }
               }
             }
           }

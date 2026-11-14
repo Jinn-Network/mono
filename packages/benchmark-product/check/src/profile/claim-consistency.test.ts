@@ -47,6 +47,7 @@ import { BenchmarkProductError } from "./errors.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "./run-results.js";
 import { binaryInstrumentReportLimitations, BINARY_INSTRUMENT_REPORT_LIMITATIONS } from "./binary-qualification.js";
 import { PROMPTED_SCREENING_LIMITATIONS, PROMPTED_SCREENING_PROFILE } from "../admission/contracts.js";
+import { SUITE_NOT_LEADERBOARD_READY_LIMITATION_3_0 } from "./suite-comparability.js";
 
 const digest = (fill: string) => fill.repeat(64);
 const DRAFT_ID = "draft-1";
@@ -1114,5 +1115,131 @@ describe("issue #3855: the projection rebuild refuses at the source that carries
       verificationCommandVerb: "bundle verify",
       assurance: { preset: ASSURANCE_PRESET, resolved: { ...RESOLVED_ASSURANCE, minVerdicts: 99 } },
     })).toThrow(expect.objectContaining({ name: "Error" }));
+  });
+});
+
+/**
+ * Issues #4759, #4761, #4762: the composed claim's `suiteComparability` section, and the suite
+ * sentence it selects, are rebuilt from what the bundle carries (`resolveCarriedSuite`), never read
+ * from the claim under test.
+ */
+describe("the composed claim's suiteComparability section", () => {
+  const vector = ["suite-comparability"] as const;
+  const notReady = { executionConformance: true, coverage: "full", leaderboardSubmitReady: false } as const;
+  const ready = { ...notReady, leaderboardSubmitReady: true } as const;
+  const sentence = SUITE_NOT_LEADERBOARD_READY_LIMITATION_3_0;
+  const venue = localVenueLimitsForRun(runRecord, false, false);
+  const reportWith = (limitations: readonly string[]) => ({ ...reportRecord, limitations: [...limitations] }) as unknown as ReportRecord;
+
+  function claimOf(section: typeof notReady | typeof ready, report: ReportRecord): ClaimPackage {
+    return buildClaimPackage({
+      draftId: DRAFT_ID,
+      benchmarkSha256: identities.benchmarkSha256,
+      runRecord,
+      runSha256: identities.runSha256,
+      matrixRecord,
+      matrixSha256: identities.matrixSha256,
+      reportRecord: report,
+      reportSha256: identities.reportSha256!,
+      reportEnvelopeSha256: identities.reportEnvelopeSha256,
+      venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, []),
+      verificationCommandVerb: "bundle verify",
+      assurance: { preset: ASSURANCE_PRESET, resolved: RESOLVED_ASSURANCE },
+      composedCapabilities: vector,
+      suiteComparability: section,
+    });
+  }
+
+  function consistency(claim: ClaimPackage, report: ReportRecord, bundle: Partial<Parameters<typeof assertClaimConsistency>[0]>): () => void {
+    return () => assertClaimConsistency({
+      claim,
+      identities,
+      benchmarkRecord: {} as unknown as BenchmarkRecord,
+      runRecord,
+      matrixRecord,
+      reportRecord: report,
+      draftId: DRAFT_ID,
+      assurancePreset: ASSURANCE_PRESET,
+      ...bundle,
+    });
+  }
+
+  const derived = (comparability: typeof notReady | typeof ready, limitation: string | undefined) =>
+    ({ composedCapabilities: vector, suite: { comparability, limitation } });
+
+  test("the section and its sentence, re-derived alike, are consistent, and the claim pins the first reader of the token", () => {
+    const report = reportWith([...venue, sentence]);
+    const claim = claimOf(notReady, report);
+    expect(claim.suiteComparability).toEqual(notReady);
+    expect(claim.verification.command).toBe(readerInstructions(vector).command);
+    expect(claim.verification.command).toBe("npx @colophon-claims/check@0.3.0 <bundle-dir>");
+    expect(consistency(claim, report, derived(notReady, sentence))).not.toThrow();
+  });
+
+  test("a flag, coverage or conformance the carried bytes do not re-derive is refused on that field", () => {
+    const report = reportWith([...venue, sentence]);
+    for (const [field, claimed] of [
+      ["leaderboardSubmitReady", { ...notReady, leaderboardSubmitReady: true }],
+      ["coverage", { ...notReady, coverage: "ten_task" }],
+      ["executionConformance", { ...notReady, executionConformance: false }],
+    ] as const) {
+      const claim = claimOf(claimed as unknown as typeof notReady, report);
+      expect(consistency(claim, report, derived(notReady, sentence)), field).toThrow(new RegExp(`suiteComparability\\.${field}`, "u"));
+    }
+  });
+
+  test("a Report missing the sentence the re-derived flag selects, or carrying one it does not, is refused", () => {
+    const withoutSentence = reportWith([...venue]);
+    expect(consistency(claimOf(notReady, withoutSentence), withoutSentence, derived(notReady, sentence)))
+      .toThrow(/Report limitations are not the exact disclosure/u);
+    const withSentence = reportWith([...venue, sentence]);
+    expect(consistency(claimOf(ready, withSentence), withSentence, derived(ready, undefined)))
+      .toThrow(/Report limitations are not the exact disclosure/u);
+  });
+
+  test("a section without the declaration, or the declaration without its section, is refused", () => {
+    const report = reportWith([...venue, sentence]);
+    expect(consistency(claimOf(notReady, report), report, { composedCapabilities: [] })).toThrow(/suiteComparability/u);
+    const plain = buildClaimPackage({
+      draftId: DRAFT_ID,
+      benchmarkSha256: identities.benchmarkSha256,
+      runRecord,
+      runSha256: identities.runSha256,
+      matrixRecord,
+      matrixSha256: identities.matrixSha256,
+      reportRecord: report,
+      reportSha256: identities.reportSha256!,
+      reportEnvelopeSha256: identities.reportEnvelopeSha256,
+      venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, []),
+      verificationCommandVerb: "bundle verify",
+      assurance: { preset: ASSURANCE_PRESET, resolved: RESOLVED_ASSURANCE },
+      composedCapabilities: [],
+    });
+    expect(consistency(plain, report, derived(notReady, sentence))).toThrow(/suiteComparability/u);
+  });
+
+  test("a suite sentence on the Report of a bundle that declares no suite is refused", () => {
+    const report = reportWith([...venue, sentence]);
+    const plain = buildClaimPackage({
+      draftId: DRAFT_ID,
+      benchmarkSha256: identities.benchmarkSha256,
+      runRecord,
+      runSha256: identities.runSha256,
+      matrixRecord,
+      matrixSha256: identities.matrixSha256,
+      reportRecord: report,
+      reportSha256: identities.reportSha256!,
+      reportEnvelopeSha256: identities.reportEnvelopeSha256,
+      venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord, []),
+      verificationCommandVerb: "bundle verify",
+      assurance: { preset: ASSURANCE_PRESET, resolved: RESOLVED_ASSURANCE },
+      composedCapabilities: [],
+    });
+    expect(consistency(plain, report, { composedCapabilities: [] })).toThrow(/official-suite sentence/u);
+  });
+
+  test("an earlier claim id cannot carry the section", () => {
+    const claim = { ...(projectedClaim() as Record<string, unknown>), suiteComparability: notReady };
+    expect(ClaimPackageSchema.safeParse(claim).success).toBe(false);
   });
 });

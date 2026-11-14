@@ -53,7 +53,10 @@ import { foldRunJournal, readRunJournalEntries } from "../run/journal.js";
 import { readPreviewLog } from "../run/preview-log.js";
 import type { RunState } from "../run/state.js";
 import { readEvaluatorPublicKeyRecords, readVerdictEnvelope } from "../venue/signing.js";
-import { claimPackageArtifactPath, draftPath, publicBundlePath, publicBundlesDir, runCancelMarkerPath } from "../workspace/layout.js";
+import { artifactsDir, claimPackageArtifactPath, draftPath, publicBundlePath, publicBundlesDir, runCancelMarkerPath } from "../workspace/layout.js";
+import { harborArmJobsDir } from "../runtime/harbor/arm-job.js";
+import { harborArmJobName } from "../runtime/harbor/launcher.js";
+import { suiteEvidenceTreeFromDirectory } from "../runtime/suite-protocol/run-complete.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { assertWorkspace } from "../workspace/workspace.js";
 import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V6_FORMAT, BUNDLE_V7_FORMAT } from "../legacy-closures.js";
@@ -100,10 +103,20 @@ import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
 import {
   activeCapabilityVector,
+  ARCHIPELAGO_EVIDENCE_ROOT,
+  buildSuiteEvidenceIndex,
   carriesOfficialTerminalBench21Slate,
   deriveClaimTaskSelection,
   derivePublicComparison,
+  deriveSuiteComparabilityFromEvidence,
   EXTERNAL_IMPORT_BUNDLE_MEMBER,
+  harborJobEvidenceRoot,
+  readRegisteredSuiteSelection,
+  registeredSuiteRows,
+  SUITE_EVIDENCE_BUNDLE_MEMBER,
+  SWE_BENCH_HARNESS_EVIDENCE_ROOT,
+  type RegisteredSuiteSelection,
+  type SuiteEvidenceTree,
 } from "@colophon-claims/check";
 
 const ROLE_ORDER: readonly BundleV4EvidenceRole[] = BUNDLE_V4_EVIDENCE_ROLES;
@@ -294,6 +307,7 @@ function recordClosure(input: MaterializeBundleInput): {
   // Captured when this run is the binary-judge runtime, so the probe's digest (if any) is
   // available where roles are assembled below without re-parsing the selection bytes.
   let binaryInspectSelection: InspectBinaryJudgeSelectionManifest | undefined;
+  let inspectEvalRuntime = false;
   if (inspectRuntime) {
     if (inspectSelectionSha256 === undefined) {
       refuse("record-integrity", "evidence-closure", "Inspect draft has no sealed runtime selection identity");
@@ -308,7 +322,14 @@ function recordClosure(input: MaterializeBundleInput): {
       refuse("record-integrity", "evidence-closure", "draft Inspect selection differs from the selection frozen in Run registration");
     }
     const selectionBytes = getSealedBytes(workspaceDir, inspectSelectionSha256);
-    if (binaryInspectRuntime) {
+    inspectEvalRuntime = genericInspectRuntime
+      && readRegisteredSuiteSelection(INSPECT_SELECTION_CORRELATION_ROLE, selectionBytes, `records/${inspectSelectionSha256}.bin`)?.kind
+        === "inspect-eval";
+    if (inspectEvalRuntime) {
+      // An Inspect eval selection (`inspect-eval-selection/1`) is not an Inspect selection manifest:
+      // it pins one shared template and names the samples, and its Tasks carry only `sampleId`.
+      // It travels under `suite-comparability` below, read from the Run's registration row.
+    } else if (binaryInspectRuntime) {
       binaryInspectSelection = exactJson(
         selectionBytes,
         InspectBinaryJudgeSelectionManifestSchema,
@@ -648,7 +669,7 @@ function recordClosure(input: MaterializeBundleInput): {
       evaluation?: { digest?: { sha256?: string } };
       payload?: { selectionManifestSha256?: unknown };
     };
-    if (genericInspectRuntime) {
+    if (genericInspectRuntime && !inspectEvalRuntime) {
       if (task.payload?.selectionManifestSha256 !== inspectSelectionSha256) {
         refuse("record-integrity", "evidence-closure", `Inspect Task ${taskSha256} does not bind the draft's sealed runtime selection`);
       }
@@ -697,6 +718,79 @@ function recordClosure(input: MaterializeBundleInput): {
       );
     }
   }
+
+  // ── The suite-comparability carriage (issues #4759, #4761, #4762) ─────────────────────────
+  //
+  // A run bound to an official suite registered its runtime selection, and for six of the seven
+  // suites its suite-protocol object, by digest at lock. The composed bundle carries those exact
+  // bytes and the files that decided `leaderboardSubmitReady`, so a reader re-derives the claim's
+  // `suiteComparability` and the limitation sentence it selects from bytes it holds. The suite
+  // facts are read from the Run's own registration rows, the same rows the checker reads, by the
+  // checker's own reader, and the files are chosen by the derivation the checker re-runs.
+  const suiteRows = registeredSuiteRows(
+    readRunPublicationExtension(run as unknown as Record<string, unknown>)?.registrationArtifacts ?? [],
+  );
+  const suiteRuntimeRow = suiteRows.runtimeSelection.length === 1 ? suiteRows.runtimeSelection[0]! : undefined;
+  const suiteSelection: RegisteredSuiteSelection | undefined = suiteRuntimeRow === undefined
+    ? undefined
+    : readRegisteredSuiteSelection(
+      suiteRuntimeRow.role,
+      getSealedBytes(workspaceDir, suiteRuntimeRow.artifact.digest.sha256),
+      `records/${suiteRuntimeRow.artifact.digest.sha256}.bin`,
+    );
+  // Evidence files come from the producing machine, not from the sealed store, so their bytes are
+  // held here and every record read below consults this map first.
+  const suiteEvidenceBytes = new Map<string, Uint8Array>();
+  let suiteEvidenceIndex: Uint8Array | undefined;
+  if (composedGeneration && suiteSelection !== undefined) {
+    const runSha256 = runState.runSha256;
+    addRole(evidenceRecords, suiteRuntimeRow!.artifact.digest.sha256, "runtime-selection");
+    if (suiteSelection.kind !== "inspect-eval") {
+      if (suiteRows.suiteSelection.length !== 1) {
+        refuse("record-integrity", "evidence-closure", "suite-bound Run must register exactly one suite-protocol selection");
+      }
+      addRole(evidenceRecords, suiteRows.suiteSelection[0]!.artifact.digest.sha256, "suite-protocol-selection");
+    }
+    const rootDirectory = (root: string): string | undefined => {
+      for (const arm of run.arms) {
+        if (root === harborJobEvidenceRoot(arm.armId)) {
+          return join(harborArmJobsDir(workspaceDir, runSha256), harborArmJobName(runSha256, arm.armId));
+        }
+      }
+      if (root === SWE_BENCH_HARNESS_EVIDENCE_ROOT) return join(artifactsDir(workspaceDir), "swebench-harness", draftId);
+      if (root === ARCHIPELAGO_EVIDENCE_ROOT) return join(artifactsDir(workspaceDir), "archipelago", draftId);
+      return undefined;
+    };
+    const trees = new Map<string, SuiteEvidenceTree>();
+    const treeFor = (root: string): SuiteEvidenceTree => {
+      let tree = trees.get(root);
+      if (tree === undefined) {
+        const directory = rootDirectory(root);
+        tree = directory === undefined ? { paths: () => [], read: () => undefined } : suiteEvidenceTreeFromDirectory(directory);
+        trees.set(root, tree);
+      }
+      return tree;
+    };
+    const derivation = deriveSuiteComparabilityFromEvidence({
+      selection: suiteSelection,
+      arms: run.arms,
+      replicates: run.replicates,
+      runSha256,
+      matrix,
+      tree: treeFor,
+    });
+    const indexed: { root: string; path: string; sha256: string }[] = [];
+    for (const file of derivation.evidence) {
+      const bytes = treeFor(file.root).read(file.path);
+      if (bytes === undefined) refuse("record-integrity", SUITE_EVIDENCE_BUNDLE_MEMBER, `evidence file ${file.root}/${file.path} disappeared while it was read`);
+      const sha256 = sha256Hex(bytes);
+      suiteEvidenceBytes.set(sha256, bytes);
+      addRole(evidenceRecords, sha256, "suite-evidence");
+      indexed.push({ ...file, sha256 });
+    }
+    suiteEvidenceIndex = buildSuiteEvidenceIndex(indexed);
+  }
+  const recordBytes = (sha256: string): Uint8Array => suiteEvidenceBytes.get(sha256) ?? getSealedBytes(workspaceDir, sha256);
 
   const journal = readRunJournalEntries(workspaceDir, draftId);
   const graph: BundleAssemblyHeader["graph"] = {
@@ -1060,8 +1154,9 @@ function recordClosure(input: MaterializeBundleInput): {
   });
   files.set("evidence.json", canonicalJsonBytes(evidenceCatalog));
   for (const record of evidenceCatalog.records) {
-    files.set(`records/${record.sha256}.bin`, getSealedBytes(workspaceDir, record.sha256));
+    files.set(`records/${record.sha256}.bin`, recordBytes(record.sha256));
   }
+  if (suiteEvidenceIndex !== undefined) files.set(SUITE_EVIDENCE_BUNDLE_MEMBER, suiteEvidenceIndex);
 
   const reportKey = loadOrCreateReportSigningKey(workspaceDir);
   const workspace = assertWorkspace(workspaceDir);
@@ -1122,7 +1217,7 @@ function recordClosure(input: MaterializeBundleInput): {
     assemblyCells,
     recordBytes: new Map(evidenceCatalog.records.map((record) => [
       record.sha256,
-      getSealedBytes(workspaceDir, record.sha256),
+      recordBytes(record.sha256),
     ])),
     // The Terminal-Bench 2.1 projector is keyed on the claim section `report` sealed, the same
     // fact the checker keys it on, so the page rendered here is the page it rebuilds. A claim
@@ -1200,6 +1295,7 @@ function recordClosure(input: MaterializeBundleInput): {
           importedRun: importedCarriage !== undefined,
           declaresTaskSelection: deriveClaimTaskSelection(run) !== undefined,
           officialTerminalBench21Slate: carriesOfficialTerminalBench21Slate(benchmark),
+          suiteProtocolBound: suiteSelection !== undefined,
         }),
       }
       : { format: legacyFormat }),

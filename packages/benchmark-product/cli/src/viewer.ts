@@ -4,7 +4,9 @@ import { createServer, type ServerResponse } from "node:http";
 import { extname, resolve } from "node:path";
 import {
   BUNDLE_V5_FORMAT,
+  BUNDLE_V10_FORMAT,
   PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS,
+  readerInstructions,
   bundleIdentityLabel,
   isMetadataFirstBundle,
   summarizeVerificationOutcome,
@@ -88,8 +90,11 @@ function viewerHtml(
   // hands exactly those an instruction to fail -- silently, because the fall-through is where a
   // format lands when nobody remembered it. `PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS` is TOTAL
   // over `SupportedBundleFormat`, so an unnamed format is a compile error in that map instead.
-  const verificationCommand =
-    PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[verification.format].compatibleCommand;
+  // A `/10` bundle names its line by what it declares: a vector carrying `suite-comparability`
+  // (issue #4759) pins a later checker than the format's base row, which would refuse it.
+  const verificationCommand = verification.format === BUNDLE_V10_FORMAT
+    ? readerInstructions(verification.capabilities).compatibleCommand
+    : PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[verification.format].compatibleCommand;
   // No released npx line understands the metadata-first profile -- an older reader refuses it at
   // manifest parse -- so this page offers the local command that does work instead of an
   // instruction to fail. The key is the bundle's declared profile, not whether a body happened to

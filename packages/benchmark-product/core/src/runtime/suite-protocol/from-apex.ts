@@ -1,12 +1,8 @@
-import {
-  APEX_AGENTS_DATASET_REVISION,
-  APEX_AGENTS_DATASET_TASK_COUNT,
-  type ApexAgentsSelectionManifest,
-} from "../apex-agents/manifest.js";
+import { apexAgentsSuiteMethodFacts, type SuiteMethodFacts } from "@colophon-claims/check";
+import type { ApexAgentsSelectionManifest } from "../apex-agents/manifest.js";
 import {
   deriveSuiteComparability,
   methodLeaderboardEligible,
-  officialArchipelagoConformance,
   suiteLeaderboardLimitation,
   type SuiteComparability,
 } from "./comparability.js";
@@ -29,42 +25,10 @@ export interface OfficialApexDatasetSize {
 
 function methodBitsFromApex(
   manifest: ApexAgentsSelectionManifest,
-  officialDatasetTaskCount: number = APEX_AGENTS_DATASET_TASK_COUNT,
-): {
-  readonly protocol: "apex-agents";
-  readonly coverage: SuiteProtocolSelection["coverage"];
-  readonly executionConformance: boolean;
-  readonly k: number;
-  readonly selectedCount: number;
-  readonly datasetCount: number;
-  readonly atifPresent: boolean;
-  readonly datasetRevisionMatchesLeaderboardPin: boolean;
-  readonly datasetCountMatchesLeaderboardPin: boolean;
-} {
-  const suite = manifest.suite;
-  return {
-    protocol: "apex-agents",
-    coverage: suite.coverage,
-    executionConformance: officialArchipelagoConformance({
-      k: suite.replicates,
-      archipelagoCommit: manifest.archipelago.commit,
-      agentId: manifest.archipelago.agentId,
-      maxSteps: manifest.archipelago.maxSteps,
-      timeoutSeconds: manifest.archipelago.timeoutSeconds,
-      judgeModel: manifest.archipelago.judgeModel,
-      judgeThinking: manifest.archipelago.judgeThinking,
-      webSearch: manifest.archipelago.webSearch,
-      timeoutOverride: manifest.archipelago.timeoutOverride,
-      resourceOverride: manifest.archipelago.resourceOverride,
-      evaluatorId: manifest.archipelago.adapterId,
-    }),
-    k: suite.replicates,
-    selectedCount: suite.selectedTaskNames.length,
-    datasetCount: suite.datasetTaskCount,
-    atifPresent: suite.atifRequired,
-    datasetRevisionMatchesLeaderboardPin: suite.datasetRevision === APEX_AGENTS_DATASET_REVISION,
-    datasetCountMatchesLeaderboardPin: suite.datasetTaskCount === officialDatasetTaskCount,
-  };
+  officialDatasetTaskCount?: number,
+): SuiteMethodFacts {
+  // The checker's, so `report` and a reader decide the method half alike (issue #4761).
+  return apexAgentsSuiteMethodFacts(manifest, officialDatasetTaskCount);
 }
 
 function presentSuiteQuote(

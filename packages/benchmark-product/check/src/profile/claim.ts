@@ -72,6 +72,8 @@ import { ClaimOwnerControlledPublicationSectionSchema } from "./owner-controlled
 import type { ClaimOwnerControlledPublicationSection } from "./owner-controlled-publication.js";
 import { ClaimTerminalBench21ComparabilitySectionSchema } from "./terminal-bench-2-1-comparability.js";
 import type { ClaimTerminalBench21ComparabilitySection } from "./terminal-bench-2-1-comparability.js";
+import { SUITE_COVERAGE } from "./suite-coverage.js";
+import type { SuiteComparability } from "./suite-comparability.js";
 import { PROMPTED_SCREENING_PROFILE } from "../admission/contracts.js";
 import { ClaimAnchorSchema, SELF_RUN_TRUST_ROOT, anchoredTrustRoot } from "./anchor-claims.js";
 import type { ClaimAnchor } from "./anchor-claims.js";
@@ -275,6 +277,14 @@ const AssuranceBlockSchema = z.object({
   disclosure: z.string().min(1),
 });
 
+/** The three suite facts core seals when a suite protocol is bound (issue #4761): the same shape
+ * as core's own claim schema. */
+const ClaimSuiteComparabilitySectionSchema = z.object({
+  executionConformance: z.boolean(),
+  coverage: z.enum(SUITE_COVERAGE),
+  leaderboardSubmitReady: z.boolean(),
+}).strict();
+
 const ClaimPackageWireSchema = z.object({
   claimSchema: z.union([
     z.literal(CLAIM_PACKAGE_SCHEMA_ID),
@@ -368,6 +378,12 @@ const ClaimPackageWireSchema = z.object({
    * refine below refuses it on every earlier allocation. Contents are the projection of the
    * Benchmark's verified official-slate extension plus the sealed sentence, never a second opinion. */
   terminalBench21Comparability: ClaimTerminalBench21ComparabilitySectionSchema.optional(),
+  /** Issues #4759, #4761, #4762: present exactly when the composed vector declares
+   * `suite-comparability`, that is, when the run is bound to an official suite protocol. The refine
+   * below refuses it on every earlier allocation. `claim-consistency` re-derives its three facts
+   * from the carried selection bytes, the Run, the Matrix and the carried evidence, never from the
+   * claim under test. */
+  suiteComparability: ClaimSuiteComparabilitySectionSchema.optional(),
 }).superRefine((claim, ctx) => {
   // The two anchored allocations differ only in which method projection they carry: /4 takes the
   // headline/comparison family, /5 (issue #3205) the binary qualification. Both carry the section.
@@ -416,6 +432,13 @@ const ClaimPackageWireSchema = z.object({
       code: "custom",
       message: "only the composed claim-package/7 allocation carries an ownerControlledPublication section",
       path: ["ownerControlledPublication"],
+    });
+  }
+  if (!composedClosure && claim.suiteComparability !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "only the composed claim-package/7 allocation carries a suiteComparability section",
+      path: ["suiteComparability"],
     });
   }
   if (!composedClosure && claim.terminalBench21Comparability !== undefined) {
@@ -802,6 +825,9 @@ export interface BuildClaimPackageInput {
    * extension by `projectClaimTerminalBench21Comparability`; the Report this claim projects already
    * seals the sentence the section repeats. */
   readonly terminalBench21Comparability?: ClaimTerminalBench21ComparabilitySection;
+  /** The re-derived suite comparability, supplied exactly when the vector declares
+   * `suite-comparability`. */
+  readonly suiteComparability?: SuiteComparability;
 }
 
 type Comparison = z.infer<typeof ComparisonSchema>;
@@ -1193,6 +1219,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
       taskSelection: taskSelection !== undefined,
       ownerControlledPublication: input.ownerControlledPublication !== undefined,
       terminalBench21Comparability: input.terminalBench21Comparability !== undefined,
+      suiteComparability: input.suiteComparability !== undefined,
     };
     for (const capability of CAPABILITY_REGISTRY) {
       if (supplied[capability.claimSection] !== input.composedCapabilities!.includes(capability.token)) {
@@ -1299,6 +1326,15 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     ...(input.terminalBench21Comparability === undefined
       ? {}
       : { terminalBench21Comparability: { ...input.terminalBench21Comparability } }),
+    ...(input.suiteComparability === undefined
+      ? {}
+      : {
+        suiteComparability: {
+          executionConformance: input.suiteComparability.executionConformance,
+          coverage: input.suiteComparability.coverage,
+          leaderboardSubmitReady: input.suiteComparability.leaderboardSubmitReady,
+        },
+      }),
     ...(input.previewDisclosure !== undefined
       ? {
           rehearsal: {

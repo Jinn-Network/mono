@@ -634,14 +634,18 @@ test('every claim pin in the tree names a published reader, and the tree pins ea
     pins['@colophon-claims/verify'].includes('0.2.1'),
     'the frozen closures must keep pinning the version published under the retired name',
   );
-  assert.deepEqual(pins['@colophon-claims/check'], ['0.2', '0.2.1']);
-  assert.deepEqual(
-    assertClaimReaderPinsMatchPublish(pins, '@colophon-claims/check', checkerManifest().version),
-    pins,
+  // `suite-comparability` (issues #4759, #4761, #4762) pins the checker's 0.3.0 line, which no
+  // release has published yet. So the next checker publish must be 0.3.0, and until its receipt
+  // lands neither the checker at another version nor the alias publishes past the guard.
+  assert.deepEqual(pins['@colophon-claims/check'], ['0.2', '0.2.1', '0.3', '0.3.0']);
+  assert.throws(
+    () => assertClaimReaderPinsMatchPublish(pins, '@colophon-claims/check', checkerManifest().version),
+    /claim pins name unpublished verifier 0\.3\.0; publish those before 0\.2\.2/u,
   );
-  assert.deepEqual(
-    assertClaimReaderPinsMatchPublish(pins, '@colophon-claims/verify', aliasManifest().version),
-    pins,
+  assert.deepEqual(assertClaimReaderPinsMatchPublish(pins, '@colophon-claims/check', '0.3.0'), pins);
+  assert.throws(
+    () => assertClaimReaderPinsMatchPublish(pins, '@colophon-claims/verify', aliasManifest().version),
+    /claim pins name unpublished @colophon-claims\/check@0\.3, @0\.3\.0; publishing @colophon-claims\/verify@/u,
   );
   for (const source of CLAIM_PIN_SOURCES) {
     assert.match(readFileSync(join(repoRoot, source), 'utf8'), /@colophon-claims\/(?:verify|check)@/u, source);
@@ -986,8 +990,9 @@ const CLAIM_PIN_SETS = {
     '@colophon-claims/verify': ['0.1', '0.1.0', '0.2', '0.2.0', '0.2.1'],
   },
   // The composed `/10` claim's lines: the first checker release, which reads the format, and the
-  // checker's `@0.2` line, which admits no release before it (issue #4746).
-  'packages/benchmark-product/check/src/capabilities.ts': { '@colophon-claims/check': ['0.2', '0.2.1'] },
+  // checker's `@0.2` line, which admits no release before it (issue #4746); and the first release
+  // implementing `suite-comparability` with its `@0.3` line (issue #4759).
+  'packages/benchmark-product/check/src/capabilities.ts': { '@colophon-claims/check': ['0.2', '0.2.1', '0.3', '0.3.0'] },
   // NEXT-STEPS.md is written to the operator's own disk beside the demo output, sealed into no
   // bundle, so it is a fresh instruction and moves.
   'packages/benchmark-product/cli/src/main.ts': { '@colophon-claims/check': ['0.2'] },
@@ -1160,9 +1165,18 @@ test('the check dispatch admits the checker version it publishes, and no other u
   // checker publish, resolves the checker pins against the ledger naming that version. Neither path
   // is new: this pins that the composed pin passes both without widening either.
   const pins = collectClaimReaderPins(repoRoot);
-  assert.deepEqual(pins['@colophon-claims/check'], ['0.2', '0.2.1']);
-  assert.deepEqual(await checkClaimPins(repoRoot, checkerManifest(), ['0.0.0', '0.2.1']), pins);
-  assert.deepEqual(await checkClaimPins(repoRoot, aliasManifest(), ['0.1.0', '0.2.0', '0.2.1', '0.2.2']), pins);
+  assert.deepEqual(pins['@colophon-claims/check'], ['0.2', '0.2.1', '0.3', '0.3.0']);
+  // The tree now pins the checker's 0.3.0 (issue #4759), so the dispatch admits a checker publish
+  // only at that version, and the alias only once a receipt names it.
+  await assert.rejects(
+    () => checkClaimPins(repoRoot, checkerManifest(), ['0.0.0', '0.2.1', '0.2.2']),
+    /claim pins name unpublished verifier 0\.3\.0; publish those before 0\.2\.2/u,
+  );
+  assert.deepEqual(await checkClaimPins(repoRoot, { ...checkerManifest(), version: '0.3.0' }, ['0.0.0', '0.2.1', '0.2.2']), pins);
+  await assert.rejects(
+    () => checkClaimPins(repoRoot, aliasManifest(), ['0.1.0', '0.2.0', '0.2.1', '0.2.2']),
+    /claim pins name unpublished @colophon-claims\/check@0\.3, @0\.3\.0/u,
+  );
   assert.throws(
     () => assertClaimReaderPinsMatchPublish(
       { ...pins, '@colophon-claims/check': ['0.2', '0.2.1', '0.2.9'] },
@@ -1186,7 +1200,7 @@ test('core and cli refuse until npm serves every reader the tree pins (issue #47
     await assert.rejects(
       () => checkClaimPins(repoRoot, manifest, undefined, beforeCheck),
       new RegExp(
-        `claim pins name @colophon-claims/check@0\\.2, @0\\.2\\.1, which npm does not serve; publish @colophon-claims/check before ${manifest.name}@0\\.1\\.1`,
+        `claim pins name @colophon-claims/check@0\\.2, @0\\.2\\.1, @0\\.3, @0\\.3\\.0, which npm does not serve; publish @colophon-claims/check before ${manifest.name}@0\\.1\\.1`,
         'u',
       ),
     );
@@ -1195,16 +1209,27 @@ test('core and cli refuse until npm serves every reader the tree pins (issue #47
     () => checkClaimPins(repoRoot, productManifest('core'), undefined, registryServing({
       '@colophon-claims/verify': ['0.1.0', '0.2.0', '0.2.1', '0.2.2'],
     })),
-    /claim pins name @colophon-claims\/check@0\.2, @0\.2\.1, which npm does not serve/u,
+    /claim pins name @colophon-claims\/check@0\.2, @0\.2\.1, @0\.3, @0\.3\.0, which npm does not serve/u,
     'a 404 is not a first publish here: nothing under a reader name goes out in this dispatch',
   );
   await assert.rejects(
     () => checkClaimPins(repoRoot, productManifest('core'), undefined, async () => ({ ok: false, status: 503 })),
     /cannot read published @colophon-claims\/check versions from npm: HTTP 503/u,
   );
+  // npm serving check 0.2.1 alone no longer frees core and cli: the tree pins 0.3.0 (issue #4759).
+  const afterFirstCheck = registryServing({
+    '@colophon-claims/check': ['0.0.0', '0.2.1', '0.2.2'],
+    '@colophon-claims/verify': ['0.1.0', '0.2.0', '0.2.1', '0.2.2', '0.2.3'],
+  });
+  for (const manifest of [productManifest('core'), productManifest('cli')]) {
+    await assert.rejects(
+      () => checkClaimPins(repoRoot, manifest, undefined, afterFirstCheck),
+      /claim pins name @colophon-claims\/check@0\.3, @0\.3\.0, which npm does not serve/u,
+    );
+  }
   const afterCheck = registryServing({
-    '@colophon-claims/check': ['0.0.0', '0.2.1'],
-    '@colophon-claims/verify': ['0.1.0', '0.2.0', '0.2.1', '0.2.2'],
+    '@colophon-claims/check': ['0.0.0', '0.2.1', '0.2.2', '0.3.0'],
+    '@colophon-claims/verify': ['0.1.0', '0.2.0', '0.2.1', '0.2.2', '0.2.3'],
   });
   for (const manifest of [productManifest('core'), productManifest('cli')]) {
     assert.deepEqual(await checkClaimPins(repoRoot, manifest, undefined, afterCheck), collectClaimReaderPins(repoRoot));

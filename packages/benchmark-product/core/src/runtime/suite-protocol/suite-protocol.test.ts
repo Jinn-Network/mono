@@ -896,7 +896,10 @@ describe("accounting divergence explanation (operator ruling of 2026-08-20, opti
     const suiteProtocolDir = dirname(fileURLToPath(import.meta.url));
     const operationsDir = join(suiteProtocolDir, "../../operations");
     const files: Readonly<Record<string, string>> = {
-      "comparability.ts": readFileSync(join(suiteProtocolDir, "comparability.ts"), "utf8"),
+      // The eligibility and conformance functions moved, byte for byte, into the checker, which
+      // re-derives a declaring bundle's `suiteComparability` with them (issues #4759, #4761); this
+      // module re-exports them. Their bodies are pinned where they now live.
+      "comparability.ts": readFileSync(join(suiteProtocolDir, "../../../../check/src/profile/suite-comparability.ts"), "utf8"),
       "hub-export.ts": readFileSync(join(operationsDir, "hub-export.ts"), "utf8"),
       "inspect-view-export.ts": readFileSync(join(operationsDir, "inspect-view-export.ts"), "utf8"),
       "apex-agents-export.ts": readFileSync(join(operationsDir, "apex-agents-export.ts"), "utf8"),

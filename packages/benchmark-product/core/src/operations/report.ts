@@ -377,6 +377,17 @@ export function runReport(
               })()
               : undefined;
       const suiteLimits = suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation];
+      // Issues #4759, #4761: a suite-bound run's claim carries `suiteComparability`, which only the
+      // composed generation's `suite-comparability` capability lets a reader re-derive. No legacy
+      // allocation carries the selection bytes or the evidence, so the rollback is refused here,
+      // while the operator can still read why, as it is for an imported run.
+      if (suiteFacts !== undefined && input.composedFormat === false) {
+        refuse(
+          "conflict",
+          `runs.${input.draftId}.suiteComparability`,
+          `draft ${input.draftId} is bound to an official suite, so composedFormat: false is refused — a suite-bound run can only be reported as composed /10, whose suite-comparability capability carries the sealed selection and evidence a reader re-derives the claim's suite comparability from`,
+        );
+      }
 
       // anchor-evidence §7.4: the claim is the report-time projection, so its anchors section is
       // exactly the set this run had already obtained. Anchoring is expected to complete before
@@ -446,6 +457,9 @@ export function runReport(
             declaresTaskSelection: deriveClaimTaskSelection(runRecord) !== undefined,
             // A fact about the Benchmark, so every entry of a brought slate run declares it too.
             officialTerminalBench21Slate,
+            // A fact about the sealed Run's bound runtime, so every entry of a suite-bound run
+            // declares it and carries the same section.
+            suiteProtocolBound: suiteFacts !== undefined,
           })
           : undefined;
         const entryIsDisclosed = composedCapabilities !== undefined
