@@ -294,8 +294,9 @@ const producerWorkflows = [...new Set(REQUIRED_CHECK_SET.map((member) => member.
 // The terminal gate jobs step 0 introduced: one uniquely-named job per operator
 // and structure surface that collects its whole workflow. The two PAC contexts
 // are shaped differently on purpose (`platform-architecture-control` collects
-// nothing; `platform-verification` collects only the selection and reusable
-// call) and are pinned by `architecture-control-workflow.test.mjs` instead.
+// nothing; `platform-verification` collects only the selection, the reusable
+// call, and `platform-release-surface`) and are pinned by
+// `architecture-control-workflow.test.mjs` instead.
 //
 // Selected by the `terminal` flag, not by a `-gate` name suffix: a future
 // terminal member named anything else would silently drop out of a suffix
