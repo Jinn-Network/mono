@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import {
   mkdtemp,
   mkdir,
@@ -881,6 +881,9 @@ describe("restart reconstruction and §6.4 actions", () => {
     const root = await stateRoot("harvest-validation-live-shim");
     const ready = join(root, "harness-ready");
     const release = join(root, "harness-release");
+    // afterEach runs these before it drains, and draining waits for the resumed worker, which
+    // waits for this harness. Release it however the test ends.
+    releaseBarriers.push(() => writeFileSync(release, "1"));
     const pause = barrier();
     // The harness blocks on a file this test writes, so the shim is alive for exactly as long as
     // the test chooses. Nothing here depends on how quickly the shim would otherwise exit.
@@ -892,8 +895,10 @@ describe("restart reconstruction and §6.4 actions", () => {
           "-e",
           `const fs = require('node:fs');`
           + `fs.writeFileSync(${JSON.stringify(ready)}, '1');`
+          + `const owner = ${process.pid};`
           + `const timer = setInterval(() => {`
-          + ` if (fs.existsSync(${JSON.stringify(release)})) { clearInterval(timer); process.exit(0); }`
+          + ` let ownerAlive = true; try { process.kill(owner, 0); } catch { ownerAlive = false; }`
+          + ` if (!ownerAlive || fs.existsSync(${JSON.stringify(release)})) { clearInterval(timer); process.exit(0); }`
           + `}, 10);`,
         ],
         env: {},
@@ -908,7 +913,9 @@ describe("restart reconstruction and §6.4 actions", () => {
     await pause.entered;
     await waitFor(() => existsSync(ready), "harness did not start");
     const workspace = paths(root, attempt);
-    // Durably record a malformed harvested event while the shim is provably running.
+    // Durably record a malformed harvested event while the shim is provably running. The event is
+    // appended out of the backend's normal order on purpose: the realistic state (outcome published,
+    // shim still alive) cannot be held, because the shim exits right after publishing its outcome.
     const events = await journalEvents(root, attempt);
     const last = events[events.length - 1]!;
     await replaceJournal(root, attempt, (current) => [
