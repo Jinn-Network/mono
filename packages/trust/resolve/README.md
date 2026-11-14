@@ -41,6 +41,13 @@ over the key. Ceremony evidence that cannot be read is a failed ceremony. A
 stored entry that is not a key binding never resolves and gives no authority, but
 if its anchors can be read it still counts when deciding which binding came first.
 
+A stored entry's fields are read from its envelope. A key's signature is its word
+for one envelope's payload, under one payload type, and nothing else. So a binding
+entry whose fields are not its envelope's payload, or whose envelope is not sealed
+as a key binding, is not a key binding here, and a revocation entry whose fields are
+not its envelope's payload, or whose envelope is not sealed as a revocation, has no
+effect. Fields and payload are compared in their RFC 8785 form.
+
 A resolve that could not find out is not a refusal. `resolveBinding` answers `null`
 when nothing resolves, and throws when a store, an anchor read, the registry or a
 `verifyHostedCeremony` leg failed, so a caller can tell the two apart. Both fail
