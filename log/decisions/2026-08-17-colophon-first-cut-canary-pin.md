@@ -132,3 +132,21 @@ Colophon Increment 1 pins:
 `@colophon-claims/verify` to release group `colophon-claims-v1` with
 `publishPolicy: independent` in the same product-workflow change. core, cli,
 and web stay `never`.
+
+## Amendment 2026-11-14 (issue #4893): served identifiers print whole
+
+The original text above is kept as written. This amendment changes the presentation rule that the 2026-09-02 note under Decision 5 set, and narrows one clause of Decision 4 to match. Nothing else changes.
+
+The premise behind the origin-free rule was that `spec.jinn.network` did not serve protocol documents. Release `v0.1.0` of the protocol spec repository (`Jinn-Network/spec`, published 2026-09-24, https://github.com/Jinn-Network/spec/releases/tag/v0.1.0) is now served at `https://spec.jinn.network/`. Pull request #4774 (merged 2026-09-29) changed the reader surfaces to match.
+
+The rule is now:
+
+- A protocol identifier under `https://spec.jinn.network/` prints whole when its path matches, exactly, a document path in the inventory of spec release `v0.1.0`, less that release's conformance fixtures. The match is by exact path, not by the inventory's served path prefixes, because the release serves some paths under a prefix and not others (for example `task-profiles/binary-judgment/2.0` but not `1.0`).
+- A name that does not resolve that way is aliased, as before. On the `/10` page (`index.html` and `README.md`) the origin is dropped and the name or path remainder is shown. In the CLI's human output the identifier is replaced by `<identifier: see --json>`.
+- Identifiers stay unchanged in sealed records and `--json` output.
+
+The pinned inventory is `SPEC_RELEASE_SERVED_PATHS` in `packages/benchmark-product/check/src/identifier-presentation.ts`, a copy of the `v0.1.0` inventory paths. The `/10` page is byte-pinned, so a later spec release's paths reach `/10` only through a newly registered presentation capability. Frozen `/2`, `/4`, `/5`, `/6`, `/7` and `/8` pages are unchanged.
+
+Decision 4's stable hold is unchanged. Its clause "no claim that `$id` / `profile` URLs currently dereference at `spec.jinn.network`" now covers only identifiers outside that inventory.
+
+Decision 5's disclosure of the host gap still describes the first cut as published. This amendment does not claim that the stable-host verification named in Decision 3 has been observed.
