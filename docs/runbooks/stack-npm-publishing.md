@@ -210,7 +210,7 @@ that release group are not published. Confirm the version has landed with
 already has the receipt integrity and `canary` tag and publishes only the missing ones. The rerun
 is refused at preflight (`preflight canary mismatch for <name>`) once a later run has moved the
 `canary` tag for any package in the group that the failed leg already published. A tag is never
-moved back, so that sha stays partial and a later sha is the retry. The same one-day artifact
+moved back, so that sha stays partial and a later sha is the retry. The same four-day artifact
 window described below applies. The `stack-canary` job timeout is 360 minutes, GitHub's ceiling
 for a hosted job: a normal `implementations-v1` walk takes about three hours, which leaves room
 for three waits that each run close to the limit and still succeed. An exhausted wait ends the
@@ -223,8 +223,9 @@ and the per-package loop, so every later package in that release group's walk (t
 the wave and all later waves) is not published; every other matrix group is unaffected,
 since `canary-publish` runs its release groups as a `fail-fast: false` matrix. Register the missing package with the CLI
 path above, then rerun. Rerunning only works while this run's `platform-verification-artifacts`
-artifact still exists (`retention-days: 1` in `platform-verification.yml`); once that window
-passes, the next push to `next` is the retry, not a manual rerun of the old run. Do not treat
+artifact still exists (`retention-days: 4` in `platform-verification.yml`, about 4.8 MB per run, counted from
+the upload, so at least three days after any leg fails); once that
+window passes, the next push to `next` is the retry, not a manual rerun of the old run. Do not treat
 a partial walk as a successful canary.
 
 **`npm publication failed for <name>@<version>: TLOG_CREATE_ENTRY_ERROR 409 on all 3 attempts`:**

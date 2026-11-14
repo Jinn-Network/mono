@@ -206,7 +206,7 @@ jobs:
           node-version: 22
       - name: Verify the host refresh logic
         run: node --test mono/.github/scripts/refresh-profile-host.test.mjs
-      # The attested roots are same-run only (retention-days: 1) and are restored by name
+      # The attested roots are same-run only (retention-days: 4) and are restored by name
       # from this run, never by run-id from another. Precedent: platform-verification.yml.
       - name: Download same-run profile roots
         uses: actions/download-artifact@v8
