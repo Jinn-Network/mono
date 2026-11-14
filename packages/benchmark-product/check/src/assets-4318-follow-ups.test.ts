@@ -60,8 +60,9 @@ describe("PR #4318 follow-ups (#4418, #4419, #4420)", () => {
     // from the full file.
     const badgeAt = ASSETS_SRC.indexOf("function buildBadge");
     expect(badgeAt, "buildBadge in assets.ts").toBeGreaterThanOrEqual(0);
-    const commentAt = ASSETS_SRC.lastIndexOf("// The retired verdict word", badgeAt);
-    expect(commentAt, 'hold-comment anchor "// The retired verdict word" above buildBadge').toBeGreaterThanOrEqual(0);
+    const holdAnchor = "// The retired verdict word (issue #2982)";
+    const commentAt = ASSETS_SRC.lastIndexOf(holdAnchor, badgeAt);
+    expect(commentAt, `hold-comment anchor "${holdAnchor}" above buildBadge`).toBeGreaterThanOrEqual(0);
     const holdComment = ASSETS_SRC.slice(commentAt, badgeAt);
     expect(holdComment).toContain("#4270");
     expect(holdComment).toContain("bundle-format allocation");
