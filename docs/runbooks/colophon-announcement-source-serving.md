@@ -7,8 +7,10 @@ ends where operator work begins: provisioning the host and domain.
 
 ## What is being served
 
-Under `<workspace>/publication/public/` the product maintains the standard
-Record Discovery serving layout:
+Under `<workspace>/publication/public/` the product maintains the Record
+Discovery serving layout plus two further kinds of object: the derived
+`/lock-index.json` listing and the publication artifacts. This table lists all
+of them:
 
 | Path | What it is | Mutability |
 |------|------------|------------|
@@ -130,8 +132,10 @@ Three things the static host must get right:
    after it. `/lock-index.json` is rewritten the same way and must be copied
    with those two files.
 3. **Do not serve anything else from the mount.** Publish the archive subtree at
-   its own path or origin. The product's handler enforces a closed path grammar;
-   a static host enforces whatever directory you point it at.
+   its own path or origin. The product's handler serves a closed allow-list of
+   three path shapes: the Record Discovery archive paths in the table above,
+   `/publication-artifacts/sha256/<digest>`, and `/lock-index.json`. Other paths
+   are not served. A static host enforces whatever directory you point it at.
 
 Neither option is required to be the only one: serving locally while mirroring
 statically is fine, because both read the same bytes.
