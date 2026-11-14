@@ -211,12 +211,15 @@ test('the stack publishing runbook tracks the generated set, CLI registration, a
 
   // Non-blocking: the rerun advice must name the artifact retention window.
   assert.match(runbook, /platform-verification-artifacts/);
-  assert.match(runbook, /retention-days: 3/);
+  assert.match(runbook, /retention-days: 4/);
+  assert.doesNotMatch(runbook, /one-day artifact/);
+  const stackPublish = readFileSync(join(repoRoot, '.github/workflows/stack-npm-publish.yml'), 'utf8');
+  assert.match(stackPublish, /same-run only \(retention-days: 4\)/);
   const verification = readFileSync(join(repoRoot, '.github/workflows/platform-verification.yml'), 'utf8');
   assert.match(
     verification,
-    /name: platform-verification-artifacts\n[\s\S]{0,160}?retention-days: 3\n/,
-    'a failed canary leg must stay re-runnable for three days',
+    /name: platform-verification-artifacts\n[\s\S]{0,160}?retention-days: 4\n/,
+    'a failed canary leg must stay re-runnable for at least three days',
   );
   assert.match(runbook, /next push to `next` is the retry/);
 
