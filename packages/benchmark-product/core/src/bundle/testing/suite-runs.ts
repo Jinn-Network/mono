@@ -6,8 +6,10 @@
  * Pier that writes a real-shaped jobs directory (trial `config.json`, ATIF files, `reward.json`).
  * SWE-bench Verified, APEX-Agents, APEX-SWE-dev and Inspect eval are brought with `run import`,
  * because their launchers need the real harness; a test writes the harness reports or grades core
- * reads where core reads them. Every selection is sealed by the same fixture drafts the runtime
- * tests use, with fake executables that answer the version probes.
+ * reads where core reads them. Inspect eval is also brought with `run import --from inspect`, and
+ * launched against a fake Inspect worker, so its delivered cells are covered both ways (#5244).
+ * Every selection is sealed by the same fixture drafts the runtime tests use, with fake executables
+ * that answer the version probes.
  */
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

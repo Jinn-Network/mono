@@ -43,6 +43,7 @@ import { SWE_BENCH_VERIFIED_DATASET_INSTANCE_COUNT, SWE_BENCH_VERIFIED_DATASET_R
 import { APEX_AGENTS_DATASET_REVISION, APEX_AGENTS_DATASET_TASK_COUNT, APEX_AGENTS_SELECTION_ROLE } from "../runtime/apex-agents/manifest.js";
 import { APEX_SWE_DEV_SELECTION_ROLE } from "../runtime/apex-swe-dev/manifest.js";
 import { INSPECT_EVAL_SELECTION_SCHEMA } from "../runtime/inspect-eval/manifest.js";
+import { INSPECT_RUN_IMPORT_EVIDENCE_NAME } from "../intake/inspect-run-records.js";
 import { TERMINAL_BENCH_2_1_DATASET_REF } from "../runtime/terminal-bench-2-1/manifest.js";
 import { TERMINAL_BENCH_3_0_DATASET_REF } from "../runtime/terminal-bench-3-0/manifest.js";
 import { DEEP_SWE_V11_GIT_SHA, DEEP_SWE_V11_TASK_COUNT, DEEP_SWE_V11_TASKS_TREE_SHA } from "../runtime/deep-swe-v1.1/manifest.js";
@@ -388,6 +389,7 @@ describe("the checker restates core's registration roles and leaderboard pins ex
     expect(check.APEX_AGENTS_SELECTION_ROLE).toBe(APEX_AGENTS_SELECTION_ROLE);
     expect(check.APEX_SWE_DEV_SELECTION_ROLE).toBe(APEX_SWE_DEV_SELECTION_ROLE);
     expect(check.INSPECT_EVAL_SELECTION_SCHEMA).toBe(INSPECT_EVAL_SELECTION_SCHEMA);
+    expect(check.INSPECT_EVAL_IMPORTED_LOG_OUTPUT).toBe(INSPECT_RUN_IMPORT_EVIDENCE_NAME);
     expect(check.TERMINAL_BENCH_2_1_LEADERBOARD_DATASET_REF).toBe(TERMINAL_BENCH_2_1_DATASET_REF);
     expect(check.TERMINAL_BENCH_3_0_LEADERBOARD_DATASET_REF).toBe(TERMINAL_BENCH_3_0_DATASET_REF);
     expect(check.DEEP_SWE_V11_LEADERBOARD_GIT_SHA).toBe(DEEP_SWE_V11_GIT_SHA);

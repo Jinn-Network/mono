@@ -59,7 +59,8 @@ export interface InspectRunImportDump {
 
 const UTF8 = new TextDecoder("utf8", { fatal: true });
 const EXTRA_ARM = "extra";
-const EVIDENCE_NAME = "inspect-log.eval";
+/** The name each imported cell's native EvalLog travels under; the checker restates it. */
+export const INSPECT_RUN_IMPORT_EVIDENCE_NAME = "inspect-log.eval";
 const INSPECT_STATUSES = new Set(["started", "success", "cancelled", "error"]);
 
 interface EvalSampleShape {
@@ -315,7 +316,7 @@ export function readInspectRunRecords(input: ReadInspectRunRecordsInput): Extern
     logsRead += 1;
     const armId = resolveArmId(log, arms);
     const evidence: readonly ExternalRunEvidenceRef[] = [{
-      name: EVIDENCE_NAME,
+      name: INSPECT_RUN_IMPORT_EVIDENCE_NAME,
       path: relativeEvidencePath(root, file),
     }];
     for (const sample of log.samples) {
