@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import {
   mkdtemp,
   mkdir,
@@ -875,6 +875,69 @@ describe("restart reconstruction and §6.4 actions", () => {
       category: "invalid-document",
     });
     pause.release();
+  });
+
+  test("a malformed harvested event with the shim still alive resumes supervision, then the worker records lost with no Delivery", async () => {
+    const root = await stateRoot("harvest-validation-live-shim");
+    const ready = join(root, "harness-ready");
+    const release = join(root, "harness-release");
+    // afterEach runs these before it drains, and draining waits for the resumed worker, which
+    // waits for this harness. Release it however the test ends.
+    releaseBarriers.push(() => writeFileSync(release, "1"));
+    const pause = barrier();
+    // The harness blocks on a file this test writes, so the shim is alive for exactly as long as
+    // the test chooses. Nothing here depends on how quickly the shim would otherwise exit.
+    const options: BackendFixtureOptions = {
+      completionBarrier: { phase: "before-outcome-wait", barrier: pause },
+      plan: (_view, workspace) => ({
+        argv: [
+          process.execPath,
+          "-e",
+          `const fs = require('node:fs');`
+          + `fs.writeFileSync(${JSON.stringify(ready)}, '1');`
+          + `const owner = ${process.pid};`
+          + `const timer = setInterval(() => {`
+          + ` let ownerAlive = true; try { process.kill(owner, 0); } catch { ownerAlive = false; }`
+          + ` if (!ownerAlive || fs.existsSync(${JSON.stringify(release)})) { clearInterval(timer); process.exit(0); }`
+          + `}, 10);`,
+        ],
+        env: {},
+        cwd: workspace.work,
+        validExitCodes: [0],
+        resultContract: { envelopeFormat: "recovery-fixture" },
+        interruptionBehavior: "repeatable",
+      }),
+    };
+    const first = fixture(root, options);
+    const { attempt } = await submit(first);
+    await pause.entered;
+    await waitFor(() => existsSync(ready), "harness did not start");
+    const workspace = paths(root, attempt);
+    // Durably record a malformed harvested event while the shim is provably running. The event is
+    // appended out of the backend's normal order on purpose: the realistic state (outcome published,
+    // shim still alive) cannot be held, because the shim exits right after publishing its outcome.
+    const events = await journalEvents(root, attempt);
+    const last = events[events.length - 1]!;
+    await replaceJournal(root, attempt, (current) => [
+      ...current,
+      {
+        ...last,
+        seq: last.seq + 1,
+        type: "harvested",
+        details: { manifest: [{ path: "patch", sizeBytes: -1, sha256: "wrong" }], omissions: [], integrityViolations: [] },
+      },
+    ]);
+    const recovered = await restartWhilePaused(root, first, pause, attempt, options);
+    expect(probeShimAlive(workspace.meta).alive).toBe(true);
+
+    // The shim is alive, so recovery resumes observation instead of rejecting the call.
+    expect(await recovered.recover(attempt)).toEqual({ classification: "matching", retained: true });
+    expect(probeShimAlive(workspace.meta).alive).toBe(true);
+    await writeFile(release, "1");
+
+    // The resumed worker refuses the malformed event: a lost terminal, and nothing was delivered.
+    expect(await terminalState(recovered, attempt)).toBe("lost");
+    expect(await recovered.deliveries(attempt)).toEqual([]);
   });
 
   test("cancellation records once, signals the real shim subtree, then harvests and terminalizes cancelled", async () => {
