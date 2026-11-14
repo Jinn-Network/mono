@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync } from 'node:fs';
 import { createDecipheriv, scryptSync } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { BindingResolver, ResolvedBinding } from '@jinn-network/trust-core';
+import type { BindingAuthorityDeps, BindingResolver, ResolvedBinding } from '@jinn-network/trust-core';
 import { describe, expect, it, vi } from 'vitest';
 import {
   NATIVE_ROLE_IDENTITY_ROLES,
@@ -12,6 +12,10 @@ import {
 
 const AGENT = 'urn:jinn:operator:test';
 const BOOT_TIME = '2026-08-02T12:00:00.000Z';
+/** Every fixture binding's voucher account: the one party that may revoke a role binding here. */
+const VOUCHER = 'did:pkh:eip155:84532:0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf';
+/** A key with no standing to revoke: the fixture resolver gives it no `bindings` scope. */
+const STRANGER = 'did:key:z6MkStrangerWithNoBindingsScope';
 
 function resolvedBinding(input: {
   readonly key: string;
@@ -21,23 +25,40 @@ function resolvedBinding(input: {
   readonly scopes: readonly string[];
   readonly effectiveStart?: string;
   readonly expiresAt?: string;
-  readonly revocations?: readonly { readonly effectiveTime: string }[];
+  readonly revocations?: readonly { readonly effectiveTime: string; readonly revokedBy: string }[];
 }): ResolvedBinding {
+  const bindingDigest = `sha256:${'b'.repeat(64)}` as const;
   return {
     binding: {
       agent: input.agent,
       key: { didKey: input.key, keyid: input.key },
+      voucher: { kind: 'account', did: VOUCHER, contractAccount: false },
       scope: input.scopes,
       validFrom: input.effectiveStart ?? '2026-08-01T00:00:00.000Z',
       ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
     },
+    bindingDigest,
     effectiveStart: input.effectiveStart ?? '2026-08-01T00:00:00.000Z',
     revocations: input.revocations?.map((revocation) => ({
-      revocation: {},
-      envelopeBytes: new Uint8Array(),
+      revocation: { revokedBy: revocation.revokedBy, target: bindingDigest },
+      // The fixture's DSSE verifier reads the signer off these bytes.
+      envelopeBytes: new TextEncoder().encode(revocation.revokedBy),
       effectiveTime: revocation.effectiveTime,
     })) ?? [],
-  } as ResolvedBinding;
+  } as unknown as ResolvedBinding;
+}
+
+/**
+ * The revocation authority rule's deps over the fixture resolver. Signatures are not what these
+ * cases test, so a revocation counts as signed by whoever its bytes name; the real-catalog cases in
+ * `trust-authoring-round-trip.test.ts` carry real signatures.
+ */
+function authorityOver(bindingResolver: BindingResolver): BindingAuthorityDeps {
+  return {
+    bindingResolver,
+    witnessVerifier: { verify1271Witness: async () => ({ verified: false }) },
+    dsseVerifier: (bytes) => ({ validSignerKeyids: [new TextDecoder().decode(bytes)] }),
+  };
 }
 
 /**
@@ -59,6 +80,7 @@ function openAt(root: string, bindingResolver: BindingResolver) {
     password: 'operator-password',
     agent: AGENT,
     bindingResolver,
+    revocationAuthority: authorityOver(bindingResolver),
     now: () => new Date(BOOT_TIME),
   });
 }
@@ -95,6 +117,7 @@ describe('native persistent role identities', () => {
       agent: 'urn:jinn:solver:scoped',
       requiredRoles: ['solver-delivery', 'solver-discovery'],
       bindingResolver: resolver,
+      revocationAuthority: authorityOver(resolver),
       verifyRoleBinding,
       now: () => new Date(BOOT_TIME),
     });
@@ -132,6 +155,7 @@ describe('native persistent role identities', () => {
       agent: 'urn:jinn:requester:scoped',
       requiredRoles: ['requester-submission', 'requester-discovery'],
       bindingResolver: resolver,
+      revocationAuthority: authorityOver(resolver),
       now: () => new Date(BOOT_TIME),
     });
     const encrypted = await readFile(path, 'utf8');
@@ -157,6 +181,7 @@ describe('native persistent role identities', () => {
       password: 'operator-password',
       requiredRoles: ['admission'] as const,
       bindingResolver: resolver,
+      revocationAuthority: authorityOver(resolver),
       now: () => new Date(BOOT_TIME),
     };
     await expect(openRoleIdentitySet({ ...common, agent: 'urn:jinn:requester:wrong' }))
@@ -174,6 +199,7 @@ describe('native persistent role identities', () => {
       password: 'operator-password',
       agent: AGENT,
       bindingResolver: resolver,
+      revocationAuthority: authorityOver(resolver),
       now: () => new Date(BOOT_TIME),
     })).rejects.toThrow(/path must be absolute/i);
     expect(existsSync(implicitCwdPath)).toBe(false);
@@ -323,12 +349,49 @@ describe('native persistent role identities', () => {
         resolvedBinding({
           key: query.key, agent: query.agent,
           scopes: ALL_NATIVE_SCOPES,
-          revocations: [{ effectiveTime: BOOT_TIME }],
+          revocations: [{ effectiveTime: BOOT_TIME, revokedBy: VOUCHER }],
         }),
       ),
     };
 
     await expect(openAt(root, resolver)).rejects.toThrow(/revoked/i);
+  });
+
+  it.each([
+    ['a readable', BOOT_TIME],
+    ['an unreadable', 'not a time'],
+  ])('ignores a revocation, with %s time, from a key with no authority to revoke it (#5147)', async (_label, effectiveTime) => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-unauthorized-revocation-'));
+    const resolver: BindingResolver = {
+      resolveBinding: vi.fn(async (query) =>
+        resolvedBinding({
+          key: query.key, agent: query.agent,
+          scopes: ALL_NATIVE_SCOPES,
+          revocations: [{ effectiveTime, revokedBy: STRANGER }],
+        }),
+      ),
+    };
+
+    const identities = await openAt(root, resolver);
+    await expect(identities.resolveEffective('solver-delivery', '2026-08-02T12:05:00.000Z'))
+      .resolves.toEqual({ ok: true, bindingDigest: `sha256:${'b'.repeat(64)}` });
+  });
+
+  it('takes an authorized revocation whose time cannot be read at every instant (#5147)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-unreadable-revocation-'));
+    const revoked = { effectiveTime: 'not a time', revokedBy: VOUCHER };
+    let revocations: (typeof revoked)[] = [];
+    const resolver: BindingResolver = {
+      resolveBinding: vi.fn(async (query) => resolvedBinding({
+        key: query.key, agent: query.agent, scopes: ALL_NATIVE_SCOPES, revocations,
+      })),
+    };
+    const identities = await openAt(root, resolver);
+    revocations = [revoked];
+
+    await expect(identities.resolveEffective('solver-delivery', '2026-08-02T12:05:00.000Z'))
+      .resolves.toEqual({ ok: false, reason: 'revoked' });
+    await expect(openAt(root, resolver)).rejects.toThrow(/revoked at boot/u);
   });
 
   it('requires evaluator verdict custody to be authorized for Delivery as well as verdict records', async () => {
@@ -357,7 +420,7 @@ describe('native persistent role identities', () => {
         key: query.key, agent: query.agent,
         scopes: ALL_NATIVE_SCOPES,
         ...(atTime === deliveryTime
-          ? { revocations: [{ effectiveTime: '2026-08-02T12:04:00.000Z' }] }
+          ? { revocations: [{ effectiveTime: '2026-08-02T12:04:00.000Z', revokedBy: VOUCHER }] }
           : {}),
       })),
     };

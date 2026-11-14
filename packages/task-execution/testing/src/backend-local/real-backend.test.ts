@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InMemoryEvidenceCatalog } from "@jinn-network/evidence-discovery";
@@ -23,7 +23,7 @@ import {
   type ProfileStore,
 } from "@jinn-network/task-execution-profiles";
 import type { ProvisionerContract } from "@jinn-network/task-execution-workspace";
-import { afterAll } from "vitest";
+import { afterAll, afterEach } from "vitest";
 import {
   describeLocalBackendContract,
   type LocalBackendContractFactory,
@@ -31,6 +31,7 @@ import {
 } from "./backend-contract.js";
 const roots: string[] = [];
 const instances: LocalTaskExecutionBackend[] = [];
+const releases: string[] = [];
 const profile = buildRepositoryWorkProfile();
 const emptyProfileStore: ProfileStore = { get: () => undefined };
 
@@ -39,6 +40,13 @@ function root(): string {
   roots.push(value);
   return value;
 }
+
+/** Lets every held fixture process exit (see `makeNodeProcessLauncher`). */
+function releaseHeldProcesses(): void {
+  for (const release of releases.splice(0)) writeFileSync(release, "");
+}
+
+afterEach(releaseHeldProcesses);
 
 afterAll(async () => {
   await Promise.all(instances.map(async (instance) => {
@@ -63,22 +71,29 @@ const launcherCapabilities: LauncherCapabilities = {
 /**
  * The real-backend suite must cross the actual supervisor/shim boundary. This launcher remains
  * a pure contract implementation: its plan is closed data and it never calls the fake
- * launcher's `onRun` simulation hook. A short delay keeps generic drive-based scenarios
- * nonterminal until their synthetic observations are appended; it does not keep them pending,
- * because the backend records `attempt-started` itself as soon as the shim is live. Evidence
- * scenarios select immediate exit.
+ * launcher's `onRun` simulation hook. Generic drive-based scenarios append synthetic
+ * observations to a live Attempt, so their process holds until its release file exists: a
+ * process that ended first would record a real terminal, and a fixed delay was only a guess at
+ * how slow a loaded runner gets (#5029). Holding does not keep them pending, because the backend
+ * records `attempt-started` itself as soon as the shim is live. The process also exits once the
+ * test process is gone, so an interrupted run leaves nothing behind. Evidence scenarios select
+ * immediate exit.
  */
-function makeNodeProcessLauncher(delayMs: number): LauncherContract {
+function makeNodeProcessLauncher(release: string | undefined): LauncherContract {
+  const program = release === undefined
+    ? "process.exit(0)"
+    : [
+        "const fs=require('node:fs');",
+        `const release=${JSON.stringify(release)};const owner=${process.pid};`,
+        "setInterval(()=>{let ownerAlive=true;try{process.kill(owner,0);}catch{ownerAlive=false;}",
+        "if(!ownerAlive||fs.existsSync(release))process.exit(0);},20);",
+      ].join("");
   return {
     id: "real-node-fixture",
     capabilities: () => launcherCapabilities,
     plan(_view, paths) {
       return {
-        argv: [
-          process.execPath,
-          "-e",
-          `setTimeout(() => process.exit(0), ${delayMs})`,
-        ],
+        argv: [process.execPath, "-e", program],
         env: {},
         cwd: paths.work,
         validExitCodes: [0],
@@ -89,8 +104,6 @@ function makeNodeProcessLauncher(delayMs: number): LauncherContract {
     },
   };
 }
-
-const launcher = makeNodeProcessLauncher(500);
 
 const provisioner: ProvisionerContract = {
   workspaceKind: () => "dir",
@@ -103,7 +116,7 @@ const provisioner: ProvisionerContract = {
   },
 };
 
-function baseConfig(stateRoot: string): LocalTaskExecutionBackendConfig {
+function baseConfig(stateRoot: string, release: string): LocalTaskExecutionBackendConfig {
   return {
     stateRoot,
     source: `urn:jinn:backend-local:conformance:${stateRoot.split("/").at(-1)}`,
@@ -113,7 +126,7 @@ function baseConfig(stateRoot: string): LocalTaskExecutionBackendConfig {
     // profile document exists. The downstream host injects the intended immutable profile
     // semantics; assembly component tests separately exercise strict digest-pinned resolveProfile.
     resolveTaskProfile: () => profile,
-    launchers: [launcher],
+    launchers: [makeNodeProcessLauncher(release)],
     provisioner: () => ({ id: "fixture", contract: provisioner }),
     provisionerCapabilities: {
       taskProfiles: [profile.profile],
@@ -130,11 +143,24 @@ function create(
   stateRoot = root(),
   overrides: Partial<LocalTaskExecutionBackendConfig> = {},
 ): LocalBackendConformanceSubject {
+  const release = join(root(), "release");
+  releases.push(release);
   const instance = makeLocalTaskExecutionBackend({
-    ...baseConfig(stateRoot),
+    ...baseConfig(stateRoot, release),
     ...overrides,
   });
   instances.push(instance);
+  // Draining or shutting down waits for the instance's processes, so it lets them go first.
+  const drain = instance.drain.bind(instance);
+  const shutdown = instance.shutdown.bind(instance);
+  instance.drain = async () => {
+    releaseHeldProcesses();
+    await drain();
+  };
+  instance.shutdown = async () => {
+    releaseHeldProcesses();
+    await shutdown();
+  };
   return instance as LocalBackendConformanceSubject;
 }
 
@@ -164,7 +190,7 @@ const factory = Object.assign(
       let calls = 0;
       return {
         backend: create(root(), {
-          launchers: [makeNodeProcessLauncher(0)],
+          launchers: [makeNodeProcessLauncher(undefined)],
           recorderAvailability: "always",
           evidence: {
             repository,

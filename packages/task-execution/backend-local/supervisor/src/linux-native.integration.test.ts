@@ -94,17 +94,21 @@ describe.runIf(linux)("Linux native custody shim", () => {
     spawnShim({ attemptId: "attempt-linux", nonce: "nonce-linux", metaDir: meta, secretsDir: secrets }, {
       argv: [process.execPath, "-e", program], env: {}, cwd: root,
     });
-    const fingerprint = await waitFor(() => readShimFingerprint(meta) ?? undefined, "ready fingerprint");
-    await waitFor(() => {
-      try { return Number(readFileSync(orphanPid, "utf8")); } catch { return undefined; }
-    }, "orphan pid");
-    writeShimCancellationCommand(meta, { nonce: "nonce-linux", graceMs: 0, killPollCeilingMs: 2_000 });
-    expect(requestShimCancellation(meta, fingerprint)).toBe(true);
+    // Once its leader exits, the shim kills and reaps what is left of its custody domain, publishes
+    // the outcome and exits; nothing keeps it alive for a later request. So this test sends no
+    // cancellation: one sent after the leader exits can find the shim gone, and one sent before
+    // kills the leader (#5029).
     const outcome = await waitFor(() => readOutcome(meta, "nonce-linux") ?? undefined, "native outcome");
-    expect(outcome.termSignal).toBeNull();
+    expect({ exitCode: outcome.exitCode, termSignal: outcome.termSignal }).toEqual({ exitCode: 0, termSignal: null });
     expect(Number.isFinite(Date.parse(outcome.startedAt))).toBe(true);
     expect(Number.isFinite(Date.parse(outcome.finishedAt))).toBe(true);
     expect(Date.parse(outcome.finishedAt)).toBeGreaterThanOrEqual(Date.parse(outcome.startedAt));
+    // The leader wrote the pid before it exited, so the file is whole by now. An exit status in the
+    // outcome means the shim's last scan found its custody domain empty, so the orphan it adopted is
+    // already reaped: no wait.
+    const orphan = Number(readFileSync(orphanPid, "utf8"));
+    expect(Number.isSafeInteger(orphan) && orphan > 1, `orphan pid ${String(orphan)}`).toBe(true);
+    expect(() => process.kill(orphan, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
     const custody = await waitFor(() => {
       try { return JSON.parse(readFileSync(join(meta, "custody.json"), "utf8")) as Record<string, unknown>; } catch { return undefined; }
     }, "native custody outcome");

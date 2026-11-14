@@ -21,6 +21,8 @@ import {
   type KeyBinding,
   type Sha256Digest,
   type TrustPolicy,
+  TRUST_KEY_BINDING_MEDIA_TYPE,
+  TRUST_REVOCATION_MEDIA_TYPE,
 } from '@jinn-network/trust-core';
 import {
   NativeTrustCatalogError,
@@ -421,6 +423,46 @@ describe('native trust catalog authority', () => {
       signatures: [{ keyid: id, signature: new Uint8Array(64).fill(7) }],
     });
     expect(verifyNativeDsse(forged).validSignerKeyids).toEqual([]);
+  });
+
+  describe("an account's signature on a revocation (key authority section 8)", () => {
+    /** The secp256k1 key with value 1, the test value the specification's vectors sign with. */
+    const KEY_ONE = privateKeyToAccount(`0x${'0'.repeat(63)}1`);
+    const KEY_ONE_DID = didPkh(8453, KEY_ONE.address);
+    const revocationBytes = new TextEncoder().encode(JSON.stringify({
+      anchors: [],
+      effectiveFrom: '2026-07-29T00:00:00Z',
+      protocol: 'https://spec.jinn.network/trust/revocation/v1',
+      revokedBy: KEY_ONE_DID,
+      target: `sha256:${'2f'.repeat(32)}`,
+    }));
+
+    async function accountSigned(input: {
+      readonly payloadType?: string;
+      readonly signer?: typeof KEY_ONE;
+      readonly over?: 'pre-authentication-encoding' | 'payload';
+    } = {}): Promise<Uint8Array> {
+      const payloadType = input.payloadType ?? TRUST_REVOCATION_MEDIA_TYPE;
+      const signed = input.over === 'payload' ? revocationBytes : dssePreAuthEncoding(payloadType, revocationBytes);
+      const signature = await (input.signer ?? KEY_ONE).signMessage({ message: { raw: signed } });
+      return sealDsseEnvelope({
+        payloadType,
+        payloadBytes: revocationBytes,
+        signatures: [{ keyid: KEY_ONE_DID, signature: hexToBytes(signature) }],
+      });
+    }
+
+    it('validates an EIP-191 signature over the pre-authentication encoding by the account it names', async () => {
+      expect(verifyNativeDsse(await accountSigned()).validSignerKeyids).toEqual([KEY_ONE_DID]);
+    });
+
+    it.each([
+      ['signed by another account', { signer: OTHER_ACCOUNT }],
+      ['signed over the payload alone', { over: 'payload' as const }],
+      ['on a record other than a revocation', { payloadType: TRUST_KEY_BINDING_MEDIA_TYPE }],
+    ])('refuses one %s', async (_label, input) => {
+      expect(verifyNativeDsse(await accountSigned(input)).validSignerKeyids).toEqual([]);
+    });
   });
 
   it('opens a role only through real policy, DSSE, EOA ceremony, and finalized anchor authority', async () => {

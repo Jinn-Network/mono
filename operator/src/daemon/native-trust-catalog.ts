@@ -2,11 +2,13 @@ import { createPublicKey, verify as cryptoVerify, type KeyObject } from 'node:cr
 import { lstat, readFile } from 'node:fs/promises';
 import bs58 from 'bs58';
 import {
+  didPkh,
   dssePreAuthEncoding,
   parseExactDsseEnvelope,
   recordDigest,
   recoverEip191Address,
   resolveBindingForAgent,
+  TRUST_REVOCATION_MEDIA_TYPE,
   validateKeyBinding,
   validateRevocation,
   verifyEnvelopeBinding,
@@ -130,7 +132,29 @@ function decodeSignature(value: string): Uint8Array | undefined {
   }
 }
 
-/** Real Ed25519/multicodec DSSE verification; key IDs are never accepted by declaration alone. */
+/**
+ * Key authority section 8, "An account's signature": an account signs a revocation with a DSSE
+ * signature whose keyid is its `did:pkh`, a 65-byte EIP-191 `personal_sign` signature over the
+ * pre-authentication encoding, recovering to that account. The text defines it for a revocation and
+ * for no other record, so nothing else takes one. Without this, no voucher account's revocation
+ * could take effect on the native path, and a role binding, which holds no `bindings` scope, could
+ * then be revoked by no one.
+ */
+function accountSignatureValid(payloadType: string, pae: Uint8Array, keyid: string, sig: string): boolean {
+  if (payloadType !== TRUST_REVOCATION_MEDIA_TYPE) return false;
+  const chainId = /^did:pkh:eip155:([0-9]+):0x[0-9a-fA-F]{40}$/u.exec(keyid)?.[1];
+  if (chainId === undefined) return false;
+  try {
+    return didPkh(chainId, recoverEip191Address(pae, new Uint8Array(Buffer.from(sig, 'base64')))) === keyid;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Real DSSE verification; key IDs are never accepted by declaration alone. Ed25519 `did:key`
+ * signatures on any record, and an account's `did:pkh` signature on a revocation.
+ */
 export const verifyNativeDsse: DsseChainVerifier = (envelopeBytes) => {
   try {
     const envelope = parseExactDsseEnvelope(envelopeBytes);
@@ -138,6 +162,10 @@ export const verifyNativeDsse: DsseChainVerifier = (envelopeBytes) => {
     const valid = new Set<string>();
     for (const signature of envelope.signatures) {
       if (signature.keyid === undefined) continue;
+      if (signature.keyid.startsWith('did:pkh:')) {
+        if (accountSignatureValid(envelope.payloadType, pae, signature.keyid, signature.sig)) valid.add(signature.keyid);
+        continue;
+      }
       const bytes = decodeSignature(signature.sig);
       if (bytes === undefined) continue;
       try {

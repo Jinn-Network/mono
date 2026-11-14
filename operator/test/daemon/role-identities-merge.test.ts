@@ -10,7 +10,7 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { BindingResolver, ResolvedBinding } from '@jinn-network/trust-core';
+import type { BindingAuthorityDeps, BindingResolver, ResolvedBinding } from '@jinn-network/trust-core';
 import { describe, expect, it, vi } from 'vitest';
 import {
   IdentityStoreError,
@@ -46,11 +46,26 @@ function resolver(): BindingResolver {
   };
 }
 
+/** One revocation authority per resolver, as one trust catalog gives a process. */
+const authorities = new WeakMap<BindingResolver, BindingAuthorityDeps>();
+function authorityFor(bindingResolver: BindingResolver): BindingAuthorityDeps {
+  const known = authorities.get(bindingResolver);
+  if (known !== undefined) return known;
+  const authority: BindingAuthorityDeps = {
+    bindingResolver,
+    witnessVerifier: { verify1271Witness: async () => ({ verified: false }) },
+    dsseVerifier: () => ({ validSignerKeyids: [] }),
+  };
+  authorities.set(bindingResolver, authority);
+  return authority;
+}
+
 function open(input: {
   readonly root: string;
   readonly file: string;
   readonly roles: readonly NativeRoleIdentityRole[];
   readonly bindingResolver: BindingResolver;
+  readonly revocationAuthority?: BindingAuthorityDeps;
   readonly agent?: string;
 }): Promise<RoleIdentitySet> {
   return openRoleIdentitySet({
@@ -59,6 +74,7 @@ function open(input: {
     storePath: join(input.root, input.file),
     password: 'operator-password',
     bindingResolver: input.bindingResolver,
+    revocationAuthority: input.revocationAuthority ?? authorityFor(input.bindingResolver),
     now: () => new Date(BOOT_TIME),
   });
 }
@@ -142,5 +158,20 @@ describe('RoleIdentitySet.merge', () => {
     });
     expect(() => RoleIdentitySet.merge([solver, requester]))
       .toThrow(/do not share one binding resolver/u);
+  });
+
+  it('refuses sets opened against different revocation authorities', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-role-merge-revocation-authority-'));
+    const bindingResolver = resolver();
+    const solver = await open({ root, file: 'solver.enc.json', roles: SOLVER_ROLES, bindingResolver });
+    const requester = await open({
+      root,
+      file: 'requester.enc.json',
+      roles: ['requester-submission'],
+      bindingResolver,
+      revocationAuthority: { ...authorityFor(bindingResolver) },
+    });
+    expect(() => RoleIdentitySet.merge([solver, requester]))
+      .toThrow(/do not share one revocation authority/u);
   });
 });

@@ -20,8 +20,8 @@ import {
 } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
-import { resolveBindingForAgent } from '@jinn-network/trust-core';
-import type { BindingResolver } from '@jinn-network/trust-core';
+import { checkBindingRevocation, resolveBindingForAgent } from '@jinn-network/trust-core';
+import type { BindingAuthorityDeps, BindingResolver } from '@jinn-network/trust-core';
 import {
   IdentityStore,
   IdentityStoreError,
@@ -57,6 +57,13 @@ export interface NativeRoleIdentitySetInput {
   readonly password: string;
   /** Real trust-resolve implementation; native composition has no permissive fallback. */
   readonly bindingResolver: BindingResolver;
+  /**
+   * What decides which revocations of a role binding count: the revocation authority rule
+   * (`checkBindingRevocation`), with the same deps every other reader passes it. Its resolver must
+   * answer for every key of the Agent, as `NativeTrustAuthority` does. Required, so a caller that
+   * omits it fails to compile instead of counting every revocation or none.
+   */
+  readonly revocationAuthority: BindingAuthorityDeps;
   /** Full ceremony/DSSE/policy verification supplied by the native trust authority. */
   readonly verifyRoleBinding?: (input: {
     readonly role: NativeRoleIdentityRole;
@@ -94,6 +101,7 @@ export class RoleIdentitySet {
     readonly agent: string,
     private readonly byRole: ReadonlyMap<NativeRoleIdentityRole, NativeRoleIdentity>,
     private readonly bindingResolver: BindingResolver,
+    private readonly revocationAuthority: BindingAuthorityDeps,
     private readonly now: () => Date,
   ) {}
 
@@ -145,10 +153,12 @@ export class RoleIdentitySet {
       if (missingScopes.length > 0) {
         throw new IdentityStoreError(`native role "${role}" binding lacks required ${missingScopes.join(', ')} scope`);
       }
-      for (const revocation of resolved.revocations) {
-        if (parseTime(revocation.effectiveTime, `native role "${role}" revocation effectiveTime`) <= now.getTime()) {
-          throw new IdentityStoreError(`native role "${role}" binding is revoked at boot`);
-        }
+      // `revocations` lists every record naming the binding, whoever signed it, so only the rule
+      // reads it. On the native path the voucher account's revocation counts because
+      // `verifyNativeDsse` checks its did:pkh signature (key authority section 8).
+      // eslint-disable-next-line no-await-in-loop -- every owned role is an independent authority gate.
+      if (!(await checkBindingRevocation(resolved, effectiveTime, input.revocationAuthority)).ok) {
+        throw new IdentityStoreError(`native role "${role}" binding is revoked at boot`);
       }
       if (input.verifyRoleBinding !== undefined) {
         for (const family of requiredScopes) {
@@ -175,6 +185,7 @@ export class RoleIdentitySet {
       input.agent,
       byRole,
       input.bindingResolver,
+      input.revocationAuthority,
       input.now ?? (() => new Date()),
     );
   }
@@ -212,6 +223,9 @@ export class RoleIdentitySet {
       if (set.bindingResolver !== first.bindingResolver) {
         throw new IdentityStoreError('native role identity sets do not share one binding resolver');
       }
+      if (set.revocationAuthority !== first.revocationAuthority) {
+        throw new IdentityStoreError('native role identity sets do not share one revocation authority');
+      }
     }
     const byRole = new Map<NativeRoleIdentityRole, NativeRoleIdentity>();
     for (const set of sets) {
@@ -222,7 +236,7 @@ export class RoleIdentitySet {
         byRole.set(role, identity);
       }
     }
-    return new RoleIdentitySet(first.agent, byRole, first.bindingResolver, first.now);
+    return new RoleIdentitySet(first.agent, byRole, first.bindingResolver, first.revocationAuthority, first.now);
   }
 
   get(role: NativeRoleIdentityRole): NativeRoleIdentity {
@@ -263,9 +277,8 @@ export class RoleIdentitySet {
     if (requiredScopes.some((scope) => !resolved.binding.scope.includes(scope))) {
       return { ok: false, reason: 'scope-policy-rejected' };
     }
-    for (const revocation of resolved.revocations) {
-      const revokedAt = Date.parse(revocation.effectiveTime);
-      if (!Number.isFinite(revokedAt) || revokedAt <= effective) return { ok: false, reason: 'revoked' };
+    if (!(await checkBindingRevocation(resolved, atTime, this.revocationAuthority)).ok) {
+      return { ok: false, reason: 'revoked' };
     }
     return { ok: true, bindingDigest: resolved.bindingDigest };
   }

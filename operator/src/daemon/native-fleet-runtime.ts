@@ -468,6 +468,7 @@ export async function buildFleetNativeRuntime(
       storePath,
       password: input.password,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       ...(input.now === undefined ? {} : { now: input.now }),
     }))),
@@ -695,6 +696,7 @@ async function buildFleetRequesterWriteAuthority(input: {
     storePath: admissionStore,
     password: input.password,
     bindingResolver: input.trust.bindingResolver,
+    revocationAuthority: input.trust,
     verifyRoleBinding: input.trust.verifyRoleBinding,
     ...(input.now === undefined ? {} : { now: input.now }),
   });
