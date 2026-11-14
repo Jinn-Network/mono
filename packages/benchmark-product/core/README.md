@@ -218,6 +218,7 @@ It is not a floating `@canary` dependency and is not a stable stack release.
 
 ## What this does not yet prove
 
-Protocol identifiers in the installed platform packages are names, not addresses.
+Protocol identifiers in the installed platform packages that the protocol spec
+release serves resolve to their documents; the rest are names, not addresses.
 This package fetches nothing from them. Checks run against the exact
 `@jinn-network/*` platform bytes installed from npm.

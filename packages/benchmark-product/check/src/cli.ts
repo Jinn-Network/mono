@@ -149,9 +149,13 @@ function humanRefusalDetail(message: string): string {
  */
 const PLATFORM_BYTES_SENTENCE = "Checks run against the exact platform bytes installed from npm." as const;
 
-/** The host gap, stated without handing a reader an unresolvable origin to visit. */
+/**
+ * The host gap, stated without handing a reader an unresolvable origin to visit. Identifiers the
+ * spec release serves resolve and print whole; only the rest are names (issue #4894).
+ */
 const IDENTIFIER_DISCLOSURE =
-  "Protocol identifiers are names, not addresses — this verifier fetches nothing\n"
+  "Protocol identifiers the protocol spec release serves resolve to their\n"
+  + "documents; the rest are names, not addresses. This verifier fetches nothing\n"
   + `from them. ${PLATFORM_BYTES_SENTENCE}`;
 
 function usage(): string {

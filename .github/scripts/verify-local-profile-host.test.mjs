@@ -599,7 +599,7 @@ test('the stable lane still refuses a loopback origin', async () => {
 
 test('the gate verifies the real identifier register under a loopback origin', async () => {
   // The inverse of what this suite first found. Registered identifiers name
-  // spec.jinn.network and always will -- they are protocol names, not addresses -- so the
+  // spec.jinn.network and always will, whichever host serves them, so the
   // gate resolves them canonically and dereferences the resulting served path at the
   // origin under verification. A preview host is therefore verifiable, which is the whole
   // reason the canary lane exists.

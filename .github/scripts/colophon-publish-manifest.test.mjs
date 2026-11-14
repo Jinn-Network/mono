@@ -55,6 +55,11 @@ const RELEASE_PIN_SHA = 'f2aa6f30f2c7d7bcfc4c11e1f6b69f3f44c28603';
 const RELEASE_PIN_VERSION = `0.1.0-canary.sha.${RELEASE_PIN_SHA}`;
 const RELEASE_PIN_RUN_URL = 'https://github.com/Jinn-Network/mono/actions/runs/41639352404/attempts/1';
 const RELEASE_DECISION = 'operator-authorization-2026-10-30-issue-5120';
+// Issue #4894: identifiers the protocol spec release serves resolve, so the disclosure tells them
+// apart from the rest, which are names. The blanket form calls every identifier a name.
+const SERVED_AND_NAMED_DISCLOSURE =
+  /Protocol identifiers[\s\S]{0,96}?spec\s+release\s+serves\s+resolve\s+to\s+their[\s\S]{0,16}?documents;\s+the\s+rest\s+are\s+names,\s+not\s+addresses/u;
+const BLANKET_NAMES_DISCLOSURE = /Protocol identifiers(?: in the installed platform packages)?\s+are\s+names/u;
 
 /** The checker, under the name it publishes as today. */
 function checkerManifest() {
@@ -189,7 +194,8 @@ test('the published CLI README names the claimant verbs and documents launch as 
   assert.match(readme, /launch/u);
   assert.match(readme, /service/u);
   assert.match(readme, new RegExp(RELEASE_PIN_VERSION, 'u'));
-  assert.match(readme, /Protocol identifiers[\s\S]{0,64}are names, not addresses/u);
+  assert.match(readme, SERVED_AND_NAMED_DISCLOSURE);
+  assert.doesNotMatch(readme, BLANKET_NAMES_DISCLOSURE);
   assert.match(readme, /What this does not yet prove/u);
   assert.doesNotMatch(readme, /spec\.jinn\.network/u);
 });
@@ -628,7 +634,8 @@ test('first-cut public surfaces disclose origin-free protocol identifiers', () =
   const readme = readFileSync(join(repoRoot, 'packages/benchmark-product/check/README.md'), 'utf8');
   const cli = readFileSync(join(repoRoot, 'packages/benchmark-product/check/src/cli.ts'), 'utf8');
   for (const [label, text] of [['README', readme], ['CLI', cli]]) {
-    assert.match(text, /Protocol identifiers[\s\S]{0,64}are names, not addresses/u, label);
+    assert.match(text, SERVED_AND_NAMED_DISCLOSURE, label);
+    assert.doesNotMatch(text, BLANKET_NAMES_DISCLOSURE, label);
     assert.match(text, /bytes installed from npm/u, label);
     assert.doesNotMatch(text, /spec\.jinn\.network/u, label);
   }
