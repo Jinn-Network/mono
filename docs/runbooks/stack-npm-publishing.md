@@ -260,5 +260,5 @@ distinct entries for one tarball). After every 409 the lane asks the registry fo
 version first: the receipt integrity there counts as published and the post-publish wait for the
 `canary` tag still applies; different bytes fail closed. Every attempt's npm output is in the job
 log with its attempt number. The walk stops as it does for a failed publish. Rerun the failed
-job: the preflight skips what is already published, within the `canary`-tag and one-day artifact
+job: the preflight skips what is already published, within the `canary`-tag and four-day artifact
 limits above. Otherwise the next push to `next` publishes a new canary version.
