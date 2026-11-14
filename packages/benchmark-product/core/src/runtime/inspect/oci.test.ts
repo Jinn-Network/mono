@@ -315,21 +315,41 @@ test("a descendant that holds stdout after the command exits still expires as a 
 
 /**
  * #5163. A command that exits non-zero while a descendant still holds its stdout is an error exit,
- * not a timeout. The bound here is far longer than the test allows, so the outcome has to be
- * decided by the exit, not by waiting for the bound or for the descendant to let go.
+ * not a timeout. The descendant outlives the 3000 ms bound, so code that waits for the pipes
+ * reports `InspectOciCommandTimeoutError` here, the wrong type, and only the exit-driven drain
+ * yields the exit, well before the bound.
  */
 test("a non-zero exit is reported as that exit even when a descendant still holds stdout", async () => {
   const directory = mkdtempSync(join(tmpdir(), "jinn-oci-held-stdout-nonzero-"));
   temporaryDirectories.push(directory);
-  process.env.JINN_INSPECT_OCI_COMMAND_TIMEOUT_MS = "60000";
-  const hostBinding = driftCheckBinding(writeDriftCheckFakeDocker(directory, DRIFT_CHECK_COMMANDS[0].selectedBy, "sleep 6 & exit 3"));
+  process.env.JINN_INSPECT_OCI_COMMAND_TIMEOUT_MS = "3000";
+  const hostBinding = driftCheckBinding(writeDriftCheckFakeDocker(directory, DRIFT_CHECK_COMMANDS[0].selectedBy, "sleep 30 & exit 3"));
 
   const startedAt = Date.now();
   const failure = await assertInspectOciHostUndrifted(hostBinding, undriftedManifest(hostBinding)).catch((cause: unknown) => cause);
 
   expect(failure).not.toBeInstanceOf(InspectOciCommandTimeoutError);
   expect((failure as Error).message).toContain("OCI runtime command exited 3");
-  expect(Date.now() - startedAt).toBeLessThan(5_000);
+  expect(Date.now() - startedAt).toBeLessThan(2_500);
+});
+
+/**
+ * #5163. A non-zero exit that lands in the last 250 ms before the bound is still that exit. The
+ * drain timer has not fired when the bound does, so only the `failedBeforeBound` guard on the
+ * `close` path keeps the expired bound from relabeling it as a timeout. The fake
+ * sleeps 1700 ms before exiting 3 against a 2000 ms bound; process start-up adds the rest, which
+ * lands the exit inside that window.
+ */
+test("a non-zero exit just before the bound is reported as that exit, not as a timeout", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "jinn-oci-exit-before-bound-"));
+  temporaryDirectories.push(directory);
+  process.env.JINN_INSPECT_OCI_COMMAND_TIMEOUT_MS = "2000";
+  const hostBinding = driftCheckBinding(writeDriftCheckFakeDocker(directory, DRIFT_CHECK_COMMANDS[0].selectedBy, "sleep 30 & sleep 1.7; exit 3"));
+
+  const failure = await assertInspectOciHostUndrifted(hostBinding, undriftedManifest(hostBinding)).catch((cause: unknown) => cause);
+
+  expect(failure).not.toBeInstanceOf(InspectOciCommandTimeoutError);
+  expect((failure as Error).message).toContain("OCI runtime command exited 3");
 });
 
 /**
@@ -340,13 +360,14 @@ test("a non-zero exit is reported as that exit even when a descendant still hold
 test("a command still running at the bound with a descendant holding stdout expires promptly as a typed timeout", async () => {
   const directory = mkdtempSync(join(tmpdir(), "jinn-oci-running-held-stdout-"));
   temporaryDirectories.push(directory);
-  process.env.JINN_INSPECT_OCI_COMMAND_TIMEOUT_MS = "500";
+  // Long enough that the two parallel image-inspect fakes finish inside it on a loaded runner.
+  process.env.JINN_INSPECT_OCI_COMMAND_TIMEOUT_MS = "2000";
   const hostBinding = driftCheckBinding(writeDriftCheckFakeDocker(directory, DRIFT_CHECK_COMMANDS[0].selectedBy, "sleep 8 & sleep 8"));
 
   const startedAt = Date.now();
   const failure = await assertInspectOciHostUndrifted(hostBinding, undriftedManifest(hostBinding)).catch((cause: unknown) => cause);
 
   expect(failure).toBeInstanceOf(InspectOciCommandTimeoutError);
-  expect((failure as Error).message).toContain("timed out after 500 ms: docker version");
-  expect(Date.now() - startedAt).toBeLessThan(4_000);
+  expect((failure as Error).message).toContain("timed out after 2000 ms: docker version");
+  expect(Date.now() - startedAt).toBeLessThan(6_000);
 });
