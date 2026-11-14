@@ -33,13 +33,16 @@ export const CLAIM_PIN_SOURCES = [
 ];
 
 /**
- * Every markdown file in the product tree that tells a reader which published reader version to
- * run, under either published name. These are corrigible after publication, so they never gate a
- * publish -- but a version npm has never served is still an instruction to fail, and CI refuses one
- * (issue #3647).
+ * Every document that tells a reader which published reader version to run, under either published
+ * name: the markdown files of the product tree, the repository's root README, and the public
+ * checking guide, which are the two copies of the command outside it (issue #4888). These are
+ * corrigible after publication, so they never gate a publish -- but a version npm has never served
+ * is still an instruction to fail, and CI refuses one (issue #3647).
  * Dated plans and decision records elsewhere in the repository are historical and out of scope.
  */
 export const READER_INSTRUCTION_DOCS = [
+  'README.md',
+  'apps/website/content/docs/check-a-claim.mdx',
   // The claimant walkthrough ends with the reader's check, so it prints the checker's line too.
   'packages/benchmark-product/CLAIMANT-WALKTHROUGH.md',
   'packages/benchmark-product/EXTERNAL-VERIFICATION.md',
@@ -476,7 +479,11 @@ export function platformSourceDirectories(repoRoot, manifest) {
       }
     }
   }
-  return [...platform].sort().map((name) => ({ name, directory: catalog.get(name).directory }));
+  return [...platform].sort().map((name) => ({
+    name,
+    directory: catalog.get(name).directory,
+    files: catalog.get(name).manifest.files,
+  }));
 }
 
 /**
@@ -505,13 +512,38 @@ export function gitChangedFiles(repoRoot, platformSourceSha, directories) {
   return diff.stdout.split('\n').filter(Boolean);
 }
 
+// npm packs these at a package's root whatever its `files` says.
+const ALWAYS_PACKED_ROOT_FILE = /^(?:readme|license|licence|copying)(?:\.[^/]*)?$/iu;
+
 /**
- * A file no published platform package is built or packed from: a test, or its vitest config.
- * Every package in a Colophon closure builds with a `tsconfig.build.json` that excludes each
- * `*.test.ts` under `src`, and none lists either in `files` (#5045).
+ * Whether a `files` entry of a package may ship `relative`, a path inside the package, when npm
+ * packs it. A plain path covers itself and everything under it, with or without a leading `./` or
+ * `/`. This check does not evaluate globs, so an entry with glob syntax covers every path, and a file
+ * it might ship is never exempt. A negated entry only removes files, so it covers nothing, and a
+ * file it removes is still compared.
  */
-function isPlatformTestFile(path) {
-  return /\.test\.ts$/u.test(path) || /(?:^|\/)vitest\.config\.ts$/u.test(path);
+function filesEntryCovers(entry, relative) {
+  const normalized = String(entry).replace(/^\.\//u, '').replace(/^\/+|\/+$/gu, '');
+  if (normalized.startsWith('!')) return false;
+  if (normalized === '' || /[*?[\]{}]/u.test(normalized)) return true;
+  return relative === normalized || relative.startsWith(`${normalized}/`);
+}
+
+/**
+ * A file no published platform package is built or packed from: a test, or its vitest config, that
+ * no `files` entry of the package it sits in covers. Every package in a Colophon closure builds with
+ * a `tsconfig.build.json` that excludes each `*.test.ts` under `src` (#5045), but a test-named file
+ * under a listed directory, such as a fixture repository, is packed and published (#5214).
+ */
+function isUnshippedTestFile(path, sources) {
+  if (!/\.test\.ts$/u.test(path) && !/(?:^|\/)vitest\.config\.ts$/u.test(path)) return false;
+  const owner = sources
+    .filter(({ directory }) => path.startsWith(`${directory}/`))
+    .sort((a, b) => b.directory.length - a.directory.length)[0];
+  if (owner === undefined) return false;
+  const relative = path.slice(owner.directory.length + 1);
+  if (!Array.isArray(owner.files) || ALWAYS_PACKED_ROOT_FILE.test(relative)) return false;
+  return !owner.files.some((entry) => filesEntryCovers(entry, relative));
 }
 
 /**
@@ -521,17 +553,17 @@ function isPlatformTestFile(path) {
  * against this tree's platform source, and the `cli` build compiles the web application from it. A
  * receipt that names an older canary passes every other check here, and a reader built against it
  * can refuse what the tree's own bundles use: the checker receipt before #5030 named a canary
- * without the `external-verifier` family (issue #5044). Only tests are exempt.
+ * without the `external-verifier` family (issue #5044). Only tests no package ships are exempt.
  */
 export function assertPlatformSourceMatchesReceipt(pin, sources, changedFiles) {
   const releaseId = `${pin.product.packageName}@${pin.product.version}`;
   const differing = changedFiles(pin.platformSourceSha, sources.map(({ directory }) => directory))
-    .filter((path) => !isPlatformTestFile(path));
+    .filter((path) => !isUnshippedTestFile(path, sources));
   if (differing.length > 0) {
     throw new Error([
       `the ${releaseId} receipt pins the platform canary built from ${pin.platformSourceSha}, but this commit's platform source differs from that commit in ${differing.length} ${differing.length === 1 ? 'file' : 'files'}:`,
       ...differing.map((path) => `  ${path}`),
-      'Publish from a commit whose platform source is that commit\'s, or re-pin the receipt to a canary of this commit\'s platform source.',
+      `If npm already serves ${releaseId}, its receipt cannot change: publish a new version with its own receipt, or, for an alias-only publish, retry the dispatch from the commit of the first run. If npm does not serve ${releaseId} yet, record its receipt against a canary built from this commit's platform source.`,
     ].join('\n'));
   }
 }

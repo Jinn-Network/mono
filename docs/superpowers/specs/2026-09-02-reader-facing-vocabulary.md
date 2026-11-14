@@ -1,9 +1,9 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.10
+- **Version:** 1.11
 - **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-12; v1.4: 2026-09-16;
   v1.5: 2026-09-17; v1.6: 2026-09-18; v1.7: 2026-09-19; v1.8: 2026-09-24; v1.9: 2026-09-26;
-  v1.10: 2026-09-29)
+  v1.10: 2026-09-29; v1.11: 2026-11-14)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
@@ -91,6 +91,16 @@
   merged record to win a bookkeeping outcome. And both records are pinned by
   `packages/benchmark-product/check/src/assets-4318-follow-ups.test.ts`, so the debt cannot rot
   unobserved. Corrects v1.9's sentence accordingly. No disposition changes.
+- **v1.11** (#3863): re-rules §4.2's *Time basis* row. v1.0 mapped it to *What the timestamp
+  covers*, which names a different concept: time basis is `authority-time` or `chain-time`, where
+  a proof's time comes from, while what a timestamp covers is the lock or matrix bytes, which the
+  reader recomputes before it reports `present`. Applied literally, the rename made the reader
+  say that what a `present` proof covers was not evaluated, when only its time was not. The row
+  now reads **time source**. Splits the *Anchors / Anchor subjects* row, which gave both headings
+  one name: *Anchors* keeps *Timestamps*, and a new row rules *Anchor subjects* as *Timestamp
+  coverage*. Both rows mark their heading as a heading form of **timestamp proof**, and §5's
+  headings rule now names them. The *Anchor (the record)* row's gloss is now carried by the
+  reader's closing paragraph. No other disposition changes.
 
 ## 1. Scope
 
@@ -358,9 +368,10 @@ rows that needed it, not retrofitted across the document.
 | `not fetched` | keep | — | Already exact. |
 | Signed by: publisher / automated grader / human reviewer / label admission | keep | — | Already plain. The `urn:`/`did:key` forms correctly stay in `--json`. |
 | same operator / custody not declared | keep | — | |
-| Anchors / Anchor subjects | rename | Timestamps | |
-| Anchor (the record) | rename + gloss | Timestamp proof | |
-| Time basis | rename | What the timestamp covers | |
+| Anchors | rename (heading) | Timestamps | A heading form of the concept **timestamp proof** (§5), per the headings rule there: it heads the list of proofs the bundle carries. Not a second name for the concept. v1.0 ruled *Anchor subjects* to the same word; the two blocks need two headings, so that one is ruled in the next row. |
+| Anchor subjects (second heading) | rename (heading) | Timestamp coverage | A heading form of the concept **timestamp proof** (§5), per the headings rule there: it says which records a proof covers and drops the hidden word *subject*. Not a second name for the concept. |
+| Anchor (the record) | rename + gloss | Timestamp proof | The inherited word appears once, in parentheses, in the reader's closing paragraph: *A timestamp proof (anchor) dates …*. |
+| Time basis | rename | Time source | Where a proof's time comes from (`authority-time`, `chain-time`). Not *what the timestamp covers*, which is the lock or matrix bytes the reader recomputes for a `present` proof. |
 | anchored / absent / `declared-but-absent` | rename | timestamped / none / promised but missing | The `declared-but-absent` **string in `--json` is contract**; only the human line changes. |
 | Trust material | rename | Trust anchors you supply | |
 | Artifact content … not fetched | keep | — | Already reader-shaped, and the caveat under it is exemplary. |
@@ -439,8 +450,9 @@ length-constrained surfaces: the first wants a sentence, the second wants one or
 neither can carry a nine-word canonical name. A heading or column header may therefore be a
 sentence-shaped or column-width form of a concept named above **without being a second name for
 it**, on one condition: the §4 row that rules it says so and points back to the concept's row
-here. One row meets that condition today: §4.1's *What was run, and what came back*, whose
-concept is **the runs**. A heading that *contains* a canonical name rather than substituting
+here. Three rows meet that condition today: §4.1's *What was run, and what came back*, whose
+concept is **the runs**, and §4.2's *Timestamps* and *Timestamp coverage*, whose concept is
+**timestamp proof**. A heading that *contains* a canonical name rather than substituting
 for it — the binary surface's *Each item's decision, and where the answer changed on rerun* —
 is not in this class and needs no exception; its own row already says why. Everything else is a
 name, and the law above applies to it in full.
