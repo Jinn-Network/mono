@@ -36,7 +36,7 @@ describe('Fleet bootstrap faucet cap', () => {
       const drips = BigInt(requestTestnetFundingMock.mock.calls.length);
       return drips * DRIP_WEI;
     });
-    vi.spyOn(globalThis, 'setTimeout').mockImplementation((cb: (...args: unknown[]) => void) => {
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation((cb: () => void) => {
       queueMicrotask(cb);
       return 0 as unknown as ReturnType<typeof setTimeout>;
     });
@@ -86,7 +86,7 @@ describe('Fleet bootstrap faucet cap', () => {
     });
 
     vi.spyOn((bootstrapper as any).publicClient, 'getBalance').mockResolvedValue(0n);
-    vi.spyOn(globalThis, 'setTimeout').mockImplementation((cb: (...args: unknown[]) => void) => {
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation((cb: () => void) => {
       queueMicrotask(cb);
       return 0 as unknown as ReturnType<typeof setTimeout>;
     });
