@@ -1173,6 +1173,86 @@ describe("createBindingResolver", () => {
     });
   });
 
+  describe("a deployment's ceremony currency profile (ceremony-currency/v1)", () => {
+    const owner = privateKeyToAccount(`0x${"7".repeat(64)}`);
+    const voucher = { kind: "account" as const, did: didPkh(84532, owner.address), contractAccount: false };
+    const anchors = fakeAnchors({
+      [DIGEST_A]: "2026-01-01T00:00:00.000Z",
+      [DIGEST_B]: "2026-02-01T00:00:00.000Z",
+    });
+    const at = "2026-06-01T00:00:00.000Z";
+
+    /** A genuine ceremony issued on 1 February, and a record of it anchored at `digest`. */
+    async function vouched(digest: Sha256Digest, validFrom: string): Promise<SealedKeyBindingRecord> {
+      const message = {
+        domain: "trust.jinn.network",
+        address: owner.address,
+        uri: "https://trust.jinn.network/ceremony/key-binding",
+        version: "1" as const,
+        chainId: 84532,
+        nonce: `currency-${digest.slice(7, 11)}`,
+        issuedAt: "2026-02-01T00:00:00.000Z",
+        resources: [AGENT, KEY_A],
+      };
+      const messageBytes = serializeCeremonyMessage("eoa", message);
+      const signature = hexToBytes(await owner.signMessage({ message: { raw: messageBytes } }));
+      const ceremonyEvidence: EoaCeremonyEvidence = { type: "eoa", message, messageBytes, signature };
+      const binding = accountBinding({
+        voucher,
+        validFrom,
+        ceremony: { type: "eoa", digest: ceremonyEvidenceDigest(ceremonyEvidence) },
+        anchors: [{ digest }],
+      });
+      return { ...record(binding, digest), ceremonyEvidence };
+    }
+
+    it("is off by default: a record that takes effect before its ceremony was issued still wins", async () => {
+      const early = await vouched(DIGEST_A, "2026-01-01T00:00:00.000Z");
+      const current = await vouched(DIGEST_B, "2026-02-01T00:00:00.000Z");
+      const resolver = createBindingResolver({ bindings: fakeStore([current, early]), anchors });
+      const resolved = await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at);
+      expect(resolved?.bindingDigest).toBe(DIGEST_A);
+      expect(resolved).not.toHaveProperty("ceremonyCurrency");
+    });
+
+    it("when applied, a record whose ceremony fails it does not beat one whose ceremony holds", async () => {
+      const early = await vouched(DIGEST_A, "2026-01-01T00:00:00.000Z");
+      const current = await vouched(DIGEST_B, "2026-02-01T00:00:00.000Z");
+      for (const stored of [[early, current], [current, early]]) {
+        const resolver = createBindingResolver({ bindings: fakeStore(stored), anchors, ceremonyCurrency: {} });
+        // eslint-disable-next-line no-await-in-loop -- one stored order, then the other.
+        const resolved = await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at);
+        expect(resolved?.bindingDigest).toBe(DIGEST_B);
+        expect(resolved?.ceremonyCurrency).toEqual({});
+      }
+    });
+
+    it("when applied, still resolves a lone record whose ceremony fails it, carrying the profile", async () => {
+      const early = await vouched(DIGEST_A, "2026-01-01T00:00:00.000Z");
+      const profile = { termsCutover: "2026-03-01T00:00:00Z" };
+      const resolver = createBindingResolver({ bindings: fakeStore([early]), anchors, ceremonyCurrency: profile });
+      const resolved = await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at);
+      expect(resolved?.bindingDigest).toBe(DIGEST_A);
+      expect(resolved?.ceremonyCurrency).toEqual(profile);
+    });
+
+    it("refuses a terms cutover under a profile that does not require anchors", () => {
+      expect(() => createBindingResolver({
+        bindings: fakeStore([]),
+        anchors,
+        requireAnchors: false,
+        ceremonyCurrency: { termsCutover: "2026-03-01T00:00:00Z" },
+      })).toThrow(expect.objectContaining({ code: "INVALID_INPUT", message: expect.stringMatching(/requires anchors/) }));
+      expect(() => createBindingResolver({ bindings: fakeStore([]), anchors, requireAnchors: false, ceremonyCurrency: {} }))
+        .not.toThrow();
+    });
+
+    it("refuses a terms cutover that cannot be read", () => {
+      expect(() => createBindingResolver({ bindings: fakeStore([]), anchors, ceremonyCurrency: { termsCutover: "2026-03-01" } }))
+        .toThrow(expect.objectContaining({ code: "INVALID_INPUT", message: expect.stringMatching(/cannot be read/) }));
+    });
+  });
+
   it("reports isGenesis for the sole binding of an Agent IRI", async () => {
     const binding = accountBinding({ anchors: [{ digest: DIGEST_A }] });
     const store = fakeStore([record(binding, DIGEST_A)]);
