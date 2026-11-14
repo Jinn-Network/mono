@@ -340,10 +340,7 @@ describe("product documentation consistency", () => {
       .flatMap((body) => body.split("\n"))
       .filter((line) => line.includes("npx "))
       .map(readerSpecifier);
-    expect(stated).toContain(readerSpecifier(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND));
-    expect([...new Set(stated)].sort()).toEqual(
-      [readerSpecifier(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND), "check@0.2"].sort(),
-    );
+    expect(stated).toEqual([readerSpecifier(PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND), "check@0.2"]);
   });
 
   it("mirrors the sealed venue sentences verbatim, the sixth included (issue #3401)", () => {
@@ -1067,12 +1064,17 @@ const sweptMarkdownFiles: readonly string[] = walkFiles(productRoot).filter((pat
  * Every fresh instruction to a cold external verifier there still prints the current name, and the
  * v5 section test above pins the two lines it may show.
  */
-const LEGACY_COMMAND_MARKDOWN = [
-  "PUBLIC-BUNDLE.md",
-  "EXTERNAL-VERIFICATION.md",
-  "verify/README.md",
-  "README.md",
-] as const;
+const LEGACY_COMMAND_MARKDOWN = ["PUBLIC-BUNDLE.md", "verify/README.md", "README.md"] as const;
+
+/**
+ * Documents that may quote exactly one sealed legacy line and nothing else of the retired name.
+ * `EXTERNAL-VERIFICATION.md` quotes the line a full-evidence `/5` claim seals (`verify@0.1`, #4874);
+ * every other line there is a fresh instruction to a cold external verifier and prints the current
+ * name.
+ */
+const SEALED_LINE_MARKDOWN: ReadonlyMap<string, string> = new Map([
+  ["EXTERNAL-VERIFICATION.md", PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND],
+]);
 
 /**
  * The exact multiset of retired-name literals each frozen file carries, keyed by product-relative
@@ -1128,8 +1130,14 @@ describe("retired reader package name", () => {
     for (const path of sweptMarkdownFiles) {
       const document = relative(productRoot, path);
       if ((LEGACY_COMMAND_MARKDOWN as readonly string[]).includes(document)) continue;
+      let text = read(path);
+      const sealed = SEALED_LINE_MARKDOWN.get(document);
+      if (sealed !== undefined) {
+        expect(text.split(sealed).length - 1, `${document} quotes its sealed line once`).toBe(1);
+        text = text.replace(sealed, "");
+      }
       expect(
-        RETIRED_READER_INSTRUCTION.test(read(path)),
+        RETIRED_READER_INSTRUCTION.test(text),
         `${document} instructs a reader to run the retired @colophon-claims/verify name`,
       ).toBe(false);
     }

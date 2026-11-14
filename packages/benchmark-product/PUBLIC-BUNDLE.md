@@ -133,7 +133,7 @@ line and `@0.2.0` on bundles materialized before `0.2.1` existed. Prompted
 screening does not move the format, so such a bundle is still `.../2`, and the
 released `@colophon-claims/verify@0.1.0` refuses it at `claim-consistency`: that
 reader rebuilds the verification command with its own `@0.1.0` line, which
-differs from the `@0.2.1` line the claim seals. Read it with `@0.2`. What the bundle's own
+differs from the `@0.2.1` (or historical `@0.2.0`) line the claim names. Read it with `@0.2`. What the bundle's own
 `index.html` and share text instruct, and what reproduces the producer's exact release, is the
 `@0.2.1` line its claim names. Take the line from the claim package's
 `verification.command` rather than inferring it from the format string.
@@ -955,16 +955,17 @@ the prompted-screening branch, so it parses `bundle.json`; what it requires of c
 the command `@0.2.0` exactly, so it accepts a prompted bundle materialized before `0.2.1` existed
 and refuses a newer one on the claim, with `binary claim package must pin verifier 0.2.0/@0.2`.
 That is a reader-too-old refusal, not a fact about the bundle. `0.2.1` accepts both commands, so it
-refuses neither. A prompted /2 is refused by no line at all: claim-package/1 carries no reader
-requirement, so even `@0.1` verifies it while the bundle's own assets name `@0.2.1`.
+refuses neither. A prompted /2 is not refused when its claim is parsed, because claim-package/1
+carries no reader requirement. `@0.1` refuses it later, at `claim-consistency`: the released
+`0.1.0` reader rebuilds the claim with its own `@0.1.0` line, which is not the line the claim names.
 
 Claim-package/1, claim-package/2, and claim-package/4 — the claims of public-bundle/2,
 public-bundle/4, and public-bundle/6 — stamp the same first public line, `@0.1.0` / `@0.1`, with one
 exception: a claim-package/1 or claim-package/2 whose method parameters carry
 `promptedScreeningProfile` stamps `@0.2.1` / `@0.2` instead (`@0.2.0` / `@0.2` if it was
-materialized before `0.2.1` existed). Only claim-package/2 enforces that pin, so the `@0.1` line
-refuses a prompted public-bundle/4 and verifies a prompted public-bundle/2 whose stated line it is
-not.
+materialized before `0.2.1` existed). Only claim-package/2 enforces that pin when the claim is
+parsed, so the `@0.1` line refuses a prompted public-bundle/4 there, and refuses a prompted
+public-bundle/2 at `claim-consistency`, where it rebuilds the claim with its own `@0.1.0` line.
 Claim-package/3, the claim of public-bundle/5, reads on the same line but pins only `@0.1`,
 because it has a single `command` field and no compatible-line field. Claim-package/5 and
 claim-package/6, the claims of public-bundle/7 and public-bundle/8, are the ones the `@0.1` line
