@@ -1,0 +1,100 @@
+{
+  "description": "Text in, text presented, for both copies of the protocol-identifier presenter: check's presentInternalProtocolIdentifiers (the /10 index.html and README.md) and web's presentProtocolText (the GUI). Both suites run every case. A case marked frozen is what a published /10 page already renders; changing its presented text changes /10 bytes, so it waits for a format change.",
+  "cases": [
+    {
+      "shape": "internal URL the spec release does not serve",
+      "input": "kind https://spec.jinn.network/records/benchmark-matrix/v1",
+      "presented": "kind records/benchmark-matrix/v1"
+    },
+    {
+      "shape": "internal URL with trailing sentence punctuation",
+      "input": "kind https://spec.jinn.network/records/benchmark-matrix/v1.",
+      "presented": "kind records/benchmark-matrix/v1."
+    },
+    {
+      "shape": "internal URL whose path prefix the spec release serves",
+      "input": "https://spec.jinn.network/task-profiles/binary-judgment/1.0",
+      "presented": "task-profiles/binary-judgment/1.0"
+    },
+    {
+      "shape": "served path over http, not the spec origin",
+      "input": "http://spec.jinn.network/task-profiles/binary-judgment/2.0",
+      "presented": "task-profiles/binary-judgment/2.0"
+    },
+    {
+      "shape": "internal URL between escaped HTML quotes",
+      "input": "&quot;https://spec.jinn.network/records/benchmark-matrix/v1&quot;",
+      "presented": "&quot;records/benchmark-matrix/v1&quot;"
+    },
+    {
+      "shape": "internal URL with the README's escaped scheme",
+      "input": "\"https\\://spec.jinn.network/records/benchmark-matrix/v1\"",
+      "presented": "\"records/benchmark-matrix/v1\""
+    },
+    {
+      "shape": "identifier the spec release serves stays whole",
+      "input": "profile https://spec.jinn.network/task-profiles/binary-judgment/2.0.",
+      "presented": "profile https://spec.jinn.network/task-profiles/binary-judgment/2.0."
+    },
+    {
+      "shape": "served identifier with the README's escaped scheme stays whole",
+      "input": "\"https\\://spec.jinn.network/task-profiles/binary-judgment/2.0\"",
+      "presented": "\"https\\://spec.jinn.network/task-profiles/binary-judgment/2.0\""
+    },
+    {
+      "shape": "anchor profile",
+      "input": "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+      "presented": "rfc3161-tsa/v1"
+    },
+    {
+      "shape": "method name in the benchmarking namespace",
+      "input": "jinn.benchmarking.method/wilson @ 1",
+      "presented": "method/wilson @ 1"
+    },
+    {
+      "shape": "namespace token with a path",
+      "input": "kind jinn.network/records/benchmark-report/v1",
+      "presented": "kind records/benchmark-report/v1"
+    },
+    {
+      "shape": "third-party URL",
+      "input": "see https://tsa.example/tsr",
+      "presented": "see https://tsa.example/tsr"
+    },
+    {
+      "shape": "text with no identifier",
+      "input": "no comparative winner stated",
+      "presented": "no comparative winner stated"
+    },
+    {
+      "shape": "frozen (#4819): a query is dropped",
+      "input": "https://spec.jinn.network/records/benchmark-matrix/v1?v=2",
+      "presented": "records/benchmark-matrix/v1"
+    },
+    {
+      "shape": "frozen (#4819): a fragment is dropped",
+      "input": "https://spec.jinn.network/records/benchmark-matrix/v1#arms",
+      "presented": "records/benchmark-matrix/v1"
+    },
+    {
+      "shape": "frozen (#4870): a mixed-case host is not recognized",
+      "input": "https://SPEC.JINN.NETWORK/trust/anchor-profiles/rfc3161-tsa/v1",
+      "presented": "https://SPEC.JINN.NETWORK/trust/anchor-profiles/rfc3161-tsa/v1"
+    },
+    {
+      "shape": "frozen (#4870): an uppercase scheme leaves only the namespace match",
+      "input": "HTTPS://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+      "presented": "HTTPS://spec.trust/anchor-profiles/rfc3161-tsa/v1"
+    },
+    {
+      "shape": "frozen (#4871): an origin with no path",
+      "input": "https://spec.jinn.network/",
+      "presented": "<protocol identifier>"
+    },
+    {
+      "shape": "frozen (#4871): a bare namespace token",
+      "input": "kind jinn.network",
+      "presented": "kind <protocol identifier>"
+    }
+  ]
+}

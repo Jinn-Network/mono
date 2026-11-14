@@ -2,12 +2,16 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { storeAgentProfile, type ProductErrorCode, type RunStatusResult } from "@colophon-claims/core";
-import { loadAgentProfilesForGui, projectRunStatusForGui } from "./view-models";
+import { AGENT_DATA_ENV, ANCHOR_PROVIDERS_ENV, PRINCIPAL_ENV, WORKSPACE_ENV } from "./product-context";
+import { loadAgentProfilesForGui, loadWorkspaceView, projectRunStatusForGui } from "./view-models";
 
 const roots: string[] = [];
-afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
+afterEach(() => {
+  vi.unstubAllEnvs();
+  roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true }));
+});
 
 function failedStatus(code: ProductErrorCode, detail: string): RunStatusResult {
   return {
@@ -64,5 +68,21 @@ describe("agent readiness projection", () => {
 
     writeFileSync(executable, "#!/bin/sh\necho changed\n");
     expect(loadAgentProfilesForGui(join(root, "data")).profiles[0]?.readiness).toBe("needs-attention");
+  });
+});
+
+describe("workspace anchoring projection", () => {
+  test("names a configured anchor profile by its path before the payload reaches the browser", () => {
+    const root = mkdtempSync(join(tmpdir(), "colophon-gui-workspace-"));
+    roots.push(root);
+    const profile = "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1";
+    vi.stubEnv(WORKSPACE_ENV, join(root, "workspace"));
+    vi.stubEnv(AGENT_DATA_ENV, join(root, "data"));
+    vi.stubEnv(PRINCIPAL_ENV, "operator");
+    vi.stubEnv(ANCHOR_PROVIDERS_ENV, JSON.stringify([{ providerProfile: profile, endpoint: "https://tsa.example/tsr" }]));
+    const view = loadWorkspaceView();
+    if (!view.ok) throw new Error(view.detail);
+    expect(view.anchoringConfiguration).toEqual({ available: true, providerProfiles: ["rfc3161-tsa/v1"] });
+    expect(JSON.stringify(view)).not.toContain("spec.jinn.network");
   });
 });

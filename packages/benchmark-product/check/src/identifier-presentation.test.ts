@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import {
   presentInternalProtocolIdentifiers,
   resolvesAtSpecOrigin,
   SPEC_RELEASE_SERVED_PATHS,
 } from "./identifier-presentation.js";
+
+/** Shared with the GUI's copy of this presenter, whose suite runs the same cases (#4818). */
+const SHARED_CASES: readonly { readonly shape: string; readonly input: string; readonly presented: string }[] =
+  JSON.parse(readFileSync(new URL("./testing/identifier-presentation-cases.json", import.meta.url), "utf8")).cases;
 
 describe("presentInternalProtocolIdentifiers", () => {
   test("keeps an actionable third-party URL", () => {
@@ -57,6 +62,12 @@ describe("presentInternalProtocolIdentifiers", () => {
         "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
       ),
     ).toBe("rfc3161-tsa/v1");
+  });
+});
+
+describe("shared presentation cases", () => {
+  test.each(SHARED_CASES)("$shape", ({ input, presented }) => {
+    expect(presentInternalProtocolIdentifiers(input)).toBe(presented);
   });
 });
 

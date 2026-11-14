@@ -17,8 +17,9 @@ import { BUNDLE_V10_FORMAT } from "./manifest.js";
 import { goldenInput } from "./testing/golden-asset-input.js";
 
 const decoder = new TextDecoder();
-const INTERNAL_NAMESPACE = /jinn\.network|jinn\.benchmarking/;
-const JINN_URL = /https?:\/\/(?:[^/?#]*\.)?jinn\.(?:network|benchmarking)/u;
+// Case-insensitive, as hosts and schemes are: an uppercase spelling names the same origin (#4870).
+const INTERNAL_NAMESPACE = /jinn\.network|jinn\.benchmarking/i;
+const JINN_URL = /https?:\/\/(?:[^/?#]*\.)?jinn\.(?:network|benchmarking)/iu;
 const NOT_HOSTED = /not hosted/iu;
 
 /** The golden facts with every arm's pinning naming `profile`, as a pinning dump would carry it. */
