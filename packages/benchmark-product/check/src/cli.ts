@@ -214,7 +214,7 @@ function evaluationNote(entry: AnchorVerificationEntry): string {
     const evaluated = entry.time !== undefined && entry.time !== anchoredValue(entry)
       ? ` — ${entry.time}`
       : "";
-    return `what the timestamp covers was evaluated against trust anchors you supplied${evaluated}`;
+    return `time source evaluated against trust anchors you supplied${evaluated}`;
   }
   // A provider's free-form reason is authenticated report data, not CLI prose. Keep the exact value
   // in `--json`, but alias raw identifiers before this untrusted text enters the human report.
@@ -230,15 +230,15 @@ function evaluationNote(entry: AnchorVerificationEntry): string {
   // `present` with material supplied is a different disclosure from `present` with none: this
   // reader did have material for the profile, and it did not carry this anchor to `verified`.
   return entry.trustMaterial === "supplied"
-    ? "what the timestamp covers was not evaluated: the trust anchors you supplied do not verify this timestamp proof"
-    : "what the timestamp covers was not evaluated: no trust anchors supplied";
+    ? "time source not evaluated: the trust anchors you supplied do not verify this timestamp proof"
+    : "time source not evaluated: no trust anchors supplied";
 }
 
 function renderAnchor(entry: AnchorVerificationEntry): string {
   const value = anchoredValue(entry);
   const head = [
     `  ${entry.subject ?? "unresolved"} timestamp proof`,
-    entry.timeBasis ?? "what the timestamp covers: unknown",
+    entry.timeBasis ?? "unknown time source",
     entry.status,
     ...(value === undefined ? [] : [value]),
   ].join(" · ");
@@ -415,7 +415,7 @@ export function renderVerifiedBundle(
     : "\nEverything above was checked against the bytes this bundle carries. The artifact\ncontents themselves were not read, so nothing here says what they contain.";
   const anchorLimits = anchors === ""
     ? ""
-    : "\nA timestamp proof dates the bytes it covers and says nothing else about the\nrun: not that results were produced after it, and not that the timestamping\nauthority is independent of the bundle's owner.";
+    : "\nA timestamp proof (anchor) dates the bytes it covers and says nothing else\nabout the run: not that results were produced after it, and not that the\ntimestamping authority is independent of the bundle's owner.";
   // "Verified" is the most overloaded word in this market and claims more than this tool does: it
   // recomputes the arithmetic, closure, and consistency of bytes someone handed it, and reads
   // nothing about whether the recorded outcomes reflect real executions (issue #2982). The verdict

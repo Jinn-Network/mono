@@ -332,18 +332,21 @@ test("the default human surface discloses every carried anchor and every subject
   assert.match(output, /integrity-anchors\s+passed/);
   // Each carried anchor: subject, time basis, status, and its byte-embedded time or height.
   assert.match(output, /lock timestamp proof · authority-time · present · 2026-01-01T12:00:00Z/);
-  assert.match(output, /what the timestamp covers was not evaluated: no trust anchors supplied/);
+  assert.match(output, /time source not evaluated: no trust anchors supplied/);
+  // A `present` proof's coverage WAS checked (the tool recomputes the lock or matrix bytes it covers);
+  // only its time source went unevaluated. Saying the coverage was not evaluated misstates the check.
+  assert.doesNotMatch(output, /covers was not evaluated|what the timestamp covers/);
   // Supplied-but-unverifying is disclosed as itself, never as "no trust anchors supplied".
   assert.match(output, /lock timestamp proof · authority-time · present · 2026-02-02T12:00:00Z/);
-  assert.match(output, /what the timestamp covers was not evaluated: the trust anchors you supplied do not verify this timestamp proof/);
+  assert.match(output, /time source not evaluated: the trust anchors you supplied do not verify this timestamp proof/);
   assert.match(output, /matrix timestamp proof · chain-time · verified · block 880017/);
-  assert.match(output, /what the timestamp covers was evaluated against trust anchors you supplied — 2026-08-17T12:00:00Z/);
+  assert.match(output, /time source evaluated against trust anchors you supplied — 2026-08-17T12:00:00Z/);
   // An authority-time proof whose evaluated instant is the genTime already on the head line does
   // not repeat it.
   assert.doesNotMatch(output, /supplied — 2026-01-01T12:00:00Z/);
   assert.match(output, new RegExp(`record ${"1".repeat(64)}`));
   assert.match(output, /Timestamp coverage\n {2}lock: timestamped\n {2}matrix: timestamped/);
-  assert.match(output, /A timestamp proof dates the bytes it covers and says nothing/);
+  assert.match(output, /A timestamp proof \(anchor\) dates the bytes it covers and says nothing/);
   assert.match(output, /not\s+that results were produced after it/);
 });
 
@@ -444,9 +447,9 @@ test("an unanchored bundle's human surface is unchanged — no anchor section at
     checks: ["manifest"],
     ...V6_IDENTITIES,
   });
-  assert.doesNotMatch(output, /Anchors/);
+  assert.doesNotMatch(output, /Timestamps/);
   assert.doesNotMatch(output, /Timestamp coverage/);
-  assert.doesNotMatch(output, /A timestamp proof dates the bytes/);
+  assert.doesNotMatch(output, /dates the bytes it covers/);
 });
 
 test("usage documents the trust-material flags and that none ships", async () => {
