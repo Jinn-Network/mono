@@ -100,9 +100,17 @@ function workspace(root: string, armIds: readonly string[]): SuiteRun {
 // ── Harbor and Pier ───────────────────────────────────────────────────────────────────────────
 
 /** A fake batched Harbor (or Pier) that writes one trial per task and attempt, each with ATIF files
- * and, when asked, a `verifier/reward.json`. */
+ * and, when asked, a `verifier/reward.json`.
+ *
+ * The Harbor fake writes each trial as Harbor 0.21.0 does (#5245; see the committed record in
+ * `test/fixtures/harbor-0.21-jobs-terminal-bench-2-1`): a directory named `<task>__<seven
+ * characters>`, and a `config.json` that numbers no attempt, names the local task by its absolute
+ * path, and records `trials_dir`, the jobs directory it was given plus the job name. A driven run
+ * gives it a jobs directory inside the workspace, so those configs name the private workspace. */
 function fakeBatchedHarbor(root: string, name: "harbor" | "pier", version: string, writeRewardJson: boolean): string {
+  const harbor021 = name === "harbor";
   return executable(join(root, name), `#!/usr/bin/env node
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 const args = process.argv.slice(2);
@@ -121,11 +129,22 @@ let index = 0;
 for (const taskName of names) {
   for (let attempt = 1; attempt <= config.n_attempts; attempt++) {
     index += 1;
-    const trial = join(job, "trial-" + index);
+    const trialName = ${harbor021
+      ? 'taskName + "__" + createHash("sha256").update(config.job_name + ":" + index).digest("hex").slice(0, 7)'
+      : '"trial-" + index'};
+    const trial = join(job, trialName);
     mkdirSync(join(trial, "agent"), { recursive: true });
     mkdirSync(join(trial, "verifier"), { recursive: true });
     mkdirSync(join(trial, "artifacts"), { recursive: true });
-    writeFileSync(join(trial, "config.json"), JSON.stringify({ task: { name: taskName }, attempt, agent: config.agents[0] }));
+    writeFileSync(join(trial, "config.json"), ${harbor021
+      ? `JSON.stringify({
+      task: { path: join(process.cwd(), config.datasets[0].path, taskName), source: "local" },
+      trial_name: trialName,
+      trials_dir: job,
+      agent: config.agents[0],
+      job_id: config.job_name,
+    }, null, 4)`
+      : "JSON.stringify({ task: { name: taskName }, attempt, agent: config.agents[0] })"});
     sleep(50);
     writeFileSync(join(trial, "result.json"), JSON.stringify({ id: "trial-" + index, status: "success", finished_at: new Date().toISOString() }));
     writeFileSync(join(trial, "agent", "recording.cast"), Buffer.from([0, 255, 1]));
@@ -331,10 +350,22 @@ export async function importedTerminalBench30Run(root: string): Promise<SuiteRun
   return run;
 }
 
+/** Seven-character trial suffixes, as Harbor 0.21.0 draws them, in code-point order. */
+const RETAINED_TRIAL_SUFFIXES = ["0Bq7HwA", "4kZx9Lm", "Gm2pQrT", "Wb8sVcE", "q3NdYfK"] as const;
+
+/** The trial directory {@link writeRetainedHarborTrials} writes for a task's attempt. Harbor numbers
+ * no attempt, so attempt `n` is the `n`th of the task's directories in code-point order, which is
+ * how `run import --from harbor` numbers them. */
+export function retainedHarborTrialDirectory(taskName: string, attempt: number): string {
+  return `${taskName}__${RETAINED_TRIAL_SUFFIXES[attempt - 1]!}`;
+}
+
 /**
- * Writes each arm's retained Harbor job where core reads it: one trial directory per task and
- * attempt with its `config.json`, plus `agent/trajectory.json` unless `withoutAtif` names it, and
- * a `result.json` that no reader of the flag consults.
+ * Writes each arm's retained Harbor job where core reads it, as Harbor 0.21.0 writes a job (#5245):
+ * one unnumbered trial directory per task and attempt whose `config.json` names the task with its
+ * dataset prefix and records `trials_dir`, here a path inside the workspace; plus
+ * `agent/trajectory.json` unless `withoutAtif` names it, and a `result.json` that no reader of the
+ * flag consults.
  */
 export function writeRetainedHarborTrials(
   run: SuiteRun,
@@ -346,10 +377,17 @@ export function writeRetainedHarborTrials(
   for (const armId of ["one", "two"]) {
     const job = join(harborArmJobsDir(run.workspaceDir, runSha256), harborArmJobName(runSha256, armId));
     for (let attempt = 1; attempt <= replicates; attempt += 1) {
-      const trial = join(job, `trial-${attempt}`);
+      const directory = retainedHarborTrialDirectory(taskName, attempt);
+      const trial = join(job, directory);
       mkdirSync(join(trial, "agent"), { recursive: true });
-      writeFileSync(join(trial, "config.json"), JSON.stringify({ task: { name: taskName }, attempt }));
-      writeFileSync(join(trial, "result.json"), JSON.stringify({ id: `trial-${attempt}`, status: "success" }));
+      writeFileSync(join(trial, "config.json"), JSON.stringify({
+        task: { name: `terminal-bench/${taskName}`, ref: `sha256:${"d".repeat(64)}`, source: "terminal-bench/terminal-bench" },
+        trial_name: directory,
+        trials_dir: job,
+        agent: { name: "terminus", model_name: `openai/model-${armId}` },
+        job_id: harborArmJobName(runSha256, armId),
+      }, null, 4));
+      writeFileSync(join(trial, "result.json"), JSON.stringify({ id: directory, status: "success" }));
       if (!withoutAtif(armId, attempt)) writeFileSync(join(trial, "agent", "trajectory.json"), JSON.stringify({ schema: "ATIF", attempt }));
     }
   }

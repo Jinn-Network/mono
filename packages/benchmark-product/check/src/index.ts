@@ -280,7 +280,9 @@ export {
   buildSuiteEvidenceIndex,
   deriveSuiteComparabilityFromEvidence,
   harborJobEvidenceRoot,
+  harborJobEvidenceTree,
   harborSuiteMethodFacts,
+  harborTrialConfigProjection,
   harborTrialDirectory,
   inspectEvalSuiteMethodFacts,
   readRegisteredSuiteSelection,
@@ -294,6 +296,7 @@ export {
   swebenchRunId,
   swebenchSuiteMethodFacts,
 } from "./profile/suite-evidence.js";
+export { assignHarborTrialAttempt, harborTrialAttemptNumber, harborTrialTaskName } from "./profile/harbor-trial.js";
 export type {
   ArmRunComplete,
   MatrixCellAccount,

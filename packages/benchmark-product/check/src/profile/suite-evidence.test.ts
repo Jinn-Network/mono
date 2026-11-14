@@ -47,6 +47,8 @@ import {
   assertInspectEvalTask,
   buildSuiteEvidenceIndex,
   deriveSuiteComparabilityFromEvidence,
+  harborTrialConfigProjection,
+  harborTrialDirectory,
   readRegisteredSuiteSelection,
   resolveCarriedSuite,
   suiteEvidenceTreeFromFiles,
@@ -192,6 +194,103 @@ describe("the Harbor-family flag is re-derived from each judged trial's files", 
     const derived = derive(harborSelection(selected), harborJob(selected), matrixFor(selected, (armId, replicate) => armId === "one" && replicate === 2 ? "expired" : "judged"));
     expect(derived.comparability.leaderboardSubmitReady).toBe(false);
     expect(derived.evidence).toEqual([]);
+  });
+});
+
+/**
+ * What Harbor 0.21.0 writes for a trial, as the product core's committed record of real jobs shows
+ * (`core/test/fixtures/harbor-0.21-jobs-terminal-bench-2-1`): the registry task name with its
+ * dataset prefix, no attempt number, a directory named `<task>__<seven random characters>`, and
+ * `trials_dir`, the jobs directory Harbor was given plus the job name. A run this product drives
+ * gives Harbor an absolute jobs directory inside its private workspace.
+ */
+const PRIVATE_JOBS_DIR = `/Users/claimant/colophon-workspace/artifacts/harbor/jobs/${RUN_SHA256}`;
+// In code-point order these are 8eveqhg, EZiYZgD, T6ZojUQ, eiRCBED, xRxLebm. A locale-aware order
+// would put eiRCBED before EZiYZgD.
+const TRIAL_SUFFIXES = ["EZiYZgD", "eiRCBED", "T6ZojUQ", "8eveqhg", "xRxLebm"] as const;
+const BY_CODE_POINT = ["8eveqhg", "EZiYZgD", "T6ZojUQ", "eiRCBED", "xRxLebm"] as const;
+
+function harbor021TrialConfig(armId: string, taskName: string, suffix: string): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify({
+    task: { name: `terminal-bench/${taskName}`, ref: `sha256:${"e".repeat(64)}`, source: "terminal-bench/terminal-bench-2-1" },
+    trial_name: `${taskName}__${suffix}`,
+    trials_dir: `${PRIVATE_JOBS_DIR}/${armId}`,
+    agent: { name: "terminus-2", model_name: "openrouter/deepseek/deepseek-v4.1-flash" },
+    job_id: "ec23d448-4283-41f7-8a7a-b3c1ca43f1dc",
+  }, null, 4));
+}
+
+/** Each arm's job as Harbor 0.21.0 writes it: one unnumbered trial directory per task and attempt,
+ * each with ATIF unless `withoutAtif` names its directory. */
+function harbor021Job(
+  selected: SuiteProtocolSelection,
+  withoutAtif: (armId: string, directory: string) => boolean = () => false,
+): Map<string, Map<string, Uint8Array>> {
+  const roots = new Map<string, Map<string, Uint8Array>>();
+  for (const { armId } of ARMS) {
+    const files = new Map<string, Uint8Array>();
+    for (const item of selected.items) {
+      for (const suffix of TRIAL_SUFFIXES.slice(0, selected.replicates)) {
+        const directory = `${item.taskName}__${suffix}`;
+        files.set(`${directory}/config.json`, harbor021TrialConfig(armId, item.taskName, suffix));
+        files.set(`${directory}/result.json`, encode({ trial_name: directory }));
+        if (!withoutAtif(armId, directory)) files.set(`${directory}/agent/trajectory.json`, encode({ schema: "ATIF" }));
+      }
+    }
+    roots.set(`harbor-job/${armId}`, files);
+  }
+  return roots;
+}
+
+describe("a real Harbor 0.21 job: prefixed task names, unnumbered attempts, a private trials_dir (#5245)", () => {
+  test("each judged cell finds its one trial, so a full conforming job with ATIF on every trial is ready", () => {
+    const selected = suite("terminal-bench-2.1", ["task-a", "task-b"]);
+    const derived = derive(harborSelection(selected), harbor021Job(selected));
+    expect(derived.comparability).toEqual({ executionConformance: true, coverage: "full", leaderboardSubmitReady: true });
+  });
+
+  test("unnumbered attempts are numbered by trial directory name in code-point order, as the Harbor import numbers them", () => {
+    const selected = suite("terminal-bench-2.1", ["task-a"]);
+    const tree = suiteEvidenceTreeFromFiles(harbor021Job(selected).get("harbor-job/one")!);
+    expect([1, 2, 3, 4, 5].map((attempt) => harborTrialDirectory(tree, "task-a", attempt)))
+      .toEqual(BY_CODE_POINT.map((suffix) => `task-a__${suffix}`));
+    expect(harborTrialDirectory(tree, "task-a", 6)).toBeUndefined();
+    expect(harborTrialDirectory(tree, "terminal-bench/task-a", 1)).toBeUndefined();
+
+    // Attempt 2 is task-a__EZiYZgD. Leaving its ATIF out matters only while attempt 2 is judged.
+    const noAtif = harbor021Job(selected, (_armId, directory) => directory === "task-a__EZiYZgD");
+    expect(derive(harborSelection(selected), noAtif).comparability.leaderboardSubmitReady).toBe(false);
+    const secondUnscorable = matrixFor(selected, (_armId, replicate) => replicate === 2 ? "unscorable" : "judged");
+    expect(derive(harborSelection(selected), noAtif, secondUnscorable).comparability.leaderboardSubmitReady).toBe(true);
+    const fourthUnscorable = matrixFor(selected, (_armId, replicate) => replicate === 4 ? "unscorable" : "judged");
+    expect(derive(harborSelection(selected), noAtif, fourthUnscorable).comparability.leaderboardSubmitReady).toBe(false);
+  });
+
+  test("a local task named only by its path is matched by the path's last component", () => {
+    const tree = suiteEvidenceTreeFromFiles(new Map([
+      ["task-a__EZiYZgD/config.json", encode({ task: { path: "/private/work/.jinn-harbor/dataset/task-a", source: "local" }, trial_name: "task-a__EZiYZgD" })],
+      ["task-a__eiRCBED/config.json", encode({ task: { path: "/private/work/.jinn-harbor/dataset/task-a", source: "local" }, trial_name: "task-a__eiRCBED" })],
+      ["task-b__abcdefg/config.json", encode({ trial_name: "task-b__abcdefg" })],
+    ]));
+    expect(harborTrialDirectory(tree, "task-a", 1)).toBe("task-a__EZiYZgD");
+    expect(harborTrialDirectory(tree, "task-a", 2)).toBe("task-a__eiRCBED");
+    expect(harborTrialDirectory(tree, "task-b", 1)).toBe("task-b__abcdefg");
+  });
+
+  test("a trial config.json is read as the part of it that names its task and attempt, and that part reads back the same", () => {
+    const text = (bytes: Uint8Array | undefined) => bytes === undefined ? undefined : new TextDecoder().decode(bytes);
+    const cases: readonly [Uint8Array, string | undefined][] = [
+      [harbor021TrialConfig("one", "task-a", "EZiYZgD"), '{"task":{"name":"task-a"}}'],
+      [encode({ task: { name: "terminal-bench/task-a" }, attempt_number: 3, trials_dir: PRIVATE_JOBS_DIR }), '{"attempt":3,"task":{"name":"task-a"}}'],
+      [encode({ task: { path: "/private/work/.jinn-harbor/dataset/task-a" }, attempt: 2 }), '{"attempt":2,"task":{"name":"task-a"}}'],
+      [encode({ trial_name: "odd/name__EZiYZgD" }), '{"trial_name":"odd/name"}'],
+      [encode({ trials_dir: PRIVATE_JOBS_DIR }), undefined],
+      [new TextEncoder().encode("not json"), undefined],
+    ];
+    for (const [bytes, projected] of cases) {
+      expect(text(harborTrialConfigProjection(bytes))).toBe(projected);
+      if (projected !== undefined) expect(text(harborTrialConfigProjection(new TextEncoder().encode(projected)))).toBe(projected);
+    }
   });
 });
 
@@ -462,6 +561,32 @@ describe("resolveCarriedSuite binds the declaration to the Run and the carried b
       .toMatch(/not one this terminal-bench-3.0 run has/u);
     const unknownRecord = [{ ...evidence[0]!, sha256: "f".repeat(64) }, ...evidence.slice(1)];
     expect(refusal(() => resolve({ index: unknownRecord }))).toMatch(/names a record the bundle does not carry/u);
+  });
+
+  test("a trial config.json travels as the part that names its task and attempt, never as the bytes Harbor wrote (#5245)", () => {
+    const job = harbor021Job(selected);
+    const carry = (travel: (path: string, bytes: Uint8Array) => Uint8Array) => [...job].flatMap(([root, files]) => [...files]
+      .filter(([path]) => !path.endsWith("result.json"))
+      .map(([path, bytes]) => {
+        const travelled = travel(path, bytes);
+        return { root, path, sha256: sha256(travelled), bytes: travelled };
+      }));
+    const recordsOf = (files: readonly { sha256: string; bytes: Uint8Array }[]) => new Map<string, Uint8Array>([
+      [sha256(manifestBytes), manifestBytes],
+      [sha256(suiteBytes), suiteBytes],
+      ...files.map((file) => [file.sha256, file.bytes] as const),
+    ]);
+
+    // Harbor numbers no attempt, so the five trials of task-a travel as five identical documents.
+    const projected = carry((path, bytes) => path.endsWith("/config.json") ? encode({ task: { name: "task-a" } }) : bytes);
+    expect(new Set(projected.filter((file) => file.path.endsWith("/config.json")).map((file) => file.sha256)).size).toBe(1);
+    expect(resolve({ records: recordsOf(projected), index: projected })?.comparability)
+      .toEqual({ executionConformance: true, coverage: "full", leaderboardSubmitReady: true });
+
+    // The bytes Harbor wrote record the private jobs directory and the agent; they do not travel.
+    const raw = carry((_path, bytes) => bytes);
+    expect(new TextDecoder().decode(raw.find((file) => file.path.endsWith("/config.json"))!.bytes)).toContain(PRIVATE_JOBS_DIR);
+    expect(refusal(() => resolve({ records: recordsOf(raw), index: raw }))).toMatch(/names its task and attempt/u);
   });
 });
 

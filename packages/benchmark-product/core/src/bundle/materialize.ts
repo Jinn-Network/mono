@@ -111,6 +111,7 @@ import {
   deriveSuiteComparabilityFromEvidence,
   EXTERNAL_IMPORT_BUNDLE_MEMBER,
   harborJobEvidenceRoot,
+  harborJobEvidenceTree,
   readRegisteredSuiteSelection,
   registeredSuiteRows,
   SUITE_EVIDENCE_BUNDLE_MEMBER,
@@ -767,6 +768,10 @@ function recordClosure(input: MaterializeBundleInput): {
       if (tree === undefined) {
         const directory = rootDirectory(root);
         tree = directory === undefined ? { paths: () => [], read: () => undefined } : suiteEvidenceTreeFromDirectory(directory);
+        // A trial config.json is carried as the part of it the flag reads, which the derivation below
+        // decides on, never as the bytes Harbor wrote: those record the jobs directory this run gave
+        // Harbor, inside the workspace (#5245).
+        if (run.arms.some((arm) => root === harborJobEvidenceRoot(arm.armId))) tree = harborJobEvidenceTree(tree);
         trees.set(root, tree);
       }
       return tree;

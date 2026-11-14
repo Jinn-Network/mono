@@ -12,14 +12,18 @@
  * Every predicate here reads a {@link SuiteEvidenceTree}: the producer hands it a tree read from
  * disk, the checker a tree of the carried files. One function decides the flag on both sides, and
  * the same function names the files the producer must carry, so what the producer decided on is
- * what the reader re-derives from.
+ * what the reader re-derives from. A Harbor or Pier job is read through
+ * {@link harborJobEvidenceTree}, so a trial `config.json` is decided on, and carried, as the part of
+ * it the flag reads (#5245).
  */
 
 import { createHash } from "node:crypto";
 import { cellKey } from "@jinn-network/benchmarking-records";
+import { compareCodePointStrings } from "@jinn-network/task-execution-profiles";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { z } from "zod";
 import { refuse } from "./errors.js";
+import { assignHarborTrialAttempt, harborTrialAttemptNumber, harborTrialTaskName } from "./harbor-trial.js";
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "./binary-judge-manifest.js";
 import {
   deriveSuiteComparability,
@@ -122,51 +126,108 @@ export function accountSuiteArmCells(
 
 // ── Harbor and Pier jobs ───────────────────────────────────────────────────────────────────────
 
-function trialTaskName(trial: Readonly<Record<string, unknown>>): string {
-  const task = trial.task;
-  if (typeof task === "object" && task !== null && "name" in task && typeof task.name === "string") return task.name;
-  if (typeof trial.task_name === "string") return trial.task_name;
-  return "";
+/** Whether `path` has the shape of a trial directory's `config.json`: one directory below the job root. */
+function isConfigShaped(path: string): boolean {
+  const parts = path.split("/");
+  return parts.length === 2 && parts[1] === "config.json";
 }
 
-function trialAttempt(trial: Readonly<Record<string, unknown>>): number {
-  const value = trial.attempt_number ?? trial.attempt;
-  return typeof value === "number" && Number.isInteger(value) && value >= 1 ? value : 1;
+/**
+ * The part of a Harbor or Pier trial `config.json` the flag reads, as canonical JSON: the task the
+ * trial ran, by the name {@link harborTrialTaskName} reads, and its attempt where the config numbers
+ * one: `{"attempt":<n>,"task":{"name":"<task>"}}`, without `attempt` where it numbers none.
+ * `undefined` when the bytes are not a JSON object or name no task. Reading the result again gives
+ * the same task and attempt, and projecting it again gives the same bytes.
+ */
+export function harborTrialConfigProjection(bytes: Uint8Array | undefined): Uint8Array | undefined {
+  const trial = parseJsonObject(bytes);
+  if (trial === undefined) return undefined;
+  const name = harborTrialTaskName(trial);
+  if (name.length === 0) return undefined;
+  const attempt = harborTrialAttemptNumber(trial);
+  // `task.name` is read from its last `/`, so a name that holds one, which only a `trial_name` can
+  // give, is kept as a `trial_name`, which reads back whole.
+  const named = name.includes("/") ? { trial_name: name } : { task: { name } };
+  return canonicalJsonBytes({ ...(attempt === undefined ? {} : { attempt }), ...named } as never);
 }
 
-/** Each trial directory's `config.json`: a `config.json` one directory below the job root. */
-function trialConfigPaths(tree: SuiteEvidenceTree): readonly string[] {
-  return tree.paths().filter((path) => {
-    const parts = path.split("/");
-    return parts.length === 2 && parts[1] === "config.json";
-  });
+const harborJobViews = new WeakMap<SuiteEvidenceTree, SuiteEvidenceTree>();
+const harborJobViewsMade = new WeakSet<SuiteEvidenceTree>();
+
+/**
+ * An arm's retained Harbor or Pier job as the flag reads it, and so as a bundle carries it (#5245):
+ * every file as it is, except that each trial `config.json` reads as its
+ * {@link harborTrialConfigProjection}, and a `config.json` that names no task, or sits in a
+ * directory whose name starts with a dot, is not there, as `run import --from harbor` skips both.
+ *
+ * Harbor writes much more into a trial `config.json` than the flag reads: `trials_dir`, the jobs
+ * directory it was given plus the job name, which for a run this product drives is a path inside
+ * its private workspace; a local task's path on the producing machine; the agent and environment
+ * configuration. None of it decides the flag, so none of it travels. The view of a view is itself.
+ */
+export function harborJobEvidenceTree(tree: SuiteEvidenceTree): SuiteEvidenceTree {
+  if (harborJobViewsMade.has(tree)) return tree;
+  let view = harborJobViews.get(tree);
+  if (view === undefined) {
+    const projections = new Map<string, Uint8Array | undefined>();
+    const project = (path: string): Uint8Array | undefined => {
+      if (!projections.has(path)) {
+        projections.set(path, path.startsWith(".") ? undefined : harborTrialConfigProjection(tree.read(path)));
+      }
+      return projections.get(path);
+    };
+    let listed: readonly string[] | undefined;
+    view = {
+      paths: () => (listed ??= tree.paths().filter((path) => !isConfigShaped(path) || project(path) !== undefined)),
+      read: (path) => isConfigShaped(path) ? project(path) : tree.read(path),
+    };
+    harborJobViewsMade.add(view);
+    harborJobViews.set(tree, view);
+  }
+  return view;
 }
 
-/** Each trial directory by the task and attempt its `config.json` names, read once per tree. */
+/** Each trial directory's `config.json` in a job view. */
+function trialConfigPaths(view: SuiteEvidenceTree): readonly string[] {
+  return view.paths().filter(isConfigShaped);
+}
+
+/** Each trial directory by the task and attempt it holds, read once per job view. */
 const trialIndexes = new WeakMap<SuiteEvidenceTree, ReadonlyMap<string, readonly string[]>>();
 
-function trialIndex(tree: SuiteEvidenceTree): ReadonlyMap<string, readonly string[]> {
-  let index = trialIndexes.get(tree);
+/**
+ * Places every trial the way `run import --from harbor` does: the task by
+ * {@link harborTrialTaskName}, so `terminal-bench/<name>` is the slate's `<name>`, and the attempt
+ * by {@link assignHarborTrialAttempt}, meeting the directories in Unicode code-point order. Harbor
+ * 0.21 numbers no attempt, so the `n`th directory of a task in that order is its attempt `n`.
+ */
+function trialIndex(view: SuiteEvidenceTree): ReadonlyMap<string, readonly string[]> {
+  let index = trialIndexes.get(view);
   if (index === undefined) {
     const built = new Map<string, string[]>();
-    for (const path of trialConfigPaths(tree)) {
-      const trial = parseJsonObject(tree.read(path));
+    const nextAttemptByTask = new Map<string, number>();
+    const directoryAttempt = new Map<string, number>();
+    const directories = trialConfigPaths(view).map((path) => path.split("/")[0]!).sort(compareCodePointStrings);
+    for (const directory of directories) {
+      const trial = parseJsonObject(view.read(`${directory}/config.json`));
       if (trial === undefined) continue;
-      const key = `${trialTaskName(trial)}\u0000${trialAttempt(trial)}`;
-      const directories = built.get(key) ?? [];
-      directories.push(path.split("/")[0]!);
-      built.set(key, directories);
+      const assigned = assignHarborTrialAttempt({ trial, directory, nextAttemptByTask, directoryAttempt });
+      if (assigned === undefined) continue;
+      const key = `${assigned.taskName}\u0000${assigned.attempt}`;
+      const matched = built.get(key) ?? [];
+      matched.push(directory);
+      built.set(key, matched);
     }
     index = built;
-    trialIndexes.set(tree, index);
+    trialIndexes.set(view, index);
   }
   return index;
 }
 
-/** The one trial directory whose `config.json` names this task and attempt, or `undefined` when
- * none or more than one does. Core requires exactly one trial per task and attempt. */
+/** The one trial directory that holds this task and attempt, or `undefined` when none or more than
+ * one does. Core requires exactly one trial per task and attempt. */
 export function harborTrialDirectory(tree: SuiteEvidenceTree, taskName: string, attempt: number): string | undefined {
-  const matched = trialIndex(tree).get(`${taskName}\u0000${attempt}`) ?? [];
+  const matched = trialIndex(harborJobEvidenceTree(tree)).get(`${taskName}\u0000${attempt}`) ?? [];
   return matched.length === 1 ? matched[0] : undefined;
 }
 
@@ -227,8 +288,9 @@ export function atifOnRetainedJob(
   matrix: { readonly cells: readonly MatrixCellAccount[] },
   armId: string,
 ): boolean {
-  return judgedTrialDirectories(tree, suite, matrix, armId)
-    .every((trialDir) => trialDir !== undefined && trialAtifPaths(tree, trialDir).length > 0);
+  const view = harborJobEvidenceTree(tree);
+  return judgedTrialDirectories(view, suite, matrix, armId)
+    .every((trialDir) => trialDir !== undefined && trialAtifPaths(view, trialDir).length > 0);
 }
 
 export function rewardJsonOnRetainedJob(
@@ -237,8 +299,9 @@ export function rewardJsonOnRetainedJob(
   matrix: { readonly cells: readonly MatrixCellAccount[] },
   armId: string,
 ): boolean {
-  return judgedTrialDirectories(tree, suite, matrix, armId)
-    .every((trialDir) => trialDir !== undefined && trialRewardJsonPaths(tree, trialDir).length > 0);
+  const view = harborJobEvidenceTree(tree);
+  return judgedTrialDirectories(view, suite, matrix, armId)
+    .every((trialDir) => trialDir !== undefined && trialRewardJsonPaths(view, trialDir).length > 0);
 }
 
 export interface ArmRunComplete {
@@ -275,19 +338,21 @@ export function allArmsRunComplete(
   };
 }
 
-/** What a reader needs from an arm's job to re-derive the flag: every trial's `config.json`, and
- * each judged cell's trial's ATIF files (and, for DeepSWE, its `reward.json`). */
+/** What a reader needs from an arm's job to re-derive the flag: every trial's `config.json`, as the
+ * part of it that names the task and attempt, and each judged cell's trial's ATIF files (and, for
+ * DeepSWE, its `reward.json`). */
 function harborArmEvidencePaths(
   tree: SuiteEvidenceTree,
   suite: SuiteProtocolSelection,
   matrix: { readonly cells: readonly MatrixCellAccount[] },
   armId: string,
 ): readonly string[] {
-  const paths = new Set(trialConfigPaths(tree));
-  for (const trialDir of judgedTrialDirectories(tree, suite, matrix, armId)) {
+  const view = harborJobEvidenceTree(tree);
+  const paths = new Set(trialConfigPaths(view));
+  for (const trialDir of judgedTrialDirectories(view, suite, matrix, armId)) {
     if (trialDir === undefined) continue;
-    for (const path of trialAtifPaths(tree, trialDir)) paths.add(path);
-    if (suite.protocol === "deep-swe-v1.1") for (const path of trialRewardJsonPaths(tree, trialDir)) paths.add(path);
+    for (const path of trialAtifPaths(view, trialDir)) paths.add(path);
+    if (suite.protocol === "deep-swe-v1.1") for (const path of trialRewardJsonPaths(view, trialDir)) paths.add(path);
   }
   return [...paths];
 }
@@ -858,7 +923,7 @@ export function deriveSuiteComparabilityFromEvidence(input: {
   if (selection.kind === "harbor") {
     const method = harborSuiteMethodFacts(selection.manifest, suite);
     const arms = armIds.map((armId) => {
-      const tree = input.tree(harborJobEvidenceRoot(armId));
+      const tree = harborJobEvidenceTree(input.tree(harborJobEvidenceRoot(armId)));
       return { armId, tree, complete: assessArmRunComplete({ matrix, suite, armId, tree }) };
     });
     if (methodLeaderboardEligible(method) && cellsAccounted) {
@@ -1037,6 +1102,23 @@ export function resolveCarriedSuite(input: {
     const tree = trees.get(file.root) ?? new Map<string, Uint8Array>();
     tree.set(file.path, bytes);
     trees.set(file.root, tree);
+  }
+  // A Harbor or Pier trial `config.json` travels as the part of it the flag reads, never as the bytes
+  // Harbor wrote, which can name private paths on the producing machine (#5245).
+  if (selection.kind === "harbor") {
+    for (const [root, files] of trees) {
+      const view = harborJobEvidenceTree(suiteEvidenceTreeFromFiles(files));
+      for (const [path, bytes] of files) {
+        const read = view.read(path);
+        if (read === undefined || read.length !== bytes.length || read.some((byte, index) => byte !== bytes[index])) {
+          refuse(
+            "record-integrity",
+            SUITE_EVIDENCE_BUNDLE_MEMBER,
+            `evidence file ${root}/${path} is not the canonical part of a trial config.json that names its task and attempt`,
+          );
+        }
+      }
+    }
   }
   const derivation = deriveSuiteComparabilityFromEvidence({
     selection,

@@ -11,7 +11,7 @@
  * the checker again on the published directory.
  */
 
-import { cpSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -55,6 +55,7 @@ import {
   importedSwebenchRun,
   importedTerminalBench30Run,
   launchedHarborSuiteRun,
+  retainedHarborTrialDirectory,
   writeRetainedHarborTrials,
   type SuiteRun,
 } from "./testing/suite-runs.js";
@@ -114,6 +115,26 @@ async function reportAndPublish(run: SuiteRun): Promise<Published> {
 
 function rolesOf(published: Published, sha256: string): readonly string[] {
   return published.evidence.records.find((record) => record.sha256 === sha256)?.roles ?? [];
+}
+
+/** Every file of a directory tree, by its path relative to `dir`. */
+function filesUnder(dir: string, prefix = ""): string[] {
+  return readdirSync(join(dir, prefix), { withFileTypes: true }).flatMap((entry) => {
+    const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+    return entry.isDirectory() ? filesUnder(dir, path) : [path];
+  });
+}
+
+/** The bundle files whose bytes name `path`. */
+function bundleFilesNaming(bundleDir: string, path: string): string[] {
+  return filesUnder(bundleDir).filter((file) => readFileSync(join(bundleDir, file)).includes(Buffer.from(path)));
+}
+
+/** The bytes each carried trial `config.json` travels as: the part that names its task and attempt. */
+function carriedTrialConfigs(published: Published): string[] {
+  return published.suiteEvidence.files
+    .filter((file) => file.path.endsWith("/config.json"))
+    .map((file) => readFileSync(join(published.bundleDir, "records", `${file.sha256}.bin`), "utf8"));
 }
 
 describe("a suite-bound run publishes a bundle that carries its sealed selection bytes (#4759)", () => {
@@ -176,11 +197,15 @@ describe("leaderboardSubmitReady is re-derived from carried evidence (#4761, #47
     // nothing the flag does not read.
     const carried = published.suiteEvidence.files.map((file) => `${file.root}:${file.path}`).sort();
     const expected = ["one", "two"].flatMap((armId) => [1, 2, 3, 4, 5].flatMap((attempt) => [
-      `harbor-job/${armId}:trial-${attempt}/agent/trajectory.json`,
-      `harbor-job/${armId}:trial-${attempt}/config.json`,
+      `harbor-job/${armId}:${retainedHarborTrialDirectory("task-alpha", attempt)}/agent/trajectory.json`,
+      `harbor-job/${armId}:${retainedHarborTrialDirectory("task-alpha", attempt)}/config.json`,
     ])).sort();
     expect(carried).toEqual(expected);
     for (const file of published.suiteEvidence.files) expect(rolesOf(published, file.sha256)).toEqual(["suite-evidence"]);
+    // Harbor's trial configs name the task with its dataset prefix and record trials_dir, a path in
+    // the workspace (#5245). Each travels as the part that names its task and attempt.
+    expect(carriedTrialConfigs(published)).toEqual(Array.from({ length: 10 }, () => '{"task":{"name":"task-alpha"}}'));
+    expect(bundleFilesNaming(published.bundleDir, run.workspaceDir)).toEqual([]);
     await verifyPublicBundle(published.bundleDir);
   }, 240_000);
 
@@ -191,21 +216,32 @@ describe("leaderboardSubmitReady is re-derived from carried evidence (#4761, #47
     expect(published.claim.suiteComparability).toEqual({ executionConformance: true, coverage: "full", leaderboardSubmitReady: false });
     expect(published.claim.limitations).toContain(notReady("terminal-bench-3.0"));
     // The evidence that decided the flag still travels: every config.json, so a reader sees that
-    // trial-3 is the one trial for its task and attempt and that it has no ATIF file.
+    // the third trial is the one trial for its task and attempt and that it has no ATIF file.
     const carried = published.suiteEvidence.files.map((file) => `${file.root}:${file.path}`);
-    expect(carried).toContain("harbor-job/two:trial-3/config.json");
-    expect(carried).not.toContain("harbor-job/two:trial-3/agent/trajectory.json");
+    expect(carried).toContain(`harbor-job/two:${retainedHarborTrialDirectory("task-alpha", 3)}/config.json`);
+    expect(carried).not.toContain(`harbor-job/two:${retainedHarborTrialDirectory("task-alpha", 3)}/agent/trajectory.json`);
     await verifyPublicBundle(published.bundleDir);
   }, 240_000);
 
   test("terminal-bench-2.1: a full, conforming launched run whose trials are all accounted unscorable is ready on the trial configs alone", async () => {
     const run = await launchedHarborSuiteRun("terminal-bench-2.1", root);
+    // The run gave Harbor a jobs directory inside the workspace, and each trial config.json Harbor
+    // wrote records it (#5245).
+    const runSha256 = readRunState(run.workspaceDir, run.draftId)!.runSha256!;
+    const job = join(harborArmJobsDir(run.workspaceDir, runSha256), harborArmJobName(runSha256, "one"));
+    const trialConfigs = filesUnder(job).filter((path) => /^[^/]+\/config\.json$/u.test(path));
+    expect(trialConfigs).toHaveLength(5);
+    for (const path of trialConfigs) expect(readFileSync(join(job, path), "utf8")).toContain(run.workspaceDir);
+
     const published = await reportAndPublish(run);
     expect(published.claim.suiteComparability).toEqual({ executionConformance: true, coverage: "full", leaderboardSubmitReady: true });
     expect(published.claim.limitations).not.toContain(notReady("terminal-bench-2.1"));
     const carried = published.suiteEvidence.files.map((file) => `${file.root}:${file.path}`);
     expect(carried).toHaveLength(10);
-    expect(carried.every((entry) => /^harbor-job\/(one|two):trial-[1-5]\/config\.json$/u.test(entry))).toBe(true);
+    expect(carried.every((entry) => /^harbor-job\/(one|two):[a-z0-9-]+__[0-9a-f]{7}\/config\.json$/u.test(entry))).toBe(true);
+    const taskName = trialConfigs[0]!.slice(0, trialConfigs[0]!.indexOf("__"));
+    expect(carriedTrialConfigs(published)).toEqual(Array.from({ length: 10 }, () => `{"task":{"name":"${taskName}"}}`));
+    expect(bundleFilesNaming(published.bundleDir, run.workspaceDir)).toEqual([]);
     await verifyPublicBundle(published.bundleDir);
   }, 240_000);
 
@@ -296,7 +332,7 @@ describe("a reader refuses a suite-bound bundle whose claim or evidence the carr
     // Carrying a file the flag does not read is refused: the evidence is exactly what decides it.
     const extra = tampered(published.bundleDir, (dir) => editJson(dir, SUITE_EVIDENCE_BUNDLE_MEMBER, (index) => {
       const files = index["files"] as { root: string; path: string; sha256: string }[];
-      files.push({ ...files[0]!, path: "trial-1/result.json" });
+      files.push({ ...files[0]!, path: `${retainedHarborTrialDirectory("task-alpha", 1)}/result.json` });
       files.sort((left, right) => left.root < right.root ? -1 : left.root > right.root ? 1 : left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
     }));
     await expect(verifyPublicBundle(extra)).rejects.toThrow(/not exactly the set of files that decides leaderboardSubmitReady/u);
@@ -319,7 +355,7 @@ describe("the producer refuses what no reader could check (#4759, #4761)", () =>
     const reported = await runReport(run.context, { draftId: run.draftId });
     expect(reported.ok, JSON.stringify(reported)).toBe(true);
     const runSha256 = readRunState(run.workspaceDir, run.draftId)!.runSha256!;
-    unlinkSync(join(harborArmJobsDir(run.workspaceDir, runSha256), harborArmJobName(runSha256, "one"), "trial-2", "agent", "trajectory.json"));
+    unlinkSync(join(harborArmJobsDir(run.workspaceDir, runSha256), harborArmJobName(runSha256, "one"), retainedHarborTrialDirectory("task-alpha", 2), "agent", "trajectory.json"));
     const published = await runPublish(run.context, { draftId: run.draftId, includeNativeArtifacts: true });
     expect(published.ok).toBe(false);
     if (published.ok) return;

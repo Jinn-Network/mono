@@ -886,6 +886,15 @@ ready to submit to the suite's leaderboard. A bundle declaring
   listed only where it decides the flag, that is, when the method is
   leaderboard-eligible and every cell is accounted; otherwise the list is empty.
 
+A trial's `config.json` travels as the part of it the flag reads, not as the
+bytes Harbor wrote: canonical JSON naming the task (the last segment of the name
+or path Harbor records, so `terminal-bench/<task>` reads as `<task>`) and, where
+Harbor numbered one, the attempt. Harbor also records there the jobs directory
+it ran in, which for a run Colophon drives is inside the private workspace. A
+reader places each judged cell's trial as `run import --from harbor` does: by
+that task name and attempt, numbering a task's unnumbered trial directories in
+Unicode code-point order of their names.
+
 The Run binds the declaration both ways: a Run that registers a suite-protocol
 selection must declare it, and a declaring bundle must carry the selection its
 Run registered. The reader re-derives the section, and the suite sentence it
