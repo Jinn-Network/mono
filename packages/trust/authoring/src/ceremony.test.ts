@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { serializeCeremonyMessage } from "@jinn-network/trust-core";
+import { matchCeremonyContent, serializeCeremonyMessage, type KeyBinding } from "@jinn-network/trust-core";
 import { describe, expect, it } from "vitest";
 
 import { ceremonyNonce, performEoaCeremony } from "./ceremony.js";
@@ -76,6 +76,17 @@ describe("performEoaCeremony", () => {
     expect(first.message.nonce).toMatch(/^[0-9a-f]{32}$/u);
     expect(second.message.nonce).not.toBe(first.message.nonce);
     expect(ceremonyNonce()).toMatch(/^[0-9a-f]{32}$/u);
+  });
+
+  it("names the domain and URI the verifier requires (§7.2), so what it authors binds", async () => {
+    const ceremony = await freshCeremony();
+    // Only the fields the content match reads: the signature is a stub here, and
+    // trust-core's own tests cover recovery.
+    const binding = { agent: "urn:uuid:operator-a", key: { didKey: DID_KEY } } as KeyBinding;
+    expect(matchCeremonyContent(ceremony, binding)).toEqual({ matches: true });
+    const elsewhere = { ...ceremony.message, domain: "login.example" };
+    expect(matchCeremonyContent({ ...ceremony, message: elsewhere, messageBytes: serializeCeremonyMessage("eoa", elsewhere) }, binding))
+      .toMatchObject({ matches: false, mismatch: expect.stringMatching(/domain/u) });
   });
 
   it("refuses a subject that is not a did:key", async () => {
