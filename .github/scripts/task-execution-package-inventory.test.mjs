@@ -44,6 +44,12 @@ const OVERRIDE_FREE_MANIFESTS = [
   'packages/benchmarking/evaluation',
   'packages/benchmarking/native-capture',
 ];
+// One manifest still carries a @noble/hashes resolutions entry and is deliberately absent
+// from OVERRIDE_FREE_MANIFESTS: packages/benchmark-product/check ("2.2.0", published as
+// @colophon-claims/check). No manifest in its portal closure pins an exact version any more,
+// so its install does not need it. It stays because colophon-publish-manifest.test.mjs asserts
+// the published manifest keeps it. In check's lock it also forces viem, ox, @scure/bip32,
+// @scure/bip39 and @noble/curves 1.9.x onto 2.2.0. Retiring it is tracked in #5232.
 
 // Packages OUTSIDE the task-execution tree that a task-execution package may legitimately
 // portal-resolve (backend plan program §7.7: the assembly consumes the evidence CONTRACT
