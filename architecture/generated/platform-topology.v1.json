@@ -15974,6 +15974,240 @@
         "kind": "fixtures",
         "package": "@jinn-network/trust-testing",
         "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/commitment-after-a-third-resource.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/commitment-after-a-third-resource.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/commitment-in-upper-case.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/commitment-in-upper-case.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/commitment-not-last.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/commitment-not-last.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/commitment-of-an-unknown-version.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/commitment-of-an-unknown-version.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/committed-after-the-cutover.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/committed-after-the-cutover.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/committed-with-an-expiry.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/committed-with-an-expiry.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/committed.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/committed.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/domain-in-upper-case.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/domain-in-upper-case.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/end-moved.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/end-moved.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/end-removed.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/end-removed.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/no-commitment-and-no-cutover.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/no-commitment-and-no-cutover.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/no-commitment-at-the-cutover.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/no-commitment-at-the-cutover.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/no-commitment-before-the-cutover.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/no-commitment-before-the-cutover.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/other-domain.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/other-domain.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/other-relationship.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/other-relationship.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/other-start.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/other-start.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/other-uri.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/other-uri.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/README.md",
+        "relativeSource": "fixtures/ceremony-currency-v1/README.md"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/takes-effect-after-the-expiration.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/takes-effect-after-the-expiration.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/takes-effect-at-the-expiration.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/takes-effect-at-the-expiration.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/takes-effect-before-the-account-vouched.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/takes-effect-before-the-account-vouched.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/two-commitments.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/two-commitments.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/unreadable-expiration.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/unreadable-expiration.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/unreadable-issued-at.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/unreadable-issued-at.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/verified-long-after-the-expiration.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/verified-long-after-the-expiration.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
+        "path": "packages/trust/testing/fixtures/ceremony-currency-v1/wider-scope.json",
+        "relativeSource": "fixtures/ceremony-currency-v1/wider-scope.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/trust-testing",
+        "packedTargets": [],
         "path": "packages/trust/testing/fixtures/ceremony-v1/README.md",
         "relativeSource": "fixtures/ceremony-v1/README.md"
       },

@@ -1,0 +1,44 @@
+{
+  "name": "other-uri",
+  "description": "A ceremony whose message names another URI binds nothing.",
+  "input": {
+    "record": {
+      "agent": "urn:uuid:11111111-1111-4111-8111-111111111111",
+      "key": {
+        "didKey": "did:key:z6MkhaTEeQnCVYnQwFRZmpFotWSU7Fdd5tkVEQxCwPvzMWzz"
+      },
+      "voucher": {
+        "kind": "account",
+        "did": "did:pkh:eip155:8453:0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
+        "contractAccount": false
+      },
+      "relationship": "controls",
+      "scope": [
+        "deliveries",
+        "verdicts",
+        "bindings"
+      ],
+      "validFrom": "2026-07-28T00:00:00Z"
+    },
+    "ceremony": {
+      "type": "eoa",
+      "message": {
+        "domain": "trust.jinn.network",
+        "address": "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
+        "uri": "https://trust.jinn.network/login",
+        "version": "1",
+        "chainId": 8453,
+        "nonce": "currency-25",
+        "issuedAt": "2026-07-28T00:00:00Z",
+        "resources": [
+          "urn:uuid:11111111-1111-4111-8111-111111111111",
+          "did:key:z6MkhaTEeQnCVYnQwFRZmpFotWSU7Fdd5tkVEQxCwPvzMWzz"
+        ]
+      },
+      "messageBytesHex": "74727573742e6a696e6e2e6e6574776f726b2077616e747320796f7520746f207369676e20696e207769746820796f757220457468657265756d206163636f756e743a0a3078374535463435353230393141363931323564354466436237623843323635393032393339354264660a0a42696e64207468697320776f726b696e67206b657920746f20746865206e616d6564204167656e74204952492e0a0a5552493a2068747470733a2f2f74727573742e6a696e6e2e6e6574776f726b2f6c6f67696e0a56657273696f6e3a20310a436861696e2049443a20383435330a4e6f6e63653a2063757272656e63792d32350a4973737565642041743a20323032362d30372d32385430303a30303a30305a0a5265736f75726365733a0a2d2075726e3a757569643a31313131313131312d313131312d343131312d383131312d3131313131313131313131310a2d206469643a6b65793a7a364d6b6861544565516e4356596e517746525a6d70466f745753553746646435746b56455178437750767a4d577a7a",
+      "signatureHex": "c0689adaf5b9340c3c2ed4b31cb54ad8eb30d2a4199271271a04a21b814525116c2b7574a7226c5247d48f0118fa863c6b351465bc3d22fd65c3c161cd8606321b"
+    },
+    "effectiveStart": "2026-07-28T00:00:00Z"
+  },
+  "expect": "ceremony-verification-failed"
+}
