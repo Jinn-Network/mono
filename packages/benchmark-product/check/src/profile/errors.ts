@@ -45,10 +45,10 @@ export const PRODUCT_ERROR_CODES = [
    * compat semantics -- see the reserved-code note above for the mechanism.
    *
    * The code is also raised when the tooling a run launched with has drifted from the selection
-   * the record sealed (executable bytes, executable versions, or a pinned commit differing in the
+   * the record sealed (executable bytes, tool versions, or a pinned commit differing in the
    * apex-swe-dev, swe-bench-verified, and apex-agents launchers), and when a sealed Inspect
    * selection manifest is not valid UTF-8 JSON or is invalid at a named path
-   * (`runtime/inspect/host.ts`).
+   * (`core/src/runtime/inspect/host.ts`).
    *
    * These paragraphs summarize the families that raise the code; they are not a census, so a
    * reader should not take a condition's absence here to mean the code is never raised for it.

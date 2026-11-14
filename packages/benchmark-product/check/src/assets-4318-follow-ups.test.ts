@@ -10,9 +10,9 @@
  *
  * #4836 then ruled that split deliberately, after finding the closer's `Deferred` escape
  * hatch: a reopen that survives the debt-sweep closer was available and was declined (a later
- * residue sweep could still draw it in and close it). The pins below guard the ruling, the
- * corrected v1.9 sentence, which had read as though no reopen could ever hold, and the §4.1
- * row's cross-reference.
+ * sweep of either kind could still draw it in and close it). The pins below guard the ruling,
+ * the corrected v1.9 sentence, which had read as though no reopen could ever hold, and the
+ * §4.1 row's cross-reference.
  */
 
 import { readFileSync } from "node:fs";
@@ -76,8 +76,8 @@ describe("PR #4318 follow-ups (#4418, #4419, #4420, #4836)", () => {
     // The v1.9 sentence claimed reopening #4270 could not hold. It can: the member closer in
     // Autopilot's `fileDebtSweep`/`fileResidueSweep` skips any member named under a `Deferred`
     // heading on the merged sweep PR body (`parseDeferredMembers`).
-    // An exact-string guard on purpose: a shape-based match would also hit the v1.10 entry,
-    // which quotes the corrected claim, so a reworded reintroduction is left to review.
+    // An exact-string guard on purpose: a shape-based match would also hit the v1.9 entry's
+    // correction note, which restates the claim; a reworded reintroduction is left to review.
     expect(spec).not.toContain("Reopening it would be closed again by the same closer");
 
     const start = spec.indexOf("- **v1.10** (#4836");
