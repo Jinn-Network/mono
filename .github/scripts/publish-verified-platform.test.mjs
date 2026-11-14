@@ -211,6 +211,7 @@ function publisherArgs(fixture, overrides = {}) {
     registry: NPM_REGISTRY,
     repository: REPOSITORY,
     outputPath: fixture.outputPath,
+    log: () => {},
     ...overrides,
   };
 }
@@ -867,6 +868,253 @@ test('an equivalent transparency-log conflict retries in a fresh npm process and
     assert.deepEqual(refusedSleeps, []);
   } finally {
     cleanup(refusedFixture);
+  }
+});
+
+const TLOG_CONFLICT_STDERR = 'npm error code TLOG_CREATE_ENTRY_ERROR\nnpm error error creating tlog entry - (409) an equivalent entry already exists in the transparency log';
+const REPUBLISH_REFUSED = {
+  status: 1,
+  stdout: '',
+  stderr: 'npm error code E403\nnpm error 403 Forbidden - You cannot publish over the previously published versions',
+};
+
+function publishCallsFor(fixture, calls, name) {
+  return publishCalls(calls).filter(({ args }) => tarballByName(fixture, args[1]) === name);
+}
+
+function versionQueriesAfterFirstPublish(calls, fixture, name) {
+  const spec = `${name}@${fixture.packageVersion}`;
+  const firstPublishAt = calls.findIndex(({ command, args }) => (
+    command === 'npm' && args[0] === 'publish' && tarballByName(fixture, args[1]) === name
+  ));
+  return calls.slice(firstPublishAt).filter(({ command, args }) => (
+    command === 'npm' && args[0] === 'view' && args[1] === spec && args[2] === 'version'
+  )).length;
+}
+
+test('every npm publish attempt is logged with its attempt number and its own output', async () => {
+  const fixture = publicationFixture();
+  const target = fixture.receipt.packageOrder[0];
+  const spec = `${target}@${fixture.packageVersion}`;
+  const logs = [];
+  let attempts = 0;
+  const fake = registryExec(fixture, {
+    publishOverride: ({ tarball, states, publishedNames }) => {
+      if (tarball.name !== target) return undefined;
+      attempts += 1;
+      if (attempts < 3) {
+        return {
+          status: 1,
+          stdout: `attempt-${attempts}-stdout`,
+          stderr: `${TLOG_CONFLICT_STDERR}\nattempt-${attempts}-stderr`,
+        };
+      }
+      states.set(tarball.name, {
+        version: fixture.packageVersion,
+        integrity: tarball.integrity,
+        tag: fixture.packageVersion,
+      });
+      publishedNames.add(tarball.name);
+      return { status: 0, stdout: 'attempt-3-stdout', stderr: 'npm notice attempt-3-stderr' };
+    },
+  });
+  try {
+    await publishVerifiedPlatform(publisherArgs(fixture, {
+      exec: fake.exec,
+      log: (line) => logs.push(line),
+      registryRetryDelayMs: 1,
+      sleep: () => {},
+      tlogConflictRetryAttempts: 3,
+    }));
+    const targetLogs = logs.filter((line) => line.includes(`npm publish ${spec} attempt`));
+    assert.equal(targetLogs.length, 3);
+    for (const [index, line] of targetLogs.entries()) {
+      const attempt = index + 1;
+      assert.match(line, new RegExp(`attempt ${attempt} of 3`, 'u'));
+      assert.match(line, new RegExp(`attempt-${attempt}-stdout`, 'u'));
+      assert.match(line, new RegExp(`attempt-${attempt}-stderr`, 'u'));
+    }
+    for (const name of fixture.receipt.packageOrder.filter((packageName) => packageName !== target)) {
+      assert.ok(
+        logs.some((line) => line.includes(`npm publish ${name}@${fixture.packageVersion} attempt 1 of 3`)),
+        `${name} attempt is logged`,
+      );
+    }
+  } finally {
+    cleanup(fixture);
+  }
+
+  const exhaustedFixture = publicationFixture();
+  const exhaustedLogs = [];
+  let exhaustedAttempts = 0;
+  const exhausted = registryExec(exhaustedFixture, {
+    publishOverride: () => {
+      exhaustedAttempts += 1;
+      return {
+        status: 1,
+        stdout: `exhausted-${exhaustedAttempts}-stdout`,
+        stderr: `${TLOG_CONFLICT_STDERR}\nexhausted-${exhaustedAttempts}-stderr`,
+      };
+    },
+  });
+  try {
+    await assert.rejects(publishVerifiedPlatform(publisherArgs(exhaustedFixture, {
+      exec: exhausted.exec,
+      log: (line) => exhaustedLogs.push(line),
+      registryRetryDelayMs: 1,
+      sleep: () => {},
+      tlogConflictRetryAttempts: 3,
+    })));
+    for (const attempt of [1, 2, 3]) {
+      assert.ok(exhaustedLogs.some((line) => (
+        line.includes(`attempt ${attempt} of 3`)
+        && line.includes(`exhausted-${attempt}-stdout`)
+        && line.includes(`exhausted-${attempt}-stderr`)
+      )), `attempt ${attempt} output is kept`);
+    }
+  } finally {
+    cleanup(exhaustedFixture);
+  }
+});
+
+test('after a transparency-log conflict the exact receipt tarball already on the registry is success', async () => {
+  const fixture = publicationFixture();
+  const target = fixture.receipt.packageOrder[0];
+  const sleeps = [];
+  const fake = registryExec(fixture, {
+    publishOverride: ({ tarball, states, publishedNames }) => {
+      if (states.has(tarball.name)) return REPUBLISH_REFUSED;
+      if (tarball.name !== target) return undefined;
+      // Another publisher landed the exact bytes; this process got the 409.
+      states.set(tarball.name, {
+        version: fixture.packageVersion,
+        integrity: tarball.integrity,
+        tag: fixture.packageVersion,
+      });
+      publishedNames.add(tarball.name);
+      return { status: 1, stdout: '', stderr: TLOG_CONFLICT_STDERR };
+    },
+  });
+  try {
+    const receipt = await publishVerifiedPlatform(publisherArgs(fixture, {
+      exec: fake.exec,
+      registryRetryDelayMs: 1,
+      sleep: (ms) => sleeps.push(ms),
+      tlogConflictRetryAttempts: 3,
+    }));
+    assert.equal(publishCallsFor(fixture, fake.calls, target).length, 1);
+    assert.equal(publishCalls(fake.calls).length, fixture.receipt.packageOrder.length);
+    assert.deepEqual(sleeps, []);
+    const observed = receipt.observedRegistry.find(({ name }) => name === target);
+    assert.equal(observed.integrity, fixture.receipt.tarballs.find(({ name }) => name === target).integrity);
+    assert.equal(observed.taggedVersion, fixture.packageVersion);
+    assert.equal(readFileSync(fixture.outputPath, 'utf8'), canonicalJsonBytes(receipt));
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('after a transparency-log conflict a registry version with other bytes fails closed', async () => {
+  const fixture = publicationFixture();
+  const target = fixture.receipt.packageOrder[0];
+  const fake = registryExec(fixture, {
+    publishOverride: ({ tarball, states }) => {
+      if (states.has(tarball.name)) return REPUBLISH_REFUSED;
+      if (tarball.name !== target) return undefined;
+      states.set(tarball.name, {
+        version: fixture.packageVersion,
+        integrity: 'sha512-OTHER',
+        tag: fixture.packageVersion,
+      });
+      return { status: 1, stdout: '', stderr: TLOG_CONFLICT_STDERR };
+    },
+  });
+  try {
+    await assert.rejects(
+      publishVerifiedPlatform(publisherArgs(fixture, {
+        exec: fake.exec,
+        registryRetryDelayMs: 1,
+        sleep: () => {},
+        tlogConflictRetryAttempts: 3,
+      })),
+      /post-conflict integrity mismatch for .*: receipt sha512-.*, registry sha512-OTHER/u,
+    );
+    assert.equal(publishCalls(fake.calls).length, 1);
+    assert.equal(existsSync(fixture.outputPath), false);
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('a version recovered after a transparency-log conflict still waits for and enforces the canary tag', async () => {
+  const fixture = publicationFixture();
+  const target = fixture.receipt.packageOrder[0];
+  const sleeps = [];
+  const fake = registryExec(fixture, {
+    publishOverride: ({ tarball, states }) => {
+      if (states.has(tarball.name)) return REPUBLISH_REFUSED;
+      if (tarball.name !== target) return undefined;
+      states.set(tarball.name, {
+        version: fixture.packageVersion,
+        integrity: tarball.integrity,
+        tag: '0.0.1',
+      });
+      return { status: 1, stdout: '', stderr: TLOG_CONFLICT_STDERR };
+    },
+  });
+  try {
+    await assert.rejects(
+      publishVerifiedPlatform(publisherArgs(fixture, {
+        exec: fake.exec,
+        registryRetryAttempts: 2,
+        registryRetryDelayMs: 1,
+        sleep: (ms) => sleeps.push(ms),
+        tlogConflictRetryAttempts: 3,
+      })),
+      /post-publish canary mismatch for .*: expected .*, got 0\.0\.1/u,
+    );
+    assert.equal(publishCalls(fake.calls).length, 1);
+    assert.deepEqual(sleeps, [1]);
+    assert.equal(existsSync(fixture.outputPath), false);
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('a transparency-log conflict on every attempt with the version absent fails with an actionable message', async () => {
+  const fixture = publicationFixture();
+  const target = fixture.receipt.packageOrder[0];
+  const sleeps = [];
+  const fake = registryExec(fixture, {
+    publishOverride: ({ tarball }) => (
+      tarball.name === target ? { status: 1, stdout: '', stderr: TLOG_CONFLICT_STDERR } : undefined
+    ),
+  });
+  try {
+    await assert.rejects(
+      publishVerifiedPlatform(publisherArgs(fixture, {
+        exec: fake.exec,
+        registryRetryDelayMs: 7,
+        sleep: (ms) => sleeps.push(ms),
+        tlogConflictRetryAttempts: 3,
+      })),
+      (error) => {
+        assert.ok(error.message.startsWith(`npm publication failed for ${target}@${fixture.packageVersion}: `));
+        assert.match(error.message, /TLOG_CREATE_ENTRY_ERROR 409 on all 3 attempts/u);
+        assert.match(error.message, /the transparency-log entry exists and the package is missing from the registry/u);
+        assert.match(error.message, /Rerun the failed job/u);
+        assert.match(error.message, /the next push to next publishes a new canary version/u);
+        assert.match(error.message, /docs\/runbooks\/stack-npm-publishing\.md/u);
+        return true;
+      },
+    );
+    assert.equal(publishCallsFor(fixture, fake.calls, target).length, 3);
+    assert.equal(publishCalls(fake.calls).length, 3);
+    assert.equal(versionQueriesAfterFirstPublish(fake.calls, fixture, target), 3);
+    assert.deepEqual(sleeps, [7, 7]);
+    assert.equal(existsSync(fixture.outputPath), false);
+  } finally {
+    cleanup(fixture);
   }
 });
 

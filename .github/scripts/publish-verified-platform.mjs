@@ -82,6 +82,10 @@ function defaultSleep(ms) {
   spawnSync('sleep', [String(Math.max(1, Math.ceil(ms / 1000)))], { stdio: 'ignore' });
 }
 
+function defaultLog(line) {
+  console.error(line);
+}
+
 export function defaultExec(command, args, cwd) {
   const result = spawnSync(command, args, {
     cwd,
@@ -320,7 +324,7 @@ function registryValue(target, field, {
   }
 }
 
-function inspectRegistry(tarball, receipt, context, { allowMissing, phase }) {
+function inspectPublishedVersion(tarball, receipt, context, { allowMissing, phase }) {
   const spec = `${tarball.name}@${receipt.packageVersion}`;
   const version = registryValue(spec, 'version', {
     ...context,
@@ -339,6 +343,13 @@ function inspectRegistry(tarball, receipt, context, { allowMissing, phase }) {
   if (integrity !== tarball.integrity) {
     throw new Error(`${phase} integrity mismatch for ${spec}: receipt ${tarball.integrity}, registry ${String(integrity)}`);
   }
+  return { version, integrity };
+}
+
+function inspectRegistry(tarball, receipt, context, { allowMissing, phase }) {
+  const published = inspectPublishedVersion(tarball, receipt, context, { allowMissing, phase });
+  if (published === null) return null;
+  const { version, integrity } = published;
   const taggedVersion = registryValue(tarball.name, `dist-tags.${receipt.distTag}`, {
     ...context,
     allowNotFound: false,
@@ -378,6 +389,27 @@ function verifyPublishedTarball(tarball, receipt, context, {
   throw new Error('unreachable registry propagation retry state');
 }
 
+function publishAttemptReport(spec, attempt, attempts, result) {
+  const output = [result.stdout, result.stderr]
+    .map((stream) => String(stream ?? '').trim())
+    .filter((stream) => stream !== '')
+    .join('\n');
+  const header = `npm publish ${spec} attempt ${attempt} of ${attempts}: exit status ${result.status}`;
+  return output === '' ? header : `${header}\n${output}`;
+}
+
+function tlogConflictMissingError(spec, attempts) {
+  return new Error([
+    `npm publication failed for ${spec}:`,
+    `TLOG_CREATE_ENTRY_ERROR 409 on ${attempts === 1 ? 'its only attempt' : `all ${attempts} attempts`}:`,
+    'the transparency-log entry exists and the package is missing from the registry.',
+    'Each attempt signs a fresh envelope, so these entries do not block a retry.',
+    "Rerun the failed job while this run's verification artifacts still exist;",
+    'otherwise the next push to next publishes a new canary version.',
+    "See the Recovery section of docs/runbooks/stack-npm-publishing.md. Each attempt's npm output is logged above.",
+  ].join(' '));
+}
+
 function publishMissingTarballs(receipt, missing, {
   exec,
   repoRoot,
@@ -387,6 +419,7 @@ function publishMissingTarballs(receipt, missing, {
   registryRetryDelayMs,
   tlogConflictRetryAttempts,
   sleep,
+  log,
 }) {
   const tarballs = new Map(receipt.tarballs.map((tarball) => [tarball.name, tarball]));
   const registryContext = { exec, repoRoot, registry };
@@ -394,6 +427,7 @@ function publishMissingTarballs(receipt, missing, {
     for (const name of wave) {
       if (!missing.has(name)) continue;
       const tarball = tarballs.get(name);
+      const spec = `${name}@${receipt.packageVersion}`;
       for (let attempt = 1; attempt <= tlogConflictRetryAttempts; attempt += 1) {
         const result = exec('npm', [
           'publish',
@@ -406,16 +440,40 @@ function publishMissingTarballs(receipt, missing, {
           '--registry',
           registry,
         ], repoRoot);
+        log(publishAttemptReport(spec, attempt, tlogConflictRetryAttempts, result));
         if (result.status === 0) break;
 
         const output = `${result.stdout}\n${result.stderr}`;
-        if (!TLOG_CONFLICT.test(output) || attempt === tlogConflictRetryAttempts) {
-          requireSuccess(result, `npm publication failed for ${name}@${receipt.packageVersion}`);
+        if (!TLOG_CONFLICT.test(output)) {
+          requireSuccess(result, `npm publication failed for ${spec}`);
         }
 
-        // npm creates the transparency-log entry before it uploads the package. A lost response
-        // can make the same npm process retry the identical signed envelope and receive a 409.
-        // Start a fresh process so it signs a fresh envelope; never retry any other publish error.
+        // A TLOG_CREATE_ENTRY_ERROR 409 means this npm process uploaded nothing: npm writes the
+        // provenance entry to the transparency log before it uploads the package. npm 11.19.0
+        // bundles sigstore 4.1.1, which posts the entry with a 5-second timeout and two retries
+        // and does not fetch an existing entry on conflict, so a response lost after the log
+        // wrote the entry makes the retry resend the identical envelope and receive a 409.
+        // A fresh npm process signs with a fresh certificate and writes a distinct entry, so it
+        // does not collide with an earlier attempt. Established from run 43452336533
+        // (2026-11-13): the three attempts for @jinn-network/verify wrote three distinct entries
+        // for the same statement (log indexes 3858232769, 3858240435 and 3858250469), and the
+        // third attempt's 409 named the entry that same process had written two seconds after it
+        // started. A fresh process can therefore succeed once the log stops losing responses, and
+        // the existing entries never block a rerun. Another publisher may still have landed the
+        // exact receipt tarball, so the registry decides before any retry: the exact version
+        // with the receipt integrity is success (the post-publish check below still enforces
+        // the dist-tag), other bytes fail closed, and absence retries. Never retry any other
+        // publish error.
+        if (inspectPublishedVersion(tarball, receipt, registryContext, {
+          allowMissing: true,
+          phase: 'post-conflict',
+        }) !== null) {
+          log(`${spec} is on the registry with the receipt integrity after a transparency-log conflict; verifying it`);
+          break;
+        }
+        if (attempt === tlogConflictRetryAttempts) {
+          throw tlogConflictMissingError(spec, tlogConflictRetryAttempts);
+        }
         sleep(registryRetryDelayMs);
       }
       verifyPublishedTarball(tarball, receipt, registryContext, {
@@ -478,6 +536,7 @@ export async function publishVerifiedPlatform(options) {
     registryRetryDelayMs = DEFAULT_REGISTRY_RETRY_DELAY_MS,
     tlogConflictRetryAttempts = DEFAULT_TLOG_CONFLICT_RETRY_ATTEMPTS,
     sleep = defaultSleep,
+    log = defaultLog,
   } = options;
   const root = resolve(repoRoot);
   const artifactRoot = resolve(verificationRoot);
@@ -542,6 +601,7 @@ export async function publishVerifiedPlatform(options) {
     registryRetryDelayMs,
     tlogConflictRetryAttempts,
     sleep,
+    log,
   });
 
   const observedRegistry = receipt.tarballs.map((tarball) => inspectRegistry(

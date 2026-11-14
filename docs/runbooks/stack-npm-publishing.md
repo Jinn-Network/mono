@@ -226,3 +226,19 @@ path above, then rerun. Rerunning only works while this run's `platform-verifica
 artifact still exists (`retention-days: 1` in `platform-verification.yml`); once that window
 passes, the next push to `next` is the retry, not a manual rerun of the old run. Do not treat
 a partial walk as a successful canary.
+
+**`npm publication failed for <name>@<version>: TLOG_CREATE_ENTRY_ERROR 409 on all 3 attempts`:**
+every `npm publish --provenance` attempt for that package (`JINN_NPM_TLOG_CONFLICT_RETRY_ATTEMPTS:
+3`) was refused with `(409) an equivalent entry already exists in the transparency log`, and the
+registry does not have the version. npm writes the provenance entry to the transparency log before
+it uploads the package, so a 409 means that attempt uploaded nothing: npm's sigstore client resent
+a request whose response was lost and got a 409 for the entry it had just written. Each attempt is
+a fresh npm process with a fresh signing certificate, so its entry is distinct and the existing
+entries do not block a rerun
+([run 43452336533](https://github.com/Jinn-Network/mono/actions/runs/43452336533) left three
+distinct entries for one tarball). After every 409 the lane asks the registry for the exact
+version first: the receipt integrity there counts as published and the post-publish wait for the
+`canary` tag still applies; different bytes fail closed. Every attempt's npm output is in the job
+log with its attempt number. The walk stops as it does for a failed publish. Rerun the failed
+job: the preflight skips what is already published, within the `canary`-tag and one-day artifact
+limits above. Otherwise the next push to `next` publishes a new canary version.
