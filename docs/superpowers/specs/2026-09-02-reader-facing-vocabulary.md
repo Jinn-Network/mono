@@ -74,13 +74,14 @@
   though no reopen could ever hold. One can — the closer honors a `Deferred` heading on the merged
   sweep PR body — so the reopen was a declined option, not an unavailable one.)
 - **v1.10** (#4836): rules the #4270 record deliberately, having found the escape hatch v1.9 did not
-  know about. Autopilot's debt-sweep closer (`fileDebtSweep` in `src/lifecycle/debt-sweep.ts`) calls
-  `parseDeferredMembers` on the merged sweep PR's body and skips every member named under a
+  know about. Autopilot's debt-sweep closer (`fileDebtSweep` in `src/lifecycle/debt-sweep.ts`)
+  calls `parseDeferredMembers` on the merged sweep PR's body and skips every member named under a
   `Deferred` heading, so a reopen of #4270 that survives that closer was available (add such a
-  heading to PR #4318's body, then reopen) and is **declined**. The reopen would hold against that
-  closer only: `fileResidueSweep` in the same file reads the heading off its own merged residue
-  sweep's PR and never off PR #4318, so a reopened #4270 could still be drawn into a future residue
-  sweep and closed there. Three reasons. An open
+  heading to PR #4318's body, then reopen) and is **declined**. The heading stops that closer from
+  closing #4270 on the strength of sweep #4307; it does not exempt #4270 from a later sweep. A
+  deferred member stays eligible for the next debt sweep of its parent PR, and `fileResidueSweep`
+  reads the heading off its own merged residue sweep's PR, never off PR #4318, so a reopened #4270
+  could be drawn into a future sweep of either kind and closed there. Three reasons. An open
   issue adds no information over either existing record, and the condition that unblocks the hold is
   a bundle-format allocation, which whoever allocates the format meets at the emission site rather
   than in a triage list; an issue unclaimable until an unrelated allocation exists is a permanent

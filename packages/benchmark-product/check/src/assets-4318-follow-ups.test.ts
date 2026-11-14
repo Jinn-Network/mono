@@ -9,9 +9,10 @@
  * site and in the spec row, not by an open GitHub issue.
  *
  * #4836 then ruled that split deliberately, after finding the closer's `Deferred` escape
- * hatch: a reopen that survives the debt-sweep closer was available and was declined (it would
- * not survive a later residue sweep). The pins below guard the ruling, the corrected v1.9
- * sentence, which had read as though no reopen could ever hold, and the §4.1 row's cross-reference.
+ * hatch: a reopen that survives the debt-sweep closer was available and was declined (a later
+ * residue sweep could still draw it in and close it). The pins below guard the ruling, the
+ * corrected v1.9 sentence, which had read as though no reopen could ever hold, and the §4.1
+ * row's cross-reference.
  */
 
 import { readFileSync } from "node:fs";
@@ -89,8 +90,10 @@ describe("PR #4318 follow-ups (#4418, #4419, #4420, #4836)", () => {
     expect(v110).toContain("parseDeferredMembers");
     expect(v110).toContain("`Deferred` heading");
     expect(v110).toContain("**declined**");
-    // The scope is stated in the entry's opening clause, not only in a later qualifier.
-    expect(v110.slice(0, v110.indexOf("**declined**"))).toContain("debt-sweep closer");
+    // The opening sentence names only the debt-sweep closer, not both closers.
+    const opening = v110.slice(0, v110.indexOf("**declined**"));
+    expect(opening).toContain("debt-sweep closer");
+    expect(opening).not.toContain("fileResidueSweep");
 
     // The §4.1 v4-badge row names the same scope and keeps its #4836 cross-reference.
     const row = spec.split("\n").find((line) => line.startsWith("| Colophon · verified qualification (v4 badge)"));

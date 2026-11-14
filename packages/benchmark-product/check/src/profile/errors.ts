@@ -36,20 +36,22 @@ export const PRODUCT_ERROR_CODES = [
    * regular file it claims to be; for a carried record that disagrees with the sealed record it
    * cites; and, since issue #3855, for a sealed Report whose results do not carry its own
    * method's shape, whose method version this verifier does not support, and whose method has no
-   * claim-package projection wired at all. It is also raised when the tooling a run launched
-   * with has drifted from the selection the record sealed (executable bytes, executable
-   * versions, or a pinned commit differing in the apex-swe-dev, swe-bench-verified, and
-   * apex-agents launchers), and when a sealed Inspect selection manifest is not valid UTF-8
-   * JSON or is invalid at a named path (`runtime/inspect/host.ts`).
-   *
-   * This list summarizes the families that raise the code; it is not a census, so a reader
-   * should not take a condition's absence here to mean the code is never raised for it.
+   * claim-package projection wired at all.
    *
    * Those last two are a fact about the READER's tooling, not about the publisher, and they are
    * deliberately here rather than under a compat code of their own: the v1 code set has no
    * compat member, and `execution` ("the verifier broke") is strictly worse for the same reader.
    * A compat code, if one is ever added, is a taxonomy change owned by the packet that adds
    * compat semantics -- see the reserved-code note above for the mechanism.
+   *
+   * The code is also raised when the tooling a run launched with has drifted from the selection
+   * the record sealed (executable bytes, executable versions, or a pinned commit differing in the
+   * apex-swe-dev, swe-bench-verified, and apex-agents launchers), and when a sealed Inspect
+   * selection manifest is not valid UTF-8 JSON or is invalid at a named path
+   * (`runtime/inspect/host.ts`).
+   *
+   * These paragraphs summarize the families that raise the code; they are not a census, so a
+   * reader should not take a condition's absence here to mean the code is never raised for it.
    */
   "record-integrity",
   /** The audit journal on disk is not well-formed, ordered JSONL. */
