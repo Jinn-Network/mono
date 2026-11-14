@@ -196,6 +196,25 @@ and dist-tag. Matching bytes are skipped; missing bytes are published in receipt
 version already exists with different bytes, stop and cut a new version—npm versions are immutable.
 Never repair the mismatch by repacking, moving a tag, or weakening receipt verification.
 
+**`canary rollback refused for <group>`:** a rerun never moves `canary` back. Before it publishes
+anything, the lane reads the `canary` tag of every package it is about to publish. Each canary
+version names its source commit (`0.1.0-canary.sha.<sha>`), and GitHub's compare of that commit
+with the leg's own source decides which is later. When a tag already points at a version from a
+later commit, the leg stops with this message, which names both shas, and publishes nothing. This
+is the rerun the preflight cannot catch on its own: a leg that failed before it published anything
+(a failed artifact download, a failed provenance check, or `ENEEDAUTH` on its first package) has
+every version missing, so a rerun after a later run had published the same group would publish
+the older versions and move `canary` back for the whole group. Do not rerun such a leg again: its
+sha stays unpublished for that group, and the later sha's canary stands. A missing version whose
+tag comes from an earlier commit, or a package with no `canary` tag yet, publishes as usual.
+
+**`canary rollback check failed for <group>`:** the lane could not tell whether a `canary` tag
+comes from an earlier commit than the leg's source, so it publishes nothing. The message says
+why: the registry read failed, GitHub's compare failed, the tagged version names no commit, or
+the two commits do not share a line of history (compare status `diverged`). A failed read or
+compare can be rerun. A tag that names no commit, or a commit off the leg's history, stops every
+later leg the same way until a person resolves that tag.
+
 **`post-publish registry query failed for <name>@<version> version` with `E404`:** npm accepted
 the publish and had not exposed the version when the wait ran out. This is registry latency, not a
 missing registration. After each publish the lane queries the registry until the exact version,

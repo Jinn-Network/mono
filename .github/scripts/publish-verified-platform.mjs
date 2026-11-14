@@ -427,6 +427,94 @@ function publishMissingTarballs(receipt, missing, {
   }
 }
 
+function packagesLabel(names) {
+  if (names.length === 1) return names[0];
+  const others = names.length - 1;
+  return `${names[0]} and ${others} other package${others === 1 ? '' : 's'}`;
+}
+
+// The dist-tag a package carries now, or null when npm has no such package or the package has
+// no such tag yet (a name reserved under another tag prints nothing). Either way there is no
+// tag for this leg to move back.
+function currentDistTag(name, distTag, { exec, repoRoot, registry }) {
+  const field = `dist-tags.${distTag}`;
+  const result = exec('npm', ['view', name, field, '--json', '--registry', registry], repoRoot);
+  const output = `${result.stdout}\n${result.stderr}`.trim();
+  if (result.status !== 0) {
+    if (/\bE404\b|404 Not Found/u.test(output)) return null;
+    throw new Error(`registry query failed for ${name} ${field}: ${output}`);
+  }
+  if (result.stdout.trim() === '') return null;
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(`registry returned invalid JSON for ${name} ${field}: ${error?.message ?? String(error)}`);
+  }
+}
+
+// The preflight checks the canary tag only for versions that already exist. A leg that
+// published nothing has every version missing, so a rerun of an old leg after a later run
+// published the same group would publish with --tag canary and move the tag back to this
+// older sha. Every canary version embeds its source sha, and that commit must be this run's
+// source or one of its ancestors. GitHub's compare of the two commits decides, because the
+// leg's checkout is shallow. Anything else, including an order that cannot be determined,
+// is refused before any publish.
+function refuseCanaryRollback(receipt, missing, { exec, repoRoot, registry, repository, sourceSha }) {
+  const refusal = (kind, detail) => new Error(
+    `canary rollback ${kind} for ${receipt.releaseGroup}: ${detail}; `
+    + 'nothing was published. See the Recovery section of docs/runbooks/stack-npm-publishing.md.',
+  );
+  const taggedBySha = new Map();
+  for (const { name } of receipt.tarballs) {
+    if (!missing.has(name)) continue;
+    let version;
+    try {
+      version = currentDistTag(name, receipt.distTag, { exec, repoRoot, registry });
+    } catch (error) {
+      throw refusal('check failed', `${error.message}, so its order against this run's source ${sourceSha} is unknown`);
+    }
+    if (version === null) continue;
+    const taggedSha = typeof version === 'string'
+      ? /-canary\.sha\.([0-9a-f]{40})$/u.exec(version)?.[1]
+      : undefined;
+    if (taggedSha === undefined) {
+      throw refusal(
+        'check failed',
+        `the ${receipt.distTag} tag of ${name} points at ${JSON.stringify(version)}, which names no source commit, `
+        + `so it cannot be ordered against this run's source ${sourceSha}`,
+      );
+    }
+    if (taggedSha === sourceSha) continue;
+    if (!taggedBySha.has(taggedSha)) taggedBySha.set(taggedSha, { version, names: [] });
+    taggedBySha.get(taggedSha).names.push(name);
+  }
+
+  for (const [taggedSha, { version, names }] of taggedBySha) {
+    const result = exec('gh', [
+      'api',
+      `repos/${repository}/compare/${sourceSha}...${taggedSha}`,
+      '--jq',
+      '.status',
+    ], repoRoot);
+    const order = result.status === 0 ? result.stdout.trim() : null;
+    if (order === 'behind') continue;
+    const tagged = `the ${receipt.distTag} tag of ${packagesLabel(names)} points at ${version}, from ${taggedSha}`;
+    if (order === 'ahead') {
+      throw refusal(
+        'refused',
+        `${tagged}, a later commit than this run's source ${sourceSha}. `
+        + `Publishing ${receipt.packageVersion} would move ${receipt.distTag} back`,
+      );
+    }
+    const reason = order === null
+      ? `GitHub compare failed: ${(result.stderr || result.stdout || `status ${result.status}`).trim()}`
+      : order === 'diverged'
+        ? 'neither commit descends from the other (GitHub compare: diverged)'
+        : `GitHub compare returned ${JSON.stringify(order)}`;
+    throw refusal('check failed', `${tagged}, and its order against this run's source ${sourceSha} is unknown: ${reason}`);
+  }
+}
+
 function validateArguments({
   sourceSha,
   releaseGroup,
@@ -533,6 +621,7 @@ export async function publishVerifiedPlatform(options) {
     });
     if (existing === null) missing.add(tarball.name);
   }
+  refuseCanaryRollback(receipt, missing, { ...registryContext, repository, sourceSha });
   publishMissingTarballs(receipt, missing, {
     exec,
     repoRoot: root,
