@@ -20,6 +20,7 @@ import {
   type NativeRoleIdentityRole,
 } from '../../src/daemon/role-identities.js';
 import type { CommandContext } from '../../src/cli/command.js';
+import { fakeTrust } from '../_support/native-trust.js';
 
 function captureIo() {
   const writes: string[] = [];
@@ -311,12 +312,14 @@ describe('native-vertical identity CLI surface', () => {
     await command.run(ctx);
     const envelope = JSON.parse(io.writes.join(''));
 
+    const bindingResolver = alwaysBindingResolver();
     const identities = await openRoleIdentitySet({
       storePath: store,
       password: 'operator-password',
       agent: 'urn:jinn:operator:test',
       requiredRoles: ['solver-delivery', 'solver-settlement', 'solver-discovery'],
-      bindingResolver: alwaysBindingResolver(),
+      bindingResolver,
+      revocationAuthority: fakeTrust({ bindingResolver }),
       now: () => new Date('2026-08-05T00:00:00.000Z'),
     });
 

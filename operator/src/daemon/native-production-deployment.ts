@@ -251,6 +251,7 @@ async function openRoles(input: {
     storePath: input.storePath,
     password: input.password,
     bindingResolver: input.trust.bindingResolver,
+    revocationAuthority: input.trust,
     verifyRoleBinding: input.trust.verifyRoleBinding,
   });
 }

@@ -147,6 +147,7 @@ import {
   type HarnessSelector,
 } from '../e2e/_daemon-harness-helpers.js';
 import { jsonRpc as anvilJsonRpc } from '../_support/chain/anvil.js';
+import { fakeTrust } from '../_support/native-trust.js';
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const SNAPSHOT_DIR = resolve(TEST_DIR, '..', '_support', 'fixtures', 'anvil-base-v3-state');
@@ -550,6 +551,7 @@ async function buildNativeEvaluatorRig(input: NativeEvaluatorRigInput) {
     storePath: join(rigRoot, 'identity', 'evaluator-roles.enc.json'),
     password: EVALUATOR_PASSWORD,
     bindingResolver,
+    revocationAuthority: fakeTrust({ bindingResolver }),
   });
 
   // ── LEG 4: the committed prediction-evaluator deployment registration ───────────────────

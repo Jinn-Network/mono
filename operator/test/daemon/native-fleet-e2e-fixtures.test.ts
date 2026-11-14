@@ -75,6 +75,7 @@ describe('native-fleet fixtures — identity + trust boot leg', () => {
       storePath: solverStore.storePath,
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now: () => NOW,
     });
@@ -87,6 +88,7 @@ describe('native-fleet fixtures — identity + trust boot leg', () => {
       storePath: requesterStore.storePath,
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now: () => NOW,
     });
@@ -99,6 +101,7 @@ describe('native-fleet fixtures — identity + trust boot leg', () => {
       storePath: admissionStore.storePath,
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now: () => NOW,
     });
@@ -129,6 +132,7 @@ describe('native-fleet fixtures — identity + trust boot leg', () => {
       storePath: evaluatorStore.storePath,
       password: PASSWORD,
       bindingResolver: trust2.bindingResolver,
+      revocationAuthority: trust2,
       verifyRoleBinding: trust2.verifyRoleBinding,
       now: () => NOW,
     });
@@ -175,6 +179,7 @@ describe('native-fleet fixtures — identity + trust boot leg', () => {
       storePath: setup.operatorA.solverStore.storePath,
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now: () => NOW,
     });
@@ -186,6 +191,7 @@ describe('native-fleet fixtures — identity + trust boot leg', () => {
       storePath: setup.operatorB.solverStore.storePath,
       password: PASSWORD,
       bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
       verifyRoleBinding: trust.verifyRoleBinding,
       now: () => NOW,
     });

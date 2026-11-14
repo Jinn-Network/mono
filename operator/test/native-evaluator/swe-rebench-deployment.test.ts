@@ -36,6 +36,7 @@ import {
   sweRebenchEvaluatorModuleDigest,
   writeSweRebenchEvaluatorSidecar,
 } from "../../src/native-evaluator/deployment-paths.js";
+import { fakeTrust } from "../_support/native-trust.js";
 
 const AGENT = "urn:jinn:evaluator:swe-rebench-deployment-fixture";
 const OTHER_AGENT = "urn:jinn:evaluator:swe-rebench-deployment-fixture-other";
@@ -115,6 +116,7 @@ async function fixture(input: { readonly agent?: string } = {}) {
     password: "operator-password",
     agent,
     bindingResolver: resolver,
+    revocationAuthority: fakeTrust({ bindingResolver: resolver }),
     now: () => new Date("2026-08-02T12:00:00.000Z"),
   });
   const evaluationProfile = buildEvaluationTaskProfile();
