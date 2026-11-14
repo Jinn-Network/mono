@@ -71,6 +71,12 @@ export const BUNDLE_V4_EVIDENCE_ROLES = [
   // is that nothing DERIVES the role there: off `/8` the Report extension is never read, so the
   // evidence closure's own size and per-digest guards refuse the record as unreachable (§6.5.2).
   "disclosure-specification",
+  // Appended at the very end, for the same reason (issues #4759 and #4762): the
+  // `suite-comparability` capability's carried suite-protocol object and evidence files. Nothing
+  // derives either role unless a `/10` bundle declares the capability, so on every other closure a
+  // record carrying one is unreachable and refused.
+  "suite-protocol-selection",
+  "suite-evidence",
 ] as const;
 export type BundleV4EvidenceRole = (typeof BUNDLE_V4_EVIDENCE_ROLES)[number];
 export const BUNDLE_V4_ADMISSION_EVIDENCE_ROLES = [
@@ -200,6 +206,11 @@ export const BUNDLE_EVIDENCE_ROLES = [
   "judge-instrument",
   "analysis-context",
   "label-resolution",
+  // Appended (issues #4759 and #4762), as in the v4 list above: derived only for a `/10` bundle that
+  // declares `suite-comparability`, so existing `/2`-graph bundles keep their bytes and refuse a
+  // record carrying either role as unreachable.
+  "suite-protocol-selection",
+  "suite-evidence",
 ] as const;
 export type BundleEvidenceRole = (typeof BUNDLE_EVIDENCE_ROLES)[number];
 

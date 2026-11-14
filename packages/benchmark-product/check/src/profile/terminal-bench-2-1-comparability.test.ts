@@ -292,6 +292,7 @@ describe("the registry entry", () => {
       importedRun: false,
       declaresTaskSelection: false,
       officialTerminalBench21Slate: false,
+      suiteProtocolBound: false,
     };
     expect(activeCapabilityVector({ ...none, importedRun: true, officialTerminalBench21Slate: true })).toContain(TOKEN);
     expect(activeCapabilityVector({ ...none, importedRun: true })).not.toContain(TOKEN);

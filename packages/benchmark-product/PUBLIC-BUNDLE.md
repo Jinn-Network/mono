@@ -578,10 +578,11 @@ Every token is **must-understand**. A reader that does not implement a token in
 the vector refuses the bundle whole, naming the token, before it reads any
 member. There is no tier of tokens a reader may ignore.
 
-Seven capabilities are registered. Each one's members, checks, and claim section
+Eight capabilities are registered. Each one's members, checks, and claim section
 are exactly what the closure it came from carries, except `external-import`,
-`task-selection`, `owner-controlled-publication`, and
-`terminal-bench-2-1-comparability`, which are new with this generation:
+`task-selection`, `owner-controlled-publication`,
+`terminal-bench-2-1-comparability`, and `suite-comparability`, which are new with
+this generation:
 
 | Token | Adds | Check it appends | Claim section |
 | --- | --- | --- | --- |
@@ -592,6 +593,10 @@ are exactly what the closure it came from carries, except `external-import`,
 | `task-selection` | no member of its own; the declaration is the Run's `task-selection/v1` extension, and the report face states it as a header fact row (see [Task-selection provenance](#task-selection-provenance)) | none; its refusals run under `claim-consistency` | `taskSelection` |
 | `owner-controlled-publication` | no member; a sixth sealed venue sentence, stated below | none; `claim-consistency` rebuilds the sentence and the section | `ownerControlledPublication` |
 | `terminal-bench-2-1-comparability` | no member; one sealed sentence in the Report limitations, stated below, for a run imported onto the official Terminal-Bench 2.1 slate | none; `claim-consistency` checks the Benchmark against the pinned slate and rebuilds the sentence and the section | `terminalBench21Comparability` |
+| `suite-comparability` | `suite-evidence.json`; the run's registered selection bytes and the evidence files at `records/<sha256>.bin` | none; `evidence-closure` checks the carried bytes against the Run and `claim-consistency` rebuilds the section and the suite sentence | `suiteComparability` |
+
+`suite-comparability` is in no checker release yet; see
+[Suite comparability](#suite-comparability-in-no-release-yet).
 
 `disclosure-specification` requires `binary-qualification`, because the evidence
 role that carries its record exists only in the v4 grammar. It does not require
@@ -812,8 +817,8 @@ entries inside this generation rather than taking a further format number.
 
 v10 pins neither v6's first public `@0.1` line nor the `verify` `0.2.1` line v7
 and v8 pin: both readers predate the format and refuse it at manifest parse, so
-a claim naming either would be an instruction to fail. Every vector registered
-today pins the first `@colophon-claims/check` release, `0.2.1`, under the
+a claim naming either would be an instruction to fail. Every vector that does
+not declare `suite-comparability` pins the first `@colophon-claims/check` release, `0.2.1`, under the
 checker's own name, with the checker's `@0.2` as the compatible line. That line
 covers no release before `0.2.1`, so it names no reader that refuses v10:
 
@@ -855,6 +860,37 @@ a sealed disclosure declaration and no anchor is refused at `report` on the roll
 because v8 is the only disclosed enumerated cell and it is anchored, and on the default
 composed path it is admitted and declares `binary-qualification` and
 `disclosure-specification`.
+
+### Suite comparability (in no release yet)
+
+This capability is in the checker's source and in no release yet: the first
+checker release that reads it has not been cut. Every earlier checker release
+refuses a bundle declaring it, by name, before reading any member. Nothing below
+describes what an earlier release does.
+
+A run bound to an official suite protocol (Terminal-Bench 2.1 or 3.0, SWE-bench
+Verified, APEX-Agents, APEX-SWE-dev, DeepSWE v1.1, or Inspect eval) seals a
+`suiteComparability` section in its claim: whether execution conformed to the
+suite's protocol, how much of the official dataset it covered, and whether it is
+ready to submit to the suite's leaderboard. A bundle declaring
+`suite-comparability` carries what a reader re-derives that section from:
+
+- the runtime selection manifest the Run registered, and, where the Run also
+  registered the suite-protocol selection object on its own, that object, each at
+  the digest the Run records;
+- `suite-evidence.json`, which lists, by root and by the path core read it at,
+  each file the producing machine held that decides the leaderboard flag: an
+  arm's retained Harbor or Pier job (each trial's `config.json`, each judged
+  trial's ATIF files, and for DeepSWE v1.1 its `reward.json`), the SWE-bench
+  Verified harness reports and predictions, or the APEX-Agents grades. A file is
+  listed only where it decides the flag, that is, when the method is
+  leaderboard-eligible and every cell is accounted; otherwise the list is empty.
+
+The Run binds the declaration both ways: a Run that registers a suite-protocol
+selection must declare it, and a declaring bundle must carry the selection its
+Run registered. The reader re-derives the section, and the suite sentence it
+selects in the Report limitations, from those bytes, the Run, and the Matrix,
+and refuses a claim whose section or sentence differs.
 
 ## Portable verification
 

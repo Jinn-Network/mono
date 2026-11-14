@@ -110,8 +110,16 @@ describe("the composed generation's allocation", () => {
     for (const vector of ADMITTED_VECTORS) {
       const { command, compatibleCommand } = readerInstructions(vector);
       expect(preComposition.has(command), JSON.stringify(vector)).toBe(false);
-      expect(command, JSON.stringify(vector)).toBe("npx @colophon-claims/check@0.2.1 <bundle-dir>");
-      expect(compatibleCommand, JSON.stringify(vector)).toBe("npx @colophon-claims/check@0.2 <bundle-dir>");
+      // `suite-comparability` (issue #4759) is the first token added after a published checker read
+      // /10, so a vector declaring it pins the first release that implements it, under a compatible
+      // line that names no published release refusing it.
+      const suite = vector.includes("suite-comparability");
+      expect(command, JSON.stringify(vector)).toBe(suite
+        ? "npx @colophon-claims/check@0.3.0 <bundle-dir>"
+        : "npx @colophon-claims/check@0.2.1 <bundle-dir>");
+      expect(compatibleCommand, JSON.stringify(vector)).toBe(suite
+        ? "npx @colophon-claims/check@0.3 <bundle-dir>"
+        : "npx @colophon-claims/check@0.2 <bundle-dir>");
     }
   });
 
@@ -138,15 +146,19 @@ describe("the composed generation's allocation", () => {
       .toBe("npx @colophon-claims/verify@0.2.0 <bundle-dir>");
   });
 
-  test("the format's one instruction row is the line every admitted vector derives", () => {
-    // The row serves a reader who has only the format string, and surfaces keyed by format read
-    // it. It stays truthful exactly as long as no vector derives a later line. The capability that
-    // first needs a later release fails here, which is the moment those surfaces must start
-    // reading `readerInstructions(vector)` instead.
+  test("the format's one instruction row is the line every admitted vector derives, until suite-comparability", () => {
+    // The row serves a reader who has only the format string. It stays truthful exactly as long as
+    // no vector derives a later line. `suite-comparability` (issue #4759) is the capability that
+    // first needs a later release, so the row is the base line, a vector declaring that token pins
+    // its own, and surfaces that hold a bundle read `readerInstructions(vector)` (the CLI's local
+    // reader does; every report page reads the claim's own pinned line).
     expect(ADMITTED_VECTORS.length).toBeGreaterThan(1);
     for (const vector of ADMITTED_VECTORS) {
-      expect(readerInstructions(vector), JSON.stringify(vector))
-        .toEqual(PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[BUNDLE_V10_FORMAT]);
+      if (vector.includes("suite-comparability")) {
+        expect(readerInstructions(vector), JSON.stringify(vector)).not.toEqual(PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[BUNDLE_V10_FORMAT]);
+      } else {
+        expect(readerInstructions(vector), JSON.stringify(vector)).toEqual(PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS[BUNDLE_V10_FORMAT]);
+      }
     }
   });
 

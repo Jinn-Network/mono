@@ -434,8 +434,8 @@ describe("product documentation consistency", () => {
       expect(document).toContain("`terminalBench21Comparability`");
     }
     // The capability table states a count and one row per registered token.
-    expect(CAPABILITY_REGISTRY).toHaveLength(7);
-    expect(bundle).toContain("\nSeven capabilities are registered.");
+    expect(CAPABILITY_REGISTRY).toHaveLength(8);
+    expect(bundle).toContain("\nEight capabilities are registered.");
     for (const capability of CAPABILITY_REGISTRY) {
       expect(bundle, capability.token).toContain(`\n| \`${capability.token}\` | `);
     }
