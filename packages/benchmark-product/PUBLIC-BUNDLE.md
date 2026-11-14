@@ -133,10 +133,14 @@ line and `@0.2.0` on bundles materialized before `0.2.1` existed. Prompted
 screening does not move the format, so such a bundle is still `.../2`, and the
 released `@colophon-claims/verify@0.1.0` refuses it at `claim-consistency`: that
 reader rebuilds the verification command with its own `@0.1.0` line, which
-differs from the `@0.2.1` (or historical `@0.2.0`) line the claim names. Read it with `@0.2`. What the bundle's own
-`index.html` and share text instruct, and what reproduces the producer's exact release, is the
-`@0.2.1` line its claim names. Take the line from the claim package's
-`verification.command` rather than inferring it from the format string.
+differs from the `@0.2.1` (or historical `@0.2.0`) line the claim names. Read a
+bundle that pins `@0.2.1` with `@0.2`. A bundle that pins `@0.2.0` reads only on
+`@0.2.0`: every reader from `0.2.1` on, `@0.2` included, refuses it at
+`claim-consistency`, because it rebuilds the verification command with the `@0.2.1`
+line. What the bundle's own `index.html` and share text instruct, and what
+reproduces the producer's exact release, is the line its claim names. Take the line
+from the claim package's `verification.command` rather than inferring it from the
+format string.
 
 ### Binary qualification bundle v4
 
@@ -176,9 +180,11 @@ npx @colophon-claims/verify@0.1 <bundle-dir>
 
 `@0.1.0` is the exact producer-side release inside that line. A v4 whose
 screening was prompted pins `@0.2.1` instead, with `@0.2` as the compatible line
-and `@0.1` refusing outright. `0.2.1` accepts the historical `@0.2.0` command as
-well as its own, so the compatible line reads a prompted v4 materialized before
-`0.2.1` existed too:
+and `@0.1` refusing outright. A prompted v4 materialized before `0.2.1` existed
+pins `@0.2.0` and reads only on `@0.2.0`. From `0.2.1` on, a reader accepts the
+historical `@0.2.0` command when it parses the claim, then rebuilds the claim with
+the `@0.2.1` line and refuses it at `claim-consistency`, so `@0.2` does not read it.
+A prompted v4 that pins `@0.2.1` reads with:
 
 ```bash
 npx @colophon-claims/verify@0.2.1 <bundle-dir>
@@ -884,9 +890,9 @@ Installing or running a Colophon package needs Node 22 or newer, with the npm th
 | `bundle.json` format | Pinned line | Compatible line | Checks | Anchor flags |
 | --- | --- | --- | --- | --- |
 | `benchmark-product-public-bundle/2`, unprompted | `@0.1.0` | `@0.1` | six | not applicable |
-| `benchmark-product-public-bundle/2`, prompted screening | `@0.2.1` (`@0.2.0` on a bundle materialized before `0.2.1` existed) | `@0.2`; `@0.1` refuses it at `claim-consistency` | six | not applicable |
+| `benchmark-product-public-bundle/2`, prompted screening | `@0.2.1` (`@0.2.0` on a bundle materialized before `0.2.1` existed) | `@0.2` when the pin is `@0.2.1`, and `@0.1` refuses it at `claim-consistency`; a `@0.2.0` pin reads only on `@0.2.0`, and `@0.2` refuses it at `claim-consistency` | six | not applicable |
 | `benchmark-product-public-bundle/4`, unprompted | `@0.1.0` | `@0.1` | six | not applicable |
-| `benchmark-product-public-bundle/4`, prompted screening | `@0.2.1` (`@0.2.0` on a bundle materialized before `0.2.1` existed) | `@0.2`, which reads either pin; `@0.1` refuses | six | not applicable |
+| `benchmark-product-public-bundle/4`, prompted screening | `@0.2.1` (`@0.2.0` on a bundle materialized before `0.2.1` existed) | `@0.2` when the pin is `@0.2.1`, and `@0.1` refuses it; a `@0.2.0` pin reads only on `@0.2.0`, and `@0.2` refuses it at `claim-consistency` | six | not applicable |
 | `benchmark-product-public-bundle/5` | `@0.1` | none pinned | seven | not applicable |
 | `benchmark-product-public-bundle/6` | `@0.1.0` | `@0.1` | seven | `--tsa-root`, `--ots-headers` |
 | `benchmark-product-public-bundle/7` | `@0.2.1` | `@0.2` | seven | `--tsa-root`, `--ots-headers` |
@@ -941,7 +947,8 @@ of the run rather than as this named refusal, so do not read a missing
 `record-integrity`-at-`bundle.json` signature on an older line as the check not having fired.
 
 **`@0.2.1` is a pin and `@0.2` is a range.** The `0.2.1` reader that public-bundle/7,
-public-bundle/8, and every prompted bundle pin reads public-bundle/2, /4, /5, /6, /7, and /8.
+public-bundle/8, and a prompted bundle materialized from `0.2.1` on pin reads public-bundle/2, /4,
+/5, /6, /7, and /8.
 `@0.2.1` names exactly that release. `@0.2` names the newest `0.2.x` release at the time it is
 run: through any release from `0.2.1` on it reads at least that set, since a newer reader keeps
 every earlier format, and through `0.2.0` it stops at the `0.2.0` support set. `colophon bundle
@@ -954,8 +961,13 @@ prompted /4 fails differently under it from a /7 or /8. `0.2.0` supports the /4 
 the prompted-screening branch, so it parses `bundle.json`; what it requires of claim-package/2 is
 the command `@0.2.0` exactly, so it accepts a prompted bundle materialized before `0.2.1` existed
 and refuses a newer one on the claim, with `binary claim package must pin verifier 0.2.0/@0.2`.
-That is a reader-too-old refusal, not a fact about the bundle. `0.2.1` accepts both commands, so it
-refuses neither. A prompted /2 is not refused when its claim is parsed, because claim-package/1
+That is a reader-too-old refusal, not a fact about the bundle. The reverse does not hold. From
+`0.2.1` on, a reader accepts both commands when it parses claim-package/2, but `claim-consistency`
+rebuilds the claim with the `@0.2.1` line and refuses one that names `@0.2.0`, under
+`record-integrity`, with `claim package verification.command is not the exact projection of verified
+facts`. So a prompted /2 or /4 materialized before `0.2.1` existed reads only on `@0.2.0`, the line
+its claim names; the `@0.2` its `verification.compatibleCommand` names refuses it on every release
+from `0.2.1` on. A prompted /2 is not refused when its claim is parsed, because claim-package/1
 carries no reader requirement. `@0.1` refuses it later, at `claim-consistency`: the released
 `0.1.0` reader rebuilds the claim with its own `@0.1.0` line, which is not the line the claim names.
 
