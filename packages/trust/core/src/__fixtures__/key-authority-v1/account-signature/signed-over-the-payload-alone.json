@@ -1,0 +1,22 @@
+{
+  "name": "signed-over-the-payload-alone",
+  "description": "The same key signs the payload bytes and not the pre-authentication encoding.",
+  "input": {
+    "voucher": {
+      "kind": "account",
+      "did": "did:pkh:eip155:8453:0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
+      "contractAccount": false
+    },
+    "envelope": {
+      "payload": "eyJhbmNob3JzIjpbXSwiZWZmZWN0aXZlRnJvbSI6IjIwMjYtMDctMjlUMDA6MDA6MDBaIiwicHJvdG9jb2wiOiJodHRwczovL3NwZWMuamlubi5uZXR3b3JrL3RydXN0L3Jldm9jYXRpb24vdjEiLCJyZXZva2VkQnkiOiJkaWQ6cGtoOmVpcDE1NTo4NDUzOjB4N0U1RjQ1NTIwOTFBNjkxMjVkNURmQ2I3YjhDMjY1OTAyOTM5NUJkZiIsInRhcmdldCI6InNoYTI1NjoyZjU5ZTYxOTBjNzI2YTBlMjE1YjEzZjNkZDQyMjcxYjIzMmY4OGZkNmYwNjZkYzlhMmJlMDA5OTlmMjI2MGJhIn0=",
+      "payloadType": "application/vnd.jinn.trust.revocation.v1+json",
+      "signatures": [
+        {
+          "keyid": "did:pkh:eip155:8453:0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
+          "sig": "1JJZnG3nSMmEKkE/52NOeqfsTdbgPvqO9JrRyctI4S0MjLrBOKYz7VjqtG2tvc15/Y9uYslseBRS0drCVYLuFBw="
+        }
+      ]
+    }
+  },
+  "expect": "not-signed"
+}
