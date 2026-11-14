@@ -945,6 +945,17 @@ function productTreeFiles(dir, found = []) {
  */
 const READER_SPECIFIER = /@colophon-claims\/(?:verify|check)@/u;
 
+// The root README and the public checking guide sit outside the product tree and quote the same
+// command, so the guard lists them by name (issue #4888).
+test('the reader instructions outside the product tree are guarded too', () => {
+  for (const doc of ['README.md', 'apps/website/content/docs/check-a-claim.mdx']) {
+    assert.ok(READER_INSTRUCTION_DOCS.includes(doc), `${doc} must be scanned for reader lines`);
+    const pins = collectReaderInstructionPins(repoRoot, [doc]);
+    assert.ok(Object.keys(pins).length > 0, `${doc} quotes a reader pin`);
+    assert.deepEqual(assertReaderInstructionPinsResolve(pins), pins);
+  }
+});
+
 test('every reader specifier in the product tree is classified, whatever its extension or directory', () => {
   const sealed = [];
   const docs = [];
@@ -971,7 +982,10 @@ test('every reader specifier in the product tree is classified, whatever its ext
     'a reader pin in a language the pin scan cannot tokenize needs a decision, not a guess',
   );
   assert.deepEqual(sealed.sort(), [...CLAIM_PIN_SOURCES].sort());
-  assert.deepEqual(docs.sort(), [...READER_INSTRUCTION_DOCS].sort());
+  assert.deepEqual(
+    docs.sort(),
+    READER_INSTRUCTION_DOCS.filter((path) => path.startsWith('packages/benchmark-product/')).sort(),
+  );
   assert.deepEqual(mentionOnly.sort(), [
     'packages/benchmark-product/check/src/assets.ts',
     // The alias shim explains, in a comment, which sealed instructions it exists to keep resolving.
@@ -1535,7 +1549,7 @@ test('a row edited together with its PRODUCT_RELEASES digest passes --apply and 
   }
 });
 
-test('the platform source check counts every file a package is built or published from, and ignores only its tests (issue #5044)', () => {
+test('the platform source check counts every file a package is built or published from, and ignores only its unshipped tests (issue #5044)', () => {
   const manifest = checkerManifest();
   const pin = loadProductReleasePlatformPin(repoRoot, manifest);
   const sources = platformSourceDirectories(repoRoot, manifest);
@@ -1548,7 +1562,7 @@ test('the platform source check counts every file a package is built or publishe
   assert.doesNotThrow(compare([]));
   assert.deepEqual(asked[0], { sha: RELEASE_PIN_SHA, directories: sources.map(({ directory }) => directory) });
   // Every package in the closure builds with a tsconfig.build.json that excludes src/**/*.test.ts,
-  // and none lists a test or its vitest config in `files` (#5045).
+  // and none lists `src` or a vitest config in `files`, so these are not shipped (#5045, #5214).
   assert.doesNotThrow(compare([`${aggregate}/src/paired-majority-delta-method.test.ts`, `${aggregate}/vitest.config.ts`]));
   // The source file #5045 found changed after the canary, held back by #5049 and tracked by #5048,
   // and the other files a build or a tarball reads.
@@ -1577,6 +1591,38 @@ test('the platform source check counts every file a package is built or publishe
       throw new Error('cannot fetch platform commit');
     }),
     /cannot fetch platform commit/u,
+  );
+});
+
+test('the platform source check ignores only test files that no files entry of their package ships (issue #5214)', () => {
+  const manifest = checkerManifest();
+  const pin = loadProductReleasePlatformPin(repoRoot, manifest);
+  const sources = platformSourceDirectories(repoRoot, manifest);
+  const evidence = 'packages/evidence/protocol';
+  const shipped = `${evidence}/fixtures/golden-execution-evidence-v1/execution/inputs/repository/test/slug.test.ts`;
+  const compare = (files) => () => assertPlatformSourceMatchesReceipt(pin, sources, () => files);
+  assert.ok(sources.some(({ directory }) => directory === evidence), 'evidence-protocol is in the compared closure');
+  // `fixtures/` is in that package's `files`, so this test-named file is packed and published.
+  assert.throws(compare([shipped]), (error) => {
+    assert.ok(error.message.includes(`\n  ${shipped}\n`));
+    return true;
+  });
+  // A test under `src` is covered by no entry, and neither is a config at the package root.
+  assert.doesNotThrow(compare([`${evidence}/src/slug.test.ts`, `${evidence}/vitest.config.ts`]));
+});
+
+test('the refusal names the real remedies, not a re-pin (issue #5214)', () => {
+  const manifest = checkerManifest();
+  const pin = loadProductReleasePlatformPin(repoRoot, manifest);
+  const sources = platformSourceDirectories(repoRoot, manifest);
+  assert.throws(
+    () => assertPlatformSourceMatchesReceipt(pin, sources, () => ['packages/benchmarking/aggregate/src/index.ts']),
+    (error) => {
+      assert.doesNotMatch(error.message, /re-pin/u);
+      assert.match(error.message, /new version with its own receipt/u);
+      assert.match(error.message, /retry the dispatch from the commit of the first run/u);
+      return true;
+    },
   );
 });
 
