@@ -58,7 +58,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 const { authorCatalog, completePolicyPurposes } = await import("./catalog.js");
-const { authorRoleBinding } = await import("./binding.js");
+const { authorRoleBinding, roleBindingTerms } = await import("./binding.js");
 const { performEoaCeremony } = await import("./ceremony.js");
 const { openCatalogAuthority, openRoleSigners } = await import("./signers.js");
 const { NATIVE_ANCHOR_CHAIN_ID, NATIVE_ANCHOR_PROFILE } = await import("./anchor.js");
@@ -110,6 +110,7 @@ async function fixture(): Promise<{
     agent: AGENT,
     didKey: roleSigner.keyId,
     issuedAt: VALID_FROM,
+    terms: roleBindingTerms("admission", VALID_FROM),
   });
   const binding = await authorRoleBinding({
     role: "admission",

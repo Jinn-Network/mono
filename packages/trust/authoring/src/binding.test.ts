@@ -3,10 +3,18 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ceremonyEvidenceDigest, validateKeyBinding, type KeyBinding } from "@jinn-network/trust-core";
+import {
+  bindingTermsCommitment,
+  ceremonyCurrencyFailure,
+  ceremonyEvidenceDigest,
+  matchCeremonyContent,
+  serializeCeremonyMessage,
+  validateKeyBinding,
+  type KeyBinding,
+} from "@jinn-network/trust-core";
 import { describe, expect, it } from "vitest";
 
-import { authorRoleBinding } from "./binding.js";
+import { authorRoleBinding, roleBindingTerms } from "./binding.js";
 import { performEoaCeremony } from "./ceremony.js";
 import { openRoleSigners, type RoleSigner } from "./signers.js";
 import type { NativeRoleIdentityRole } from "./roles.js";
@@ -41,11 +49,12 @@ function payloadOf(envelopeBytes: Uint8Array): KeyBinding {
 }
 
 describe("authorRoleBinding", () => {
-  it("binds validFrom to the VERBATIM anchor-time string (§6 law 2)", async () => {
+  it("binds validFrom to the VERBATIM anchor-time string and commits the ceremony to the binding's terms (§6 law 2, ceremony currency §2)", async () => {
     const signers = await solverSigners();
     const role = signers.get("solver-delivery")!;
+    const terms = roleBindingTerms("solver-delivery", ANCHOR_TIME);
     const ceremony = await performEoaCeremony({
-      signer, agent: AGENT, didKey: role.keyId, issuedAt: ANCHOR_TIME,
+      signer, agent: AGENT, didKey: role.keyId, issuedAt: ANCHOR_TIME, terms,
     });
     const entry = await authorRoleBinding({
       role: "solver-delivery",
@@ -68,13 +77,28 @@ describe("authorRoleBinding", () => {
     expect(binding.voucher).toEqual({ kind: "account", did: `did:pkh:eip155:84532:${EOA}`, contractAccount: false });
     expect(binding.anchors).toEqual([{ digest: ANCHOR }]);
     expect(binding.ceremony).toEqual({ type: "eoa", digest: ceremonyEvidenceDigest(ceremony) });
+    expect(entry.ceremony.message.resources).toEqual([
+      AGENT,
+      role.keyId,
+      bindingTermsCommitment(terms),
+    ]);
+    // Content match passes with the rule off, and ceremonyCurrencyFailure passes with the rule on.
+    expect(matchCeremonyContent(entry.ceremony, binding)).toEqual({ matches: true });
+    expect(ceremonyCurrencyFailure(entry.ceremony.message, binding, {
+      profile: { termsCutover: ANCHOR_TIME },
+      effectiveStart: ANCHOR_TIME,
+    })).toBeUndefined();
   });
 
   it("refuses a validFrom that is merely the same instant in a different spelling", async () => {
     const signers = await solverSigners();
     const role = signers.get("solver-delivery")!;
     const ceremony = await performEoaCeremony({
-      signer, agent: AGENT, didKey: role.keyId, issuedAt: ANCHOR_TIME,
+      signer,
+      agent: AGENT,
+      didKey: role.keyId,
+      issuedAt: ANCHOR_TIME,
+      terms: roleBindingTerms("solver-delivery", ANCHOR_TIME),
     });
     await expect(authorRoleBinding({
       role: "solver-delivery",
@@ -88,43 +112,55 @@ describe("authorRoleBinding", () => {
     })).rejects.toThrow(/verbatim anchor block time/u);
   });
 
-  it("requires exactly three ceremony resources for a settlement-scoped role (§2.3b)", async () => {
+  it("requires four ceremony resources (Safe ahead of terms commitment) for a settlement-scoped role (§2.3b, ceremony currency §3)", async () => {
     const signers = await solverSigners();
     const role = signers.get("solver-settlement")!;
-    const twoResource = await performEoaCeremony({
-      signer, agent: AGENT, didKey: role.keyId, issuedAt: ANCHOR_TIME,
+    const terms = roleBindingTerms("solver-settlement", ANCHOR_TIME);
+    const withoutSafe = await performEoaCeremony({
+      signer, agent: AGENT, didKey: role.keyId, issuedAt: ANCHOR_TIME, terms,
     });
     await expect(authorRoleBinding({
       role: "solver-settlement",
       signer: role,
       agent: AGENT,
       ceremonyAccount: EOA,
-      ceremony: twoResource,
+      ceremony: withoutSafe,
       validFrom: ANCHOR_TIME,
       anchorDigest: ANCHOR,
-    })).rejects.toThrow(/exactly 3 ceremony resources/u);
+    })).rejects.toThrow(/exactly 4 ceremony resources/u);
 
-    const threeResource = await performEoaCeremony({
-      signer, agent: AGENT, didKey: role.keyId, issuedAt: ANCHOR_TIME, settlementSafe: SAFE,
+    const withSafe = await performEoaCeremony({
+      signer, agent: AGENT, didKey: role.keyId, issuedAt: ANCHOR_TIME, terms, settlementSafe: SAFE,
     });
     const entry = await authorRoleBinding({
       role: "solver-settlement",
       signer: role,
       agent: AGENT,
       ceremonyAccount: EOA,
-      ceremony: threeResource,
+      ceremony: withSafe,
       validFrom: ANCHOR_TIME,
       anchorDigest: ANCHOR,
     });
-    expect(payloadOf(entry.envelopeBytes).scope).toEqual(["settlements"]);
-    expect(entry.ceremony.message.resources[2]).toBe(`did:pkh:eip155:84532:${SAFE}`);
+    const binding = payloadOf(entry.envelopeBytes);
+    expect(binding.scope).toEqual(["settlements"]);
+    expect(entry.ceremony.message.resources).toEqual([
+      AGENT,
+      role.keyId,
+      `did:pkh:eip155:84532:${SAFE}`,
+      bindingTermsCommitment(terms),
+    ]);
+    expect(ceremonyCurrencyFailure(entry.ceremony.message, binding, {
+      profile: { termsCutover: ANCHOR_TIME },
+      effectiveStart: ANCHOR_TIME,
+    })).toBeUndefined();
   });
 
-  it("requires exactly two ceremony resources for a non-settlement role", async () => {
+  it("requires three ceremony resources (no Safe, with terms commitment) for a non-settlement role", async () => {
     const signers = await solverSigners();
     const role = signers.get("solver-delivery")!;
+    const terms = roleBindingTerms("solver-delivery", ANCHOR_TIME);
     const ceremony = await performEoaCeremony({
-      signer, agent: AGENT, didKey: role.keyId, issuedAt: ANCHOR_TIME, settlementSafe: SAFE,
+      signer, agent: AGENT, didKey: role.keyId, issuedAt: ANCHOR_TIME, terms, settlementSafe: SAFE,
     });
     await expect(authorRoleBinding({
       role: "solver-delivery",
@@ -134,7 +170,76 @@ describe("authorRoleBinding", () => {
       ceremony,
       validFrom: ANCHOR_TIME,
       anchorDigest: ANCHOR,
-    })).rejects.toThrow(/exactly 2 ceremony resources/u);
+    })).rejects.toThrow(/exactly 3 ceremony resources/u);
+
+    const uncommittedMessage = { ...ceremony.message, resources: [AGENT, role.keyId] };
+    await expect(authorRoleBinding({
+      role: "solver-delivery",
+      signer: role,
+      agent: AGENT,
+      ceremonyAccount: EOA,
+      ceremony: {
+        ...ceremony,
+        message: uncommittedMessage,
+        messageBytes: serializeCeremonyMessage("eoa", uncommittedMessage),
+      },
+      validFrom: ANCHOR_TIME,
+      anchorDigest: ANCHOR,
+    })).rejects.toThrow(/exactly 3 ceremony resources/u);
+  });
+
+  it("refuses a ceremony whose commitment is for different binding terms", async () => {
+    const signers = await solverSigners();
+    const delivery = signers.get("solver-delivery")!;
+    const wrongTermsCeremony = await performEoaCeremony({
+      signer,
+      agent: AGENT,
+      didKey: delivery.keyId,
+      issuedAt: ANCHOR_TIME,
+      terms: roleBindingTerms("solver-discovery", ANCHOR_TIME),
+    });
+    await expect(authorRoleBinding({
+      role: "solver-delivery",
+      signer: delivery,
+      agent: AGENT,
+      ceremonyAccount: EOA,
+      ceremony: wrongTermsCeremony,
+      validFrom: ANCHOR_TIME,
+      anchorDigest: ANCHOR,
+    })).rejects.toThrow(/ceremony commits to terms/u);
+
+    const settlement = signers.get("solver-settlement")!;
+    const settlementTerms = roleBindingTerms("solver-settlement", ANCHOR_TIME);
+    const validSettlement = await performEoaCeremony({
+      signer,
+      agent: AGENT,
+      didKey: settlement.keyId,
+      issuedAt: ANCHOR_TIME,
+      terms: settlementTerms,
+      settlementSafe: SAFE,
+    });
+    const doubleCommitmentMessage = {
+      ...validSettlement.message,
+      resources: [
+        AGENT,
+        settlement.keyId,
+        bindingTermsCommitment(roleBindingTerms("solver-delivery", ANCHOR_TIME)),
+        bindingTermsCommitment(settlementTerms),
+      ],
+    };
+    await expect(authorRoleBinding({
+      role: "solver-settlement",
+      signer: settlement,
+      agent: AGENT,
+      ceremonyAccount: EOA,
+      ceremony: {
+        ...validSettlement,
+        message: doubleCommitmentMessage,
+        messageBytes: serializeCeremonyMessage("eoa", doubleCommitmentMessage),
+      },
+      validFrom: ANCHOR_TIME,
+      anchorDigest: ANCHOR,
+    })).rejects.toThrow(/2 terms commitments/u);
   });
 
   it("refuses a ceremony that names a different agent or key", async () => {
@@ -142,7 +247,11 @@ describe("authorRoleBinding", () => {
     const role = signers.get("solver-delivery")!;
     const other = signers.get("solver-settlement")!;
     const ceremony = await performEoaCeremony({
-      signer, agent: AGENT, didKey: role.keyId, issuedAt: ANCHOR_TIME,
+      signer,
+      agent: AGENT,
+      didKey: role.keyId,
+      issuedAt: ANCHOR_TIME,
+      terms: roleBindingTerms("solver-delivery", ANCHOR_TIME),
     });
     await expect(authorRoleBinding({
       role: "solver-delivery",
