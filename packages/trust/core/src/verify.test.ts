@@ -2039,3 +2039,128 @@ describe("authenticateRequester (§7.5b)", () => {
     expect(outcome.ok).toBe(true);
   });
 });
+
+// Key authority section 8: a voucher whose `contractAccount` is `true` cannot revoke, and a
+// revocation whose `revokedBy` names one has no effect. Each case runs once with the voucher a
+// contract account and once with it not, so the field alone decides.
+describe("a contract account's revocation has no effect (key authority section 8)", () => {
+  const GENESIS_KEY = "did:key:z6MkfCONTRACTGENESIS111111111111111111111";
+  const LATER_KEY = "did:key:z6MkfCONTRACTLATER111111111111111111111111";
+  const VERDICT_KEY = "did:key:z6MkfCONTRACTVERDICT11111111111111111111";
+  const SETTLEMENT_KEY = "did:key:z6MkfCONTRACTSETTLE111111111111111111111";
+  const ENVELOPE_TIME = "2026-03-01T00:00:00Z";
+  const CLAIM_TIME = "2026-03-05T00:00:00Z";
+
+  function accountBinding(key: string, contractAccount: boolean, scope: KeyBinding["scope"]): KeyBinding {
+    return keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: key, algorithm: "ed25519", didKey: key },
+      voucher: { kind: "account", did: VOUCHER_DID, contractAccount },
+      scope,
+    });
+  }
+
+  /** A binding that stands, with one revocation its voucher account signed. */
+  function revokedByItsVoucher(binding: KeyBinding, effectiveTime: string): ResolvedBinding {
+    return authorityBinding(binding, { revocations: [revocationEntry(VOUCHER_DID, effectiveTime)] });
+  }
+
+  function deps(resolver: BindingResolver) {
+    return { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier };
+  }
+
+  test.each([
+    { contractAccount: true, ok: true },
+    { contractAccount: false, ok: false },
+  ])("checkBindingRevocation, contractAccount $contractAccount: ok is $ok", async ({ contractAccount, ok }) => {
+    const resolved = revokedByItsVoucher(accountBinding(GENESIS_KEY, contractAccount, ["verdicts"]), "2026-02-01T00:00:00Z");
+    expect((await checkBindingRevocation(resolved, ENVELOPE_TIME, deps(new FakeBindingResolver()))).ok).toBe(ok);
+  });
+
+  test.each([
+    { contractAccount: true, expected: { ok: true } },
+    { contractAccount: false, expected: { ok: false, reason: "revoked" } },
+  ])("evidence verification, contractAccount $contractAccount", async ({ contractAccount, expected }) => {
+    const resolver = new FakeBindingResolver().register({
+      key: GENESIS_KEY,
+      agent: AGENT,
+      resolved: revokedByItsVoucher(accountBinding(GENESIS_KEY, contractAccount, ["verdicts"]), "2026-02-01T00:00:00Z"),
+    });
+    const outcome = await verifyEnvelopeBinding(
+      {
+        envelopeBytes: sealedEnvelope({ verdict: true }, TRUST_KEY_BINDING_MEDIA_TYPE, GENESIS_KEY),
+        key: GENESIS_KEY,
+        agent: AGENT,
+        family: "verdicts",
+        atTime: ENVELOPE_TIME,
+      },
+      deps(resolver),
+    );
+    expect(outcome).toMatchObject(expected);
+  });
+
+  test.each([
+    { leg: "verdict", contractAccount: true, ok: true },
+    { leg: "verdict", contractAccount: false, ok: false },
+    { leg: "settlement", contractAccount: true, ok: true },
+    { leg: "settlement", contractAccount: false, ok: false },
+  ])("the settlement join, a $leg leg with contractAccount $contractAccount: ok is $ok", async ({ leg, contractAccount, ok }) => {
+    const verdict = accountBinding(VERDICT_KEY, contractAccount, ["verdicts"]);
+    const settlement = accountBinding(SETTLEMENT_KEY, contractAccount, ["settlements"]);
+    const resolver = new FakeBindingResolver()
+      .register({
+        key: VERDICT_KEY,
+        agent: AGENT,
+        // Before the envelope's time, so the verdict leg's own check reads it.
+        resolved: leg === "verdict" ? revokedByItsVoucher(verdict, "2026-02-01T00:00:00Z") : authorityBinding(verdict),
+      })
+      .register({
+        key: SETTLEMENT_KEY,
+        agent: AGENT,
+        // Between the envelope's time and the claim, so the claim-time check reads it.
+        resolved: leg === "settlement" ? revokedByItsVoucher(settlement, "2026-03-02T00:00:00Z") : authorityBinding(settlement),
+      });
+    const outcome = await settlementJoinCheck(
+      {
+        verdictKey: VERDICT_KEY,
+        settlementDeclarationKey: SETTLEMENT_KEY,
+        claimedEvaluatorAgent: AGENT,
+        family: "verdicts",
+        envelopeEffectiveTime: ENVELOPE_TIME,
+        claimTime: CLAIM_TIME,
+      },
+      deps(resolver),
+    );
+    expect(outcome.ok).toBe(ok);
+  });
+
+  // Section 7: only the founding account's own revocation ends self-extension from the genesis
+  // binding, and a voucher that cannot revoke leaves only the window to end it.
+  test.each([
+    { contractAccount: true, expected: { ok: true } },
+    { contractAccount: false, expected: { ok: false, reason: "consent-chain-violation" } },
+  ])("the founding account's rule, contractAccount $contractAccount", async ({ contractAccount, expected }) => {
+    const genesis = revokedByItsVoucher(accountBinding(GENESIS_KEY, contractAccount, ["verdicts", "bindings"]), "2026-02-01T00:00:00Z");
+    const later = resolvedBinding({
+      binding: accountBinding(LATER_KEY, contractAccount, ["verdicts"]),
+      bindingDigest: `sha256:${"f".repeat(64)}`,
+      effectiveStart: ENVELOPE_TIME,
+      isGenesis: false,
+      incumbentControls: [{ key: GENESIS_KEY, voucher: { kind: "account", did: VOUCHER_DID, contractAccount } }],
+    });
+    const resolver = new FakeBindingResolver()
+      .register({ key: GENESIS_KEY, agent: AGENT, resolved: genesis })
+      .register({ key: LATER_KEY, agent: AGENT, resolved: later });
+    const outcome = await verifyEnvelopeBinding(
+      {
+        envelopeBytes: sealedEnvelope({ verdict: true }, TRUST_KEY_BINDING_MEDIA_TYPE, LATER_KEY),
+        key: LATER_KEY,
+        agent: AGENT,
+        family: "verdicts",
+        atTime: CLAIM_TIME,
+      },
+      deps(resolver),
+    );
+    expect(outcome).toMatchObject(expected);
+  });
+});

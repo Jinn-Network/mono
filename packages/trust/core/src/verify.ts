@@ -561,7 +561,10 @@ async function isRevocationAuthorized(
   if (revokedBy.startsWith("did:pkh:")) {
     // The binding's voucher account (§7.4b). The injected verifier decides
     // whether that account signed; nothing here checks that the ceremony is new.
-    return resolved.binding.voucher.kind === "account" && resolved.binding.voucher.did === revokedBy;
+    // A contract account cannot revoke, and a revocation naming one has no
+    // effect, whatever its signature holds (key authority section 8).
+    const { voucher } = resolved.binding;
+    return voucher.kind === "account" && voucher.did === revokedBy && voucher.contractAccount !== true;
   }
   // A key giving up its own binding gives no authority to anyone, so it needs no
   // chain to stand on: the signature above and `bindings` scope are all this act
