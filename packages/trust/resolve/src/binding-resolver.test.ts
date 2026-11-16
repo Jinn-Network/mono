@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  DSSE_PAYLOAD_TYPE,
   TRUST_KEY_BINDING_FORMAT,
+  TRUST_KEY_BINDING_MEDIA_TYPE,
+  TRUST_REVOCATION_FORMAT,
+  TRUST_REVOCATION_MEDIA_TYPE,
+  canonicalJsonBytes,
   ceremonyEvidenceDigest,
   deriveStrength,
   didPkh,
+  sealDsseEnvelope,
   serializeCeremonyMessage,
 } from "@jinn-network/trust-core";
 import type {
@@ -12,6 +18,7 @@ import type {
   ChainFactResolver,
   EoaCeremonyEvidence,
   KeyBinding,
+  Revocation,
   Sha256Digest,
 } from "@jinn-network/trust-core";
 import { hexToBytes } from "viem";
@@ -19,7 +26,12 @@ import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it, vi } from "vitest";
 
 import { createBindingResolver as createResolverWithAllOptions } from "./binding-resolver.js";
-import type { BindingStore, CreateBindingResolverOptions, SealedKeyBindingRecord } from "./binding-resolver.js";
+import type {
+  BindingStore,
+  CreateBindingResolverOptions,
+  SealedKeyBindingRecord,
+  SealedRevocationRecord,
+} from "./binding-resolver.js";
 import { invalidInput, resolutionFailed } from "./errors.js";
 
 const AGENT = "https://spec.jinn.network/agents/1";
@@ -58,8 +70,33 @@ function accountBinding(overrides: Partial<KeyBinding> = {}): KeyBinding {
   };
 }
 
+/** An envelope whose payload is `fields`, sealed as `payloadType`. Its signature is a placeholder:
+ * `recordSignedByItsKey` answers for signatures here. Fields that are not JSON have no envelope. */
+function sealedOver(fields: unknown, payloadType: string): Uint8Array {
+  try {
+    return sealDsseEnvelope({ payloadBytes: canonicalJsonBytes(fields), payloadType, signatures: [{ signature: Uint8Array.of(1) }] });
+  } catch {
+    return new Uint8Array();
+  }
+}
+
 function record(binding: KeyBinding, digest: Sha256Digest): SealedKeyBindingRecord {
-  return { binding, envelopeBytes: new Uint8Array(), bindingDigest: digest };
+  return { binding, envelopeBytes: sealedOver(binding, TRUST_KEY_BINDING_MEDIA_TYPE), bindingDigest: digest };
+}
+
+function revocationFields(overrides: Partial<Revocation> = {}): Revocation {
+  return {
+    protocol: TRUST_REVOCATION_FORMAT,
+    target: DIGEST_A,
+    revokedBy: KEY_A,
+    anchors: [{ digest: DIGEST_B }],
+    effectiveFrom: "2026-02-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function revocationRecord(revocation: Revocation): SealedRevocationRecord {
+  return { revocation, envelopeBytes: sealedOver(revocation, TRUST_REVOCATION_MEDIA_TYPE) };
 }
 
 function fakeStore(records: readonly SealedKeyBindingRecord[]): BindingStore {
@@ -273,20 +310,11 @@ describe("createBindingResolver", () => {
       ["anchors that are not a list", { anchors: "soon" }],
       ["an anchor that names no digest", { anchors: [{ digest: "not-a-digest" }] }],
     ])("ignores a revocation with %s", async (_label, overrides) => {
+      const revocation = revocationFields(overrides as never);
       const bindings: BindingStore = {
         ...fakeStore([genuine]),
         async listRevocationsForTargets() {
-          return [{
-            revocation: {
-              protocol: "https://spec.jinn.network/trust/revocation/v1",
-              target: DIGEST_A,
-              revokedBy: KEY_A,
-              anchors: [{ digest: DIGEST_B }],
-              effectiveFrom: "2026-02-01T00:00:00.000Z",
-              ...overrides,
-            },
-            envelopeBytes: Uint8Array.of(1),
-          } as never];
+          return [revocationRecord(revocation)];
         },
       };
       const resolved = await createBindingResolver({ bindings, anchors }).resolveBinding({ key: KEY_A, agent: AGENT }, at);
@@ -297,16 +325,7 @@ describe("createBindingResolver", () => {
       const bindings: BindingStore = {
         ...fakeStore([genuine]),
         async listRevocationsForTargets() {
-          return [{
-            revocation: {
-              protocol: "https://spec.jinn.network/trust/revocation/v1",
-              target: DIGEST_A,
-              revokedBy: KEY_A,
-              anchors: [{ digest: DIGEST_B }],
-              effectiveFrom: "soon",
-            },
-            envelopeBytes: Uint8Array.of(1),
-          }];
+          return [revocationRecord(revocationFields({ effectiveFrom: "soon" }))];
         },
       };
       const resolved = await createBindingResolver({ bindings, anchors }).resolveBinding({ key: KEY_A, agent: AGENT }, at);
@@ -356,6 +375,44 @@ describe("createBindingResolver", () => {
       const unreadable = { ...record(accountBinding(), DIGEST_B), ceremonyEvidence: { message: 7 } as never };
       const resolver = createBindingResolver({ bindings: fakeStore([unreadable]), anchors });
       expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.bindingDigest).toBe(DIGEST_B);
+    });
+
+    describe("an entry's fields are its envelope's payload", () => {
+      it.each([
+        ["fields its envelope does not carry", { ...record(accountBinding({ scope: ["verdicts"] }), FIRST), binding: accountBinding() }],
+        ["an envelope sealed as another kind of record", { ...record(accountBinding(), FIRST), envelopeBytes: sealedOver(accountBinding(), DSSE_PAYLOAD_TYPE) }],
+        ["an envelope that is not one", { ...record(accountBinding(), FIRST), envelopeBytes: Uint8Array.of(1) }],
+      ])("does not resolve an entry with %s, and resolves what is genuine", async (_label, entry) => {
+        for (const stored of [[entry, genuine], [genuine, entry]]) {
+          // eslint-disable-next-line no-await-in-loop -- both stored orders, in turn.
+          const resolved = await createBindingResolver({ bindings: fakeStore(stored), anchors }).resolveBinding({ key: KEY_A, agent: AGENT }, at);
+          expect(resolved).toMatchObject({ bindingDigest: DIGEST_A, isGenesis: true });
+        }
+      });
+
+      it("reads an entry whose fields its envelope carries in another spelling", async () => {
+        const { scope, ...rest } = accountBinding();
+        const respelled = { ...record(accountBinding(), FIRST), binding: { scope, ...rest } };
+        const resolved = await createBindingResolver({ bindings: fakeStore([respelled, genuine]), anchors }).resolveBinding({ key: KEY_A, agent: AGENT }, at);
+        expect(resolved?.bindingDigest).toBe(FIRST);
+      });
+
+      const listing = (entry: SealedRevocationRecord) => createBindingResolver({
+        bindings: { ...fakeStore([genuine]), listRevocationsForTargets: async () => [entry] },
+        anchors,
+      }).resolveBinding({ key: KEY_A, agent: AGENT }, at);
+
+      it.each([
+        ["fields its envelope does not carry", { revocation: revocationFields(), envelopeBytes: sealedOver(revocationFields({ target: DIGEST_B }), TRUST_REVOCATION_MEDIA_TYPE) }],
+        ["an envelope sealed as another kind of record", { revocation: revocationFields(), envelopeBytes: sealedOver(revocationFields(), TRUST_KEY_BINDING_MEDIA_TYPE) }],
+        ["an envelope that is not one", { revocation: revocationFields(), envelopeBytes: Uint8Array.of(1) }],
+      ])("does not list a revocation with %s", async (_label, entry) => {
+        expect((await listing(entry))?.revocations).toEqual([]);
+      });
+
+      it("lists a revocation whose fields are its envelope's payload", async () => {
+        expect((await listing(revocationRecord(revocationFields())))?.revocations).toHaveLength(1);
+      });
     });
   });
 
@@ -700,23 +757,15 @@ describe("createBindingResolver", () => {
 
     it("orders revocations by instant", async () => {
       const binding = accountBinding();
-      const revocation = (effectiveFrom: string, digest: Sha256Digest, marker: number) => ({
-        revocation: {
-          protocol: "https://spec.jinn.network/trust/revocation/v1",
-          target: DIGEST_A,
-          revokedBy: KEY_OWNER,
-          anchors: [{ digest }],
-          effectiveFrom,
-        },
-        envelopeBytes: Uint8Array.of(marker),
-      });
+      const revocation = (effectiveFrom: string, digest: Sha256Digest) =>
+        revocationRecord(revocationFields({ revokedBy: KEY_OWNER, anchors: [{ digest }], effectiveFrom }));
       const store: BindingStore = {
         ...fakeStore([record(binding, DIGEST_A)]),
         async listRevocationsForTargets() {
           return [
-            revocation("2026-03-01T00:00:00.500Z", DIGEST_B, 1),
-            revocation("2026-03-01T00:00:00Z", CEREMONY_DIGEST, 2),
-          ] as never;
+            revocation("2026-03-01T00:00:00.500Z", DIGEST_B),
+            revocation("2026-03-01T00:00:00Z", CEREMONY_DIGEST),
+          ];
         },
       };
       const anchors = fakeAnchors({
@@ -1131,6 +1180,13 @@ describe("createBindingResolver", () => {
 
     it("does not compose with an entry that is not a key binding, however genuine its ceremony", async () => {
       expect(await composed(await accountLeg({ relationship: "owns" } as never))).toBeNull();
+    });
+
+    it("does not compose with the owner's record holding a window its envelope does not carry", async () => {
+      const ended = await accountLeg({ expiresAt: "2026-02-01T00:00:00.000Z" });
+      expect(await composed(ended)).toBeNull();
+      const { expiresAt: _end, ...unending } = ended.binding;
+      expect(await composed({ ...ended, binding: unending })).toBeNull();
     });
 
     it("composes with a Safe's account ceremony only on the host's say-so", async () => {

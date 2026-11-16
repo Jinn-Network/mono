@@ -97,6 +97,21 @@ drift this job exists to remove. Every step fails the job on a non-zero exit —
 multi-command ones under `set -euo pipefail` — the job carries no `continue-on-error`,
 and the push is a plain fast-forward that fails rather than overwrites.
 
+A rerun never moves the host back. Before it mirrors anything, the refresh reads the
+commit `.jinn-profile-host-source` names. When that is another commit than the run's own,
+it asks GitHub's compare which is later, because the job's mono checkout is shallow, and
+continues only when the marker's commit is an ancestor of the run's source: the rule the
+stack canary lane applies to its `canary` tag. A rerun of an older run, possible while that
+run's `platform-verification-artifacts` artifact lasts, stops with
+`profile host refresh refused`, names both shas, and mirrors, commits and pushes nothing.
+The host already serves a later push to `next`, so that red is the rerun's correct outcome,
+not drift. Do not rerun it again. When the order cannot be told (GitHub's compare failed,
+or neither commit descends from the other), the refresh stops with
+`profile host order check failed` and writes nothing: rerun it when the compare failed,
+and otherwise read the marker against `next` before anything else. A missing or malformed
+marker names no commit to order and is repaired as before. The break-glass invocation
+below runs the same check, so `gh` must be signed in where it runs.
+
 The refresh is deliberately **not** a `needs:` of `stable-live-host-verification`. Adding
 a write-credential job to that gate's dependency chain would let a skipped refresh skip
 the gate, and a skipped upstream job being a refusal is the whole point of

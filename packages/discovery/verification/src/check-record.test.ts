@@ -1033,7 +1033,11 @@ describe("trust binding", () => {
       } as unknown as KeyBinding;
       const record: SealedKeyBindingRecord = {
         binding,
-        envelopeBytes: Uint8Array.of(1),
+        envelopeBytes: sealDsseEnvelope({
+          payloadBytes: canonicalJsonBytes(binding),
+          payloadType: "application/vnd.jinn.trust.key-binding.v1+json",
+          signatures: [{ signature: Uint8Array.of(1), keyid: key.keyid }],
+        }),
         bindingDigest: `sha256:${"d".repeat(64)}`,
         ...(witness === undefined ? {} : { witness }),
       };

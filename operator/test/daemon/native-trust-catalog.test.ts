@@ -39,6 +39,10 @@ const SPKI = Buffer.from('302a300506032b6570032100', 'hex');
 const NOW = '2026-08-02T12:00:00.000Z';
 const VALID_FROM = '2026-08-01T00:00:00.000Z';
 const ANCHOR_TIME = '2026-08-01T00:01:00.000Z';
+/** Before `NOW`: a binding that ends here is out of window at `NOW`. */
+const EXPIRED_AT = '2026-08-02T00:00:00.000Z';
+/** After `NOW`: a binding valid from here is out of window at `NOW`. */
+const NOT_YET_VALID_FROM = '2026-08-03T00:00:00.000Z';
 const AGENT = 'https://spec.jinn.network/agents/native-solver';
 const ROLE_PURPOSE = 'native:solver-delivery';
 const FAMILY = 'deliveries';
@@ -139,6 +143,8 @@ interface CatalogFixture {
   readonly policyGenesisDigest: Sha256Digest;
   readonly key: string;
   readonly bindingDigest: Sha256Digest;
+  /** The key `secondDiscoveryKey` binds to the same Agent. */
+  readonly secondKey?: string;
   readonly anchors: ReadonlyMap<string, NonNullable<AnchorObservation>>;
   readonly catalog: Record<string, unknown>;
   write(value?: Record<string, unknown>): Promise<void>;
@@ -169,6 +175,11 @@ async function buildCatalog(options: {
   readonly strangerWithUnreadableEvidence?: Readonly<Record<string, unknown>>;
   /** Scopes the binding for discovery signing too, for the adapter a consumer builds over it. */
   readonly discoverySigning?: boolean;
+  /**
+   * Binds a second discovery signing key to the same Agent, by the same account under the same
+   * anchor, in effect throughout. None of the other options apply to it.
+   */
+  readonly secondDiscoveryKey?: boolean;
   readonly forgeBindingEnvelope?: boolean;
   /** Strips the binding envelope's signatures entirely — an UNSIGNED binding, not a forged one. */
   readonly unsignBindingEnvelope?: boolean;
@@ -246,6 +257,30 @@ async function buildCatalog(options: {
       signature: b64(ceremony.signature),
     },
   }];
+  let secondKey: string | undefined;
+  if (options.secondDiscoveryKey === true) {
+    const second = ed25519Signer(generateKeyPairSync('ed25519'));
+    const secondCeremony = await eoaCeremony(AGENT, second.id);
+    const { expiresAt: _expiresAt, ...inEffectThroughout } = binding;
+    const sealed = await sealKeyBinding({
+      ...inEffectThroughout,
+      key: { publicKey: second.id, keyid: second.id, algorithm: 'Ed25519', didKey: second.id },
+      scope: ['bindings', family, DISCOVERY_SIGNING_SCOPE],
+      validFrom: VALID_FROM,
+      ceremony: { type: 'eoa', digest: ceremonyEvidenceDigest(secondCeremony) },
+    }, second.signer);
+    catalogBindings.push({
+      digest: sealed.recordDigest,
+      envelope: b64(sealed.envelopeBytes),
+      ceremony: {
+        type: 'eoa',
+        message: secondCeremony.message,
+        messageBytes: b64(secondCeremony.messageBytes),
+        signature: b64(secondCeremony.signature),
+      },
+    });
+    secondKey = second.id;
+  }
   if (options.conflict === true) {
     const secondAnchor = recordDigest(new TextEncoder().encode('second-binding-anchor'));
     const secondBinding = await sealKeyBinding({ ...binding, anchors: [{ digest: secondAnchor }] }, working.signer);
@@ -367,6 +402,7 @@ async function buildCatalog(options: {
     policyGenesisDigest: sealedPolicy.recordDigest,
     key: working.id,
     bindingDigest: recordDigest(bindingEnvelope),
+    ...(secondKey === undefined ? {} : { secondKey }),
     anchors,
     catalog,
     write,
@@ -583,9 +619,13 @@ describe('native trust catalog authority', () => {
  * which aborted the whole enumeration and made every multi-scope agent unconsumable; the live
  * DR-2026-08-05 round-4 gate logged 44 consecutive refusals on both operators.
  *
- * The discriminator is trust-core's typed `scope-violation` reason and nothing else. These tests
- * exist to hold that line in both directions: exactly one thing skips, and every genuinely
- * untrustworthy binding still throws. Delete any one guard and its row here goes red.
+ * The discriminator is trust-core's typed `scope-violation` reason, and, since #5212, its typed
+ * `revoked` reason and a key that is not in effect at the instant asked but passes every check at
+ * an instant it is. Each of those keys is genuine and simply not one the Agent signs with then; a
+ * throw on it refused every read of the Agent, including what its other keys signed. These tests
+ * exist to hold that line in both directions: exactly those skip, as `null`, never as the binding,
+ * and every genuinely untrustworthy binding still throws, out of window or not. Delete any one
+ * guard and its row here goes red.
  */
 describe('family-scoped resolver skip-vs-refuse boundary (#2525)', () => {
   async function resolverOver(
@@ -617,14 +657,28 @@ describe('family-scoped resolver skip-vs-refuse boundary (#2525)', () => {
   });
 
   it.each([
+    ['a revoked binding', { revoked: true as const }],
+    ['an expired binding', { expiresAt: EXPIRED_AT }],
+    ['a not-yet-effective binding', { validFrom: NOT_YET_VALID_FROM }],
+  ])('SKIPS %s rather than refusing the Agent (#5212)', async (_label, options) => {
+    // Asked for the family this binding DOES carry, so `scope-violation` is not why it skips.
+    const fixture = await buildCatalog(options);
+    const resolver = await resolverOver(fixture, FAMILY);
+    await expect(resolver.resolveBinding({ key: fixture.key, agent: AGENT }, NOW)).resolves.toBeNull();
+  });
+
+  it.each([
     ['a forged binding signature', { forgeBindingEnvelope: true as const }, /binding did not resolve/u],
     ['a ceremony signature mismatch', { ceremonyMode: 'bad-signature' as const }, /ceremony-verification-failed/u],
     ['a ceremony that signed a different identity', { ceremonyMode: 'bad-content' as const }, /ceremony-verification-failed/u],
     ['a ceremony commitment digest mismatch', { ceremonyMode: 'digest-mismatch' as const }, /ceremony evidence digest/u],
-    ['a revoked binding', { revoked: true as const }, /revoked/u],
-    ['an expired binding', { expiresAt: '2026-08-02T00:00:00.000Z' }, /binding did not resolve/u],
-    ['a not-yet-effective binding', { validFrom: '2026-08-03T00:00:00.000Z' }, /binding did not resolve/u],
     ['conflicting bindings', { conflict: true as const }, /conflicting bindings/u],
+    // A revoked or out-of-window binding skips only when nothing else is wrong with it.
+    ['a revoked binding whose ceremony signature fails', { revoked: true as const, ceremonyMode: 'bad-signature' as const }, /ceremony-verification-failed/u],
+    ['an expired forged binding', { expiresAt: EXPIRED_AT, forgeBindingEnvelope: true as const }, /binding did not resolve/u],
+    ['an expired binding whose ceremony signature fails', { expiresAt: EXPIRED_AT, ceremonyMode: 'bad-signature' as const }, /ceremony-verification-failed/u],
+    ['an expired pair of conflicting bindings', { expiresAt: EXPIRED_AT, conflict: true as const }, /conflicting bindings/u],
+    ['a not-yet-effective binding whose ceremony signed a different identity', { validFrom: NOT_YET_VALID_FROM, ceremonyMode: 'bad-content' as const }, /ceremony-verification-failed/u],
   ])('still REFUSES %s, loudly, rather than skipping it', async (_label, options, expected) => {
     // Asked for the family this binding DOES carry, so a `scope-violation` can never be the reason
     // it fails — anything that returns null here would be the fix swallowing a real refusal.
@@ -687,7 +741,9 @@ describe('family-scoped resolver skip-vs-refuse boundary (#2525)', () => {
  */
 describe('a revocation of a discovery signing key, over the adapter a consumer builds (§7.4b)', () => {
   /** Built the way `native-discovery-trust.ts` and `native-consumer/driver.ts` build it. */
-  async function discoveryKeys(options: Parameters<typeof buildCatalog>[0]): Promise<readonly string[]> {
+  async function discoveryKeys(
+    options: Parameters<typeof buildCatalog>[0],
+  ): Promise<{ readonly resolved: readonly string[]; readonly fixture: CatalogFixture }> {
     const fixture = await buildCatalog({ discoverySigning: true, ...options });
     const trust = await openNativeTrustCatalog({
       path: fixture.path,
@@ -696,21 +752,33 @@ describe('a revocation of a discovery signing key, over the adapter a consumer b
       settlementOwnershipClient: OWNS,
       now: new Date(NOW),
     });
+    const ownKeys = new Set([fixture.key, fixture.secondKey]);
     const adapter = createTrustAdapter({
       bindingResolver: trust.resolverFor({ family: FAMILY, purpose: ROLE_PURPOSE }),
-      keyCatalog: { candidateKeys: async (agent) => [...trust.candidateKeys(agent)].filter(({ keyid }) => keyid === fixture.key) },
+      keyCatalog: { candidateKeys: async (agent) => [...trust.candidateKeys(agent)].filter(({ keyid }) => ownKeys.has(keyid)) },
       verifier: trust.rawSignatureVerifier,
       revocationAuthority: trust,
     });
-    return (await adapter.keys.resolve(AGENT, new Date(NOW))).map(({ keyid }) => keyid);
+    return { resolved: (await adapter.keys.resolve(AGENT, new Date(NOW))).map(({ keyid }) => keyid), fixture };
   }
 
   it('keeps a key a stranger revoked', async () => {
-    expect(await discoveryKeys({ strangerWithUnreadableEvidence: {} })).toHaveLength(1);
+    expect((await discoveryKeys({ strangerWithUnreadableEvidence: {} })).resolved).toHaveLength(1);
   });
 
-  it('refuses a key revoked by a key entitled to revoke it', async () => {
-    await expect(discoveryKeys({ revoked: true })).rejects.toThrow(/revoked/u);
+  it('drops a key revoked by a key entitled to revoke it', async () => {
+    expect((await discoveryKeys({ revoked: true })).resolved).toEqual([]);
+  });
+
+  it.each([
+    ['revoked', { revoked: true as const }],
+    ['expired', { expiresAt: EXPIRED_AT }],
+    ['not yet in effect', { validFrom: NOT_YET_VALID_FROM }],
+  ])("keeps the Agent's other discovery key when one is %s (#5212)", async (_label, options) => {
+    const { resolved, fixture } = await discoveryKeys({ ...options, secondDiscoveryKey: true });
+    // The premise: enumeration meets the dropped key first, so a throw on it refuses the Agent.
+    expect(fixture.secondKey).toBeDefined();
+    expect(resolved).toEqual([fixture.secondKey]);
   });
 });
 

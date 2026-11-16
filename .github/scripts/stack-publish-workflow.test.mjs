@@ -1,10 +1,64 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
 const workflowPath = resolve(import.meta.dirname, '../workflows/stack-npm-publish.yml');
 const workflow = readFileSync(workflowPath, 'utf8');
+const publishingRunbook = readFileSync(
+  resolve(import.meta.dirname, '../../docs/runbooks/stack-npm-publishing.md'),
+  'utf8',
+);
+
+function canaryPublishBlock() {
+  return workflow.slice(workflow.indexOf('canary-publish:'), workflow.indexOf('canary-host-refresh:'));
+}
+
+// The `run: |` body of one named step in `block`, dedented, as the runner executes it.
+function stepRunScript(block, stepName) {
+  const steps = block.split(/\n {6}- /u);
+  const step = steps.find((candidate) => candidate.split('\n')[0] === `name: ${stepName}`);
+  assert.ok(step, `missing step ${stepName}`);
+  const lines = step.split('\n');
+  const runAt = lines.findIndex((line) => /^ {8}run: \|$/u.test(line));
+  assert.ok(runAt > -1, `${stepName} has no run block`);
+  const body = [];
+  for (const line of lines.slice(runAt + 1)) {
+    if (line !== '' && !line.startsWith(' '.repeat(10))) break;
+    body.push(line.slice(10));
+  }
+  return body.join('\n');
+}
+
+const RECEIPT_GROUP = 'benchmarking-product-v1';
+
+// Runs the stored-receipt comparison against one fixture workspace: this attempt's receipt,
+// plus whatever the download step left from an earlier attempt (undefined: nothing).
+function compareStoredReceipt({ receipt, stored }) {
+  const dir = mkdtempSync(join(tmpdir(), 'stack-publication-receipt-'));
+  try {
+    mkdirSync(join(dir, '.platform-publication', RECEIPT_GROUP), { recursive: true });
+    writeFileSync(join(dir, '.platform-publication', RECEIPT_GROUP, 'publication-receipt.json'), receipt);
+    if (stored !== undefined) {
+      mkdirSync(join(dir, '.platform-publication-stored', RECEIPT_GROUP), { recursive: true });
+      for (const [name, content] of Object.entries(stored)) {
+        writeFileSync(join(dir, '.platform-publication-stored', RECEIPT_GROUP, name), content);
+      }
+    }
+    const outputFile = join(dir, 'github-output');
+    writeFileSync(outputFile, '');
+    const result = spawnSync('bash', ['-e', '-c', stepRunScript(canaryPublishBlock(), 'Compare with the stored receipt')], {
+      cwd: dir,
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, RELEASE_GROUP: RECEIPT_GROUP, GITHUB_OUTPUT: outputFile },
+    });
+    return { status: result.status, log: `${result.stdout}${result.stderr}`, output: readFileSync(outputFile, 'utf8') };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 test('preserves platform triggers and cross-branch canary serialization', () => {
   assert.match(workflow, /branches:\s*\[integration\/evidence-v1, next\]/u);
@@ -47,7 +101,8 @@ test('the publisher downloads only the current run verification artifacts and re
   const publishAt = workflow.indexOf('canary-publish:');
   const refreshAt = workflow.indexOf('canary-host-refresh:');
   const block = workflow.slice(publishAt, refreshAt);
-  assert.equal((block.match(/uses: actions\/download-artifact@v8/gu) ?? []).length, 2);
+  // Two verification inputs, plus the leg's own receipt from an earlier attempt of this run.
+  assert.equal((block.match(/uses: actions\/download-artifact@v8/gu) ?? []).length, 3);
   assert.deepEqual(
     [...block.matchAll(/^\s+name: (platform-verification-(?:artifacts|receipt))$/gmu)].map((match) => match[1]).sort(),
     ['platform-verification-artifacts', 'platform-verification-receipt'],
@@ -118,6 +173,98 @@ test('the final deterministic publication receipt is attested and uploaded', () 
   assert.match(block, /uses: actions\/upload-artifact@v7/u);
   assert.ok(block.includes('name: platform-publication-receipt-${{ matrix.release_group }}'));
   assert.match(block, /if-no-files-found: error/u);
+});
+
+// A rerun's upload of a name an earlier attempt stored is not refused (#5235): upload-artifact
+// v7's client keys CreateArtifact by the attempt's own backend id, so the run would gain a
+// second artifact of that name. A rerun instead compares against the stored receipt first.
+test('a rerun compares its receipt with one an earlier attempt stored before attesting or uploading', () => {
+  const block = canaryPublishBlock();
+  const findAt = block.indexOf('- name: Find the receipt an earlier attempt of this run stored');
+  const compareAt = block.indexOf('- name: Compare with the stored receipt');
+  const publishAt = block.indexOf('node .github/scripts/publish-verified-platform.mjs');
+  const attestAt = block.indexOf('- name: Attest final publication receipt');
+  const uploadAt = block.indexOf('- name: Upload final publication receipt');
+  assert.ok(findAt > -1 && compareAt > -1, 'the stored-receipt steps must exist');
+  assert.ok(publishAt < findAt && findAt < compareAt && compareAt < attestAt && attestAt < uploadAt);
+
+  // A pattern, not a name: a name that matches nothing fails the step, a pattern downloads
+  // nothing and succeeds, which is the first attempt of every run. Same run only.
+  const find = block.slice(findAt, compareAt);
+  assert.match(find, /uses: actions\/download-artifact@v8/u);
+  assert.ok(find.includes('pattern: platform-publication-receipt-${{ matrix.release_group }}\n'));
+  assert.ok(find.includes('path: .platform-publication-stored/${{ matrix.release_group }}\n'));
+  assert.doesNotMatch(find, /^\s+name: platform|run-id:|github-token:|repository:|merge-multiple:/mu);
+
+  const compare = block.slice(compareAt, attestAt);
+  assert.match(compare, /id: stored-receipt/u);
+  assert.match(compare, /RELEASE_GROUP: \$\{\{ matrix\.release_group \}\}/u);
+  assert.doesNotMatch(stepRunScript(block, 'Compare with the stored receipt'), /\$\{\{/u);
+
+  // The upload runs only when nothing is stored, and never deletes what is.
+  const upload = block.slice(uploadAt);
+  assert.match(upload, /^ {8}if: steps\.stored-receipt\.outputs\.upload == 'true'$/mu);
+  assert.doesNotMatch(upload, /overwrite:/u);
+});
+
+test('the stored-receipt comparison uploads a first receipt, skips an identical one, and refuses a different one', () => {
+  const receipt = '{"releaseGroup":"benchmarking-product-v1","sourceSha":"a"}\n';
+
+  const first = compareStoredReceipt({ receipt, stored: undefined });
+  assert.equal(first.status, 0, first.log);
+  assert.equal(first.output, 'upload=true\n');
+
+  const empty = compareStoredReceipt({ receipt, stored: {} });
+  assert.equal(empty.status, 0, empty.log);
+  assert.equal(empty.output, 'upload=true\n');
+
+  const identical = compareStoredReceipt({ receipt, stored: { 'publication-receipt.json': receipt } });
+  assert.equal(identical.status, 0, identical.log);
+  assert.equal(identical.output, 'upload=false\n', 'one receipt artifact for the group, not two');
+  assert.match(identical.log, /::notice::.*earlier attempt of this run stored this publication receipt/u);
+
+  const different = compareStoredReceipt({
+    receipt,
+    stored: { 'publication-receipt.json': receipt.replace('"a"', '"b"') },
+  });
+  assert.equal(different.status, 1, different.log);
+  assert.equal(different.output, '', 'a different receipt is neither uploaded nor marked as stored');
+  assert.match(different.log, /::error::publication receipt for benchmarking-product-v1 differs from the one an earlier attempt of this run stored/u);
+  assert.match(different.log, /docs\/runbooks\/stack-npm-publishing\.md/u);
+
+  for (const stored of [
+    { 'other.json': receipt },
+    { 'publication-receipt.json': receipt, 'extra.json': '{}\n' },
+  ]) {
+    const unexpected = compareStoredReceipt({ receipt, stored });
+    assert.equal(unexpected.status, 1, `${Object.keys(stored).join(', ')} must fail closed: ${unexpected.log}`);
+    assert.equal(unexpected.output, '');
+    assert.match(unexpected.log, /::error::/u);
+  }
+});
+
+test('the runbook says what to do when a leg fails after its receipt was stored', () => {
+  const recovery = publishingRunbook.slice(publishingRunbook.indexOf('## Recovery'));
+  assert.match(recovery, /\*\*A leg that fails after its publication receipt was stored:\*\*/u);
+  assert.match(
+    recovery,
+    /`publication receipt for <group> differs from the one an earlier attempt\s+of this run stored`/u,
+  );
+  assert.match(recovery, /platform-publication-receipt-<group>/u);
+  assert.match(recovery, /refuses a duplicate artifact name only within\s+one attempt/u);
+});
+
+// refresh-profile-host.mjs asks GitHub's compare whether the commit the host marker names is
+// earlier than this run's source (#5242); the job's mono checkout is too shallow to answer.
+test('only the host refresh mirror step holds the job token, to order the host marker on GitHub', () => {
+  const block = workflow.slice(workflow.indexOf('canary-host-refresh:'), workflow.indexOf('resolve-stable-source:'));
+  const tokenSteps = block.split(/\n {6}- /u).slice(1)
+    .filter((step) => step.includes('github.token'))
+    .map((step) => step.split('\n')[0].trim());
+  assert.deepEqual(tokenSteps, ['name: Mirror the bundle into the host checkout']);
+  assert.match(block, /^ {10}GH_TOKEN: \$\{\{ github\.token \}\}$/mu);
+  // A read of mono's compare endpoint needs nothing beyond the job's contents: read.
+  assert.match(block, /^ {4}permissions:\n {6}contents: read\n {4}env:/mu);
 });
 
 test('the canary host refresh copies same-run attested bytes to the host and pushes only on change', () => {

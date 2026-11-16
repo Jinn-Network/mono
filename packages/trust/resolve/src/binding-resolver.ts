@@ -4,10 +4,14 @@ import {
   AnchorReferenceSchema,
   KeyBindingSchema,
   Sha256DigestSchema,
+  TRUST_KEY_BINDING_MEDIA_TYPE,
+  TRUST_REVOCATION_MEDIA_TYPE,
+  canonicalJsonBytes,
   ceremonyEvidenceDigest,
   compareCalendarStrictRfc3339Instants,
   compareCodeUnitStrings,
   isCalendarStrictRfc3339,
+  parseSignedRecordEnvelope,
   recordDigest,
   verifyEoaCeremony,
   voucherIdentityEquals,
@@ -167,22 +171,44 @@ function canBePlaced(record: SealedKeyBindingRecord): boolean {
     && Sha256DigestSchema.safeParse(record.bindingDigest).success);
 }
 
-/** Whether a stored entry is the record it says it is. Only one that is can
- * resolve or give authority. */
+/**
+ * Whether a stored entry's fields are what its envelope says: the payload of that envelope,
+ * sealed as `payloadType`. A key's signature is its word for one envelope's payload and
+ * nothing else, so fields a store pairs with an envelope they are not the payload of are no
+ * one's word, and neither is a payload sealed as another kind of record. Both sides are read
+ * as JSON and compared in their RFC 8785 form, so how a store orders or spaces the fields does
+ * not count. An envelope that cannot be read carries nothing.
+ */
+function isPayloadOf(fields: unknown, envelopeBytes: Uint8Array, payloadType: string): boolean {
+  try {
+    const { payloadBytes } = parseSignedRecordEnvelope(envelopeBytes, payloadType);
+    const sealed = canonicalJsonBytes(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(payloadBytes)));
+    const stored = canonicalJsonBytes(fields);
+    return sealed.length === stored.length && sealed.every((byte, index) => byte === stored[index]);
+  } catch {
+    return false;
+  }
+}
+
+/** Whether a stored entry is the record it says it is: a key binding whose fields are its
+ * envelope's payload. Only one that is can resolve or give authority. */
 function isReadableBinding(record: SealedKeyBindingRecord): boolean {
   return remembered(readableBindings, record, () => KeyBindingSchema.safeParse(record.binding).success
     && Sha256DigestSchema.safeParse(record.bindingDigest).success
-    && record.envelopeBytes instanceof Uint8Array);
+    && record.envelopeBytes instanceof Uint8Array
+    && isPayloadOf(record.binding, record.envelopeBytes, TRUST_KEY_BINDING_MEDIA_TYPE));
 }
 
 /** Whether a stored revocation has what verification reads: a place in time, a
- * signer and the bytes that signer signed. A time that cannot be read claims
- * nothing, so the anchor stands alone, and authority is settled in `verify.ts`.
- * A revocation by someone with standing must not vanish for how it is spelled. */
+ * signer and the bytes that signer signed, whose payload its fields are. A time
+ * that cannot be read claims nothing, so the anchor stands alone, and authority
+ * is settled in `verify.ts`. A revocation by someone with standing must not
+ * vanish for how it is spelled. */
 function isReadableRevocation(record: SealedRevocationRecord): boolean {
   return remembered(readableRevocations, record, () => hasReadableAnchors(record.revocation)
     && typeof record.revocation.revokedBy === "string"
-    && record.envelopeBytes instanceof Uint8Array);
+    && record.envelopeBytes instanceof Uint8Array
+    && isPayloadOf(record.revocation, record.envelopeBytes, TRUST_REVOCATION_MEDIA_TYPE));
 }
 
 function isObserved<T>(observation: T | null): observation is T {
