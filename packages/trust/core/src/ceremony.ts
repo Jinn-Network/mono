@@ -171,6 +171,32 @@ function ceremonyStatement(type: "eoa" | "recap"): string {
   return type === "eoa" ? EOA_CEREMONY_STATEMENT : RECAP_CEREMONY_STATEMENT;
 }
 
+// §7.2 pins a dedicated ceremony `domain` and `uri`, so that a signature asked
+// for as a web login, or for another purpose, is never read as a ceremony.
+// EIP-4361 has the wallet compare `domain` with the site that asks for the
+// signature, so a message naming any other domain may have been asked for by
+// any site. These are the values of the one deployment this layer serves, fixed
+// here rather than read from configuration: every ceremony this layer authors
+// carries them (`@jinn-network/trust-authoring`'s `performEoaCeremony`).
+const CEREMONY_DOMAIN = "trust.jinn.network";
+const KEY_BINDING_CEREMONY_URI = "https://trust.jinn.network/ceremony/key-binding";
+const AUTHORIZATION_CEREMONY_URI = "https://trust.jinn.network/ceremony/authorization";
+
+/** Why `message` is not the profile's for a ceremony of `type`, compared exactly;
+ * `undefined` when its domain and URI are the profile's. */
+function profileMismatch(type: "eoa" | "recap", message: SiweCeremonyMessage): string | undefined {
+  if (message.domain !== CEREMONY_DOMAIN) {
+    return `ceremony domain "${message.domain}" is not the profile's "${CEREMONY_DOMAIN}" (§7.2).`;
+  }
+  const [uri, purpose] = type === "eoa"
+    ? [KEY_BINDING_CEREMONY_URI, "a key-binding"]
+    : [AUTHORIZATION_CEREMONY_URI, "an authorization"];
+  if (message.uri !== uri) {
+    return `ceremony URI "${message.uri}" is not the profile's "${uri}" for ${purpose} ceremony (§7.2).`;
+  }
+  return undefined;
+}
+
 /**
  * Canonically re-serializes a structured ceremony `message` to its EIP-4361
  * message text -- the exact bytes a genuine ceremony EIP-191-signs. This is
@@ -242,6 +268,10 @@ export function ceremonyEvidenceDigest(
  * voucher V over ANY message could be paired with a fabricated `message`
  * naming an arbitrary (key, agent) or capability set and would otherwise
  * content-match successfully.
+ *
+ * Once the bytes are tied, the message's `domain` and `uri` must be the
+ * profile's for its type (§7.2): a ceremony signed for another site or
+ * another purpose binds nothing either.
  */
 export function matchCeremonyContent(
   ceremony: EoaCeremonyEvidence,
@@ -264,6 +294,9 @@ export function matchCeremonyContent(
         + "can be trusted (§7.2 mandatory content match).",
     };
   }
+
+  const profile = profileMismatch(ceremony.type, ceremony.message);
+  if (profile !== undefined) return { matches: false, mismatch: profile };
 
   if (ceremony.type === "recap") {
     const statement = record as AuthorizationStatement;

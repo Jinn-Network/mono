@@ -43,6 +43,49 @@ export function computeEtag(bytes: Uint8Array): string {
   return `"sha256-${sha256Hex(bytes)}"`;
 }
 
+const ENTITY_TAG = /^(?:W\/)?"[^"]*"$/;
+
+function opaqueTag(tag: string): string {
+  return tag.startsWith("W/") ? tag.slice(2) : tag;
+}
+
+/**
+ * Whether an If-None-Match header is satisfied by the current entity tag, so the
+ * caller answers 304 (RFC 9110 section 13.1.2). It uses the weak comparison:
+ * `W/` is ignored on both sides and the opaque tags are compared, so a tag
+ * weakened by a compressing proxy still matches. `*` alone matches any existing
+ * representation. A comma-separated list matches when any member does. Empty list elements are ignored (RFC 9110 section 5.6.1.2). A header
+ * that is not exactly `*` or a well-formed list of entity tags never matches,
+ * so a malformed value gets the full response.
+ */
+export function ifNoneMatchSatisfied(header: string | null, currentEtag: string): boolean {
+  if (header === null) return false;
+  const value = header.trim();
+  if (value === "*") return true;
+  const members: string[] = [];
+  let rest = value;
+  while (rest !== "") {
+    // RFC 9110 section 5.6.1.2: a recipient ignores empty list elements.
+    const empty = /^,[ \t]*/.exec(rest);
+    if (empty !== null) {
+      rest = rest.slice(empty[0].length);
+      continue;
+    }
+    const next = /^((?:W\/)?"[^"]*")[ \t]*(?:,[ \t]*|$)/.exec(rest);
+    if (next === null) return false;
+    members.push(next[1]!);
+    rest = rest.slice(next[0].length);
+  }
+  if (members.length === 0 || !ENTITY_TAG.test(currentEtag)) return false;
+  const current = opaqueTag(currentEtag);
+  return members.some((member) => opaqueTag(member) === current);
+}
+
+/** A 304 carries only the fields RFC 9110 section 15.4.5 requires plus the cache policy. */
+export function notModifiedResponse(etag: string, cacheControl: string): Response {
+  return new Response(null, { status: 304, headers: { "cache-control": cacheControl, etag } });
+}
+
 function notFound(): Response {
   return new Response(null, { status: 404 });
 }
@@ -104,9 +147,8 @@ export function createArchiveHttpHandler(options: ArchiveHttpHandlerOptions): Ar
     });
     if (route.kind === "record" || route.kind === "page") headers.set("accept-ranges", "bytes");
 
-    const ifNoneMatch = request.headers.get("if-none-match");
-    if (ifNoneMatch !== null && ifNoneMatch.split(",").some((candidate) => candidate.trim() === etag)) {
-      return new Response(null, { status: 304, headers });
+    if (ifNoneMatchSatisfied(request.headers.get("if-none-match"), etag)) {
+      return notModifiedResponse(etag, cachePolicy(route, options));
     }
 
     const rangeHeader = request.headers.get("range");

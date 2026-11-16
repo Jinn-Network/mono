@@ -51,3 +51,15 @@ single admitted profile. A future chain is a new profile, not a parameter.
 
 `revokeBinding` is designed here and implemented in a follow-up (§3.3): its surface is fixed so
 rotation needs no schema change.
+
+**Who signs a revocation.** `revokeBinding` takes the target binding's **voucher account**, the
+ceremony EOA that `authorRoleBinding` named as the binding's `did:pkh` voucher, and signs through
+`voucherAccountSigner`: `revokedBy` and the DSSE `keyid` are that `did:pkh`, and the signature is a
+65-byte EIP-191 `personal_sign` over the DSSE pre-authentication encoding. It never takes the catalog
+authority. Under [key authority section 8](https://github.com/Jinn-Network/spec/blob/main/documents/profiles/key-authority/v1/specification.md)
+a revocation counts only from the voucher account, from the bound key itself when its record holds
+`bindings` scope, or from a standing `bindings` key of the Agent. No native role binding holds
+`bindings` scope, so neither the bound key nor any other role key of the Agent can revoke one, and
+the voucher account is the one signer whose revocation of a native role binding has effect. The
+catalog authority's key holds no binding to any Agent, and a revocation it signed would revoke
+nothing.

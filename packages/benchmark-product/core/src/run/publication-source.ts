@@ -38,7 +38,7 @@ import {
   type SourceAppendIntentStore,
   type SourceStateStore,
 } from "@jinn-network/record-discovery-serve";
-import { computeEtag, createArchiveHttpHandler, createFsBlobStore, IMMUTABLE_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL } from "@jinn-network/record-discovery-transport-http";
+import { computeEtag, createArchiveHttpHandler, createFsBlobStore, IMMUTABLE_CACHE_CONTROL, ifNoneMatchSatisfied, notModifiedResponse, REVALIDATE_CACHE_CONTROL } from "@jinn-network/record-discovery-transport-http";
 import { sha256 as publicationSha256, type CasResult, type PublicationJournal, type PublicationJournalStore } from "@jinn-network/record-publication";
 import { atomicWriteFileSync, fsyncDirectorySync, readFileIfExistsSync } from "../fs/atomic.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
@@ -552,9 +552,10 @@ export function createWorkspacePublicationHttpHandler(workspaceDir: string): (re
           "x-content-type-options": "nosniff",
           etag,
         });
-        const ifNoneMatch = request.headers.get("if-none-match");
-        if (ifNoneMatch !== null && ifNoneMatch.split(",").some((candidate) => candidate.trim() === etag)) {
-          return new Response(null, { status: 304, headers });
+        if (ifNoneMatchSatisfied(request.headers.get("if-none-match"), etag)) {
+          const notModified = notModifiedResponse(etag, REVALIDATE_CACHE_CONTROL);
+          notModified.headers.set("x-content-type-options", "nosniff");
+          return notModified;
         }
         headers.set("content-length", String(object.bytes.length));
         return new Response(request.method === "HEAD" ? null : object.bytes, { status: 200, headers });

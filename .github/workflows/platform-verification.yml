@@ -233,7 +233,7 @@ jobs:
           path: .platform-verification
           if-no-files-found: error
           include-hidden-files: true
-          retention-days: 1
+          retention-days: 4
 
   artifact_attestation:
     name: artifact-attestation

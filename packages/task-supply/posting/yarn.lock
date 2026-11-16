@@ -100,7 +100,7 @@ __metadata:
     "@jinn-network/task-admission": "npm:0.1.0"
     "@jinn-network/task-execution-profiles": "npm:0.1.0"
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
-    "@noble/hashes": "npm:2.2.0"
+    "@noble/hashes": "npm:^2.2.0"
     zod: "npm:4.4.3"
   languageName: node
   linkType: soft

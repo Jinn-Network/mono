@@ -196,6 +196,25 @@ and dist-tag. Matching bytes are skipped; missing bytes are published in receipt
 version already exists with different bytes, stop and cut a new version—npm versions are immutable.
 Never repair the mismatch by repacking, moving a tag, or weakening receipt verification.
 
+**`canary rollback refused for <group>`:** a rerun never moves `canary` back. Before it publishes
+anything, the lane reads the `canary` tag of every package it is about to publish. Each canary
+version names its source commit (`0.1.0-canary.sha.<sha>`), and GitHub's compare of that commit
+with the leg's own source decides which is later. When a tag already points at a version from a
+later commit, the leg stops with this message, which names both shas, and publishes nothing. This
+is the rerun the preflight cannot catch on its own: a leg that failed before it published anything
+(a failed artifact download, a failed provenance check, or `ENEEDAUTH` on its first package) has
+every version missing, so a rerun after a later run had published the same group would publish
+the older versions and move `canary` back for the whole group. Do not rerun such a leg again: its
+sha stays unpublished for that group, and the later sha's canary stands. A missing version whose
+tag comes from an earlier commit, or a package with no `canary` tag yet, publishes as usual.
+
+**`canary rollback check failed for <group>`:** the lane could not tell whether a `canary` tag
+comes from an earlier commit than the leg's source, so it publishes nothing. The message says
+why: the registry read failed, GitHub's compare failed, the tagged version names no commit, or
+the two commits do not share a line of history (compare status `diverged`). A failed read or
+compare can be rerun. A tag that names no commit, or a commit off the leg's history, stops every
+later leg the same way until a person resolves that tag.
+
 **`post-publish registry query failed for <name>@<version> version` with `E404`:** npm accepted
 the publish and had not exposed the version when the wait ran out. This is registry latency, not a
 missing registration. After each publish the lane queries the registry until the exact version,
@@ -210,7 +229,7 @@ that release group are not published. Confirm the version has landed with
 already has the receipt integrity and `canary` tag and publishes only the missing ones. The rerun
 is refused at preflight (`preflight canary mismatch for <name>`) once a later run has moved the
 `canary` tag for any package in the group that the failed leg already published. A tag is never
-moved back, so that sha stays partial and a later sha is the retry. The same one-day artifact
+moved back, so that sha stays partial and a later sha is the retry. The same four-day artifact
 window described below applies. The `stack-canary` job timeout is 360 minutes, GitHub's ceiling
 for a hosted job: a normal `implementations-v1` walk takes about three hours, which leaves room
 for three waits that each run close to the limit and still succeed. An exhausted wait ends the
@@ -223,8 +242,9 @@ and the per-package loop, so every later package in that release group's walk (t
 the wave and all later waves) is not published; every other matrix group is unaffected,
 since `canary-publish` runs its release groups as a `fail-fast: false` matrix. Register the missing package with the CLI
 path above, then rerun. Rerunning only works while this run's `platform-verification-artifacts`
-artifact still exists (`retention-days: 1` in `platform-verification.yml`); once that window
-passes, the next push to `next` is the retry, not a manual rerun of the old run. Do not treat
+artifact still exists (`retention-days: 4` in `platform-verification.yml`, about 4.8 MB per run, counted from
+the upload, so at least three days after any leg fails); once that
+window passes, the next push to `next` is the retry, not a manual rerun of the old run. Do not treat
 a partial walk as a successful canary.
 
 **`npm publication failed for <name>@<version>: TLOG_CREATE_ENTRY_ERROR 409 on all 3 attempts`:**
@@ -240,5 +260,22 @@ distinct entries for one tarball). After every 409 the lane asks the registry fo
 version first: the receipt integrity there counts as published and the post-publish wait for the
 `canary` tag still applies; different bytes fail closed. Every attempt's npm output is in the job
 log with its attempt number. The walk stops as it does for a failed publish. Rerun the failed
-job: the preflight skips what is already published, within the `canary`-tag and one-day artifact
+job: the preflight skips what is already published, within the `canary`-tag and four-day artifact
 limits above. Otherwise the next push to `next` publishes a new canary version.
+
+**A leg that fails after its publication receipt was stored:** for example `Failed to
+FinalizeArtifact` on "Upload final publication receipt" while the run still lists
+`platform-publication-receipt-<group>`, as in
+[run 43066987003](https://github.com/Jinn-Network/mono/actions/runs/43066987003). Every package in
+the group is published and its receipt is attested and stored, so nothing is missing; rerun the
+failed job, within the four-day artifact window above, only to turn the leg green. The rerun
+publishes nothing and rebuilds the receipt from the same-run inputs. It then downloads the receipt
+the earlier attempt stored, because upload-artifact refuses a duplicate artifact name only within
+one attempt: a rerun's upload of that name would succeed and leave the run two receipts for the
+group. When the two receipts are byte-identical, the rerun does not upload a second copy. When they
+differ, the leg stops with `publication receipt for <group> differs from the one an earlier attempt
+of this run stored`, names both digests, and uploads nothing, so the stored receipt stands for that
+run. A rerun of the failed job alone reads the same same-run inputs, so a difference means they
+were rebuilt (a rerun of all jobs) or the registry changed; do not rerun again, and the next push
+to `next` is the retry. A rerun after a later run has moved the `canary` tag stops at preflight
+first, as above.

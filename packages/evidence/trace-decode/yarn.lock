@@ -222,7 +222,7 @@ __metadata:
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
-    "@noble/hashes": "npm:2.2.0"
+    "@noble/hashes": "npm:^2.2.0"
     ajv: "npm:8.17.1"
     zod: "npm:4.4.3"
   languageName: node

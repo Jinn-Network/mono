@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { INSPECT_SANDBOX_PROVIDER, type InspectSelectionManifest } from "./manifest.js";
 import {
   assertInspectOciHostUndrifted,
@@ -315,21 +315,62 @@ test("a descendant that holds stdout after the command exits still expires as a 
 
 /**
  * #5163. A command that exits non-zero while a descendant still holds its stdout is an error exit,
- * not a timeout. The bound here is far longer than the test allows, so the outcome has to be
- * decided by the exit, not by waiting for the bound or for the descendant to let go.
+ * not a timeout. The descendant outlives the 3000 ms bound, so code that waits for the pipes
+ * reports `InspectOciCommandTimeoutError` here, the wrong type, and only the exit-driven drain
+ * yields the exit, well before the bound.
  */
 test("a non-zero exit is reported as that exit even when a descendant still holds stdout", async () => {
   const directory = mkdtempSync(join(tmpdir(), "jinn-oci-held-stdout-nonzero-"));
   temporaryDirectories.push(directory);
-  process.env.JINN_INSPECT_OCI_COMMAND_TIMEOUT_MS = "60000";
-  const hostBinding = driftCheckBinding(writeDriftCheckFakeDocker(directory, DRIFT_CHECK_COMMANDS[0].selectedBy, "sleep 6 & exit 3"));
+  process.env.JINN_INSPECT_OCI_COMMAND_TIMEOUT_MS = "3000";
+  const hostBinding = driftCheckBinding(writeDriftCheckFakeDocker(directory, DRIFT_CHECK_COMMANDS[0].selectedBy, "sleep 30 & exit 3"));
 
   const startedAt = Date.now();
   const failure = await assertInspectOciHostUndrifted(hostBinding, undriftedManifest(hostBinding)).catch((cause: unknown) => cause);
 
   expect(failure).not.toBeInstanceOf(InspectOciCommandTimeoutError);
   expect((failure as Error).message).toContain("OCI runtime command exited 3");
-  expect(Date.now() - startedAt).toBeLessThan(5_000);
+  expect(Date.now() - startedAt).toBeLessThan(2_500);
+});
+
+/**
+ * #5163. A non-zero exit seen before the bound is still that exit when the bound fires before the
+ * 250 ms drain has abandoned the pipes. Only the `failedBeforeBound` guard on the `close` path keeps
+ * the expired bound from relabeling it as a timeout. The fake clock stands still until the exit has
+ * armed the drain and then moves past a 100 ms bound, so the bound fires first on every host,
+ * whatever its process start-up costs.
+ */
+test("a non-zero exit seen before the bound stays that exit when the bound fires before the drain", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "jinn-oci-exit-before-bound-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "jinn-oci-project-"));
+  const datasetCacheDir = mkdtempSync(join(tmpdir(), "jinn-oci-dataset-"));
+  temporaryDirectories.push(directory, projectDir, datasetCacheDir);
+  const dockerPath = join(directory, "docker");
+  writeFileSync(dockerPath, ["#!/bin/sh", "[ \"$1\" = run ] || exit 0", "sleep 30 & exit 3"].join("\n"), { mode: 0o755 });
+  chmodSync(dockerPath, 0o755);
+  process.env.JINN_INSPECT_OCI_WORKER_TIMEOUT_MS = "100";
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const outcome = catalogInspectOciSelection({
+      dockerPath,
+      imageDigest: `sha256:${"a".repeat(64)}`,
+      projectDir,
+      datasetCacheDir,
+      taskReference: "hermetic_eval.py@fixture",
+    }).catch((cause: unknown) => cause);
+    // `docker version` clears its own bound on close. The worker run then arms its 100 ms bound,
+    // and its non-zero exit arms the 250 ms drain, so two pending timers mean the exit has been seen.
+    const deadline = performance.now() + 10_000;
+    while (vi.getTimerCount() < 2 && performance.now() < deadline) await new Promise((resolve) => setImmediate(resolve));
+    expect(vi.getTimerCount()).toBe(2);
+    vi.advanceTimersByTime(100);
+
+    const failure = await outcome;
+    expect(failure).not.toBeInstanceOf(InspectOciCommandTimeoutError);
+    expect((failure as Error).message).toContain("OCI runtime command exited 3");
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 /**
@@ -340,13 +381,14 @@ test("a non-zero exit is reported as that exit even when a descendant still hold
 test("a command still running at the bound with a descendant holding stdout expires promptly as a typed timeout", async () => {
   const directory = mkdtempSync(join(tmpdir(), "jinn-oci-running-held-stdout-"));
   temporaryDirectories.push(directory);
-  process.env.JINN_INSPECT_OCI_COMMAND_TIMEOUT_MS = "500";
+  // Long enough that the two parallel image-inspect fakes finish inside it on a loaded runner.
+  process.env.JINN_INSPECT_OCI_COMMAND_TIMEOUT_MS = "2000";
   const hostBinding = driftCheckBinding(writeDriftCheckFakeDocker(directory, DRIFT_CHECK_COMMANDS[0].selectedBy, "sleep 8 & sleep 8"));
 
   const startedAt = Date.now();
   const failure = await assertInspectOciHostUndrifted(hostBinding, undriftedManifest(hostBinding)).catch((cause: unknown) => cause);
 
   expect(failure).toBeInstanceOf(InspectOciCommandTimeoutError);
-  expect((failure as Error).message).toContain("timed out after 500 ms: docker version");
-  expect(Date.now() - startedAt).toBeLessThan(4_000);
+  expect((failure as Error).message).toContain("timed out after 2000 ms: docker version");
+  expect(Date.now() - startedAt).toBeLessThan(6_000);
 });

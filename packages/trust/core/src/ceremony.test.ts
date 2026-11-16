@@ -3,16 +3,19 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import { describe, expect, test } from "vitest";
 
 import type { AuthorizationStatement } from "./authorization.js";
 import {
   matchCeremonyContent,
   recoverEip191Address,
+  serializeCeremonyMessage,
   verifyEoaCeremony,
   verifyReCapCeremony,
 } from "./ceremony.js";
-import type { EoaCeremonyEvidence, ReCapCeremonyEvidence } from "./ceremony.js";
+import type { EoaCeremonyEvidence, ReCapCeremonyEvidence, SiweCeremonyMessage } from "./ceremony.js";
 import type { KeyBinding } from "./key-binding.js";
 import { didPkh } from "./spellings.js";
 
@@ -286,5 +289,106 @@ describe("verifyReCapCeremony", () => {
       authorizationStatementFor(recapFixture.mismatchedCapabilities),
     );
     expect(result.verified).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §7.2 pins a dedicated ceremony `domain` and `uri`. EIP-4361 has the wallet
+// compare `domain` with the site that asks for the signature, so these two
+// fields are what tie a signature to the place and purpose it was asked for.
+// Every ceremony below is genuine: the signature recovers to the voucher, the
+// message bytes are the serialized message, and the content matches. Only the
+// domain or the URI differs from the profile's.
+// ---------------------------------------------------------------------------
+
+/** The secp256k1 secret key 1, a test value with no other use. */
+const TEST_SECRET_KEY = Uint8Array.from({ length: 32 }, (_, index) => (index === 31 ? 1 : 0));
+const TEST_ADDRESS = "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf" as const;
+const PROFILE_DOMAIN = "trust.jinn.network";
+const KEY_BINDING_URI = "https://trust.jinn.network/ceremony/key-binding";
+const AUTHORIZATION_URI = "https://trust.jinn.network/ceremony/authorization";
+
+/** EIP-191 `personal_sign` by the test key, as `r || s || v`. */
+function signEip191(messageBytes: Uint8Array): Uint8Array {
+  const prefix = new TextEncoder().encode(`\x19Ethereum Signed Message:\n${messageBytes.length}`);
+  const digest = keccak_256(Uint8Array.of(...prefix, ...messageBytes));
+  const recovered = secp256k1.sign(digest, TEST_SECRET_KEY, { prehash: false, format: "recovered" });
+  return Uint8Array.of(...recovered.slice(1), recovered[0]! + 27);
+}
+
+function signedMessage(type: "eoa" | "recap", overrides: Partial<SiweCeremonyMessage>) {
+  const message: SiweCeremonyMessage = {
+    domain: PROFILE_DOMAIN,
+    address: TEST_ADDRESS,
+    uri: type === "eoa" ? KEY_BINDING_URI : AUTHORIZATION_URI,
+    version: "1",
+    chainId: 8453,
+    nonce: "domain-and-uri-1",
+    issuedAt: "2026-07-28T00:00:00Z",
+    resources: type === "eoa" ? [eoaFixture.agentIri, eoaFixture.didKey] : [...recapFixture.capabilities],
+    ...overrides,
+  };
+  const messageBytes = serializeCeremonyMessage(type, message);
+  return { message, messageBytes, signature: signEip191(messageBytes) };
+}
+
+function signedEoaCeremony(overrides: Partial<SiweCeremonyMessage> = {}): EoaCeremonyEvidence {
+  return { type: "eoa", ...signedMessage("eoa", overrides) };
+}
+
+function signedReCapCeremony(overrides: Partial<SiweCeremonyMessage> = {}): ReCapCeremonyEvidence {
+  return { type: "recap", ...signedMessage("recap", overrides) };
+}
+
+function bindingVouchedByTestKey(): KeyBinding {
+  return {
+    ...keyBindingFor(eoaFixture.agentIri),
+    voucher: { kind: "account", did: didPkh(8453, TEST_ADDRESS), contractAccount: false },
+  };
+}
+
+describe("the profile's ceremony domain and URI (§7.2)", () => {
+  test("a genuine ceremony with the profile's domain and URI verifies", () => {
+    const eoa = verifyEoaCeremony(signedEoaCeremony(), bindingVouchedByTestKey());
+    expect(eoa).toEqual({ verified: true, recoveredAddress: TEST_ADDRESS });
+    const recap = verifyReCapCeremony(signedReCapCeremony(), authorizationStatementFor(recapFixture.capabilities));
+    expect(recap).toEqual({ verified: true, recoveredAddress: TEST_ADDRESS });
+  });
+
+  test("the repository's sealed ceremonies still verify", () => {
+    expect(verifyEoaCeremony(eoaCeremony(), keyBindingFor(eoaFixture.agentIri)).verified).toBe(true);
+    expect(verifyReCapCeremony(recapCeremony(), authorizationStatementFor(recapFixture.capabilities)).verified)
+      .toBe(true);
+  });
+
+  test.each([
+    ["another domain", { domain: "login.example" }, /domain "login\.example"/],
+    ["the domain in upper case", { domain: "TRUST.JINN.NETWORK" }, /domain "TRUST\.JINN\.NETWORK"/],
+    ["the domain with a port", { domain: "trust.jinn.network:443" }, /domain "trust\.jinn\.network:443"/],
+    ["another URI", { uri: "https://trust.jinn.network/login" }, /URI "https:\/\/trust\.jinn\.network\/login"/],
+    ["the authorization URI", { uri: AUTHORIZATION_URI }, /URI "https:\/\/trust\.jinn\.network\/ceremony\/authorization"/],
+  ])("a genuine key-binding ceremony with %s binds nothing", (_label, overrides, reason) => {
+    const ceremony = signedEoaCeremony(overrides);
+    const binding = bindingVouchedByTestKey();
+    expect(matchCeremonyContent(ceremony, binding)).toEqual({ matches: false, mismatch: expect.stringMatching(reason) });
+    expect(verifyEoaCeremony(ceremony, binding)).toEqual({
+      verified: false,
+      recoveredAddress: TEST_ADDRESS,
+      reason: expect.stringMatching(reason),
+    });
+  });
+
+  test.each([
+    ["another domain", { domain: "login.example" }, /domain "login\.example"/],
+    ["the key-binding URI", { uri: KEY_BINDING_URI }, /URI "https:\/\/trust\.jinn\.network\/ceremony\/key-binding"/],
+  ])("a genuine authorization ceremony with %s authorizes nothing", (_label, overrides, reason) => {
+    const ceremony = signedReCapCeremony(overrides);
+    const statement = authorizationStatementFor(recapFixture.capabilities);
+    expect(matchCeremonyContent(ceremony, statement)).toEqual({ matches: false, mismatch: expect.stringMatching(reason) });
+    expect(verifyReCapCeremony(ceremony, statement)).toEqual({
+      verified: false,
+      recoveredAddress: TEST_ADDRESS,
+      reason: expect.stringMatching(reason),
+    });
   });
 });

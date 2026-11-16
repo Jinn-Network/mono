@@ -47,7 +47,6 @@
   "resolutions": {
     "@jinn-network/benchmarking-protocol": "portal:../protocol",
     "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
-    "@jinn-network/execution-evidence-builder": "portal:../../evidence/execution-evidence-builder",
-    "@noble/hashes": "2.3.0"
+    "@jinn-network/execution-evidence-builder": "portal:../../evidence/execution-evidence-builder"
   }
 }

@@ -2,8 +2,11 @@
 
 import { describe, expect, test } from "vitest";
 import {
+  DSSE_PAYLOAD_TYPE,
   TRUST_KEY_BINDING_MEDIA_TYPE,
+  TRUST_REVOCATION_MEDIA_TYPE,
   checkBindingRevocation,
+  parseDsseEnvelope,
   resolveBindingForAgent,
   sealDsseEnvelope,
   settlementJoinCheck,
@@ -237,6 +240,33 @@ class World {
   verdictInStoredOrder(key: string, atTime: string = NOW) {
     return this.verifyOver(this.records, key, atTime);
   }
+
+  /** The keys the real resolver lists as incumbents of what resolves for `key`, in its order. */
+  async incumbentKeys(key: string, atTime: string = NOW): Promise<string[]> {
+    const resolved = await this.authorityOver(this.records).bindingResolver.resolveBinding({ key, agent: AGENT }, atTime);
+    return (resolved?.incumbentControls ?? []).map((incumbent) => incumbent.key);
+  }
+}
+
+/** Files `record` under `under`'s digest, as a store that takes digests as given may. */
+function fileUnder(w: World, record: SealedKeyBindingRecord, under: SealedKeyBindingRecord): void {
+  w.records[w.records.indexOf(record)] = { ...record, bindingDigest: under.bindingDigest };
+}
+
+/** Pairs `record`'s envelope with other fields, as a store that takes rows as given may. */
+function storeFieldsOf(w: World, record: SealedKeyBindingRecord, fields: (sealed: KeyBinding) => KeyBinding): void {
+  w.records[w.records.indexOf(record)] = { ...record, binding: fields(record.binding) };
+}
+
+/** The same payload under another payload type, declaring the same signer. The kit's DSSE leg
+ * reads only the declared keyid, so this is an envelope that key signed as another kind of record. */
+function sealedAsAnotherType(envelopeBytes: Uint8Array, payloadType: string): Uint8Array {
+  const { payloadBytes, signatures } = parseDsseEnvelope(envelopeBytes);
+  return sealDsseEnvelope({
+    payloadBytes,
+    payloadType,
+    signatures: [{ signature: Uint8Array.of(1), keyid: signatures[0]!.keyid! }],
+  });
 }
 
 /** Mints with a fresh key until the record's digest sorts the wanted side of `than`'s. */
@@ -716,11 +746,6 @@ describe.each([
   });
 
   describe("a record a store files under the genesis binding's digest (§7.3)", () => {
-    /** Files `record` under `under`'s digest, as a store that takes digests as given may. */
-    function fileUnder(w: World, record: SealedKeyBindingRecord, under: SealedKeyBindingRecord): void {
-      w.records[w.records.indexOf(record)] = { ...record, bindingDigest: under.bindingDigest };
-    }
-
     test("is not the genesis binding for sharing its digest", async () => {
       const w = world();
       const genesis = await bindGenesis(w);
@@ -792,6 +817,173 @@ describe.each([
       const { ceremonyEvidence: _evidence, ...bare } = genesis;
       w.records.splice(w.records.indexOf(genesis), 1, bare, { ...bare, ceremonyEvidence: null as unknown as EoaCeremonyEvidence });
       expect(await w.verdict(GENESIS_KEY)).toMatchObject({ ok: false, reason: "ceremony-verification-failed" });
+    });
+  });
+
+  describe("a row filed under another record's digest is judged on its own (§7.4a, §7.4b)", () => {
+    test.each([
+      { order: "before", sortsBefore: true },
+      { order: "after", sortsBefore: false },
+    ])("a row under the genesis digest whose ceremony fails, listed $order it, leaves the founder's self-extension standing", async ({ sortsBefore }) => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1 });
+      let unsoundKey: string | undefined;
+      for (let attempt = 0; attempt < 4096 && unsoundKey === undefined; attempt += 1) {
+        const key = testDidKey(`binding-authority-unsound-${attempt}`);
+        // eslint-disable-next-line no-await-in-loop -- minting until the resolver lists it on the wanted side.
+        const unsound = await w.bind({ key, signer: OWNER, validFrom: T0, withoutCeremonyEvidence: true });
+        fileUnder(w, unsound, genesis);
+        // eslint-disable-next-line no-await-in-loop -- minting until the resolver lists it on the wanted side.
+        const incumbents = await w.incumbentKeys(NEXT_KEY);
+        if ((incumbents.indexOf(key) < incumbents.indexOf(GENESIS_KEY)) === sortsBefore) unsoundKey = key;
+        else w.records.pop();
+      }
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+      expect(await w.verdict(unsoundKey!)).toMatchObject({ ok: false, reason: "ceremony-verification-failed" });
+    });
+
+    test("a row with no chain, filed under the digest of a record that stands, leaves that record's chain to it", async () => {
+      const w = world();
+      await bindGenesis(w, { expiresAt: T1 });
+      await w.bind({ key: COLD_KEY, signer: SECOND_OWNER, validFrom: "2026-01-15T00:00:00.000Z", consentBy: GENESIS_KEY });
+      const consented = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T3, consentBy: COLD_KEY });
+      const orphan = await w.bind({ key: STRANGER_KEY, signer: OWNER, validFrom: T2 });
+      fileUnder(w, orphan, consented);
+      await w.bind({ key: THIRD_KEY, signer: OWNER, validFrom: T4 });
+      expect(await w.verdict(STRANGER_KEY)).toMatchObject(refusedChain);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+      expect(await w.verdict(THIRD_KEY)).toMatchObject(stands);
+    });
+
+    test("a stranger's row under the genesis digest does not make the stranger's revocation of it the genesis key's own", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      const strangers = await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T1 });
+      fileUnder(w, strangers, genesis);
+      await w.revoke(genesis, STRANGER_KEY, T2);
+      await w.bind({ key: THIRD_KEY, signer: SECOND_OWNER, validFrom: T3, consentBy: GENESIS_KEY });
+      expect(await w.verdict(STRANGER_KEY)).toMatchObject(refusedChain);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+      expect(await w.verdict(THIRD_KEY)).toMatchObject(stands);
+      expect(await w.notRevoked(GENESIS_KEY, NOW)).toBe(true);
+    });
+
+    test("a stranger's verdict leg under the genesis digest does not hide the founding account's revocation from the settlement leg", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w, { scope: ["verdicts", "bindings", "settlements"] });
+      const strangers = await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T1 });
+      fileUnder(w, strangers, genesis);
+      await w.revoke(genesis, accountVoucher(84532, OWNER.address).did, T2);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject({ ok: false, reason: "revoked" });
+      expect(await w.join(STRANGER_KEY, GENESIS_KEY, T3, T4)).toMatchObject({ ok: false });
+    });
+  });
+
+  describe("an entry's fields are its envelope's payload (§3)", () => {
+    const notResolved = { ok: false, reason: "binding-not-resolved" };
+    const revoked = { ok: false, reason: "revoked" };
+
+    test("a binding entry holding a scope its envelope does not carry does not resolve, and consents no one", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const next = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1, scope: ["verdicts"] });
+      storeFieldsOf(w, next, (sealed) => ({ ...sealed, scope: ["verdicts", "bindings"] }));
+      await w.bind({ key: THIRD_KEY, signer: SECOND_OWNER, validFrom: T2, consentBy: NEXT_KEY });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(notResolved);
+      expect(await w.verdict(THIRD_KEY)).toMatchObject(refusedChain);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+    });
+
+    test("and revokes nothing", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      const next = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1, scope: ["verdicts"] });
+      storeFieldsOf(w, next, (sealed) => ({ ...sealed, scope: ["verdicts", "bindings"] }));
+      await w.revoke(genesis, NEXT_KEY, T2);
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+      expect(await w.notRevoked(GENESIS_KEY, NOW)).toBe(true);
+    });
+
+    test("a binding entry holding a window its envelope does not carry does not resolve, and consents no one", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const next = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1, expiresAt: T1 });
+      storeFieldsOf(w, next, ({ expiresAt: _end, ...sealed }) => sealed);
+      await w.bind({ key: THIRD_KEY, signer: SECOND_OWNER, validFrom: T2, consentBy: NEXT_KEY });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(notResolved);
+      expect(await w.verdict(THIRD_KEY)).toMatchObject(refusedChain);
+    });
+
+    test("a binding entry claiming a relationship its envelope does not carry does not resolve, and extends to no one", async () => {
+      const w = world();
+      await bindGenesis(w, { expiresAt: T1 });
+      const next = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1, relationship: "signs-for" });
+      storeFieldsOf(w, next, (sealed) => ({ ...sealed, relationship: "controls" }));
+      await w.bind({ key: THIRD_KEY, signer: OWNER, validFrom: T2 });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(notResolved);
+      expect(await w.verdict(THIRD_KEY)).toMatchObject(refusedChain);
+    });
+
+    test("a binding entry whose envelope is another kind of record's does not resolve, and consents no one", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const next = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1 });
+      w.records[w.records.indexOf(next)] = { ...next, envelopeBytes: sealedAsAnotherType(next.envelopeBytes, DSSE_PAYLOAD_TYPE) };
+      await w.bind({ key: THIRD_KEY, signer: SECOND_OWNER, validFrom: T2, consentBy: NEXT_KEY });
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(notResolved);
+      expect(await w.verdict(THIRD_KEY)).toMatchObject(refusedChain);
+    });
+
+    test("§7.5a refuses a settlement leg holding a scope its envelope does not carry", async () => {
+      const w = world();
+      await bindGenesis(w);
+      const leg = await w.bind({ key: NEXT_KEY, signer: OWNER, validFrom: T1, scope: ["verdicts"] });
+      storeFieldsOf(w, leg, (sealed) => ({ ...sealed, scope: ["settlements"] }));
+      expect(await w.join(GENESIS_KEY, NEXT_KEY, T2, T4))
+        .toMatchObject({ ok: false, reason: expect.stringMatching(/settlement leg does not resolve/) });
+    });
+
+    test("a published revocation paired with another target has no effect on that target, in either listed order", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      const cold = await w.bind({ key: COLD_KEY, signer: OWNER, validFrom: T1 });
+      await w.revoke(cold, GENESIS_KEY, T2);
+      const published = w.revocations.at(-1)!;
+      w.revocations.push({ revocation: { ...published.revocation, target: genesis.bindingDigest }, envelopeBytes: published.envelopeBytes });
+      for (const _listed of ["as stored", "reversed"]) {
+        expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+        expect(await w.notRevoked(GENESIS_KEY, NOW)).toBe(true);
+        expect(await w.verdict(COLD_KEY)).toMatchObject(revoked);
+        w.revocations.reverse();
+      }
+    });
+
+    test("a revocation whose envelope is another kind of record's has no effect", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      await w.revoke(genesis, GENESIS_KEY, T1);
+      const sealed = w.revocations.at(-1)!;
+      w.revocations[w.revocations.length - 1] = {
+        ...sealed,
+        envelopeBytes: sealedAsAnotherType(sealed.envelopeBytes, TRUST_KEY_BINDING_MEDIA_TYPE),
+      };
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(stands);
+      expect(await w.notRevoked(GENESIS_KEY, NOW)).toBe(true);
+    });
+
+    test("the same revocation sealed as a revocation still revokes", async () => {
+      const w = world();
+      const genesis = await bindGenesis(w);
+      await w.revoke(genesis, GENESIS_KEY, T1);
+      const sealed = w.revocations.at(-1)!;
+      w.revocations[w.revocations.length - 1] = {
+        ...sealed,
+        envelopeBytes: sealedAsAnotherType(sealed.envelopeBytes, TRUST_REVOCATION_MEDIA_TYPE),
+      };
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(revoked);
+      expect(await w.notRevoked(GENESIS_KEY, NOW)).toBe(false);
     });
   });
 

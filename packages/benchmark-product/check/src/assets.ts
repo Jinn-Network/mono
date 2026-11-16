@@ -1325,9 +1325,9 @@ function pairedCompactFragment(facts: Exclude<MethodFacts, BinaryFacts>): string
 // auto-closed after PR #4318; this comment and the vocabulary spec row are the remaining record of
 // the hold, by ruling and not by default (#4419; #4836 found that the member closer honors a
 // `Deferred` heading on the merged sweep PR body, so a reopen surviving that closer was available,
-// and declined it -- the vocabulary spec's v1.10 entry carries the reasons).
-// The local viewer (`cli/src/viewer.ts`) took the same ruling immediately, because
-// nothing byte-compares a live reader page; only the mechanism differs there, not the ruling.
+// and declined it -- the vocabulary spec's v1.10 entry carries the reasons). The local viewer
+// (`cli/src/viewer.ts`) took the same ruling immediately, because nothing byte-compares a live
+// reader page; only the mechanism differs there, not the ruling.
 
 function buildBadge(input: PublicAssetInput, reportFacts: MethodFacts): string {
   const scope = scopeLine(input);

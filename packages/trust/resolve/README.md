@@ -32,13 +32,21 @@ is not the genesis binding for that. Rows of one key that share an instant and a
 digest are ranked by a founding claim first and then by what they say, so for
 rows a store reads from JSON the order it lists them in never chooses between
 them. Values JSON cannot hold, which only a caller building rows in memory can
-supply, are outside that.
+supply, are outside that. The `agentId` composition leg weighs rows the same way:
+an account record a store files under the `agentId` record's digest still counts.
 
 `recordSignedByItsKey` is required, because this package has no DSSE verifier of
 its own. A record its key never signed does not resolve and cannot win a conflict
 over the key. Ceremony evidence that cannot be read is a failed ceremony. A
 stored entry that is not a key binding never resolves and gives no authority, but
 if its anchors can be read it still counts when deciding which binding came first.
+
+A stored entry's fields are read from its envelope. A key's signature is its word
+for one envelope's payload, under one payload type, and nothing else. So a binding
+entry whose fields are not its envelope's payload, or whose envelope is not sealed
+as a key binding, is not a key binding here, and a revocation entry whose fields are
+not its envelope's payload, or whose envelope is not sealed as a revocation, has no
+effect. Fields and payload are compared in their RFC 8785 form.
 
 A resolve that could not find out is not a refusal. `resolveBinding` answers `null`
 when nothing resolves, and throws when a store, an anchor read, the registry or a

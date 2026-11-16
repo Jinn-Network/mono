@@ -46,7 +46,6 @@
   },
   "resolutions": {
     "@jinn-network/execution-evidence-builder": "portal:../../evidence/execution-evidence-builder",
-    "@noble/hashes": "2.2.0",
     "@colophon-claims/core": "portal:../core",
     "@colophon-claims/check": "portal:../check",
     "@jinn-network/attestation-issuer": "portal:../../evidence/attestation-issuer",

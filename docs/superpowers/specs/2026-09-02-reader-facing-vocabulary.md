@@ -1,9 +1,9 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.10
+- **Version:** 1.11
 - **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-12; v1.4: 2026-09-16;
   v1.5: 2026-09-17; v1.6: 2026-09-18; v1.7: 2026-09-19; v1.8: 2026-09-24; v1.9: 2026-09-26;
-  v1.10: 2026-09-29)
+  v1.10: 2026-09-29; v1.11: 2026-11-14)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
@@ -74,13 +74,14 @@
   though no reopen could ever hold. One can — the closer honors a `Deferred` heading on the merged
   sweep PR body — so the reopen was a declined option, not an unavailable one.)
 - **v1.10** (#4836): rules the #4270 record deliberately, having found the escape hatch v1.9 did not
-  know about. Autopilot's post-merge member closer (`fileDebtSweep` and `fileResidueSweep` in
-  `src/lifecycle/debt-sweep.ts`) calls `parseDeferredMembers` on the merged sweep PR's body and skips
-  every member named under a `Deferred` heading. A reopen of #4270 that survives the debt-sweep
-  closer was therefore available — add such a heading to PR #4318's body, then reopen — and is
-  **declined**. (Only that path: `fileResidueSweep` reads the heading off its own merged residue
-  sweep's PR, so a reopened #4270 could still be drawn into a future residue sweep and closed
-  there.) Three reasons. An open
+  know about. Autopilot's debt-sweep closer (`fileDebtSweep` in `src/lifecycle/debt-sweep.ts`)
+  calls `parseDeferredMembers` on the merged sweep PR's body and skips every member named under a
+  `Deferred` heading, so a reopen of #4270 that survives that closer was available (add such a
+  heading to PR #4318's body, then reopen) and is **declined**. The heading stops that closer from
+  closing #4270 on the strength of sweep #4307; it does not exempt #4270 from a later sweep. A
+  deferred member stays eligible for the next debt sweep of its parent PR, and `fileResidueSweep`
+  reads the heading off its own merged residue sweep's PR, never off PR #4318, so a reopened #4270
+  could be drawn into a future sweep of either kind and closed there. Three reasons. An open
   issue adds no information over either existing record, and the condition that unblocks the hold is
   a bundle-format allocation, which whoever allocates the format meets at the emission site rather
   than in a triage list; an issue unclaimable until an unrelated allocation exists is a permanent
@@ -90,6 +91,16 @@
   merged record to win a bookkeeping outcome. And both records are pinned by
   `packages/benchmark-product/check/src/assets-4318-follow-ups.test.ts`, so the debt cannot rot
   unobserved. Corrects v1.9's sentence accordingly. No disposition changes.
+- **v1.11** (#3863): re-rules §4.2's *Time basis* row. v1.0 mapped it to *What the timestamp
+  covers*, which names a different concept: time basis is `authority-time` or `chain-time`, where
+  a proof's time comes from, while what a timestamp covers is the lock or matrix bytes, which the
+  reader recomputes before it reports `present`. Applied literally, the rename made the reader
+  say that what a `present` proof covers was not evaluated, when only its time was not. The row
+  now reads **time source**. Splits the *Anchors / Anchor subjects* row, which gave both headings
+  one name: *Anchors* keeps *Timestamps*, and a new row rules *Anchor subjects* as *Timestamp
+  coverage*. Both rows mark their heading as a heading form of **timestamp proof**, and §5's
+  headings rule now names them. The *Anchor (the record)* row's gloss is now carried by the
+  reader's closing paragraph. No other disposition changes.
 
 ## 1. Scope
 
@@ -268,7 +279,7 @@ spelling is the untouched other side of the line (§2), not a second ruling.
 | Independence clusters | rename + gloss | Groups that do not share a source | The counted quantity is kept; only the noun changes. |
 | Benchmark and configuration scope | rename | What was tested, and how each configuration was pinned | The `<h2 id="scope-heading">` in `buildIndex` (`assets.ts`); its `Arms and pinned configuration` sub-heading becomes **Each configuration, pinned**, following the `arm` → *Configuration* rename above. |
 | Evidence signpost (social card) | rename | Benchmark report | The v4 card's phrase; the current card already says "Benchmark report". Retire the older wording with the v4 assets. |
-| Colophon · verified qualification (v4 badge) | rename (held) | Colophon · binary qualification | Ruled in #4270: the reserved word is retired from the badge, social card, share text, index prose, and the report README's status line: the five sites the emission-site comment enumerates. The two that are not SVG or share builders are named here because they are easy to miss: the index prose is `neutralClaimHtml`'s binary sentence, `Verified binary-instrument qualification. Facts are presented per instrument without comparative conclusions.`, and the README status line is `buildReadme`'s `documentStatus`, `<run outcome>. Verified binary-instrument qualification.` (both `assets.ts`). A further string, `pairedCompactFragment`'s `Verified qualification signpost · full evidence at index.html`, was never a sixth site: `buildBadge`, `buildSocialCard`, and `buildShareText` all return on `binary` before they call it, so no surface ever printed it. It never reached a presentation byte `verify.ts` byte-compares, so its removal did not need the #4270 allocation. #4418 deleted the unreachable string outright (`check/src/assets.ts`); the five rendered sites, `neutralClaimHtml`, `buildBadge`, `buildSocialCard`, `buildReadme`'s `documentStatus`, and `buildShareText`, are the whole inventory of surfaces still carrying the reserved word. A badge carries no room for the caveats the CLI prints under its verdict, so it names the scope instead. **Held pending a bundle-format allocation**, not yet applied: `verify.ts` byte-compares every presentation asset against the reader's own rebuild, and every qualifying format pins a published reader, so moving these bytes without an allocation makes each side refuse the other. The hold is recorded at the emission site (`check/src/assets.ts`, above `buildBadge`), beside the #2980 and #2977 holds. GitHub issue #4270 was auto-closed after PR #4318; this row and that comment are the remaining record of the hold, by ruling and not by default (#4419, #4836: a durable reopen via a `Deferred` heading on PR #4318 was available and was declined — see the v1.10 entry). |
+| Colophon · verified qualification (v4 badge) | rename (held) | Colophon · binary qualification | Ruled in #4270: the reserved word is retired from the badge, social card, share text, index prose, and the report README's status line: the five sites the emission-site comment enumerates. The two that are not SVG or share builders are named here because they are easy to miss: the index prose is `neutralClaimHtml`'s binary sentence, `Verified binary-instrument qualification. Facts are presented per instrument without comparative conclusions.`, and the README status line is `buildReadme`'s `documentStatus`, `<run outcome>. Verified binary-instrument qualification.` (both `assets.ts`). A further string, `pairedCompactFragment`'s `Verified qualification signpost · full evidence at index.html`, was never a sixth site: `buildBadge`, `buildSocialCard`, and `buildShareText` all return on `binary` before they call it, so no surface ever printed it. It never reached a presentation byte `verify.ts` byte-compares, so its removal did not need the #4270 allocation. #4418 deleted the unreachable string outright (`check/src/assets.ts`); the five rendered sites, `neutralClaimHtml`, `buildBadge`, `buildSocialCard`, `buildReadme`'s `documentStatus`, and `buildShareText`, are the whole inventory of surfaces still carrying the reserved word. A badge carries no room for the caveats the CLI prints under its verdict, so it names the scope instead. **Held pending a bundle-format allocation**, not yet applied: `verify.ts` byte-compares every presentation asset against the reader's own rebuild, and every qualifying format pins a published reader, so moving these bytes without an allocation makes each side refuse the other. The hold is recorded at the emission site (`check/src/assets.ts`, above `buildBadge`), beside the #2980 and #2977 holds. GitHub issue #4270 was auto-closed after PR #4318; this row and that comment are the remaining record of the hold, by ruling and not by default (#4419; #4836 found that a reopen surviving the debt-sweep closer, via a `Deferred` heading on PR #4318's body, was available and was declined — see the v1.10 entry). |
 | No comparative winner stated | keep | — | Load-bearing and already plain. |
 
 #### Binary-qualification report surface (binary reports only)
@@ -357,9 +368,10 @@ rows that needed it, not retrofitted across the document.
 | `not fetched` | keep | — | Already exact. |
 | Signed by: publisher / automated grader / human reviewer / label admission | keep | — | Already plain. The `urn:`/`did:key` forms correctly stay in `--json`. |
 | same operator / custody not declared | keep | — | |
-| Anchors / Anchor subjects | rename | Timestamps | |
-| Anchor (the record) | rename + gloss | Timestamp proof | |
-| Time basis | rename | What the timestamp covers | |
+| Anchors | rename (heading) | Timestamps | A heading form of the concept **timestamp proof** (§5), per the headings rule there: it heads the list of proofs the bundle carries. Not a second name for the concept. v1.0 ruled *Anchor subjects* to the same word; the two blocks need two headings, so that one is ruled in the next row. |
+| Anchor subjects (second heading) | rename (heading) | Timestamp coverage | A heading form of the concept **timestamp proof** (§5), per the headings rule there: it says which records a proof covers and drops the hidden word *subject*. Not a second name for the concept. |
+| Anchor (the record) | rename + gloss | Timestamp proof | The inherited word appears once, in parentheses, in the reader's closing paragraph: *A timestamp proof (anchor) dates …*. |
+| Time basis | rename | Time source | Where a proof's time comes from (`authority-time`, `chain-time`). Not *what the timestamp covers*, which is the lock or matrix bytes the reader recomputes for a `present` proof. |
 | anchored / absent / `declared-but-absent` | rename | timestamped / none / promised but missing | The `declared-but-absent` **string in `--json` is contract**; only the human line changes. |
 | Trust material | rename | Trust anchors you supply | |
 | Artifact content … not fetched | keep | — | Already reader-shaped, and the caveat under it is exemplary. |
@@ -438,8 +450,9 @@ length-constrained surfaces: the first wants a sentence, the second wants one or
 neither can carry a nine-word canonical name. A heading or column header may therefore be a
 sentence-shaped or column-width form of a concept named above **without being a second name for
 it**, on one condition: the §4 row that rules it says so and points back to the concept's row
-here. One row meets that condition today: §4.1's *What was run, and what came back*, whose
-concept is **the runs**. A heading that *contains* a canonical name rather than substituting
+here. Three rows meet that condition today: §4.1's *What was run, and what came back*, whose
+concept is **the runs**, and §4.2's *Timestamps* and *Timestamp coverage*, whose concept is
+**timestamp proof**. A heading that *contains* a canonical name rather than substituting
 for it — the binary surface's *Each item's decision, and where the answer changed on rerun* —
 is not in this class and needs no exception; its own row already says why. Everything else is a
 name, and the law above applies to it in full.

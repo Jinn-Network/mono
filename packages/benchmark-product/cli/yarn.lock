@@ -817,10 +817,17 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@noble/hashes@npm:2.2.0":
-  version: 2.2.0
-  resolution: "@noble/hashes@npm:2.2.0"
-  checksum: 10c0/cad8630c504d6b9271984f685cd0af9101b40988fc2dfbe17ccdf068a9941f95cc5c9957d89e9ca4b7ca94c15cb35f93510c5d53a09fbcc83ee503b93d0a1034
+"@noble/hashes@npm:2.3.0":
+  version: 2.3.0
+  resolution: "@noble/hashes@npm:2.3.0"
+  checksum: 10c0/85651da4c1ea1db15fcacac7f38e4c4e6d60154cd116200b1002c198893bfad2733b31108352fde307126bab789f82f47b5bee8a12462b12f25fd0703aed7dce
+  languageName: node
+  linkType: hard
+
+"@noble/hashes@npm:^2.2.0":
+  version: 2.4.0
+  resolution: "@noble/hashes@npm:2.4.0"
+  checksum: 10c0/f5820a38c52886073a69722a030688ad188bbacb822d01554545371259961c2b916266c57c013c2ce5a0d78aec977142fc68fd2a79be4c97b0644fcee9bb35f6
   languageName: node
   linkType: hard
 

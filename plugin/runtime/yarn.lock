@@ -220,7 +220,7 @@ __metadata:
   resolution: "@jinn-network/evidence-derivation@portal:../../packages/evidence/derivation::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
-    "@noble/hashes": "npm:2.2.0"
+    "@noble/hashes": "npm:^2.2.0"
     "@secretlint/core": "npm:13.0.4"
     "@secretlint/secretlint-rule-preset-recommend": "npm:13.0.4"
     canonicalize: "npm:3.0.0"
@@ -292,7 +292,7 @@ __metadata:
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
-    "@noble/hashes": "npm:2.2.0"
+    "@noble/hashes": "npm:^2.2.0"
     ajv: "npm:8.17.1"
     zod: "npm:4.4.3"
   languageName: node

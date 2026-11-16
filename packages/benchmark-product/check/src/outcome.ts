@@ -57,7 +57,7 @@ const CHECK_SUBJECTS: { readonly [C in VerificationCheckName]: string } = {
   "matrix-rederivation": "calculations",
   "report-verification": "the report",
   "claim-consistency": "claim consistency",
-  "integrity-anchors": "anchor well-formedness",
+  "integrity-anchors": "timestamp proof well-formedness",
   "disclosure-specification": "the disclosure specification",
   "external-import": "the external-import marker",
   "artifact-integrity": "artifact integrity",

@@ -13,17 +13,20 @@ import { link, open as openFile, readFile, rename, unlink } from "node:fs/promis
 import { dirname } from "node:path";
 import { randomBytes } from "node:crypto";
 import {
+  didPkh,
   recordDigest,
   sealTrustPolicy,
   validateTrustPolicy,
+  type DidPkh,
   type DsseSigner,
   type Sha256Digest,
   type SignerSet,
   type TrustPolicy,
 } from "@jinn-network/trust-core";
 
-import type { AnchorDeclaration } from "./anchor.js";
+import { NATIVE_ANCHOR_CHAIN_ID, type AnchorDeclaration } from "./anchor.js";
 import type { SealedBindingEntry } from "./binding.js";
+import type { CeremonySigner } from "./ceremony.js";
 import { TrustAuthoringError } from "./errors.js";
 import type { NativeRoleIdentityRole } from "./roles.js";
 
@@ -555,14 +558,47 @@ export async function sealPolicySuccessor(input: {
 }
 
 /**
+ * Key authority section 8, "An account's signature": the revocation signer for a binding's voucher
+ * account. Its `keyId` is the account's `did:pkh`, spelled as `authorRoleBinding` spells the voucher,
+ * and is the revocation's `revokedBy`. It signs the DSSE pre-authentication encoding with a 65-byte
+ * EIP-191 `personal_sign` signature, and refuses any other length rather than seal a revocation no
+ * verifier would count.
+ */
+export function voucherAccountSigner(voucher: CeremonySigner): {
+  readonly keyId: DidPkh;
+  readonly dsseSigner: DsseSigner;
+} {
+  const keyId = didPkh(NATIVE_ANCHOR_CHAIN_ID, voucher.address);
+  return {
+    keyId,
+    dsseSigner: async ({ preAuthEncoding }) => {
+      const signature = await voucher.signMessage({ message: { raw: preAuthEncoding } });
+      if (!/^0x[0-9a-fA-F]{130}$/u.test(signature)) {
+        throw new TrustAuthoringError(`voucher account ${keyId} returned a signature that is not 65 bytes of hex`);
+      }
+      return [{ keyid: keyId, signature: new Uint8Array(Buffer.from(signature.slice(2), "hex")) }];
+    },
+  };
+}
+
+/**
  * DESIGNED, IMPLEMENTATION DEFERRED (spec §3.3, §9 follow-up issue). The catalog schema and the
  * binding resolver already carry anchored, effective-time revocations, so rotation needs no schema
  * change when it ships — only this body, plus the rebind flow (revoke + `authorRoleBinding` for the
  * replacement key + a new anchor). The surface is fixed here so that stays true.
+ *
+ * The signer is the target binding's voucher account, through `voucherAccountSigner`, and never the
+ * catalog authority. Key authority section 8 gives a revocation effect only from the voucher account,
+ * from the bound key itself when its record holds `bindings` scope, or from a standing `bindings` key
+ * of the Agent. No native role binding holds `bindings` scope (spec §3.2a), so neither the bound key
+ * nor any other role key of the Agent can revoke one, and the voucher account is the one signer whose
+ * revocation of a native role binding counts. The catalog authority's key holds no binding to any
+ * Agent, so a revocation it signed would have no effect in any reader.
  */
 export interface RevokeBindingInput {
   readonly catalogPath: string;
-  readonly authority: CatalogAuthority;
+  /** The ceremony EOA `authorRoleBinding` named as the target binding's `did:pkh` voucher. */
+  readonly voucher: CeremonySigner;
   /** The `sha256:` digest of the sealed binding being revoked. */
   readonly target: `sha256:${string}`;
   readonly effectiveTime: string;
