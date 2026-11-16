@@ -528,3 +528,168 @@ test('a boolean run value still publishes through the guard', () => {
     assert.match(passed.output, new RegExp(`^${expected}$`, 'mu'));
   }
 });
+
+/**
+ * Lift the `platform-verification` gate's steps out of the workflow: each step's name,
+ * its `${{ ... }}` env bindings, and its `run:` script. A step-level `if:` or
+ * `continue-on-error` would change which steps decide the job's conclusion, so both
+ * are refused here rather than modeled.
+ */
+function parseGateSteps(source) {
+  const gateJob = sliceJob(source, '  platform-verification:');
+  const marker = '\n    steps:\n';
+  const at = gateJob.indexOf(marker);
+  assert.ok(at >= 0, 'platform-verification must declare steps:');
+  const chunks = gateJob.slice(at + marker.length).split(/^ {6}- /mu).slice(1);
+  assert.notEqual(chunks.length, 0, 'platform-verification must declare at least one step');
+  return chunks.map((chunk) => {
+    const name = chunk.match(/^name: (?<name>.+)$/mu)?.groups?.name;
+    assert.ok(name, 'every platform-verification step must open with its name');
+    assert.doesNotMatch(chunk, /^ {8}if:/mu, `${name}: a gate step must not be conditional`);
+    assert.doesNotMatch(chunk, /continue-on-error/u, `${name}: a gate step must not continue on error`);
+    const env = new Map(
+      [...chunk.matchAll(/^ {10}(?<variable>[A-Z][A-Z0-9_]*): \$\{\{ (?<expression>[^}]+?) \}\}$/gmu)]
+        .map(({ groups }) => [groups.variable, groups.expression]),
+    );
+    const inline = chunk.match(/^ {8}run: (?!\|)(?<command>.+)$/mu)?.groups?.command;
+    if (inline !== undefined) return { name, env, script: `${inline}\n` };
+    const blockMarker = '\n        run: |\n';
+    const block = chunk.indexOf(blockMarker);
+    assert.ok(block >= 0, `${name}: must carry a run: script`);
+    const lines = [];
+    for (const line of chunk.slice(block + blockMarker.length).split('\n')) {
+      if (line.trim() === '') {
+        lines.push('');
+        continue;
+      }
+      if (!line.startsWith('          ')) break;
+      lines.push(line.slice(10));
+    }
+    return { name, env, script: `${lines.join('\n')}\n` };
+  });
+}
+
+/**
+ * Run the gate's steps in order under `bash -e`, the shell GitHub Actions uses for a
+ * `run:` step, stopping at the first non-zero exit the way a job does. Every binding a
+ * step declares must be answered by `needs`, so a binding pointed at the wrong job
+ * fails here instead of reading as an empty string.
+ */
+function runGate(steps, needs) {
+  for (const step of steps) {
+    const env = { PATH: process.env.PATH };
+    for (const [variable, expression] of step.env) {
+      assert.ok(
+        Object.hasOwn(needs, expression),
+        `${step.name}: binds ${variable} to \${{ ${expression} }}, which the lane under test does not answer`,
+      );
+      env[variable] = needs[expression];
+    }
+    const run = spawnSync('bash', ['-e', '-c', step.script], { encoding: 'utf8', env });
+    if (run.status !== 0) return { conclusion: 'failure', step: step.name };
+  }
+  return { conclusion: 'success' };
+}
+
+// The two lanes the gate sees once selection succeeds: the pull-request fast lane and
+// any unselected merge group skip the reusable call; a selected merge group runs it.
+const UNSELECTED_LANE = Object.freeze({
+  'needs.verification-selection.result': 'success',
+  'needs.verification-selection.outputs.run': 'false',
+  'needs.platform-verification-reusable.result': 'skipped',
+});
+const SELECTED_LANE = Object.freeze({
+  'needs.verification-selection.result': 'success',
+  'needs.verification-selection.outputs.run': 'true',
+  'needs.platform-verification-reusable.result': 'success',
+});
+const RELEASE_SURFACE_RESULT = 'needs.platform-release-surface.result';
+
+// `platform-release-surface` is not one of the required contexts on `next`, and before
+// #5262 nothing required depended on it: on 2026-11-14 it failed in three merge groups
+// whose `platform-verification` and `platform-architecture-control` were both green, and
+// all three merges landed. The required `platform-verification` gate now carries it.
+test('platform-verification needs platform-release-surface and binds its result', () => {
+  const source = readArchitectureControlWorkflow();
+  const gateJob = sliceJob(source, '  platform-verification:');
+  assert.match(gateJob, /^ {4}if: always\(\)$/mu, 'the gate must report even when a job it needs fails');
+  const needsBlock = gateJob.match(/^ {4}needs:\n(?<list>(?: {6}- [A-Za-z0-9_-]+\n)+)/mu)?.groups?.list;
+  assert.ok(needsBlock, 'platform-verification must declare a block-sequence needs:');
+  const needs = [...needsBlock.matchAll(/- (?<id>[A-Za-z0-9_-]+)/gu)].map(({ groups }) => groups.id);
+  assert.deepEqual(
+    [...needs].sort(),
+    ['platform-release-surface', 'platform-verification-reusable', 'verification-selection'],
+  );
+  // `needs.<job>` resolves to nothing for a job outside `needs:`, so every job the gate
+  // reads must also be one it waits for.
+  for (const [, job] of gateJob.matchAll(/needs\.(?<job>[A-Za-z0-9_-]+)\./gu)) {
+    assert.ok(needs.includes(job), `platform-verification reads needs.${job} without needing it`);
+  }
+  assert.match(gateJob, /RELEASE_SURFACE_RESULT: \$\{\{ needs\.platform-release-surface\.result \}\}/u);
+  assert.match(gateJob, /test "\$\{RELEASE_SURFACE_RESULT\}" = success/u);
+});
+
+// Exact success is only safe to demand of a job that always runs. The workflow has no
+// `paths:` filter (the trigger set is pinned above), and the job carries no `if:` and no
+// `needs:`, so it runs on every pull request, merge group, and dispatch that runs the
+// gate. A condition added later must change the gate in the same edit.
+test('platform-release-surface runs whenever the workflow does', () => {
+  const releaseJob = sliceJob(
+    readArchitectureControlWorkflow(),
+    '  platform-release-surface:',
+    '  platform-verification-reusable:',
+  );
+  assert.doesNotMatch(releaseJob, /^ {4}if:/mu);
+  assert.doesNotMatch(releaseJob, /^ {4}needs:/mu);
+  assert.doesNotMatch(releaseJob, /continue-on-error/u);
+});
+
+test('a failed, cancelled, or skipped platform-release-surface fails platform-verification on every lane', () => {
+  const steps = parseGateSteps(readArchitectureControlWorkflow());
+  for (const [label, lane] of [['unselected', UNSELECTED_LANE], ['selected', SELECTED_LANE]]) {
+    assert.deepEqual(
+      runGate(steps, { ...lane, [RELEASE_SURFACE_RESULT]: 'success' }),
+      { conclusion: 'success' },
+      `${label}: a green release surface must leave the gate green`,
+    );
+    for (const result of ['failure', 'cancelled', 'skipped', '']) {
+      assert.equal(
+        runGate(steps, { ...lane, [RELEASE_SURFACE_RESULT]: result }).conclusion,
+        'failure',
+        `${label}: a '${result}' release surface must fail platform-verification`,
+      );
+    }
+  }
+
+  // Kill-check: the same gate without the steps that read the release surface is the
+  // shape that let the three merges land. It goes green over a failed release surface,
+  // which is what makes the assertions above load-bearing.
+  const withoutReleaseSurface = steps.filter(
+    (step) => ![...step.env.values()].includes(RELEASE_SURFACE_RESULT),
+  );
+  assert.ok(withoutReleaseSurface.length < steps.length, 'a gate step must bind the release-surface result');
+  for (const lane of [UNSELECTED_LANE, SELECTED_LANE]) {
+    assert.equal(
+      runGate(withoutReleaseSurface, { ...lane, [RELEASE_SURFACE_RESULT]: 'failure' }).conclusion,
+      'success',
+    );
+  }
+});
+
+test('with a green release surface the gate keeps its selection rule', () => {
+  const steps = parseGateSteps(readArchitectureControlWorkflow());
+  const green = { [RELEASE_SURFACE_RESULT]: 'success' };
+  const cases = [
+    [{ ...UNSELECTED_LANE, 'needs.verification-selection.result': 'failure' }, 'failure'],
+    [{ ...UNSELECTED_LANE }, 'success'],
+    [{ ...UNSELECTED_LANE, 'needs.platform-verification-reusable.result': 'failure' }, 'failure'],
+    [{ ...UNSELECTED_LANE, 'needs.platform-verification-reusable.result': 'cancelled' }, 'failure'],
+    [{ ...SELECTED_LANE }, 'success'],
+    [{ ...SELECTED_LANE, 'needs.platform-verification-reusable.result': 'skipped' }, 'failure'],
+    [{ ...SELECTED_LANE, 'needs.platform-verification-reusable.result': 'failure' }, 'failure'],
+    [{ ...SELECTED_LANE, 'needs.platform-verification-reusable.result': 'cancelled' }, 'failure'],
+  ];
+  for (const [lane, expected] of cases) {
+    assert.equal(runGate(steps, { ...lane, ...green }).conclusion, expected, JSON.stringify(lane));
+  }
+});
