@@ -21,9 +21,12 @@ The dependency direction is one-way: `authoring` depends on `core`; `resolve` ne
   own file under its own store-format tag.
 - **Ceremonies** — `performEoaCeremony` builds and EIP-191-signs the profiled SIWE message.
   `message.address` is always the actual signer; a settlement-scoped binding's ceremony declares the
-  service Safe as a third `did:pkh` resource (§2.3b) instead of pretending the Safe signed.
+  service Safe as a third `did:pkh` resource (§2.3b) instead of pretending the Safe signed, and the
+  final resource commits to the binding's terms (`urn:jinn:trust:binding-terms:v1:sha256:…`,
+  `ceremony-currency/v1` §2).
 - **Bindings** — `authorRoleBinding` seals the self-signed `KeyBinding`, vouched by the ceremony EOA,
-  scoped from the role's record families, anchored on-chain.
+  scoped from the role's record families, anchored on-chain; `roleBindingTerms` derives the terms a
+  role's ceremony commits to.
 - **Anchors** — `submitAnchor` writes the calldata anchor and returns the block time;
   `waitForFinalizedAnchor` polls the injected reader until it reads back finalized.
 - **Catalog** — `authorCatalog` (genesis, refuses to overwrite), `appendOperator` (late join:

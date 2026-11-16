@@ -7,15 +7,19 @@
  *
  * Every §6 law that can be checked at authoring time IS checked here rather than deferred to a boot
  * refusal: `validFrom` must be the verbatim anchor time and must equal the ceremony's `issuedAt`;
- * the ceremony's declared resources must name this exact agent and key; and the §2.3b resource
- * cardinality (three for settlement-scoped bindings, two otherwise) is enforced, so PR2's
- * settlement-authority check has the third resource waiting for it.
+ * the ceremony's declared resources must name this exact agent and key; the resource cardinality
+ * (four for settlement-scoped bindings with the Safe ahead of the commitment, three otherwise) is
+ * enforced; and the final resource must commit to the binding's exact terms (ceremony currency §2,
+ * §3).
  */
 import {
+  bindingTermsCommitment,
+  ceremonyCurrencyFailure,
   ceremonyEvidenceDigest,
   didPkh,
   recordDigest,
   sealKeyBinding,
+  type BindingTerms,
   type EoaCeremonyEvidence,
   type KeyBinding,
 } from "@jinn-network/trust-core";
@@ -48,6 +52,15 @@ export function scopeForRole(role: NativeRoleIdentityRole): readonly string[] {
   return [...new Set(NATIVE_ROLE_IDENTITY_REQUIREMENTS[role])];
 }
 
+/** The binding terms `authorRoleBinding` seals for `role` at `validFrom` (ceremony currency §2). */
+export function roleBindingTerms(role: NativeRoleIdentityRole, validFrom: string): BindingTerms {
+  return {
+    relationship: "controls",
+    scope: scopeForRole(role),
+    validFrom,
+  };
+}
+
 export async function authorRoleBinding(input: {
   readonly role: NativeRoleIdentityRole;
   /** The role's own custody — the binding is SELF-signed, which is what ties store to catalog. */
@@ -66,11 +79,11 @@ export async function authorRoleBinding(input: {
     );
   }
   const resources = input.ceremony.message.resources;
-  const expectedResourceCount = isSettlementRole(input.role) ? 3 : 2;
+  const expectedResourceCount = isSettlementRole(input.role) ? 4 : 3;
   if (resources.length !== expectedResourceCount) {
     throw new TrustAuthoringError(
       `role "${input.role}" binding requires exactly ${expectedResourceCount} ceremony resources `
-        + `(§2.3b), got ${resources.length}`,
+        + `(§2.3b, ceremony currency §2), got ${resources.length}`,
     );
   }
   if (resources[0] !== input.agent) {
@@ -89,6 +102,22 @@ export async function authorRoleBinding(input: {
         + `"${input.validFrom}" — both must be the verbatim anchor block time (§6 law 2)`,
     );
   }
+  const terms = roleBindingTerms(input.role, input.validFrom);
+  const expectedCommitment = bindingTermsCommitment(terms);
+  const actualCommitment = resources[resources.length - 1];
+  if (actualCommitment !== expectedCommitment) {
+    throw new TrustAuthoringError(
+      `ceremony commits to terms "${actualCommitment ?? ""}", not the binding's "${expectedCommitment}" `
+        + "(ceremony currency §2)",
+    );
+  }
+  const currencyFailure = ceremonyCurrencyFailure(input.ceremony.message, terms, {
+    profile: { termsCutover: input.validFrom },
+    effectiveStart: input.validFrom,
+  });
+  if (currencyFailure !== undefined) {
+    throw new TrustAuthoringError(currencyFailure);
+  }
 
   const binding: KeyBinding = {
     protocol: KEY_BINDING_PROTOCOL,
@@ -104,9 +133,9 @@ export async function authorRoleBinding(input: {
       did: didPkh(NATIVE_ANCHOR_CHAIN_ID, input.ceremonyAccount),
       contractAccount: false,
     },
-    relationship: "controls",
-    scope: [...scopeForRole(input.role)],
-    validFrom: input.validFrom,
+    relationship: terms.relationship,
+    scope: [...terms.scope],
+    validFrom: terms.validFrom,
     ceremony: { type: "eoa", digest: ceremonyEvidenceDigest(input.ceremony) },
     strength: "strong",
     anchors: [{ digest: input.anchorDigest }],
