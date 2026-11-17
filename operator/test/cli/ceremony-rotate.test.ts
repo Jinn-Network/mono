@@ -19,7 +19,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { openRoleSigners, revocationAnchorDigest } from '@jinn-network/trust-authoring';
+import { openRoleSigners, revocationAnchorDigest, scopeForRole } from '@jinn-network/trust-authoring';
 import { didPkh, validateKeyBinding } from '@jinn-network/trust-core';
 import { privateKeyToAccount } from 'viem/accounts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -30,7 +30,7 @@ import {
   type CeremonyCommandDeps,
 } from '../../src/cli/commands/ceremony.js';
 import type { CommandContext } from '../../src/cli/command.js';
-import { orderedRolesForSet } from '../../src/cli/commands/native-requester.js';
+import { ROLE_SETS, orderedRolesForSet, type RoleSetName } from '../../src/cli/commands/native-requester.js';
 import { openNativeTrustCatalog } from '../../src/daemon/native-trust-catalog.js';
 import { openRoleIdentitySet, type NativeRoleIdentityRole } from '../../src/daemon/role-identities.js';
 
@@ -724,8 +724,8 @@ describe('ceremony init re-authoring a rotated operator', () => {
  */
 describe('ceremony join after a rotation', () => {
   /** A second catalog, sealed at another path by another operator under the same catalog authority. */
-  async function secondCatalog(h: Harness): Promise<{ readonly path: string; readonly genesis: string }> {
-    const otherDir = join(h.home, '.jinn-operator-b');
+  async function secondCatalog(h: Harness, name = '.jinn-operator-b'): Promise<{ readonly path: string; readonly genesis: string }> {
+    const otherDir = join(h.home, name);
     mkdirSync(otherDir, { recursive: true });
     const init = await run(h, [
       'init', '--dir', otherDir, '--role-sets', 'requester,admission,solver', '--authority-store', h.authorityStore,
@@ -954,7 +954,7 @@ describe('ceremony join after a rotation', () => {
     expect(refusal.details).toMatchObject({ state: 'rotated-family', sideEffects: false, families: ['requester'] });
     expect(String(refusal.message)).toContain(`${h.catalogPath} revokes`);
     unchanged();
-    expect(createCeremonyCommand(h.deps).helpText).toContain('the run receipt, <dir>/ceremony/receipt.json, names the anchor');
+    expect(createCeremonyCommand(h.deps).helpText).toContain('the run receipt, <dir>/ceremony/receipt.json, names every anchor');
   });
 
   it('refuses from the catalog it joins when that is the one the rotation revoked in, moved to another path (#5362)', async () => {
@@ -983,6 +983,45 @@ describe('ceremony join after a rotation', () => {
     const result = await run(h, joinArgv(h, second, 'requester'));
 
     expect(result.kind).toBe('ceremony_join_complete');
+  });
+
+  it('refuses a family a rotation retired after a later join replaced the anchor the run receipt names (#5362)', async () => {
+    // init binds requester, admission and solver into the first catalog, under one anchor.
+    const h = await provisioned();
+    expect(Object.keys(JSON.parse(readFileSync(join(h.dir, 'ceremony', 'receipt.json'), 'utf-8')))).not.toContain('earlierAnchors');
+    const rotation = await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
+    expect(rotation.kind).toBe('ceremony_rotate_complete');
+    // A join of requester alone into a second catalog: a new anchor, over the requester keys only.
+    const second = await secondCatalog(h);
+    const joined = await run(h, joinArgv(h, second, 'requester'));
+    expect(joined.kind).toBe('ceremony_join_complete');
+    // Then every other record of the solver rotation goes.
+    const setAside = join(h.home, 'set-aside');
+    mkdirSync(setAside);
+    for (const name of readdirSync(join(h.dir, 'identity')).filter((entry) => entry.startsWith('solver.rotated-'))) {
+      renameSync(join(h.dir, 'identity', name), join(setAside, name));
+    }
+    rmSync(join(h.dir, 'ceremony', 'rotation.json'));
+    const third = await secondCatalog(h, '.jinn-operator-c');
+    const unchanged = snapshot(h, third.path);
+    const freshConfig = join(h.home, 'fresh-config.json');
+
+    const refusal = await run(h, [...joinArgv(h, third, 'requester,solver'), '--config', freshConfig]);
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect(refusal.details).toMatchObject({ state: 'rotated-family', sideEffects: false, families: ['solver'] });
+    expect(String(refusal.message)).toContain(`${h.catalogPath} revokes the solver keys`);
+    expect(existsSync(freshConfig)).toBe(false);
+    unchanged();
+  });
+
+  it('keeps, for every role family, a role whose scope no other family holds, which is how a revoked binding names it', () => {
+    const scopeOf = (role: NativeRoleIdentityRole): string => [...scopeForRole(role)].sort().join(' ');
+    const families = Object.keys(ROLE_SETS) as RoleSetName[];
+    for (const family of families) {
+      const elsewhere = new Set(families.filter((other) => other !== family).flatMap((other) => [...ROLE_SETS[other]].map(scopeOf)));
+      expect([...ROLE_SETS[family]].some((role) => !elsewhere.has(scopeOf(role))), family).toBe(true);
+    }
   });
 });
 
