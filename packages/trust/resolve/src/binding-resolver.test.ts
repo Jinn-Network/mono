@@ -19,6 +19,7 @@ import type {
   AnchorResolver,
   ChainFactResolver,
   DsseChainVerifier,
+  Eip1271Witness,
   EoaCeremonyEvidence,
   KeyBinding,
   Revocation,
@@ -26,7 +27,7 @@ import type {
   Sha256Digest,
   WitnessVerifier,
 } from "@jinn-network/trust-core";
-import { hexToBytes } from "viem";
+import { bytesToHex, hexToBytes } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it, vi } from "vitest";
 
@@ -134,6 +135,60 @@ function unusedChainFacts(): ChainFactResolver {
       throw new Error("getAgentWalletAtBlock should not be called in this test");
     }),
   };
+}
+
+/** The author of the 1271 witnesses here (§7.2a), and the key its statements are sealed under. */
+const WITNESS_AUTHOR = "https://spec.jinn.network/agents/witness";
+const WITNESS_KEY = "did:key:zWitness";
+
+/** A 1271 witness (§7.2a): `WITNESS_AUTHOR`'s statement that `safe` on `chainId` accepted `signature`
+ * over `messageBytes`, in its RFC 8785 form and sealed under the author's key. */
+function witnessOver(safe: string, messageBytes: Uint8Array, signature: Uint8Array, chainId = 84532): Eip1271Witness {
+  const statement = {
+    chainId,
+    blockNumber: 1,
+    blockHash: `0x${"9".repeat(64)}`,
+    verifier: WITNESS_AUTHOR,
+    safe,
+    hash: eip191MessageHash(messageBytes),
+    signature: bytesToHex(signature),
+    result: "0x1626ba7e",
+  };
+  return {
+    chainId,
+    blockNumber: statement.blockNumber,
+    blockHash: statement.blockHash,
+    verifier: WITNESS_AUTHOR,
+    envelopeBytes: sealDsseEnvelope({
+      payloadBytes: canonicalJsonBytes(statement),
+      signatures: [{ signature: Uint8Array.of(1), keyid: WITNESS_KEY }],
+    }),
+  };
+}
+
+/** A Safe's ceremony (§7.2): the profiled SIWE message an EOA would sign, naming `resources`, signed by
+ * `safe` under EIP-1271, and a witness that `safe` accepted it. */
+function safeCeremony(
+  safe: `0x${string}`,
+  { resources = [AGENT, KEY_A], issuedAt = "2026-01-01T00:00:00.000Z", nonce = "safe-nonce" }: {
+    readonly resources?: readonly string[];
+    readonly issuedAt?: string;
+    readonly nonce?: string;
+  } = {},
+): { readonly ceremonyEvidence: SafeCeremonyEvidence; readonly witness: Eip1271Witness } {
+  const message = {
+    domain: "trust.jinn.network",
+    address: safe,
+    uri: "https://trust.jinn.network/ceremony/key-binding",
+    version: "1" as const,
+    chainId: 84532,
+    nonce,
+    issuedAt,
+    resources,
+  };
+  const messageBytes = serializeCeremonyMessage("safe", message);
+  const signature = Uint8Array.of(0xbb);
+  return { ceremonyEvidence: { type: "safe", message, messageBytes, signature }, witness: witnessOver(safe, messageBytes, signature) };
 }
 
 describe("createBindingResolver", () => {
@@ -585,7 +640,7 @@ describe("createBindingResolver", () => {
       expect(await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at)).toBeNull();
     });
 
-    it.each(["safe", "oidc-machine", "github-human"] as const)("resolves a %s binding only on the host's say-so", async (type) => {
+    it.each(["oidc-machine", "github-human"] as const)("resolves a %s binding only on the host's say-so", async (type) => {
       const binding = accountBinding({ ceremony: { type, digest: CEREMONY_DIGEST }, strength: deriveStrength(type) });
       const sealed = record(binding, DIGEST_A);
       const verifyHostedCeremony = vi.fn(async () => true);
@@ -637,7 +692,12 @@ describe("createBindingResolver", () => {
       {
         ceremony: "oidc-machine" as const,
         label: "a hosted ceremony the host refused",
-        options: { verifyHostedCeremony: async () => false },
+        options: { verifyHostedCeremony: async (): Promise<boolean> => false },
+      },
+      {
+        ceremony: "safe" as const,
+        label: "a safe ceremony with no message, which the host would vouch for",
+        options: { verifyHostedCeremony: async (): Promise<boolean> => true },
       },
     ])("counts $label when deciding what came first, and does not resolve it", async ({ ceremony, options }) => {
       const earlier = accountBinding({
@@ -658,6 +718,67 @@ describe("createBindingResolver", () => {
 
       expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.isGenesis).toBe(false);
       expect(await resolver.resolveBinding({ key: KEY_OWNER, agent: AGENT }, at)).toBeNull();
+    });
+  });
+
+  // A Safe signs the same message an EOA does (§7.2). This resolver holds no witness verifier, so
+  // whether to believe a witness is the host's call, but the message and what the witness says it
+  // checked are read here first, as `verify.ts` reads them.
+  describe("a Safe ceremony, checked before the host is asked (§7.2)", () => {
+    const SAFE = "0x5afe00000000000000000000000000000000cafe" as const;
+    const voucher = { kind: "account" as const, did: didPkh(84532, SAFE), contractAccount: true };
+    const anchors = fakeAnchors({ [DIGEST_A]: "2026-01-01T00:00:00.000Z" });
+    const at = "2026-06-01T00:00:00.000Z";
+
+    /** A Safe's binding of KEY_A that commits to `ceremonyEvidence` and carries it with `witness`. */
+    function safeRecord(
+      { ceremonyEvidence, witness }: { readonly ceremonyEvidence: unknown; readonly witness?: Eip1271Witness } = safeCeremony(SAFE),
+    ): SealedKeyBindingRecord {
+      const binding = accountBinding({
+        voucher,
+        ceremony: { type: "safe", digest: ceremonyEvidenceDigest(ceremonyEvidence as SafeCeremonyEvidence) },
+        strength: deriveStrength("safe"),
+      });
+      return {
+        ...record(binding, DIGEST_A),
+        ceremonyEvidence: ceremonyEvidence as SafeCeremonyEvidence,
+        ...(witness === undefined ? {} : { witness }),
+      };
+    }
+
+    const resolving = (entry: SealedKeyBindingRecord, verifyHostedCeremony: CreateBindingResolverOptions["verifyHostedCeremony"]) =>
+      createBindingResolver({ bindings: fakeStore([entry]), anchors, verifyHostedCeremony })
+        .resolveBinding({ key: KEY_A, agent: AGENT }, at);
+
+    it("resolves a genuine one only on the host's say-so", async () => {
+      const genuine = safeRecord();
+      const verifyHostedCeremony = vi.fn(async () => true);
+      expect((await resolving(genuine, verifyHostedCeremony))?.bindingDigest).toBe(DIGEST_A);
+      expect(verifyHostedCeremony).toHaveBeenCalledWith(genuine);
+      expect(await resolving(genuine, async () => false)).toBeNull();
+    });
+
+    it.each([
+      ["carries no ceremony evidence", () => {
+        const { ceremonyEvidence: _ceremonyEvidence, ...bare } = safeRecord();
+        return bare;
+      }],
+      ["carries no witness", () => safeRecord({ ceremonyEvidence: safeCeremony(SAFE).ceremonyEvidence })],
+      ["carries a ceremony it does not commit to", () => ({ ...safeRecord(), ...safeCeremony(SAFE, { nonce: "another-nonce" }) })],
+      ["carries an EOA ceremony's evidence", () => {
+        const { ceremonyEvidence, witness } = safeCeremony(SAFE);
+        return safeRecord({ ceremonyEvidence: { ...ceremonyEvidence, type: "eoa" }, witness });
+      }],
+      ["has a message naming another key", () => safeRecord(safeCeremony(SAFE, { resources: [AGENT, "did:key:zKeyElsewhere"] }))],
+      ["has a witness about another Safe", () => {
+        const { ceremonyEvidence } = safeCeremony(SAFE);
+        const elsewhere = "0x5afe00000000000000000000000000000000beef";
+        return safeRecord({ ceremonyEvidence, witness: witnessOver(elsewhere, ceremonyEvidence.messageBytes, ceremonyEvidence.signature) });
+      }],
+    ])("does not resolve one that %s, nor ask the host about it", async (_label, entry) => {
+      const verifyHostedCeremony = vi.fn(async () => true);
+      expect(await resolving(entry(), verifyHostedCeremony)).toBeNull();
+      expect(verifyHostedCeremony).not.toHaveBeenCalled();
     });
   });
 
@@ -1393,29 +1514,17 @@ describe("createBindingResolver", () => {
       });
     });
 
-    /** The owner's record as a Safe's: a Safe ceremony whose message names `resources`, which the
-     * record commits to, and a 1271 witness about the voucher's Safe and chain and those bytes. */
-    async function safeLeg(resources: readonly string[] = [AGENT, KEY_OWNER]): Promise<SealedKeyBindingRecord> {
-      const message = { ...(await ceremonyBy(owner, OWNED)).message, resources };
-      const messageBytes = serializeCeremonyMessage("safe", message);
-      const ceremonyEvidence: SafeCeremonyEvidence = { type: "safe", message, messageBytes, signature: Uint8Array.of(0xbb) };
+    /** The owner's record as a Safe's: a Safe ceremony issued at `issuedAt` whose message names
+     * `resources`, which the record commits to, and a 1271 witness about the voucher's Safe and chain
+     * and those bytes. */
+    async function safeLeg(resources: readonly string[] = [AGENT, KEY_OWNER], issuedAt = OWNED): Promise<SealedKeyBindingRecord> {
+      const { ceremonyEvidence, witness } = safeCeremony(owner.address, { resources, issuedAt, nonce: "composition-nonce" });
       const { ceremonyEvidence: _eoaEvidence, ...safe } = await accountLeg({
         voucher: { ...ownerVoucher, contractAccount: true },
         ceremony: { type: "safe", digest: ceremonyEvidenceDigest(ceremonyEvidence) },
         strength: deriveStrength("safe"),
       });
-      const statement = { chainId: 84532, safe: owner.address, hash: eip191MessageHash(messageBytes) };
-      return {
-        ...safe,
-        ceremonyEvidence,
-        witness: {
-          chainId: 84532,
-          blockNumber: 1,
-          blockHash: `0x${"9".repeat(64)}`,
-          verifier: AGENT,
-          envelopeBytes: sealDsseEnvelope({ payloadBytes: canonicalJsonBytes(statement), signatures: [{ signature: Uint8Array.of(1) }] }),
-        },
-      };
+      return { ...safe, ceremonyEvidence, witness };
     }
     const witness = (verified: boolean) => ({ compositionAuthority: { dsseVerifier: declaredSigners, witnessVerifier: witnesses(verified) } });
 
@@ -1440,9 +1549,25 @@ describe("createBindingResolver", () => {
       expect(await composed(bare, { verifyHostedCeremony: async () => true, ...witness(true) })).toBeNull();
     });
 
-    it("does not compose with a Safe's account record whose message names another key", async () => {
-      const elsewhere = await safeLeg([AGENT, "did:key:zKeyElsewhere"]);
-      expect(await composed(elsewhere, { verifyHostedCeremony: async () => true, ...witness(true) })).toBeNull();
+    // The host is asked only whether to believe a witness about this Safe and these bytes, so a Safe
+    // account record whose message does not hold up is refused here, before the host hears of it.
+    it.each([
+      ["whose message names another key", () => safeLeg([AGENT, "did:key:zKeyElsewhere"]), {}],
+      [
+        "whose ceremony fails the deployment's ceremony currency profile",
+        () => safeLeg(undefined, "2026-01-15T00:00:00.000Z"),
+        { ceremonyCurrency: {} },
+      ],
+    ])("does not compose with a Safe's account record %s, nor ask the host about it", async (_label, leg, options) => {
+      const verifyHostedCeremony = vi.fn(async () => true);
+      expect(await composed(await leg(), { verifyHostedCeremony, ...witness(true), ...options })).toBeNull();
+      expect(verifyHostedCeremony).not.toHaveBeenCalled();
+    });
+
+    it("composes with a Safe's account record whose ceremony meets the deployment's ceremony currency profile", async () => {
+      const witnessed = await safeLeg();
+      const options = { verifyHostedCeremony: async () => true, ...witness(true), ceremonyCurrency: {} };
+      expect((await composed(witnessed, options))?.bindingDigest).toBe(DIGEST_A);
     });
 
     describe("when the registry cannot be read", () => {
@@ -1531,6 +1656,63 @@ describe("createBindingResolver", () => {
       const resolved = await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at);
       expect(resolved?.bindingDigest).toBe(DIGEST_A);
       expect(resolved?.ceremonyCurrency).toEqual(profile);
+    });
+
+    // A Safe record whose ceremony fails the text is refused before the host is asked about it, so it
+    // does not resolve, even alone: a Safe record resolves only on the host's say-so.
+    describe("over a Safe's records", () => {
+      const SAFE = "0x5afe00000000000000000000000000000000cafe" as const;
+      const safeVoucher = { kind: "account" as const, did: didPkh(84532, SAFE), contractAccount: true };
+
+      /** A genuine Safe ceremony issued on 1 February, and a record of it anchored at `digest`. */
+      function safeVouched(digest: Sha256Digest, validFrom: string): SealedKeyBindingRecord {
+        const ceremony = safeCeremony(SAFE, { issuedAt: "2026-02-01T00:00:00.000Z", nonce: `currency-safe-${digest.slice(7, 11)}` });
+        const binding = accountBinding({
+          voucher: safeVoucher,
+          validFrom,
+          ceremony: { type: "safe", digest: ceremonyEvidenceDigest(ceremony.ceremonyEvidence) },
+          strength: deriveStrength("safe"),
+          anchors: [{ digest }],
+        });
+        return { ...record(binding, digest), ...ceremony };
+      }
+
+      it("is off by default: a Safe record that takes effect before its ceremony was issued still wins", async () => {
+        const early = safeVouched(DIGEST_A, "2026-01-01T00:00:00.000Z");
+        const current = await vouched(DIGEST_B, "2026-02-01T00:00:00.000Z");
+        const resolver = createBindingResolver({ bindings: fakeStore([current, early]), anchors, verifyHostedCeremony: async () => true });
+        expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.bindingDigest).toBe(DIGEST_A);
+      });
+
+      it.each([
+        ["a Safe's", async () => safeVouched(DIGEST_B, "2026-02-01T00:00:00.000Z")],
+        ["an account's", () => vouched(DIGEST_B, "2026-02-01T00:00:00.000Z")],
+      ])("when applied, a Safe record whose ceremony fails it does not beat %s record whose ceremony holds", async (_label, holding) => {
+        const early = safeVouched(DIGEST_A, "2026-01-01T00:00:00.000Z");
+        const current = await holding();
+        for (const stored of [[early, current], [current, early]]) {
+          const resolver = createBindingResolver({
+            bindings: fakeStore(stored),
+            anchors,
+            ceremonyCurrency: {},
+            verifyHostedCeremony: async () => true,
+          });
+          // eslint-disable-next-line no-await-in-loop -- one stored order, then the other.
+          expect((await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at))?.bindingDigest).toBe(DIGEST_B);
+        }
+      });
+
+      it("when applied, does not resolve a lone Safe record whose ceremony fails it, nor ask the host about it", async () => {
+        const verifyHostedCeremony = vi.fn(async () => true);
+        const resolver = createBindingResolver({
+          bindings: fakeStore([safeVouched(DIGEST_A, "2026-01-01T00:00:00.000Z")]),
+          anchors,
+          ceremonyCurrency: {},
+          verifyHostedCeremony,
+        });
+        expect(await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at)).toBeNull();
+        expect(verifyHostedCeremony).not.toHaveBeenCalled();
+      });
     });
 
     it("refuses a terms cutover under a profile that does not require anchors", () => {
