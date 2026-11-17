@@ -62,13 +62,15 @@ export type { EoaTestSigner };
 // Every builder uses a "fixture signer" for the record's own DSSE
 // envelope signature -- the kit's `dsseVerifier` fake (`fakes.ts`) trusts
 // every declared `keyid`, so the envelope signature only needs to declare
-// the right key, not carry real cryptographic material (consistent with
-// the T7 finding: real DSSE verification is deferred everywhere in this
-// tree). The one EXCEPTION is the EOA ceremony leg, which `verify.ts`
+// the right key, not carry real cryptographic material. The kit's
+// fixtures are therefore not accepted by a real DSSE verifier such as
+// `createDidKeyDsseVerifier` (`@jinn-network/discovery-verification`).
+// The one EXCEPTION is the EOA ceremony leg, which `verify.ts`
 // independently, genuinely recovers -- `crypto.ts`'s `EoaTestSigner`
 // signs for real there. A Safe ceremony's message and witness statement
-// are built for real too, since `verify.ts` reads both; only the Safe's own
-// signature, which nothing checks offline, is a placeholder.
+// payload are built for real, since `verify.ts` reads both; the Safe's own
+// signature, which nothing checks offline, is a placeholder, and so is the
+// witness statement's DSSE signature (see `buildSafeCeremony`).
 // ---------------------------------------------------------------------------
 
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -160,7 +162,16 @@ export interface SafeCeremonyOptions {
 }
 
 /** A Safe ceremony (§7.2) by the voucher's Safe, and a 1271 witness statement
- * (§7.2a) that the Safe accepted the EIP-191 hash of its signed bytes. */
+ * (§7.2a) that the Safe accepted the EIP-191 hash of its signed bytes.
+ *
+ * The witness statement's payload is real, but its DSSE signature is a
+ * placeholder: the one byte 1, under a keyid from `testDidKey` that is not a
+ * real Ed25519 `did:key`. Believed by the kit's fake `WitnessVerifier`
+ * (`registerWitnessResult`, which looks results up by author name) and by a
+ * DSSE port that trusts every declared keyid. `createWitnessVerifier`
+ * (`@jinn-network/trust-resolve`) checks the signature against keys that
+ * stand for the author and refuses this witness. The kit does not build a
+ * witness that verifier accepts. */
 function buildSafeCeremony(
   agentIri: string,
   workingKeyDidKey: string,
