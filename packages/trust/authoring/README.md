@@ -32,6 +32,12 @@ The dependency direction is one-way: `authoring` depends on `core`; `resolve` ne
 - **Catalog** — `authorCatalog` (genesis, refuses to overwrite), `appendOperator` (late join:
   append + hash-linked policy successor, genesis digest unchanged), `sealPolicySuccessor` (refresh
   and authority rotation).
+- **Role key rotation**: two acts, each under its own fresh anchor, in this order. `rebindRoles`
+  appends replacement bindings for new keys, authored by `authorRoleBinding` under the same voucher.
+  Then `planRevocation` checks the voucher can revoke the retiring bindings and names the act's
+  `revocation-anchor/v1` digest (`revocationAnchorDigest`), and `revokeBinding` seals and appends one
+  revocation per retiring binding. Neither seals a policy successor: the policy names Agent IRIs,
+  and a rotation keeps them.
 
 ## Sequencing law (§6), enforced where it can be
 
@@ -52,17 +58,31 @@ caller supplies it), no config write-back (the `jinn ceremony` CLI owns that), a
 selection — the calldata profile literal is `base-sepolia-calldata-v1`, matching the catalog schema's
 single admitted profile. A future chain is a new profile, not a parameter.
 
-`revokeBinding` is designed here and implemented in a follow-up (§3.3): its surface is fixed so
-rotation needs no schema change.
-
 **Who signs a revocation.** `revokeBinding` takes the target binding's **voucher account**, the
 ceremony EOA that `authorRoleBinding` named as the binding's `did:pkh` voucher, and signs through
 `voucherAccountSigner`: `revokedBy` and the DSSE `keyid` are that `did:pkh`, and the signature is a
 65-byte EIP-191 `personal_sign` over the DSSE pre-authentication encoding. It never takes the catalog
-authority. Under [key authority section 8](https://github.com/Jinn-Network/spec/blob/main/documents/profiles/key-authority/v1/specification.md)
+authority. The signer signs revocations and nothing else, and refuses a signature that does not
+recover to the voucher's address; `revokeBinding` refuses, before signing, a voucher that is not
+every target's voucher. Under [key authority section 8](https://github.com/Jinn-Network/spec/blob/main/documents/profiles/key-authority/v1/specification.md)
 a revocation counts only from the voucher account, from the bound key itself when its record holds
 `bindings` scope, or from a standing `bindings` key of the Agent. No native role binding holds
 `bindings` scope, so neither the bound key nor any other role key of the Agent can revoke one, and
 the voucher account is the one signer whose revocation of a native role binding has effect. The
 catalog authority's key holds no binding to any Agent, and a revocation it signed would revoke
 nothing.
+
+**Why the rebind comes first.** A replacement binding draws its authority from a binding of the same
+Agent under the same voucher that stands at the replacement's effective start (key authority
+section 7). Rebound first, the replacement draws on the binding it replaces, and the later
+revocation takes nothing back (section 6). Revoked first, an Agent whose only binding was the
+retired one, as an admission Agent's is, has no authority left, and its replacement fails the
+consent chain; `rebindRoles` refuses that order.
+
+**What rotation cannot do.** The voucher account is the only account that can revoke the bindings
+it vouched for, and it can vouch for new keys of the same Agent. If that account's key is the one
+compromised, a rotation by the same account cannot shut its holder out: each side can revoke and
+rebind what the other binds. A binding under a new account needs consent from a `bindings` key of
+the Agent, and no native role binding holds one. What remains lies outside rotation: the catalog
+authority seals a policy successor that no longer accepts the Agent IRI, and the operator
+provisions a new Agent IRI under a new account (ceremony spec §7).
