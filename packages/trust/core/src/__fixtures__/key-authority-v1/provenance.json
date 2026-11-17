@@ -1,0 +1,23 @@
+{
+  "repository": "https://github.com/Jinn-Network/spec",
+  "commit": "a0937a95eab5745882496381146b578aec8788c4",
+  "root": "documents/@jinn-network/trust-testing/fixtures",
+  "entries": [
+    {
+      "id": "key-authority-v1/account-signature/contract-account.json",
+      "sha256": "efbf2f259ac709b6fa2f412037fbcbee8682fd4694333ec94db38d91578cb2ca"
+    },
+    {
+      "id": "key-authority-v1/account-signature/signed-by-another-account.json",
+      "sha256": "2c0477c0fd44177dcf6365b95385e283befa05c7cc0be46cbd228167e498e928"
+    },
+    {
+      "id": "key-authority-v1/account-signature/signed-by-the-account.json",
+      "sha256": "a1d729b43f37080a06db42a647611c79588ad748cb3a0d24942005666d9c55c8"
+    },
+    {
+      "id": "key-authority-v1/account-signature/signed-over-the-payload-alone.json",
+      "sha256": "bf6a97eb344473106d5b1647e00206a8afa480cf097f35b5b5c74933ed94effc"
+    }
+  ]
+}
