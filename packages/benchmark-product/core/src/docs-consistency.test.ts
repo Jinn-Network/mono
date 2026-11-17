@@ -628,6 +628,60 @@ describe("product documentation consistency", () => {
     expect(paragraph).toContain("`promptedScreeningProfile`");
   });
 
+  it("states that no published reader from 0.2.1 on reads a prompted bundle pinning the historical line (#5213)", () => {
+    // Issue #5213. From `0.2.1` on, a reader accepts the historical prompted command when it parses
+    // the claim, but `claim-consistency` rebuilds the claim with the current prompted line and
+    // byte-compares the two, so it refuses a prompted bundle that pins the historical line. That was
+    // settled by running the published readers against a prompted /2 and /4 pinning each line, not
+    // by reading the code. `0.2.0` is the one published reader whose rebuild names the historical
+    // line, so the guide names it as the only reader that can read such a bundle, and claims no
+    // more: the run could not show it reading one, because `0.2.0` refuses those synthetic bundles
+    // earlier, on evaluator semantics it predates. The guide had said the compatible line "reads
+    // either pin"; each of the four places that state the mapping is pinned here, and the old
+    // wording is refused anywhere.
+    const guide = read(bundleReadmePath);
+    const historical = readerLine(LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND);
+    const current = readerLine(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND);
+    // If the two lines were ever one, there would be nothing for the statement to distinguish.
+    expect(current).not.toBe(historical);
+    const refused = `no published reader from \`${current.slice(1)}\` on reads`;
+    const onlyReader = new RegExp(
+      `\`${historical.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\`[^.;|]*is the only published reader whose rebuild names that line`,
+      "u",
+    );
+    // Compared with the line wrapping collapsed, so a reflow of the prose cannot break the pin.
+    const blocks = guide.split(/\n\s*\n/u).map((block) => block.replace(/\s+/gu, " "));
+    for (const marker of [
+      "One kind of version 2 bundle names a later line.",
+      "A v4 whose screening was prompted",
+      `An explicitly pinned \`${historical}\``,
+    ]) {
+      const matching = blocks.filter((block) => block.includes(marker));
+      expect(matching, marker).toHaveLength(1);
+      expect(matching[0], marker).toContain(refused);
+      expect(matching[0], marker).toMatch(onlyReader);
+      expect(matching[0], marker).toContain("`claim-consistency`");
+      expect(matching[0], marker).toContain("`report-verification`");
+    }
+    const rows = guide
+      .split("\n")
+      .filter((line) => line.startsWith("| `benchmark-product-public-bundle/") && line.includes(", prompted screening |"))
+      .map((line) => line.split("|").slice(1, -1).map((cell) => cell.trim()));
+    expect(rows.map((cells) => cells[0])).toEqual([
+      `\`${BUNDLE_FORMAT}\`, prompted screening`,
+      `\`${BUNDLE_V4_FORMAT}\`, prompted screening`,
+    ]);
+    for (const cells of rows) {
+      expect(cells[2], cells[0]).toContain(refused);
+      expect(cells[2], cells[0]).toMatch(onlyReader);
+      expect(cells[2], cells[0]).toContain("`claim-consistency`");
+      expect(cells[2], cells[0]).toContain("`report-verification`");
+    }
+    for (const retired of ["reads either pin", "refuses neither", "reads a prompted v4 materialized before", "reads only on", "is the only published reader that can read it"]) {
+      expect(guide, retired).not.toContain(retired);
+    }
+  });
+
   it("pins every format section's reader commands to the lines that format pins", () => {
     // Issue #3940, the third statement site #3519 named. The table above and the too-old refusal
     // sample are pinned; the per-format sections that restate the same mapping were not, so a

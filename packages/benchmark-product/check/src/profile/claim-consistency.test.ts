@@ -35,6 +35,8 @@ import { buildClaimPackage, ClaimPackageSchema, COMPOSED_CLAIM_PACKAGE_SCHEMA_ID
 import {
   ANCHORED_CLAIM_PACKAGE_SCHEMA_ID,
   CLAIM_PACKAGE_SCHEMA_ID,
+  LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+  PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V6_CHECKS,
   PUBLIC_BUNDLE_V6_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V6_VERIFICATION_COMMAND,
@@ -722,22 +724,26 @@ describe("assertClaimConsistency: binary-instrument report limitations (spec §1
     }],
   } as unknown as RunRecord;
 
-  function checkPrompted(reportRecord: ReportRecord): void {
+  function promptedClaim(reportRecord: ReportRecord): ClaimPackage {
+    return buildClaimPackage({
+      draftId: DRAFT_ID,
+      benchmarkSha256: identities.benchmarkSha256,
+      runRecord: promptedRunRecord,
+      runSha256: identities.runSha256,
+      matrixRecord,
+      matrixSha256: identities.matrixSha256,
+      reportRecord,
+      reportSha256: identities.reportSha256!,
+      reportEnvelopeSha256: identities.reportEnvelopeSha256,
+      venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, promptedRunRecord),
+      verificationCommandVerb: "bundle verify",
+      assurance: { preset: ASSURANCE_PRESET, resolved: RESOLVED_ASSURANCE },
+    });
+  }
+
+  function checkPrompted(reportRecord: ReportRecord, claim: ClaimPackage = promptedClaim(reportRecord)): void {
     assertClaimConsistency({
-      claim: buildClaimPackage({
-        draftId: DRAFT_ID,
-        benchmarkSha256: identities.benchmarkSha256,
-        runRecord: promptedRunRecord,
-        runSha256: identities.runSha256,
-        matrixRecord,
-        matrixSha256: identities.matrixSha256,
-        reportRecord,
-        reportSha256: identities.reportSha256!,
-        reportEnvelopeSha256: identities.reportEnvelopeSha256,
-        venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, promptedRunRecord),
-        verificationCommandVerb: "bundle verify",
-        assurance: { preset: ASSURANCE_PRESET, resolved: RESOLVED_ASSURANCE },
-      }),
+      claim,
       identities,
       benchmarkRecord: {} as unknown as BenchmarkRecord,
       runRecord: promptedRunRecord,
@@ -768,6 +774,28 @@ describe("assertClaimConsistency: binary-instrument report limitations (spec §1
     ];
     expect(() => checkPrompted(binaryReport(limitations))).toThrow(
       "Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history",
+    );
+  });
+
+  test("refuses a prompted claim that names the historical 0.2.0 line (#5213)", () => {
+    // Issue #5213. claim-package/2 accepts either prompted line when it is parsed
+    // (`test/claim-schema.test.mjs` pins that), but the rebuild here stamps the current line and is
+    // byte-compared, so a prompted claim sealed with the historical line is refused.
+    // `PUBLIC-BUNDLE.md` states this refusal; it was confirmed end to end against the published
+    // readers on a prompted /2 and /4.
+    const reportRecord = binaryReport([
+      ...localVenueLimitsForRun(promptedRunRecord),
+      ...binaryInstrumentReportLimitations(promptedParameters),
+    ]);
+    const current = promptedClaim(reportRecord);
+    expect(current.verification.command).toBe(PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND);
+    const historical: ClaimPackage = {
+      ...current,
+      verification: { ...current.verification, command: LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND },
+    };
+    expect(() => checkPrompted(reportRecord)).not.toThrow();
+    expect(() => checkPrompted(reportRecord, historical)).toThrow(
+      "claim package verification.command is not the exact projection of verified facts",
     );
   });
 });

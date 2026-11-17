@@ -54,6 +54,11 @@ rows in memory can supply, are outside that: some are written out alike, and a r
 cannot be written out at all cannot be told from another, so it gives no authority, has
 no chain, and `checkBindingRevocation` never shows it unrevoked.
 
+A revocation entry is named the same way, never by its envelope alone: by its record, its
+envelope, the effective time the resolver read for it and the scope of the record it names.
+Two entries that share an envelope are each judged on their own, and one that cannot be
+written out is judged afresh each time it is read.
+
 ## What a ceremony does not show
 
 Nothing here shows that a ceremony is current. A ceremony (§7.2) shows that an

@@ -455,7 +455,8 @@ const BUILD_COMPILED_PRODUCTS = new Map([['@colophon-claims/cli', ['@colophon-cl
  * `@colophon-claims` package it depends on or its build compiles, followed through the runtime
  * dependencies of each. A `cli` install brings in `core` and the checker, and the `cli` build
  * compiles the private web application from these directories through portals (#5045), so a `cli`
- * publish also takes every platform package web installs (#5214).
+ * publish also takes every platform package web installs (#5214). Each carries the manifest fields
+ * that decide what npm packs from it.
  */
 export function platformSourceDirectories(repoRoot, manifest, packages = loadCatalogPackages(repoRoot)) {
   const catalog = new Map(packages.map((pkg) => [pkg.name, pkg]));
@@ -491,11 +492,10 @@ export function platformSourceDirectories(repoRoot, manifest, packages = loadCat
       }
     }
   }
-  return [...platform].sort().map((name) => ({
-    name,
-    directory: catalog.get(name).directory,
-    files: catalog.get(name).manifest.files,
-  }));
+  return [...platform].sort().map((name) => {
+    const { files, main, browser, bin, directories } = catalog.get(name).manifest;
+    return { name, directory: catalog.get(name).directory, files, main, browser, bin, directories };
+  });
 }
 
 /**
@@ -527,26 +527,59 @@ export function gitChangedFiles(repoRoot, platformSourceSha, directories) {
 // npm packs these at a package's root whatever its `files` says.
 const ALWAYS_PACKED_ROOT_FILE = /^(?:readme|license|licence|copying)(?:\.[^/]*)?$/iu;
 
+// A path segment npm reads as a literal name: no glob, escape, negation, comment, space or newline.
+const PLAIN_SEGMENT = /^[A-Za-z0-9_@+.-]+$/u;
+
 /**
- * Whether a `files` entry of a package may ship `relative`, a path inside the package, when npm
- * packs it. A plain path covers itself and everything under it, with or without a leading `./` or
- * `/`. This check does not evaluate globs or escapes, or resolve paths, so an entry with glob syntax,
- * a backslash, or an empty, `.` or `..` segment covers every path, and a file it might ship is never
- * exempt. A negated entry only removes files, so it covers nothing, and a file it removes is still
- * compared.
+ * `value` as a lowercased path inside a package, with one leading `./` and any leading and trailing
+ * slashes removed, or `undefined` unless every segment is a plain name other than `.` and `..`.
+ * npm 11.19.0 matches `files` entries and manifest targets case-insensitively, so on Linux `dist/`
+ * also ships `DIST/a.test.ts`.
+ */
+function plainPath(value) {
+  const path = String(value).replace(/^\.\//u, '').replace(/^\/+|\/+$/gu, '');
+  const plain = path.split('/').every((segment) => PLAIN_SEGMENT.test(segment) && segment !== '.' && segment !== '..');
+  return plain ? path.toLowerCase() : undefined;
+}
+
+/**
+ * Whether `path`, from `plainPath`, is or contains `relative`, a lowercased path inside the package.
+ * This check models no other form npm reads, so a value that is not a plain path covers every path,
+ * and a file it might ship is never exempt (#5296).
+ */
+function pathCovers(path, relative) {
+  return path === undefined || relative === path || relative.startsWith(`${path}/`);
+}
+
+/**
+ * Whether a `files` entry of a package may ship `relative`, a lowercased path inside the package,
+ * when npm packs it. A plain entry covers itself and everything under it, and one of a single segment
+ * also covers a file of that name in any directory, since npm matches an entry with no slash against
+ * base names. A negated plain entry only removes files, so it covers nothing, and a file it removes
+ * is still compared. Any other entry covers every path: npm splits an entry into rules at a newline,
+ * reads `!!fixtures` as an inclusion, and reads `./!fixtures` as a directory named `!fixtures`.
  */
 function filesEntryCovers(entry, relative) {
-  const normalized = String(entry).replace(/^\.\//u, '').replace(/^\/+|\/+$/gu, '');
-  if (normalized.startsWith('!')) return false;
-  if (normalized === '' || /[*?[\]{}\\]/u.test(normalized)) return true;
-  if (normalized.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')) return true;
-  return relative === normalized || relative.startsWith(`${normalized}/`);
+  const text = String(entry);
+  if (text.startsWith('!')) return plainPath(text.slice(1)) === undefined;
+  const path = plainPath(text);
+  return pathCovers(path, relative) || (!path.includes('/') && relative.endsWith(`/${path}`));
+}
+
+/**
+ * The manifest targets npm packs whatever a package's `files` says: `main`, `browser`, and each
+ * `bin` target, which the files of a `directories.bin` directory supply when `bin` is absent.
+ */
+function alwaysPackedTargets({ main, browser, bin, directories }) {
+  const bins = typeof bin === 'object' && bin !== null ? Object.values(bin) : [bin];
+  return [main, browser, ...bins, directories?.bin].filter(Boolean);
 }
 
 /**
  * A file no published platform package is built or packed from: a test, or its vitest config, that
- * no `files` entry of the package it sits in covers. Every package in a Colophon closure builds with
- * a `tsconfig.build.json` that excludes each `*.test.ts` under `src` (#5045), but a test-named file
+ * no `files` entry of the package it sits in covers and that is none of its manifest's `main`,
+ * `browser` or `bin` targets. Every package in a Colophon closure builds with a
+ * `tsconfig.build.json` that excludes each `*.test.ts` under `src` (#5045), but a test-named file
  * under a listed directory, such as a fixture repository, is packed and published (#5214).
  */
 function isUnshippedTestFile(path, sources) {
@@ -557,7 +590,9 @@ function isUnshippedTestFile(path, sources) {
   if (owner === undefined) return false;
   const relative = path.slice(owner.directory.length + 1);
   if (!Array.isArray(owner.files) || ALWAYS_PACKED_ROOT_FILE.test(relative)) return false;
-  return !owner.files.some((entry) => filesEntryCovers(entry, relative));
+  const name = relative.toLowerCase();
+  return !owner.files.some((entry) => filesEntryCovers(entry, name))
+    && !alwaysPackedTargets(owner).some((target) => pathCovers(plainPath(target), name));
 }
 
 /**

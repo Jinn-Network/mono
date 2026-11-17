@@ -2226,3 +2226,156 @@ describe("a contract account's revocation has no effect (key authority section 8
     expect(outcome).toMatchObject(expected);
   });
 });
+
+// Key authority section 3: every rule judges an entry, not a digest, and nothing decided for one
+// entry is decided for another. A resolver can list two revocations with one envelope that differ
+// in what it hands over: their fields, the effective time it read for them, or the scope of the
+// record they name. Section 8 asks of each whether it is authorized, so an entry with no authority
+// takes nothing from one that has it, and the verdict is the same in either listed order.
+describe("two revocations with one envelope are each judged on their own (key authority sections 3 and 8)", () => {
+  const ENVELOPE_TIME = "2026-03-01T00:00:00Z";
+  const CLAIM_TIME = "2026-03-05T00:00:00Z";
+  const SETTLEMENT_KEY = "did:key:z6MkfSHAREDSETTLE1111111111111111111111";
+  const REVOKED_DIGEST = `sha256:${"b".repeat(64)}` as const;
+
+  // KEY_2's genesis binding, holding `bindings` scope. Its envelope is not KEY_2's, so it cannot
+  // stand as an authority: KEY_2 revokes it only by giving up this record, or one that held
+  // `bindings` scope.
+  const revokedBinding = keyBinding({
+    agent: AGENT,
+    key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+    voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+    scope: ["verdicts", "bindings"],
+  });
+  // A key of the Agent that stands from 2025-12-01 with `bindings` scope.
+  const revoker = authorityBinding(keyBinding({
+    agent: AGENT,
+    key: { publicKey: "0x00", keyid: CONSENT_KEY, algorithm: "ed25519", didKey: CONSENT_KEY },
+    voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+    scope: ["bindings"],
+  }));
+  const settlementLeg = authorityBinding(keyBinding({
+    agent: AGENT,
+    key: { publicKey: "0x00", keyid: SETTLEMENT_KEY, algorithm: "ed25519", didKey: SETTLEMENT_KEY },
+    voucher: { kind: "account", did: OTHER_VOUCHER_DID, contractAccount: false },
+    scope: ["settlements"],
+  }));
+
+  function over(revocations: readonly ResolvedRevocation[]) {
+    const resolved = resolvedBinding({
+      binding: revokedBinding,
+      envelopeBytes: sealedEnvelope(revokedBinding, TRUST_KEY_BINDING_MEDIA_TYPE, CONSENT_KEY),
+      bindingDigest: REVOKED_DIGEST,
+      revocations,
+    });
+    const deps = {
+      bindingResolver: new FakeBindingResolver()
+        .register({ key: KEY_2, agent: AGENT, resolved })
+        .register({ key: CONSENT_KEY, agent: AGENT, resolved: revoker })
+        .register({ key: SETTLEMENT_KEY, agent: AGENT, resolved: settlementLeg }),
+      witnessVerifier: fakeWitnessVerifier,
+      dsseVerifier: trustingDsseVerifier,
+    };
+    return {
+      checkBindingRevocation: async () => (await checkBindingRevocation(resolved, ENVELOPE_TIME, deps)).ok,
+      verifyEnvelopeBinding: async () => (await verifyEnvelopeBinding(
+        {
+          envelopeBytes: sealedEnvelope({ verdict: true }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+          key: KEY_2,
+          agent: AGENT,
+          family: "verdicts",
+          atTime: ENVELOPE_TIME,
+        },
+        deps,
+      )).ok,
+      settlementJoinCheck: async () => (await settlementJoinCheck(
+        {
+          verdictKey: KEY_2,
+          settlementDeclarationKey: SETTLEMENT_KEY,
+          claimedEvaluatorAgent: AGENT,
+          family: "verdicts",
+          envelopeEffectiveTime: ENVELOPE_TIME,
+          claimTime: CLAIM_TIME,
+        },
+        deps,
+      )).ok,
+    };
+  }
+  const entryPoints = ["checkBindingRevocation", "verifyEnvelopeBinding", "settlementJoinCheck"] as const;
+
+  interface Variation {
+    readonly differsIn: string;
+    /** Whose signatures the one envelope carries. Its payload is the authorized entry's fields. */
+    readonly signers: readonly string[];
+    readonly authorized: ResolvedRevocation;
+    readonly unauthorized: ResolvedRevocation;
+  }
+  const byVoucher = revocationEntry(VOUCHER_DID, "2026-02-01T00:00:00Z");
+  const byItsKey = revocationEntry(KEY_2, "2026-02-01T00:00:00Z");
+  const byRevoker = revocationEntry(CONSENT_KEY, "2026-02-01T00:00:00Z");
+  const variations: readonly Variation[] = [
+    {
+      differsIn: "revokedBy",
+      signers: [OTHER_VOUCHER_DID, VOUCHER_DID],
+      authorized: byVoucher,
+      unauthorized: { ...byVoucher, revocation: { ...byVoucher.revocation, revokedBy: OTHER_VOUCHER_DID } },
+    },
+    {
+      differsIn: "target",
+      signers: [KEY_2],
+      authorized: { ...byItsKey, revocation: { ...byItsKey.revocation, target: REVOKED_DIGEST } },
+      unauthorized: byItsKey,
+    },
+    {
+      // Before the revoker's binding took effect, so nothing resolves for it then.
+      differsIn: "effectiveTime",
+      signers: [CONSENT_KEY],
+      authorized: byRevoker,
+      unauthorized: { ...byRevoker, effectiveTime: "2025-11-01T00:00:00Z" },
+    },
+    {
+      differsIn: "targetScope",
+      signers: [KEY_2],
+      authorized: { ...byItsKey, targetScope: ["verdicts", "bindings"] },
+      unauthorized: { ...byItsKey, targetScope: ["verdicts"] },
+    },
+  ];
+
+  function oneEnvelope({ authorized, signers }: Variation): Uint8Array {
+    const [first, ...rest] = signers.map((keyid) => ({ signature: new Uint8Array([1, 2, 3]), keyid }));
+    return sealDsseEnvelope({
+      payloadBytes: canonicalJsonBytes(authorized.revocation),
+      payloadType: TRUST_REVOCATION_MEDIA_TYPE,
+      signatures: [first!, ...rest],
+    });
+  }
+
+  describe.each(variations)("differing in $differsIn", (variation) => {
+    const envelopeBytes = oneEnvelope(variation);
+    const counts = { ...variation.authorized, envelopeBytes };
+    const doesNot = { ...variation.unauthorized, envelopeBytes };
+
+    test.each(entryPoints)("%s finds the binding revoked in either listed order", async (entryPoint) => {
+      expect(await over([doesNot, counts])[entryPoint]()).toBe(false);
+      expect(await over([counts, doesNot])[entryPoint]()).toBe(false);
+    });
+
+    test.each(entryPoints)("%s finds it unrevoked by the entry with no authority alone", async (entryPoint) => {
+      expect(await over([doesNot])[entryPoint]()).toBe(true);
+    });
+  });
+
+  test("an entry that cannot be written out is still judged on its own", async () => {
+    const variation = variations[0]!;
+    const envelopeBytes = oneEnvelope(variation);
+    const unwritten = (entry: ResolvedRevocation): ResolvedRevocation =>
+      ({ ...entry, envelopeBytes, revocation: { ...entry.revocation, note: 1n } });
+    const counts = { ...variation.authorized, envelopeBytes };
+    const doesNot = { ...variation.unauthorized, envelopeBytes };
+    for (const revocations of [[doesNot, unwritten(variation.authorized)], [unwritten(variation.unauthorized), counts]]) {
+      expect(await over(revocations).checkBindingRevocation()).toBe(false);
+      expect(await over([...revocations].reverse()).checkBindingRevocation()).toBe(false);
+    }
+    expect(await over([unwritten(variation.unauthorized)]).checkBindingRevocation()).toBe(true);
+  });
+});

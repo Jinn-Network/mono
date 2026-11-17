@@ -742,9 +742,10 @@ describe('admission binding carries the receipt-issuing scope every verifier che
  * signature never stops at all: a role binding holds no `bindings` scope, so on the native path
  * its voucher account is the one party that can revoke it.
  *
- * `trust-authoring` authors no revocation yet (`revokeBinding` is deferred), so the record is
- * sealed with trust-core and given its own, later anchor. Everything else is production code.
- * One case signs it with `voucherAccountSigner`, the signer `revokeBinding`'s input fixes (#5211).
+ * The record is sealed with trust-core and given its own, later anchor, so each case controls the
+ * signer; `revokeBinding`'s own round trip is `trust-rotation-round-trip.test.ts` (#5236).
+ * Everything else is production code. One case signs it with `voucherAccountSigner`, the signer
+ * `revokeBinding`'s input fixes (#5211).
  */
 describe('role identities apply the revocation authority rule over a real catalog (#5147)', () => {
   const REVOKED_ROLE = 'solver-delivery' as const;
@@ -865,7 +866,7 @@ describe('role identities apply the revocation authority rule over a real catalo
  *
  * Production code throughout: an authored catalog, the shipped opener, and the source
  * `native-discovery-trust.ts` builds. The revocation is the voucher account's, sealed with
- * trust-core as in the block above, since `trust-authoring` authors none yet.
+ * trust-core as in the block above.
  */
 describe('a revoked discovery key stops only itself over a real catalog (#5212)', () => {
   const SOURCE = { agent: AGENT_A, name: 'native-requester' } as const;
