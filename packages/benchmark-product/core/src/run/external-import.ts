@@ -469,6 +469,17 @@ export interface PreparedEvidence {
   readonly bytes: Uint8Array;
 }
 
+/** One evidence file as it was read, before a named reader decides what of it is carried. */
+export interface ReadEvidenceFile {
+  readonly name: string;
+  /** The path the record names, relative to the evidence root. */
+  readonly path: string;
+  readonly bytes: Uint8Array;
+}
+
+/** What a named reader carries of one evidence file it read. It may refuse, naming the file. */
+export type CarriedEvidence = (file: ReadEvidenceFile) => Uint8Array;
+
 /** Everything a `graded` cell needs, resolved once: the rule it is judged by, the measurements
  * typed against that rule's own declarations, and the verdict those two produce. */
 export interface PreparedGrading {
@@ -504,6 +515,10 @@ export interface PreflightExternalRunImportInput {
   /** The most evidence, in bytes, the whole import may carry. Defaults to
    * `EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES`. The per-file cap is not the caller's to move. */
   readonly maxAggregateEvidenceBytes?: number;
+  /** Set by a named reader that removes part of a file before it is carried
+   * (`harborCarriedEvidence`). Omitted, every file is carried as read. The caps bound the bytes
+   * read. */
+  readonly carriedEvidence?: CarriedEvidence;
 }
 
 /** Resolves everything the write path would otherwise resolve mid-write. Writes nothing. */
@@ -533,7 +548,7 @@ export function preflightExternalRunImport(
     }
     if (outcome === "error" || outcome === "timeout") return { cell, arm, evidence: [] };
 
-    const evidence = readImportedEvidence(evidenceRoot, cell, budget);
+    const evidence = readImportedEvidence(evidenceRoot, cell, budget, input.carriedEvidence);
     if (outcome === "ungradeable") return { cell, arm, evidence };
     return { cell, arm, evidence, grading: prepareGrading(workspaceDir, cell) };
   });
@@ -568,6 +583,7 @@ function readImportedEvidence(
   evidenceRoot: string,
   cell: ExternalRunImportCell,
   budget: EvidenceBudget,
+  carriedEvidence: CarriedEvidence | undefined,
 ): PreparedEvidence[] {
   const root = resolvePath(evidenceRoot);
   const at = `row ${cell.record.row}`;
@@ -590,7 +606,11 @@ function readImportedEvidence(
           + `("${ref.path}") — evidence paths may not leave the directory the dump file lives in`,
       );
     }
-    return { name: ref.name, bytes: readEvidenceFileNoFollow(path, ref.name, cell, at, budget) };
+    const bytes = readEvidenceFileNoFollow(path, ref.name, cell, at, budget);
+    return {
+      name: ref.name,
+      bytes: carriedEvidence === undefined ? bytes : carriedEvidence({ name: ref.name, path: ref.path, bytes }),
+    };
   });
 }
 

@@ -54,6 +54,7 @@ import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import type { ExternalRunRecord } from "../intake/external-run-records.js";
+import { harborCarriedEvidence } from "../intake/harbor-run-records.js";
 import { TERMINAL_BENCH_21_OFFICIAL_SLATE_EXTENSION } from "../intake/terminal-bench-2-1.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import {
@@ -102,7 +103,7 @@ export interface RunImportResult {
   /** The sealed `ExternalRunImportDeclaration` — the durable home for every imported reason. */
   readonly declarationSha256: string;
   readonly importedCellCount: number;
-  /** Total bytes of the evidence files this import carried, the figure the aggregate cap bounds. */
+  /** Total bytes of the evidence files this import read, the figure the aggregate cap bounds. */
   readonly evidenceBytes: number;
   /** Per-outcome counts of what was WRITTEN, not of what the Matrix will derive: the outcome is
    * `run.collect`'s to derive from this evidence, never this operation's to assert. */
@@ -234,6 +235,9 @@ export function importRunRecords(
         ...(input.maxAggregateEvidenceBytes === undefined
           ? {}
           : { maxAggregateEvidenceBytes: input.maxAggregateEvidenceBytes }),
+        // Harbor writes the machine it ran on into its own record of each trial, and whatever is
+        // carried is published. The Harbor reader's evidence root is the jobs directory (#5266).
+        ...(input.namedReader === "harbor" ? { carriedEvidence: harborCarriedEvidence(input.evidenceRoot) } : {}),
       });
       // The dump's identity is one more thing that can refuse: with no `dump` supplied it is the
       // hash of the records' canonical JSON, and canonical JSON carries no fractional number. So
