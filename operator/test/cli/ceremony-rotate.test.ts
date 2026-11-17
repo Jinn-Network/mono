@@ -6,13 +6,23 @@
  * carries its EIP-191 signature and authoring refuses one that does not recover to it. What rotate
  * writes is then opened by the production catalog opener and role identities.
  */
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openRoleSigners, revocationAnchorDigest } from '@jinn-network/trust-authoring';
 import { didPkh, validateKeyBinding } from '@jinn-network/trust-core';
 import { privateKeyToAccount } from 'viem/accounts';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ceremonyAnchorDigest,
@@ -23,6 +33,37 @@ import type { CommandContext } from '../../src/cli/command.js';
 import { orderedRolesForSet } from '../../src/cli/commands/native-requester.js';
 import { openNativeTrustCatalog } from '../../src/daemon/native-trust-catalog.js';
 import { openRoleIdentitySet, type NativeRoleIdentityRole } from '../../src/daemon/role-identities.js';
+
+/**
+ * A full disk, armed for one write: the next write into a file whose path starts with `path` lands
+ * half its bytes and then fails with ENOSPC, as a write that runs out of space does. A write through
+ * a descriptor is matched by the path it was opened at. Every other write passes through.
+ */
+const diskFull = vi.hoisted(() => ({ path: undefined as string | undefined, fired: false }));
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  const opened = new Map<number, string>();
+  const openSync: typeof actual.openSync = (path, ...rest) => {
+    const fd = actual.openSync(path, ...rest);
+    opened.set(fd, String(path));
+    return fd;
+  };
+  const writeFileSync: typeof actual.writeFileSync = (file, data, options) => {
+    const path = typeof file === 'number' ? opened.get(file) : String(file);
+    if (diskFull.path !== undefined && path?.startsWith(diskFull.path) === true) {
+      diskFull.path = undefined;
+      diskFull.fired = true;
+      const bytes = typeof data === 'string'
+        ? Buffer.from(data)
+        : Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+      actual.writeFileSync(file, bytes.subarray(0, Math.floor(bytes.length / 2)), options);
+      throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+    }
+    actual.writeFileSync(file, data, options);
+  };
+  return { ...actual, openSync, writeFileSync, default: { ...actual, openSync, writeFileSync } };
+});
 
 const SAFE = '0x8464135c8F25Da09e49BC8782676a84730C318bC' as const;
 const PASSWORD = 'ceremony-rotate-test-password';
@@ -50,6 +91,8 @@ function harness(options: HarnessOptions = {}) {
   const submitted: Submitted[] = [];
   /** `identityStores` as the config named it at each anchor submission, by submission index. */
   const storesAtSubmit: (Record<string, string> | undefined)[] = [];
+  /** Anchor transactions that mined and were then dropped: no finality read ever finds them. */
+  const dropped = new Set<string>();
   let account = agentAccount;
   let finalityWaits = 0;
   // Waits run genesis, then the rebind, then the revocation.
@@ -91,11 +134,17 @@ function harness(options: HarnessOptions = {}) {
           finalityWaits += 1;
           calls.push('waitForFinalized');
           if (finalityWaits === interruptAt) throw new Error(`killed during the ${options.interruptWait} finality wait`);
+          // The chain's record of the transaction the locator names, as the production reader
+          // returns it, rather than what the locator says about it.
+          const mined = submitted.find(({ transactionHash }) => transactionHash === input.locator.transactionHash);
+          if (mined === undefined || mined.digest !== input.digest || dropped.has(mined.transactionHash)) {
+            throw new Error(`anchor ${input.digest} did not read back finalized within ${input.timeoutMs}ms`);
+          }
           return {
-            digest: input.digest,
-            anchorTime: input.locator.anchorTime,
+            digest: mined.digest,
+            anchorTime: mined.anchorTime,
             chainId: 84532,
-            transactionHash: input.locator.transactionHash,
+            transactionHash: mined.transactionHash,
             blockHash: `0x${'ef'.repeat(32)}`,
             blockNumber: 1n,
             finalized: true,
@@ -114,6 +163,7 @@ function harness(options: HarnessOptions = {}) {
     calls,
     submitted,
     storesAtSubmit,
+    dropped,
     useAccount(next: typeof agentAccount) { account = next; },
   };
 }
@@ -171,9 +221,9 @@ async function openCatalog(h: Harness, now: string) {
     path: h.catalogPath,
     expectedPolicyGenesisDigest: config(h).trustPolicyGenesisDigest,
     anchorClient: {
-      async lookupFinalizedAnchor({ digest }) {
-        const found = h.submitted.find((anchor) => anchor.digest === digest);
-        if (found === undefined) return null;
+      async lookupFinalizedAnchor({ digest, locator }) {
+        const found = h.submitted.find((anchor) => anchor.transactionHash === locator.transactionHash);
+        if (found === undefined || found.digest !== digest || h.dropped.has(found.transactionHash)) return null;
         return {
           digest,
           anchorTime: found.anchorTime,
@@ -651,5 +701,232 @@ describe('ceremony join after a rotation', () => {
     expect((result.bindings as { keyId: string }[]).map(({ keyId }) => keyId).sort())
       .toEqual([...requester.values()].map(({ keyId }) => keyId).sort());
     expect(config(h).identityStores.solver).toBe(rotatedSolver);
+  });
+});
+
+/**
+ * A lost, unreadable or stale rotation receipt (#5329). From the config repoint on, `rotation.json`
+ * is the only record of the store a rotation retires: the config names the store it just bound. A
+ * receipt read as absent made the next run rotate those keys and leave the retiring ones bound.
+ */
+describe('ceremony rotate and its rotation receipt', () => {
+  const rotateArgv = (h: Harness, extra: readonly string[] = []) => [
+    'rotate', '--dir', h.dir, '--role-sets', 'solver', ...extra,
+  ];
+  const receiptPathOf = (h: Harness) => join(h.dir, 'ceremony', 'rotation.json');
+
+  afterEach(() => {
+    diskFull.path = undefined;
+    diskFull.fired = false;
+    vi.useRealTimers();
+  });
+
+  /**
+   * Moves the clock a minute on. A rotated store's name carries the second its rotation started, so
+   * a rotation started in the same second as the last one would name that one's store.
+   */
+  function aMinuteLater(): void {
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 60_000 });
+  }
+
+  /** A solver rotation stopped in its revocation finality wait, after the config was repointed. */
+  async function stoppedAfterRepoint(): Promise<Harness> {
+    const h = await provisioned({ interruptWait: 'revocation' });
+    await expect(run(h, rotateArgv(h, ['--execute']))).rejects.toThrow(/killed during the revocation finality wait/u);
+    expect(config(h).identityStores.solver).toBe((rotationReceipt(h).stores as Record<string, string>).solver);
+    return h;
+  }
+
+  /** What a refused rotate must leave as it was: no session, no anchor, no store, no write. */
+  function unchangedBy(h: Harness): () => void {
+    const sessions = h.calls.filter((call) => call === 'openAnchorSession').length;
+    const submissions = h.submitted.length;
+    const catalog = readFileSync(h.catalogPath);
+    const configBytes = readFileSync(h.configPath);
+    const stores = readdirSync(join(h.dir, 'identity')).sort();
+    const receipt = existsSync(receiptPathOf(h)) ? readFileSync(receiptPathOf(h)) : undefined;
+    return () => {
+      expect(h.calls.filter((call) => call === 'openAnchorSession')).toHaveLength(sessions);
+      expect(h.submitted).toHaveLength(submissions);
+      expect(readFileSync(h.catalogPath)).toEqual(catalog);
+      expect(readFileSync(h.configPath)).toEqual(configBytes);
+      expect(readdirSync(join(h.dir, 'identity')).sort()).toEqual(stores);
+      expect(existsSync(receiptPathOf(h)) ? readFileSync(receiptPathOf(h)) : undefined).toEqual(receipt);
+    };
+  }
+
+  it.each([
+    ['truncated mid-write', () => '{"schemaVersion":1,"roleSe'],
+    ['parseable but naming no stores', (receipt: Record<string, unknown>) => JSON.stringify({ ...receipt, stores: undefined })],
+    ['parseable but with null stores', (receipt: Record<string, unknown>) => JSON.stringify({ ...receipt, stores: null })],
+  ])('refuses a rotation.json it cannot read (%s), naming it, before anything is minted or anchored', async (_case, corrupt) => {
+    const h = await stoppedAfterRepoint();
+    writeFileSync(receiptPathOf(h), corrupt(rotationReceipt(h)));
+    const unchanged = unchangedBy(h);
+
+    const refusal = await run(h, rotateArgv(h, ['--execute']));
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect(refusal.details).toMatchObject({ state: 'rotation-receipt-unreadable', sideEffects: false });
+    expect(String(refusal.message)).toContain(receiptPathOf(h));
+    unchanged();
+  });
+
+  it('refuses an unreadable rotation.json in the plan as well', async () => {
+    const h = await stoppedAfterRepoint();
+    writeFileSync(receiptPathOf(h), '{"schemaVersion":1,"roleSe');
+    const unchanged = unchangedBy(h);
+
+    const refusal = await run(h, rotateArgv(h));
+
+    expect(refusal.details).toMatchObject({ state: 'rotation-receipt-unreadable', sideEffects: false });
+    unchanged();
+  });
+
+  it('leaves rotation.json whole when a write of it fails partway, and the re-run resumes from it', async () => {
+    const h = await stoppedAfterRepoint();
+    const retiredStore = (rotationReceipt(h).retiring as Record<string, string>).solver!;
+    const before = readFileSync(receiptPathOf(h));
+    // The disk fills during the re-run's first write, which rewrites the receipt it resumes.
+    diskFull.path = receiptPathOf(h);
+
+    await expect(run(h, rotateArgv(h, ['--execute']))).rejects.toThrow(/ENOSPC/u);
+
+    expect(diskFull.fired).toBe(true);
+    expect(readFileSync(receiptPathOf(h))).toEqual(before);
+    expect(readdirSync(join(h.dir, 'ceremony')).sort()).toEqual(['receipt.json', 'rotation.json']);
+    expect(h.submitted).toHaveLength(3);
+
+    const result = await run(h, rotateArgv(h, ['--execute']));
+
+    expect(result.kind).toBe('ceremony_rotate_complete');
+    expect(result.resumed).toBe(true);
+    expect(h.submitted).toHaveLength(3);
+    await expect(bootAt(h, retiredStore, h.submitted[2]!.anchorTime)).rejects.toThrow(/binding is revoked at boot/u);
+  });
+
+  it('refuses to start a rotation, before any anchor, while another key for one of its roles is bound and unrevoked', async () => {
+    const h = await stoppedAfterRepoint();
+    const retiringStore = (rotationReceipt(h).retiring as Record<string, string>).solver!;
+    const stillBound = await openRoleSigners({
+      storePath: retiringStore, password: PASSWORD, ownedRoles: SOLVER_ROLES, create: false,
+    });
+    // Removed after the repoint: the config names the store the rotation just bound, and the
+    // catalog still binds the keys it was retiring.
+    rmSync(receiptPathOf(h));
+    const unchanged = unchangedBy(h);
+    aMinuteLater();
+
+    const refusal = await run(h, rotateArgv(h, ['--execute']));
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect(refusal.details).toMatchObject({ state: 'another-key-bound', sideEffects: false });
+    for (const { keyId } of stillBound.values()) expect(String(refusal.message)).toContain(keyId);
+    expect(String(refusal.hint)).toContain(receiptPathOf(h));
+    unchanged();
+  });
+
+  it('starts a second rotation of a family once the first finished, whose retired keys stay bound but revoked', async () => {
+    const h = await provisioned();
+    const first = await run(h, rotateArgv(h, ['--execute']));
+    expect(first.kind).toBe('ceremony_rotate_complete');
+    const firstStore = config(h).identityStores.solver!;
+    aMinuteLater();
+
+    const second = await run(h, rotateArgv(h, ['--execute']));
+
+    expect(second.kind).toBe('ceremony_rotate_complete');
+    expect(second.resumed).toBe(false);
+    expect(h.submitted).toHaveLength(5);
+    const revokedAt = h.submitted[4]!.anchorTime;
+    await expect(bootAt(h, firstStore, revokedAt)).rejects.toThrow(/binding is revoked at boot/u);
+    await expect(bootAt(h, config(h).identityStores.solver!, revokedAt)).resolves.toBeDefined();
+  });
+
+  it('takes a resumed act\'s block time from the finality read, not the time its receipt recorded', async () => {
+    const h = await stoppedAfterRepoint();
+    const retiredStore = (rotationReceipt(h).retiring as Record<string, string>).solver!;
+    const [, , revocation] = h.submitted;
+    const receipt = rotationReceipt(h) as { revocationAnchor: { locator: { anchorTime: string } } };
+    // A day after the block: the retired key would keep verifying until then.
+    receipt.revocationAnchor.locator.anchorTime = new Date(Date.parse(revocation!.anchorTime) + 86_400_000).toISOString();
+    writeFileSync(receiptPathOf(h), JSON.stringify(receipt));
+
+    const result = await run(h, rotateArgv(h, ['--execute']));
+
+    expect(result.kind).toBe('ceremony_rotate_complete');
+    expect(h.submitted).toHaveLength(3);
+    expect(result.revocationAnchor).toMatchObject({
+      transactionHash: revocation!.transactionHash,
+      effectiveTime: revocation!.anchorTime,
+    });
+    await expect(bootAt(h, retiredStore, revocation!.anchorTime)).rejects.toThrow(/binding is revoked at boot/u);
+  });
+
+  it('submits a fresh anchor, recorded in place of the old one, when the recorded one is for another digest', async () => {
+    const h = await provisioned({ interruptWait: 'rebind' });
+    await expect(run(h, rotateArgv(h, ['--execute']))).rejects.toThrow(/killed during the rebind finality wait/u);
+    const [genesis, rebind] = h.submitted;
+    // A record for another digest: the genesis anchor, which anchors other keys.
+    const { anchorLocator } = JSON.parse(readFileSync(join(h.dir, 'ceremony', 'receipt.json'), 'utf-8')) as {
+      anchorLocator: Record<string, unknown>;
+    };
+    expect(anchorLocator.transactionHash).toBe(genesis!.transactionHash);
+    writeFileSync(receiptPathOf(h), JSON.stringify({
+      ...rotationReceipt(h),
+      rebindAnchor: { digest: genesis!.digest, locator: anchorLocator },
+    }));
+
+    const result = await run(h, rotateArgv(h, ['--execute']));
+
+    expect(result.kind).toBe('ceremony_rotate_complete');
+    // genesis, the interrupted rebind, a fresh rebind for the digest this run recomputed, the revocation.
+    expect(h.submitted).toHaveLength(4);
+    const fresh = h.submitted[2]!;
+    expect(fresh.digest).toBe(rebind!.digest);
+    expect(result.rebindAnchor).toMatchObject({ digest: rebind!.digest, transactionHash: fresh.transactionHash });
+    expect(rotationReceipt(h).rebindAnchor).toMatchObject({
+      digest: rebind!.digest,
+      locator: { transactionHash: fresh.transactionHash },
+    });
+  });
+
+  it('resubmits, on --resubmit-anchor, a recorded anchor that never reads back finalized, keeping the receipt', async () => {
+    const h = await stoppedAfterRepoint();
+    const retiredStore = (rotationReceipt(h).retiring as Record<string, string>).solver!;
+    const [, , lost] = h.submitted;
+    // Mined, then dropped: every re-run waits on it until the finality timeout.
+    h.dropped.add(lost!.transactionHash);
+    await expect(run(h, rotateArgv(h, ['--execute']))).rejects.toThrow(/did not read back finalized/u);
+    expect(h.submitted).toHaveLength(3);
+    const { stores, retiring } = rotationReceipt(h);
+
+    const result = await run(h, rotateArgv(h, ['--execute', '--resubmit-anchor']));
+
+    expect(result.kind).toBe('ceremony_rotate_complete');
+    expect(result.resumed).toBe(true);
+    expect(h.submitted).toHaveLength(4);
+    const fresh = h.submitted[3]!;
+    expect(fresh.digest).toBe(lost!.digest);
+    expect(result.revocationAnchor).toMatchObject({ transactionHash: fresh.transactionHash, effectiveTime: fresh.anchorTime });
+    expect(rotationReceipt(h)).toMatchObject({
+      stores,
+      retiring,
+      revocationAnchor: { digest: fresh.digest, locator: { transactionHash: fresh.transactionHash } },
+    });
+    await expect(bootAt(h, retiredStore, fresh.anchorTime)).rejects.toThrow(/binding is revoked at boot/u);
+    expect(createCeremonyCommand(h.deps).helpText).toContain('--resubmit-anchor');
+  });
+
+  it('refuses --resubmit-anchor when no rotation is unfinished, rather than start a new one', async () => {
+    const h = await provisioned();
+    await run(h, rotateArgv(h, ['--execute']));
+    const unchanged = unchangedBy(h);
+
+    const refusal = await run(h, rotateArgv(h, ['--execute', '--resubmit-anchor']));
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect(String(refusal.message)).toContain('--resubmit-anchor applies only to an unfinished rotation');
+    unchanged();
   });
 });
