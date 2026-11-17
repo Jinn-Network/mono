@@ -345,6 +345,10 @@ function renderSubject(subject: AnchorSubjectReport): string {
       + `${subject.declaredProfiles?.map(anchorProfileName).join(", ") ?? "a timestamp provider"} and the bundle carries no matching timestamp proof`;
   }
   if (subject.outcome === "absent") return `  ${name}: none — no timestamp proof was carried and none was promised`;
+  // Exhaustive over the three coverage outcomes: `anchored` is the only one left. A fourth outcome
+  // fails to compile here rather than reading as timestamped, in this report and in the product's
+  // workspace `verify`, which prints this block (issue #5313).
+  subject.outcome satisfies "anchored";
   return `  ${name}: timestamped`;
 }
 
