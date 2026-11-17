@@ -360,10 +360,13 @@ export {
   createWorkspacePublicationSource,
   normalizePublicArchiveBaseUrl,
   publicArchiveUrl,
+  refreshWorkspacePublicationHead,
   refreshWorkspacePublicationWellKnown,
   resolveWorkspacePublicationSourceName,
 } from "./run/publication-source.js";
+export type { WorkspacePublicationHeadRefresh } from "./run/publication-source.js";
 export {
+  DEFAULT_PUBLICATION_HEAD_REFRESH_INTERVAL_MS,
   DEFAULT_PUBLICATION_SERVE_HOST,
   DEFAULT_PUBLICATION_SERVE_PORT,
   startPublicationArchiveServer,

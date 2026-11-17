@@ -1,0 +1,38 @@
+{
+  "name": "window-its-envelope-does-not-carry",
+  "description": "A binding entry holds no expiresAt, and its envelope ends at its own start. Its fields do not match its envelope, so it does not resolve, and its key consents no one.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "envelope": {
+        "until": "02-01"
+      }
+    },
+    {
+      "id": "c",
+      "key": "K3",
+      "voucher": "B",
+      "from": "03-01",
+      "consentBy": "K2"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "binding-not-resolved"
+    },
+    {
+      "key": "K3",
+      "expect": "consent-chain-violation"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "name": "own-revocation",
+  "description": "A key may revoke its own binding, and that revocation is not retroactive.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "g",
+      "by": "K1",
+      "at": "02-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "revoked"
+    },
+    {
+      "key": "K1",
+      "at": "01-01",
+      "expect": "accepted"
+    }
+  ]
+}

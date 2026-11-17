@@ -1,0 +1,40 @@
+{
+  "name": "own-key-revoking-through-a-standing-sibling",
+  "description": "A key's revocation of a sibling that lacks bindings scope counts when the record that resolves for the key at that time holds bindings scope and stands.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "r",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01"
+    },
+    {
+      "id": "o",
+      "key": "K2",
+      "voucher": "A",
+      "from": "03-01",
+      "scope": [
+        "verdicts"
+      ]
+    }
+  ],
+  "revocations": [
+    {
+      "target": "o",
+      "by": "K2",
+      "at": "04-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "revoked"
+    }
+  ]
+}

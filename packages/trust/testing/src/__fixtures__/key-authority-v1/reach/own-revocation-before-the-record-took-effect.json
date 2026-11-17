@@ -1,0 +1,31 @@
+{
+  "name": "own-revocation-before-the-record-took-effect",
+  "description": "A key cannot give up a record before that record took effect.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "o",
+      "key": "K2",
+      "voucher": "A",
+      "from": "04-01"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "o",
+      "by": "K2",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "accepted"
+    }
+  ]
+}

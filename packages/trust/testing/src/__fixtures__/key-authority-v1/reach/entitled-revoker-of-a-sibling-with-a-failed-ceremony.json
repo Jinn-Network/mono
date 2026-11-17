@@ -1,0 +1,38 @@
+{
+  "name": "entitled-revoker-of-a-sibling-with-a-failed-ceremony",
+  "description": "A sibling whose ceremony fails still shares: an entitled key could have revoked the key directly.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "o",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01"
+    },
+    {
+      "id": "f",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "ceremony": "absent"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "f",
+      "by": "K1",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "revoked"
+    }
+  ]
+}

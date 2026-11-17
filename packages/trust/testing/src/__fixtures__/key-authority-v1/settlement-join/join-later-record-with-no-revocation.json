@@ -1,0 +1,42 @@
+{
+  "name": "join-later-record-with-no-revocation",
+  "description": "With no revocation the later record joins.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "s",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "until": "04-15",
+      "scope": [
+        "settlements"
+      ]
+    },
+    {
+      "id": "t",
+      "key": "K2",
+      "voucher": "A",
+      "from": "04-10",
+      "scope": [
+        "settlements"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "join": {
+        "verdict": "K1",
+        "settlement": "K2",
+        "envelope": "03-01",
+        "claim": "05-01"
+      },
+      "expect": "joined"
+    }
+  ]
+}

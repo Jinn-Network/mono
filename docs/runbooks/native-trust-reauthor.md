@@ -40,15 +40,15 @@ silent-degradation window.
 > operator's bindings, so a shared catalog comes back single-operator. A **joined** operator has
 > no path at all, since `join` needs the catalog it appends to. Only the anchor question below
 > was in scope for DR-2026-09-06; **the rest of this procedure needs its own fix and does not
-> have one yet.** A further defect lands once revocations exist: `authorCatalog` writes
-> `revocations: []`, so a wholesale re-author un-revokes everything — see
-> "Why wholesale, not `appendOperator`" below. Treat the steps below as a description of intent,
-> not a runbook to execute, until that lands.
+> have one yet.** Revocations are not on that list: the re-run names the catalog it replaces, and
+> every revocation that catalog holds is carried into the new one, or the re-run refuses (see
+> "Revocations carry forward" below). Treat the steps below as a description of intent, not a
+> runbook to execute, until the rest lands.
 
-Re-run the existing ceremony against the same directory:
+Re-run the existing ceremony against the same directory, naming the catalog it replaces:
 
 ```
-jinn ceremony <same arguments as the original run>
+jinn ceremony init <same arguments as the original run> --previous-catalog <where the catalog was moved>
 ```
 
 It is already idempotent on custody and requires no new tooling. Specifically:
@@ -181,13 +181,41 @@ additive, so the old narrow-scope binding would remain alongside the new wide-sc
 operator no better off. `authorCatalog`, which the ceremony command uses, rewrites the catalog and
 does not have this problem.
 
-It has a different one, and it belongs on the defect list at the top of this runbook.
-`authorCatalog` writes `revocations: []` (`packages/trust/authoring/src/catalog.ts:216`), so a
-wholesale re-author **un-revokes everything**. `appendOperator` does not have this problem — it
-rewrites around the loaded file and preserves `revocations` — so this is specific to the verb the
-ceremony command actually uses. Since #5236 `jinn ceremony rotate` authors revocations, so the
-hazard is live: re-authoring a catalog that carries revocations un-revokes every retired key. Do not
-run this procedure on such a catalog until it preserves `revocations`.
+## Revocations carry forward
+
+A wholesale rewrite would drop the revocations the replaced catalog holds, and every key they
+retired would bind again. Since `jinn ceremony rotate` authors revocations, the re-author keeps them
+instead ([#5308](https://github.com/Jinn-Network/mono/issues/5308)).
+
+`jinn ceremony init --previous-catalog <path>` reads the replaced catalog before it mints or anchors
+anything. `authorCatalog` then writes every revocation that catalog holds into the new one verbatim,
+with the binding each revocation names and every anchor either one references. Nothing is re-signed
+or re-anchored, so each revocation keeps its voucher account's signature and its effective time, and
+each retired key stays refused from the same instant. The named binding comes along because a
+revocation reaches a key only through the record it names. The completion lists the carried
+revocations as `carriedRevocations`.
+
+`init` refuses instead of writing a catalog, and says why, when:
+
+- it would replace a catalog and `--previous-catalog` is missing: its run receipt shows it sealed a
+  catalog at `--catalog`, or `<dir>/ceremony/rotation.json` exists;
+- the replaced catalog cannot be read, or a revocation in it relies on an anchor it does not
+  declare (the refusal names the revocation);
+- the re-author declares an anchor a carried record relies on differently from the replaced catalog,
+  which would move that record's time;
+- the re-author would bind a key a carried revocation retired, for the same Agent (the refusal names
+  the revocation);
+- the config's `identityStores` names a different store than `<dir>/identity/<family>.enc.json` for a
+  family it would bind, or `<dir>/ceremony/rotation.json` records a rotation of that family, finished
+  or not: that family was rotated, whatever `--previous-catalog` names. A `rotation.json` that cannot
+  be read is refused as well, rather than taken for no rotation.
+
+A re-author after `jinn ceremony rotate` meets the last two refusals: the retired-key one when
+`--previous-catalog` is the catalog holding the rotation's revocations, the rotated-family one for
+any other file. `init` opens the stores at
+`<dir>/identity/<family>.enc.json`, not the stores `identityStores` names, and after a rotation those
+hold the retired keys. So a rotated family cannot be re-authored with `init`. The refusal
+comes after the stores are opened and before any anchor is sent, so it spends no gas.
 
 ## Cost and sequencing
 

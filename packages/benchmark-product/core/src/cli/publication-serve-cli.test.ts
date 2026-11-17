@@ -54,6 +54,9 @@ describe("publication serve", () => {
     // under contention that acquire waits out a 30-second timeout before the bind, which used to
     // be a completely silent window (#3293).
     expect(progress[0]).toMatch(/^refreshing the well-known document for source colophon-benchmarks$/);
+    // The head heartbeat's first check runs before the verb reports ready, and says why there is
+    // nothing to re-sign (#4187).
+    expect(progress).toContain("no announcement yet; no source head to re-sign");
     expect(progress[progress.length - 1]).toMatch(/^serving http:\/\/127\.0\.0\.1:\d+ /);
     expect(installed).toBe(1);
     shutdown.abort();

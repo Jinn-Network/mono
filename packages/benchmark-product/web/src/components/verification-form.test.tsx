@@ -86,6 +86,11 @@ describe("verification action presentation", () => {
             status: "pending",
             subject: "lock",
             trustMaterial: "none",
+          }, {
+            recordSha256: "e".repeat(64),
+            status: "present",
+            subject: "matrix",
+            trustMaterial: "none",
           }],
           subjects: [
             { subject: "lock", outcome: "anchored" },
@@ -104,8 +109,11 @@ describe("verification action presentation", () => {
     expect(markup).toContain(">Timestamps<");
     expect(markup).toContain(`lock timestamp proof · pending · ${"c".repeat(64)}`);
     expect(markup).toContain(">Timestamp coverage<");
+    expect(markup).toContain(`the runs timestamp proof · present · ${"e".repeat(64)}`);
     expect(markup).toContain("lock: timestamped");
-    expect(markup).toContain("matrix: promised but missing (opentimestamps/v1)");
+    expect(markup).toContain("the runs: promised but missing (opentimestamps/v1)");
+    // Spec section 4.2, v1.15 (issue #5278): the raw subject `matrix` stays in the result only.
+    expect(markup).not.toMatch(/>matrix(?![\w-])/u);
     expect(markup).toContain("a timestamp proof is still pending, and `report` closes the anchoring window.");
     expect(markup).not.toMatch(/>Anchors<|Anchor subjects|anchored|declared-but-absent|anchor evidence/u);
   });
@@ -121,7 +129,7 @@ describe("verification action presentation", () => {
     };
     const markup = renderToStaticMarkup(<VerificationForm action={action} draftId="draft-1" />);
     expect(markup).toContain("no timestamp proofs carried");
-    expect(markup).toContain("matrix: none");
+    expect(markup).toContain("the runs: none");
     expect(markup).not.toMatch(/absent|no anchor records carried/u);
   });
 
@@ -154,6 +162,12 @@ describe("verification action presentation", () => {
     expect(report).toContain(`\\n${TIMESTAMP_PROOF_LABELS.heading}\\n`);
     expect(report).toContain(`"  ${TIMESTAMP_PROOF_LABELS.noneCarried}"`);
     expect(declaration("renderAnchor")).toContain(` ${TIMESTAMP_PROOF_LABELS.proof}\``);
+    expect(declaration("renderAnchor")).toContain("timestampSubjectName(entry.subject)");
+    expect(subject).toContain("timestampSubjectName(subject.subject)");
+    const subjectNames = /^const TIMESTAMP_SUBJECT_NAMES\b[^=]*= (\{[^}]*\});$/mu.exec(reader)?.[1];
+    expect(subjectNames, "the reader's TIMESTAMP_SUBJECT_NAMES").toBe(
+      `{ ${Object.entries(TIMESTAMP_PROOF_LABELS.subjects).map(([raw, name]) => `${raw}: "${name}"`).join(", ")} }`,
+    );
   });
 
   test("names declared anchor profiles, which the spec origin does not serve, without the origin", () => {

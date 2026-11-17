@@ -1919,6 +1919,104 @@ describe("checkBindingRevocation (§7.5 step 4, §7.4b)", () => {
       expect(await checkBindingRevocation(unwritten([]), "2026-03-01T00:00:00Z", deps)).toMatchObject({ ok: false });
     });
   });
+
+  // Each listed entry is judged on its own, whichever entries sit beside it. The answers below are
+  // read through all three entry points, with the entry that carries the authority listed first
+  // and last, so an answer kept for one entry and reused for another shows in one of the orders.
+  describe("revocation entries listed together", () => {
+    const VERDICT = "did:key:z6MkfMEMOVERDICT1111111111111111111111111";
+    const SETTLEMENT = "did:key:z6MkfMEMOSETTLE11111111111111111111111111";
+    const STRANGER = "did:key:z6MkfMEMOSTRANGER111111111111111111111111";
+    const keys = signingKeys(VERDICT, SETTLEMENT, VOUCHER_DID, OTHER_VOUCHER_DID, STRANGER);
+    const verdict = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: VERDICT, algorithm: "ed25519", didKey: VERDICT },
+      voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+      scope: ["verdicts"],
+    });
+    const settlement = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: SETTLEMENT, algorithm: "ed25519", didKey: SETTLEMENT },
+      voucher: { kind: "account", did: OTHER_VOUCHER_DID, contractAccount: false },
+      scope: ["settlements"],
+    });
+    const base = revocationEntry(VOUCHER_DID, "2026-02-01T00:00:00Z");
+    const sealedBy = (signedBy: string): Uint8Array =>
+      keys.seal(base.revocation, TRUST_REVOCATION_MEDIA_TYPE, VOUCHER_DID, signedBy);
+
+    async function verdicts(revocations: readonly ResolvedRevocation[]) {
+      const resolved = resolvedBinding({
+        binding: verdict,
+        envelopeBytes: keys.seal(verdict, TRUST_KEY_BINDING_MEDIA_TYPE, VERDICT),
+        revocations,
+      });
+      const deps = {
+        bindingResolver: new FakeBindingResolver()
+          .register({ key: VERDICT, agent: AGENT, resolved })
+          .register({
+            key: SETTLEMENT,
+            agent: AGENT,
+            resolved: authorityBinding(settlement, { envelopeBytes: keys.seal(settlement, TRUST_KEY_BINDING_MEDIA_TYPE, SETTLEMENT) }),
+          }),
+        witnessVerifier: fakeWitnessVerifier,
+        dsseVerifier: keys.verifier,
+      };
+      return {
+        revocation: await checkBindingRevocation(resolved, "2026-03-01T00:00:00Z", deps),
+        envelope: await verifyEnvelopeBinding(
+          {
+            envelopeBytes: keys.seal({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, VERDICT),
+            key: VERDICT,
+            agent: AGENT,
+            family: "verdicts",
+            atTime: "2026-03-01T00:00:00Z",
+          },
+          deps,
+        ),
+        join: await settlementJoinCheck(
+          {
+            verdictKey: VERDICT,
+            settlementDeclarationKey: SETTLEMENT,
+            claimedEvaluatorAgent: AGENT,
+            family: "verdicts",
+            envelopeEffectiveTime: "2026-03-01T00:00:00Z",
+            claimTime: "2026-03-05T00:00:00Z",
+          },
+          deps,
+        ),
+      };
+    }
+
+    const revokedBoth = async (listed: readonly ResolvedRevocation[]) => {
+      const outcome = await verdicts(listed);
+      expect(outcome.revocation).toMatchObject({ ok: false });
+      expect(outcome.envelope).toMatchObject({ ok: false, reason: "revoked" });
+      expect(outcome.join).toMatchObject({ ok: false, reason: expect.stringMatching(/verdict leg is revoked/) });
+    };
+
+    test("alike in all but the envelope, the one the voucher signed revokes whichever is listed first", async () => {
+      const forged = { ...base, envelopeBytes: sealedBy(STRANGER) };
+      const genuine = { ...base, envelopeBytes: sealedBy(VOUCHER_DID) };
+      await revokedBoth([forged, genuine]);
+      await revokedBoth([genuine, forged]);
+    });
+
+    test("unwritable entries, one with authority and one without, revoke whichever is listed first", async () => {
+      // A bigint cannot be written out, so neither entry has a row of its own.
+      const unwritable = (envelopeBytes: Uint8Array, revokedBy: string): ResolvedRevocation => ({
+        ...base,
+        revocation: { ...base.revocation, revokedBy, nonce: 1n } as never,
+        envelopeBytes,
+      });
+      const withoutAuthority = unwritable(
+        keys.seal({ ...base.revocation, revokedBy: OTHER_VOUCHER_DID }, TRUST_REVOCATION_MEDIA_TYPE, OTHER_VOUCHER_DID),
+        OTHER_VOUCHER_DID,
+      );
+      const withAuthority = unwritable(sealedBy(VOUCHER_DID), VOUCHER_DID);
+      await revokedBoth([withoutAuthority, withAuthority]);
+      await revokedBoth([withAuthority, withoutAuthority]);
+    });
+  });
 });
 
 describe("authenticateRequester (§7.5b)", () => {
@@ -2169,6 +2267,162 @@ describe("verifyEnvelopeBinding under a ceremony currency profile", () => {
       reason: "ceremony-verification-failed",
       detail: expect.stringMatching(/terms cutover/),
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The same text applies wherever the walk asks whether a binding gives authority: a revoker, an
+// incumbent and a consenter each have to stand, and each stands only if its own ceremony meets the
+// text. In every case below the authority's EOA ceremony fails the text only because its record
+// took effect before the ceremony was issued, so the profile alone decides.
+// ---------------------------------------------------------------------------
+
+describe("authority under a ceremony currency profile", () => {
+  const CURRENT = "2026-07-28T00:00:00Z";
+  const STALE = "2026-01-01T00:00:00Z";
+  const NOT_YET_REVOKED = "2026-09-01T00:00:00Z";
+  const deps = (resolver: BindingResolver) => ({
+    bindingResolver: resolver,
+    witnessVerifier: fakeWitnessVerifier,
+    dsseVerifier: trustingDsseVerifier,
+  });
+
+  /** A bindings-scoped authority whose EOA ceremony meets the text only from `CURRENT` on. */
+  function eoaAuthority(effectiveStart: string, profile?: ResolvedBinding["ceremonyCurrency"], relationship: KeyBinding["relationship"] = "controls") {
+    const evidence = eoaCeremonyEvidence();
+    return authorityBinding(
+      keyBinding({
+        agent: eoaFixture.agentIri,
+        key: { publicKey: "0x04", keyid: eoaFixture.didKey, algorithm: "secp256k1", didKey: eoaFixture.didKey },
+        voucher: { kind: "account", did: didPkh(eoaFixture.voucherChainId, eoaFixture.message.address), contractAccount: false },
+        ceremony: { type: "eoa", digest: ceremonyEvidenceDigest(evidence) },
+        scope: ["bindings"],
+        relationship,
+      }),
+      { ceremonyEvidence: evidence, effectiveStart, ...(profile === undefined ? {} : { ceremonyCurrency: profile }) },
+    );
+  }
+
+  const successor = (extra: Partial<KeyBinding> = {}) => keyBinding({
+    agent: eoaFixture.agentIri,
+    key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+    voucher: { kind: "account", did: OTHER_VOUCHER_DID, contractAccount: false },
+    ...extra,
+  });
+
+  describe("a revocation signed by a sibling key", () => {
+    const target = resolvedBinding({
+      binding: successor(),
+      revocations: [revocationEntry(eoaFixture.didKey, "2026-08-01T00:00:00Z")],
+    });
+    const revokedWith = async (effectiveStart: string, profile?: ResolvedBinding["ceremonyCurrency"]) => (
+      await checkBindingRevocation(
+        target,
+        NOT_YET_REVOKED,
+        deps(new FakeBindingResolver().register({ key: eoaFixture.didKey, agent: eoaFixture.agentIri, resolved: eoaAuthority(effectiveStart, profile) })),
+      )
+    ).ok;
+
+    test("counts with the profile off, whatever the sibling's ceremony", async () => {
+      expect(await revokedWith(STALE)).toBe(false);
+    });
+
+    test("does not count with the profile on when the sibling's own ceremony fails it", async () => {
+      expect(await revokedWith(STALE, {})).toBe(true);
+    });
+
+    test("counts with the profile on when the sibling's own ceremony meets it", async () => {
+      expect(await revokedWith(CURRENT, {})).toBe(false);
+    });
+  });
+
+  describe("an incumbent that roots a self-extension", () => {
+    const voucher = { kind: "account" as const, did: didPkh(eoaFixture.voucherChainId, eoaFixture.message.address), contractAccount: false };
+    const standsWith = async (effectiveStart: string, profile?: ResolvedBinding["ceremonyCurrency"]) => {
+      const candidate = resolvedBinding({
+        binding: successor({ voucher }),
+        isGenesis: false,
+        effectiveStart: "2026-07-30T00:00:00Z",
+        incumbentControls: [{ key: eoaFixture.didKey, voucher }],
+      });
+      const resolver = new FakeBindingResolver()
+        .register({ key: KEY_2, agent: eoaFixture.agentIri, resolved: candidate })
+        .register({ key: eoaFixture.didKey, agent: eoaFixture.agentIri, resolved: eoaAuthority(effectiveStart, profile) });
+      return verifyEnvelopeBinding(
+        {
+          envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+          key: KEY_2,
+          agent: eoaFixture.agentIri,
+          family: "deliveries",
+          atTime: "2026-08-01T00:00:00Z",
+        },
+        deps(resolver),
+      );
+    };
+
+    test("roots it with the profile off, whatever the incumbent's ceremony", async () => {
+      expect(await standsWith(STALE)).toMatchObject({ ok: true });
+    });
+
+    test("does not root it with the profile on when the incumbent's own ceremony fails it", async () => {
+      expect(await standsWith(STALE, {})).toMatchObject({ ok: false, reason: "consent-chain-violation" });
+    });
+
+    test("roots it with the profile on when the incumbent's own ceremony meets it", async () => {
+      expect(await standsWith(CURRENT, {})).toMatchObject({ ok: true });
+    });
+  });
+
+  describe("a consent chain", () => {
+    const standsWith = async (effectiveStart: string, profile?: ResolvedBinding["ceremonyCurrency"]) => {
+      const candidate = resolvedBinding({
+        binding: successor({ consent: { keyid: eoaFixture.didKey, sig: btoa("irrelevant-in-this-fake") } }),
+        isGenesis: false,
+        effectiveStart: "2026-07-30T00:00:00Z",
+      });
+      const resolver = new FakeBindingResolver()
+        .register({ key: KEY_2, agent: eoaFixture.agentIri, resolved: candidate })
+        .register({ key: eoaFixture.didKey, agent: eoaFixture.agentIri, resolved: eoaAuthority(effectiveStart, profile) });
+      return verifyEnvelopeBinding(
+        {
+          envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+          key: KEY_2,
+          agent: eoaFixture.agentIri,
+          family: "deliveries",
+          atTime: "2026-08-01T00:00:00Z",
+        },
+        deps(resolver),
+      );
+    };
+
+    test("holds with the profile off, whatever the consenter's ceremony", async () => {
+      expect(await standsWith(STALE)).toMatchObject({ ok: true });
+    });
+
+    test("fails with the profile on when the consenter's own ceremony fails it", async () => {
+      expect(await standsWith(STALE, {})).toMatchObject({ ok: false, reason: "consent-chain-violation" });
+    });
+
+    test("holds with the profile on when the consenter's own ceremony meets it", async () => {
+      expect(await standsWith(CURRENT, {})).toMatchObject({ ok: true });
+    });
+  });
+
+  // One walk judges a row more than once. The row names neither the profile nor the effective start
+  // it is read under, so the answer kept for it is kept under those too: an answer reached without
+  // the profile is not the answer with it.
+  test("a revoker row judged without the profile earlier in a walk is judged again when it carries one", async () => {
+    const early = revocationEntry(eoaFixture.didKey, "2026-02-01T00:00:00Z");
+    const late = revocationEntry(eoaFixture.didKey, "2026-08-01T00:00:00Z");
+    const target = resolvedBinding({ binding: successor(), revocations: [early, late] });
+    const unprofiled = eoaAuthority(STALE);
+    const profiled = { ...unprofiled, ceremonyCurrency: {} };
+    const resolver: BindingResolver = {
+      resolveBinding: async (_query, atTime) => (atTime < "2026-06-01T00:00:00Z" ? profiled : unprofiled),
+    };
+    // The early entry reads the revoker with the profile and fails it; the late one reads the same
+    // row without it and counts.
+    expect((await checkBindingRevocation(target, NOT_YET_REVOKED, deps(resolver))).ok).toBe(false);
   });
 });
 

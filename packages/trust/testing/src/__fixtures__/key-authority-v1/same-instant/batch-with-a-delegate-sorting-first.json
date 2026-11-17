@@ -1,0 +1,43 @@
+{
+  "name": "batch-with-a-delegate-sorting-first",
+  "description": "A delegate's lower digest does not take the founding of a batch from the controls records.",
+  "bindings": [
+    {
+      "id": "a",
+      "key": "K2",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "b",
+      "key": "K3",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "d",
+      "key": "K7",
+      "voucher": "A",
+      "from": "01-01",
+      "rel": "signs-for",
+      "below": [
+        "a",
+        "b"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "key": "K7",
+      "expect": "accepted"
+    },
+    {
+      "key": "K2",
+      "expect": "accepted"
+    },
+    {
+      "key": "K3",
+      "expect": "accepted"
+    }
+  ]
+}

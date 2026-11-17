@@ -1,0 +1,34 @@
+{
+  "name": "same-instant-peers-with-no-root",
+  "description": "Two records of one account at one instant, with nothing under them, stand on nothing.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "x",
+      "key": "K5",
+      "voucher": "C",
+      "from": "02-01"
+    },
+    {
+      "id": "y",
+      "key": "K6",
+      "voucher": "C",
+      "from": "02-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K5",
+      "expect": "consent-chain-violation"
+    },
+    {
+      "key": "K6",
+      "expect": "consent-chain-violation"
+    }
+  ]
+}

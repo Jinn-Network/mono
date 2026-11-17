@@ -52,7 +52,7 @@
  * reader are masked too, so a ruled name that happens to contain an inherited word is not read as
  * that word.
  *
- * Violations already on `next` are recorded in `KNOWN_VIOLATIONS`, each with the open issue that
+ * Violations already on `next` are recorded in `KNOWN_VIOLATIONS`, each with the issue that
  * owns it (`OWNERS`). The ledger must equal what the surfaces carry
  * exactly: a new violation fails, and so does a recorded one that has gone, so the list cannot
  * outlive the strings it describes. To regenerate it after a change that is meant:
@@ -67,9 +67,10 @@ import { describe, expect, test } from "vitest";
 import { BENCHMARKING_METHOD_IDS, SIX_VARIABLE_DISCLOSURE_SPECIFICATION } from "@jinn-network/benchmarking-records";
 import type { IntegrityAnchorsReport } from "./anchor/check.js";
 import { buildPublicAssets, type PublicAssetInput } from "./assets.js";
-import { expectedChecks } from "./capabilities.js";
+import { CAPABILITY_REGISTRY, expectedChecks } from "./capabilities.js";
 import { ANCHOR_CASES } from "./characterization/testing/anchor-cases.js";
 import { renderVerifiedBundle, runVerifierCli } from "./cli.js";
+import { describeRecomputedChecks, type VerificationOutcome } from "./outcome.js";
 import type { FreezeRepoVerificationResult } from "./freeze-repo.js";
 import { domainBindingProof, type VerifiedDomainBinding } from "./identity/domain-binding.js";
 import { BUNDLE_V10_FORMAT, SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
@@ -620,6 +621,35 @@ function metadataFirst(notFetched: number): PublicBundleVerificationResult {
   } as unknown as PublicBundleVerificationResult;
 }
 
+/** Every capability the registry carries, in registry order. Derived, never listed: a capability
+ * added to the registry is declared here with no edit to this file. */
+const EVERY_CAPABILITY: readonly string[] = [...new Set(CAPABILITY_REGISTRY.map(({ token }) => token))].sort();
+const EVERY_CHECK: readonly string[] = expectedChecks(EVERY_CAPABILITY);
+
+/** One `/10` result declaring every registered capability, so the gloss line and the
+ * recomputed-checks subject of every check the registry can add are on a surface this test scans. */
+function renderEveryCheck(): string {
+  return renderVerifiedBundle({
+    format: BUNDLE_V10_FORMAT,
+    capabilities: EVERY_CAPABILITY,
+    checks: EVERY_CHECK,
+    ...CLASSIC,
+  } as unknown as PublicBundleVerificationResult);
+}
+
+/** The checks, from `expected`, whose name does not start a line of `render`. */
+function unrenderedChecks(render: string, expected: readonly string[]): string[] {
+  const lines = render.split("\n");
+  return expected.filter((check) => !lines.some((line) => line.startsWith(`${check} `)));
+}
+
+/** The surfaces, among `texts`, no render of which yields reader text. A single render may print
+ * nothing on a surface (a refusal prints to stderr and nothing to stdout), so the floor is one
+ * non-empty render per surface, not one per render. */
+function emptySurfaces(texts: ReadonlyMap<string, readonly string[]>): string[] {
+  return [...texts].filter(([, items]) => items.every((text) => text.trim() === "")).map(([surface]) => surface);
+}
+
 /** Every human stdout shape this suite renders itself: one per closure, every anchor report the
  * characterization suite builds, each signer and binding form. */
 const READER_RENDERS: readonly string[] = [
@@ -649,6 +679,7 @@ const READER_RENDERS: readonly string[] = [
     checks: expectedChecks(["external-import"]),
     ...CLASSIC,
   } as unknown as PublicBundleVerificationResult),
+  renderEveryCheck(),
   renderVerifiedBundle({ format: "benchmark-product-public-bundle/4", checks: SIX, ...CLASSIC, signers: SIGNERS } as PublicBundleVerificationResult),
   renderVerifiedBundle(
     { format: "benchmark-product-public-bundle/4", checks: SIX, ...CLASSIC, signers: SIGNERS } as PublicBundleVerificationResult,
@@ -1038,14 +1069,10 @@ const REPORT_VIOLATION_OWNER = 3862 as const;
  */
 const READER_PROSE_AND_REFUSAL_OWNER = 5251 as const;
 
-/** The `Timestamps` and `Timestamp coverage` blocks name each covered record by its claim anchor subject, so a reader meets "matrix". */
-const TIMESTAMP_SUBJECT_OWNER = 5278 as const;
-
 /** The issues on Jinn-Network/mono that own recorded violations: each either retires its entries
  * or rules them out of section 5's reach, and its change updates this ledger. */
 const OWNERS = {
   [REPORT_VIOLATION_OWNER]: "Report page vocabulary",
-  [TIMESTAMP_SUBJECT_OWNER]: "the subject label in the reader's timestamp blocks",
   [READER_PROSE_AND_REFUSAL_OWNER]: "a field path a refusal line prints as written",
 } as const;
 
@@ -1101,6 +1128,17 @@ function scan(surface: Surface, rendered: readonly Rendered[]): Violation[] {
   return [...found.values()].map(({ rule, name, units }) => ({ surface, rule, name, units: [...units].sort() }));
 }
 
+/** What `scan` reads for each surface, as reader text. */
+async function surfaceReaderTexts(): Promise<Map<Surface, string[]>> {
+  const decoder = new TextDecoder();
+  const reports = Object.values(REPORT_PROFILES).map((input) => buildPublicAssets(input));
+  const texts = new Map<Surface, string[]>();
+  for (const asset of REPORT_ASSETS) texts.set(asset, reports.map((assets) => readerText(asset, decoder.decode(assets[asset]))));
+  const reader = await readerSurfaces();
+  for (const surface of READER_SURFACES) texts.set(surface, reader[surface].map((raw) => readerText(surface, raw)));
+  return texts;
+}
+
 async function observedViolations(): Promise<Violation[]> {
   const decoder = new TextDecoder();
   const reports = Object.values(REPORT_PROFILES).map((input) => ({ assets: buildPublicAssets(input), sealed: sealedValues(input) }));
@@ -1135,7 +1173,7 @@ function printLedger(observed: readonly Violation[]): string {
       ? "REPORT_VIOLATION_OWNER"
       : owner === READER_PROSE_AND_REFUSAL_OWNER
         ? "READER_PROSE_AND_REFUSAL_OWNER"
-        : owner === TIMESTAMP_SUBJECT_OWNER ? "TIMESTAMP_SUBJECT_OWNER" : "OWNER_REQUIRED";
+        : "OWNER_REQUIRED";
     return [
       "  {",
       `    surface: ${JSON.stringify(violation.surface)}, rule: ${JSON.stringify(violation.rule)}, name: ${JSON.stringify(violation.name)},`,
@@ -1432,17 +1470,6 @@ const KNOWN_VIOLATIONS: readonly KnownViolation[] = [
     owner: READER_PROSE_AND_REFUSAL_OWNER,
     units: [
       "colophon-check: the claim's field anchors does not agree with the records here",
-    ],
-  },
-  // Owned by #5278. The `Timestamps` and `Timestamp coverage` blocks name each covered record by
-  // its claim anchor subject (`lock`, `matrix`), so a reader meets "matrix".
-  {
-    surface: "colophon-check stdout", rule: "hidden term", name: "Matrix",
-    owner: TIMESTAMP_SUBJECT_OWNER,
-    units: [
-      "matrix timestamp proof",
-      "matrix: none — no timestamp proof was carried and none was promised",
-      "matrix: timestamped",
     ],
   },
   {
@@ -1940,6 +1967,36 @@ describe("reader-facing strings", () => {
     const usage = (await runVerifierCli([])).stderr;
     const flags = [...new Set([...usage.matchAll(/(?<![\w-])--[a-z][\w-]*/gu)].map((match) => match[0]))].sort();
     expect(flags).toEqual(Object.keys(CLI_FLAGS).sort());
+  });
+
+  test("every verification check the registry can add is rendered here, with its gloss and its caveat subject", () => {
+    const render = renderEveryCheck();
+    expect(EVERY_CHECK.length).toBeGreaterThan(expectedChecks([]).length);
+    expect(unrenderedChecks(render, EVERY_CHECK)).toEqual([]);
+    // The caveat names what was recomputed, one subject per check that passed. It wraps, so the
+    // render is read as one line.
+    const flat = render.replace(/\s+/gu, " ");
+    for (const check of EVERY_CHECK) {
+      const subject = describeRecomputedChecks({ outcomes: [{ check, state: "passed" }] } as unknown as VerificationOutcome);
+      expect(flat, check).toContain(subject);
+    }
+  });
+
+  test("a check left out of the render is reported unrendered", () => {
+    const [first, ...rest] = EVERY_CHECK;
+    const partial = EVERY_CHECK.slice(1).map((check) => `${check} passed`).join("\n");
+    expect(unrenderedChecks(partial, EVERY_CHECK)).toEqual([first]);
+    expect(rest.length).toBeGreaterThan(0);
+  });
+
+  test("every scanned surface renders reader text", async () => {
+    const texts = await surfaceReaderTexts();
+    expect([...texts.keys()].sort()).toEqual([...REPORT_ASSETS, ...READER_SURFACES].sort());
+    expect(emptySurfaces(texts)).toEqual([]);
+  });
+
+  test("a surface that renders nothing is reported empty", () => {
+    expect(emptySurfaces(new Map([["a", ["text"]], ["b", []], ["c", ["  ", ""]], ["d", ["text", "  "]]]))).toEqual(["b", "c"]);
   });
 
   test("carry exactly the recorded violations, each with its owner", async () => {

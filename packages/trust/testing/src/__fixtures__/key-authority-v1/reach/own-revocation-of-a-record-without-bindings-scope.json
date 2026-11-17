@@ -1,0 +1,44 @@
+{
+  "name": "own-revocation-of-a-record-without-bindings-scope",
+  "description": "A sibling that does not stand lends the key no bindings scope.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "o",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "scope": [
+        "verdicts"
+      ]
+    },
+    {
+      "id": "f",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "scope": [
+        "bindings"
+      ],
+      "ceremony": "absent"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "o",
+      "by": "K2",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "accepted"
+    }
+  ]
+}

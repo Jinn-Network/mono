@@ -1,0 +1,38 @@
+{
+  "name": "revoking-an-ended-record-reaches-nothing-else",
+  "description": "A record out of window at the revocation's time shares nothing.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "e",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "until": "02-15"
+    },
+    {
+      "id": "l",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-10"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "e",
+      "by": "K1",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "accepted"
+    }
+  ]
+}

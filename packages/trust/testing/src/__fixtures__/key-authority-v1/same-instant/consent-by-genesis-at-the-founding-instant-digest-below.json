@@ -1,0 +1,32 @@
+{
+  "name": "consent-by-genesis-at-the-founding-instant-digest-below",
+  "description": "A record that names a consenter does not take the founding from the record that claims it.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "B",
+      "from": "01-01",
+      "consentBy": "K1",
+      "below": [
+        "g"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "accepted"
+    },
+    {
+      "key": "K2",
+      "expect": "accepted"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "back-dated-past-an-ended-authority",
+  "description": "Effective start, not validFrom, is when authority is judged.",
+  "profile": "anchors-required",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01",
+      "until": "02-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "A",
+      "from": "01-01",
+      "anchor": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "consent-chain-violation"
+    }
+  ]
+}

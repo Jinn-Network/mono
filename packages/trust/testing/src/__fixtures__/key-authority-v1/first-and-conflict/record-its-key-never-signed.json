@@ -1,0 +1,25 @@
+{
+  "name": "record-its-key-never-signed",
+  "description": "A record its key never signed does not resolve.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "x",
+      "key": "K2",
+      "voucher": "C",
+      "from": "02-01",
+      "signed": false
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "binding-not-resolved"
+    }
+  ]
+}

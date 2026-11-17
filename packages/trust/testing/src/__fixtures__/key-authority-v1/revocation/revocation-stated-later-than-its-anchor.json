@@ -1,0 +1,32 @@
+{
+  "name": "revocation-stated-later-than-its-anchor",
+  "description": "Effective time is the later of the stated time and the anchor.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "g",
+      "by": "K1",
+      "at": "02-01",
+      "stated": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "at": "02-15",
+      "expect": "accepted"
+    },
+    {
+      "key": "K1",
+      "at": "03-01",
+      "expect": "revoked"
+    }
+  ]
+}

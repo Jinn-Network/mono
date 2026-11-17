@@ -1,6 +1,9 @@
 # Native Identity Ceremony — production trust-artifact provisioning
 
-**Version:** 0.8 (rotation ships, after issue #5236: §3.2's `revokeBinding` is implemented with
+**Version:** 0.9 (a rotation resumes onto its own anchors, after issue #5311: §3.2b, §4.5 and §6
+laws 1 and 6 let an interrupted rotation wait on the anchor it submitted and recorded for the same
+act instead of sending a second one, and §4.5 repoints `identityStores` between the rebind and the
+revocation. v0.8 shipped rotation, after issue #5236: §3.2's `revokeBinding` is implemented with
 `planRevocation`, `revocationAnchorDigest` and the rebind writer `rebindRoles`, §4.5 adds
 `jinn ceremony rotate`, and §7 states what revocation and rebind can and cannot do when the voucher
 account itself is the compromised key. v0.7 made §3.2's deferred `revokeBinding` sign as the target
@@ -766,6 +769,22 @@ separation keeps the two preimages distinct by construction, so neither anchor c
 for the other and law 6's cross-act ban is not weakened by the rebind sharing a session with the
 revocation.
 
+**Fresh is per act, so an interrupted act resumes onto its own anchor (v0.9).** A rotation
+interrupted after it submits an act's anchor, most often during the finality wait, waits on that
+anchor again when re-run instead of submitting a second one. The anchor it resumes onto is not
+found by digest: it is the locator this rotation wrote to its own receipt
+(`<dir>/ceremony/rotation.json`) the moment it submitted it, used only while that receipt is
+unfinished and only when the re-run recomputes the same digest for the same act. A new rotation
+writes a new receipt, so it never sees a prior rotation's anchors. Such an anchor was newly
+submitted for this act, which is what R1 asks, and is not another act's, which is what R2 and the
+always-fresh rebind rule above forbid: the collision those rules guard against is a *different*
+act that happens to recompute the same digest, and a receipt-scoped locator cannot reach one. Its
+block time falls inside this rotation, after the replacement keys were minted, so a resumed rebind
+cannot date a replacement binding to before the act that creates it; and `rebindRoles` still
+refuses an anchor the catalog already declares. For the revocation, resuming is also the safer
+direction: the retired key stops verifying from the first anchor's block time, not from a second
+one submitted after the interruption.
+
 **Revocation: the `revocation-anchor/v1` preimage, recomputable by design.** `revokeBinding`'s
 body is deferred (§3.2, §9), so no revocation has ever been authored — which is why this is
 cheap to fix now and expensive after the first one is anchored. The preimage is
@@ -1069,18 +1088,29 @@ catalog authority is needed: the policy names Agent IRIs, and a rotation keeps t
    custody, and the Safe-ownership preflight, as `init` does.
 2. Open the current stores and find each key's catalog bindings. `planRevocation` shows the agent
    EOA is their voucher **before either anchor is sent**; a mismatch refuses with no gas spent.
-3. Record `<dir>/ceremony/rotation.json` naming the new store per family, then mint those stores.
-4. **Rebind**: submit a fresh `ceremony-anchor/v1` anchor over the replacement keys (§3.2b), wait
-   for finality, author the replacement bindings with `validFrom` = its block time, `rebindRoles`.
-5. **Revoke**: submit a fresh `revocation-anchor/v1` anchor, wait for finality, `revokeBinding`
-   with `effectiveTime` = its block time.
-6. Write `identityStores.<family>` = the new store, then mark the receipt complete. Restart every
-   daemon after distributing the catalog.
+3. Record `<dir>/ceremony/rotation.json` naming the new store and the retiring store per family,
+   then mint the new stores.
+4. **Rebind**: submit a fresh `ceremony-anchor/v1` anchor over the replacement keys (§3.2b) and
+   record its locator in the receipt, wait for finality, author the replacement bindings with
+   `validFrom` = its block time, `rebindRoles`.
+5. Write `identityStores.<family>` = the new store, whose keys the catalog now binds.
+6. **Revoke**: submit a fresh `revocation-anchor/v1` anchor and record its locator in the receipt,
+   wait for finality, `revokeBinding` with `effectiveTime` = its block time.
+7. Mark the receipt complete. Restart every daemon after distributing the catalog.
 
-A re-run after an interruption reopens the stores the receipt names, skips a half the catalog
-already shows (a replacement key it binds, a retiring binding it revokes), and submits fresh
-anchors for what remains; neither half reuses an anchor. A receipt whose stores the config already
-names is complete: resuming it would take the new keys for the retiring ones.
+The config moves between the two acts so that no step leaves it naming a store whose bindings the
+catalog revokes: before step 5 it names the retiring store, whose bindings stand, and from step 5
+the new one, whose bindings the catalog carries. A daemon restarted at any point boots.
+
+A re-run while the receipt is unfinished resumes it, whatever the config names by then. It reopens
+the stores the receipt names, retiring and new; skips a half the catalog already shows (a
+replacement key it binds, a retiring binding it revokes); and for a half that remains, waits on the
+anchor the receipt recorded for that act when it recomputes the same digest, submitting a fresh one
+only when none was recorded (§3.2b says why this is not reuse across acts). A run stopped after its
+last write and before the completion mark therefore resumes to nothing but the mark, rather than
+rotating the keys it just bound. A receipt written by v0.8's rotate records no retiring stores; it
+falls back to the config, which that version repointed last, so once the config names its new
+stores that rotation is complete.
 
 ## 5. Catalog governance
 
@@ -1131,7 +1161,8 @@ per-relationship model has no consumer, and would multiply the §6 sequencing pe
    the receipt is moved aside. **The one act that MUST NOT reuse is a rebind**, whose anchor is
    always freshly submitted (§3.2b) — the narrow rebind preimage makes a cross-act collision
    reachable, and reuse would date the replacement binding to the anchor of the binding it
-   replaces. Cross-*preimage* reuse is refused by domain separation: a `revocation-anchor/v1`
+   replaces. A rebind interrupted after its anchor was submitted, resuming onto the locator its own
+   rotation recorded for it, is the same act and not reuse (§3.2b, §4.5). Cross-*preimage* reuse is refused by domain separation: a `revocation-anchor/v1`
    digest can never equal a `ceremony-anchor/v1` one, so a revocation's anchor is always fresh
    (law 6). Each binding and each revocation declares exactly one anchor (§3.2b).
 2. **`validFrom = anchor block time`** (and `issuedAt` with it). The resolver computes
@@ -1212,7 +1243,10 @@ per-relationship model has no consumer, and would multiply the §6 sequencing pe
    make the anchor govern. Both halves are listed as authoring convention because the verifier
    checks neither, not because neither matters. Law 1's anchor-first ordering extends to
    revocations for the same reason it governs bindings: the
-   effective time is not knowable until the anchor mines.
+   effective time is not knowable until the anchor mines. A revocation act interrupted after its
+   anchor was submitted resumes onto the locator its rotation recorded for it (§4.5): that anchor
+   was newly submitted for this act, so R1 holds, and R2's ban on another act's anchor does not
+   reach it.
 
 ## 7. Security considerations
 

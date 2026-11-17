@@ -4,14 +4,19 @@ import {
   MEDIA_HEAD,
   RECORD_KINDS,
   archivePagePath,
+  dssePreAuthEncoding,
   formatOrigin,
   headPath,
+  parseSourceHead,
   recordDigest,
   recordPath,
   sealJson,
+  verifySourceChain,
   type Announcement,
+  type HighWaterMark,
   type SourceIdentity,
 } from "@jinn-network/record-discovery-protocol";
+import type { DsseEnvelope } from "@jinn-network/trust-core";
 
 import type { Clock, ReadableImmutableBlobStore, StoredBlob } from "./ports.js";
 import type { ArchivePage } from "./archive.js";
@@ -588,5 +593,305 @@ describe("durable Record Discovery source writer", () => {
     // minting a second head: nothing re-signed, and the intent is durably cleared.
     expect(harness.signCount()).toBe(signCount);
     expect(await harness.intentCas.read()).toBeUndefined();
+  });
+});
+
+// #4187: an idle source re-signs its current head before `refreshBy` lapses, so a reader that
+// arrives during the idle window never fetches a stale head. Design record:
+// docs/superpowers/specs/2026-09-09-idle-head-heartbeat-design.md (§4 trigger, §5 primitive).
+describe("idle head refresh (#4187)", () => {
+  // command() is stamped T0 with the 24h default window, so its head lapses at T0+24h and
+  // falls due for a refresh at T0+12h, half the window it was minted with.
+  const T0 = "2026-08-03T12:00:00.000Z";
+  const DUE = "2026-08-04T00:00:00.000Z";
+  const JUST_BEFORE_DUE = "2026-08-03T23:59:59.999Z";
+
+  interface ServedHead {
+    readonly bytes: Uint8Array;
+    readonly envelope: { payloadType: string; payload: string; signatures: { keyid?: string; sig: string }[] };
+    readonly head: { protocol: string; origin: string; sequence: string; entry: string; issuedAt: string; refreshBy: string };
+  }
+
+  async function servedHead(harness: ReturnType<typeof makeHarness>): Promise<ServedHead> {
+    const stored = await harness.blobs.get(headPath(SOURCE.name));
+    expect(stored?.contentType).toBe(MEDIA_HEAD);
+    const envelope = JSON.parse(new TextDecoder().decode(stored!.bytes)) as ServedHead["envelope"];
+    const head = JSON.parse(new TextDecoder().decode(
+      Uint8Array.from(atob(envelope.payload), (character) => character.charCodeAt(0)),
+    )) as ServedHead["head"];
+    return { bytes: stored!.bytes, envelope, head };
+  }
+
+  function commandAt(announcementId: string, timestamp: string): AppendAnnouncementCommand {
+    return { ...command(available(announcementId)), timestamp };
+  }
+
+  function refresher(harness: ReturnType<typeof makeHarness>, at: string, overrides: Partial<DurableSourceWriterOptions> = {}) {
+    return createDurableSourceWriter(writerOptions(harness, { clock: clockAt(at), ...overrides }));
+  }
+
+  /** A cold or returning reader of the served chain, holding its own high-water mark. */
+  function reader(harness: ReturnType<typeof makeHarness>) {
+    const marks = new Map<string, HighWaterMark>();
+    const key = { keyid: harness.signer.keyId, publicKey: "test-key", algorithm: "test" };
+    return {
+      marks,
+      async verify(head: ServedHead, at: string, firstAdoption: boolean) {
+        const page = JSON.parse(new TextDecoder().decode(
+          (await harness.blobs.get(archivePagePath(SOURCE.name, head.head.sequence)))!.bytes,
+        )) as ArchivePage;
+        return verifySourceChain({
+          head: parseSourceHead(head.head),
+          headSignature: head.envelope as DsseEnvelope,
+          entries: (async function* () {
+            for (const signed of firstAdoption ? page.entries : []) yield signed as never;
+          })(),
+          ports: {
+            keys: { resolve: async () => [key], everBound: async (_agent, keyid) => keyid === key.keyid },
+            sigs: { verify: async (pae, signature) => equalBytes(pae, signature) },
+            fresh: { isFresh: (refreshBy, now) => Date.parse(refreshBy) > now.getTime() },
+            hwm: {
+              get: async (source) => marks.get(formatOrigin(source.agent, source.name)),
+              put: async (source, mark) => { marks.set(formatOrigin(source.agent, source.name), mark); },
+            },
+            now: new Date(at),
+            firstAdoption,
+          },
+        });
+      },
+    };
+  }
+
+  it("re-signs a head idle for half its window at the same position, re-basing refreshBy", async () => {
+    const harness = makeHarness();
+    await writer(harness).append(command());
+    const before = await servedHead(harness);
+    const stateBefore = (await harness.stateCas.read())!.value;
+
+    const outcome = await refresher(harness, DUE).refreshIdleHead();
+
+    expect(outcome).toEqual({
+      status: "refreshed",
+      previous: { issuedAt: T0, refreshBy: "2026-08-04T12:00:00.000Z" },
+      current: { issuedAt: DUE, refreshBy: "2026-08-05T00:00:00.000Z" },
+    });
+    const after = await servedHead(harness);
+    // Position is untouched; only the two instants move, and `refreshBy` moves because it is
+    // recomputed from the new `issuedAt` -- the re-basing IS the heartbeat (design §2).
+    expect(after.head).toEqual({ ...before.head, issuedAt: DUE, refreshBy: "2026-08-05T00:00:00.000Z" });
+    expect(after.envelope.signatures).toEqual([
+      { keyid: harness.signer.keyId, sig: encodeBase64(dssePreAuthEncoding(MEDIA_HEAD, sealJson(after.head).bytes)) },
+    ]);
+    expect((await harness.stateCas.read())!.value).toEqual(stateBefore);
+    expect(await harness.intentCas.read()).toBeUndefined();
+  });
+
+  it("leaves a head with more than half its window remaining byte-identical", async () => {
+    const harness = makeHarness();
+    await writer(harness).append(command());
+    const before = await servedHead(harness);
+    const signCount = harness.signCount();
+
+    const outcome = await refresher(harness, JUST_BEFORE_DUE).refreshIdleHead();
+
+    expect(outcome).toEqual({ status: "not-due", current: { issuedAt: T0, refreshBy: "2026-08-04T12:00:00.000Z" } });
+    expect((await servedHead(harness)).bytes).toEqual(before.bytes);
+    expect(harness.signCount()).toBe(signCount);
+  });
+
+  it("re-signs a head that has already lapsed", async () => {
+    const harness = makeHarness();
+    await writer(harness).append(command());
+
+    const outcome = await refresher(harness, "2026-08-06T12:00:00.000Z").refreshIdleHead();
+
+    expect(outcome).toMatchObject({ status: "refreshed", current: { issuedAt: "2026-08-06T12:00:00.000Z", refreshBy: "2026-08-07T12:00:00.000Z" } });
+  });
+
+  it("has nothing to refresh for a source that never appended, and writes nothing", async () => {
+    const harness = makeHarness();
+
+    await expect(refresher(harness, DUE).refreshIdleHead()).resolves.toEqual({ status: "no-position" });
+    expect(harness.blobs.values.size).toBe(0);
+    expect(harness.signCount()).toBe(0);
+  });
+
+  it("keeps every successive window at the profile clamp rather than widening it", async () => {
+    const harness = makeHarness();
+    await writer(harness).append(command());
+
+    const first = await refresher(harness, DUE).refreshIdleHead();
+    const early = await refresher(harness, "2026-08-04T11:59:59.999Z").refreshIdleHead();
+    const second = await refresher(harness, "2026-08-04T12:00:00.000Z").refreshIdleHead();
+
+    expect(first).toMatchObject({ status: "refreshed", current: { issuedAt: DUE, refreshBy: "2026-08-05T00:00:00.000Z" } });
+    // The trigger reads the window the served head was minted with, so the second beat falls
+    // due half a window after the first, not half a window after the original append.
+    expect(early).toMatchObject({ status: "not-due" });
+    expect(second).toMatchObject({ status: "refreshed", current: { issuedAt: "2026-08-04T12:00:00.000Z", refreshBy: "2026-08-05T12:00:00.000Z" } });
+    const head = (await servedHead(harness)).head;
+    expect(Date.parse(head.refreshBy) - Date.parse(head.issuedAt)).toBe(24 * 60 * 60 * 1000);
+  });
+
+  it("reads the wall clock when no clock is injected", async () => {
+    const harness = makeHarness();
+    await writer(harness).append(command());
+    const before = Date.now();
+
+    const outcome = await createDurableSourceWriter({ ...writerOptions(harness), clock: undefined }).refreshIdleHead();
+
+    const after = Date.now();
+    expect(outcome.status).toBe("refreshed");
+    const issuedAt = Date.parse((await servedHead(harness)).head.issuedAt);
+    expect(issuedAt).toBeGreaterThanOrEqual(before);
+    expect(issuedAt).toBeLessThanOrEqual(after);
+  });
+
+  it("serves a cold reader a head that passes the chain check where the idle head is stale", async () => {
+    const harness = makeHarness();
+    await writer(harness).append(command());
+    const idle = await servedHead(harness);
+    const coldAt = "2026-08-05T06:00:00.000Z";
+
+    // Round-10 as a cold reader sees it: the idle head has lapsed, so it is refused.
+    await expect(reader(harness).verify(idle, coldAt, true)).resolves.toEqual({ status: "stale" });
+
+    await refresher(harness, "2026-08-05T00:00:00.000Z").refreshIdleHead();
+    await expect(reader(harness).verify(await servedHead(harness), coldAt, true)).resolves.toMatchObject({ status: "ok" });
+  });
+
+  it("leaves a replay of the head it superseded refused by a reader that holds the re-signed one", async () => {
+    const harness = makeHarness();
+    await writer(harness).append(command());
+    const superseded = await servedHead(harness);
+    await refresher(harness, DUE).refreshIdleHead();
+    const current = await servedHead(harness);
+    // Both heads are inside `refreshBy` at this instant, so freshness cannot be what refuses.
+    const at = "2026-08-04T01:00:00.000Z";
+    const consumer = reader(harness);
+
+    await expect(consumer.verify(current, at, true)).resolves.toMatchObject({ status: "ok" });
+    expect(consumer.marks.get(formatOrigin(SOURCE.agent, SOURCE.name))).toMatchObject({ issuedAt: DUE });
+    // Same sequence, same entry, an earlier `issuedAt`: a rollback mirror's replay.
+    await expect(consumer.verify(superseded, at, false))
+      .resolves.toEqual({ status: "broken-chain", at: "issued-at-monotonicity" });
+  });
+
+  it("lets a new record advance the source from the re-signed head, as it would without one", async () => {
+    const harness = makeHarness();
+    await writer(harness).append(command());
+    await refresher(harness, DUE).refreshIdleHead();
+    const refreshed = await servedHead(harness);
+
+    // The append floor is the head actually served, so a timestamp at or before the re-signed
+    // instant is refused exactly as one at or before an appended head is.
+    await expect(refresher(harness, DUE).append(commandAt("ann-2", DUE))).rejects.toThrow("strictly advance");
+    const receipt = await refresher(harness, "2026-08-04T00:00:01.000Z").append(commandAt("ann-2", "2026-08-04T00:00:01.000Z"));
+
+    expect(receipt.sequence).toBe("0000000000000002");
+    const appended = (await servedHead(harness)).head;
+    expect(appended).toMatchObject({
+      sequence: "0000000000000002",
+      entry: receipt.entryDigest,
+      issuedAt: "2026-08-04T00:00:01.000Z",
+      refreshBy: "2026-08-05T00:00:01.000Z",
+    });
+    expect(appended.entry).not.toBe(refreshed.head.entry);
+  });
+
+  it("finishes a crashed append before it judges the head, so the refresh never writes under it", async () => {
+    const harness = makeHarness();
+    await writer(harness).append(command());
+    await expect(writer(harness, "after-intent-before-page").append(commandAt("ann-2", "2026-08-03T12:01:00.000Z")))
+      .rejects.toThrow("fault:after-intent-before-page");
+
+    // The recovered append's head is minted at 12:01, so it is not yet due at DUE.
+    await expect(refresher(harness, DUE).refreshIdleHead()).resolves.toMatchObject({ status: "not-due" });
+    expect(await harness.intentCas.read()).toBeUndefined();
+    expect((await servedHead(harness)).head.sequence).toBe("0000000000000002");
+  });
+
+  it("refuses when an append stages an intent mid-refresh, and the source stays appendable", async () => {
+    const harness = makeHarness();
+    await writer(harness).append(command());
+    const before = await servedHead(harness);
+    let raced = false;
+    const racingSigner: DurableSourceSigner = {
+      ...harness.signer,
+      async sign(pae) {
+        if (!raced) {
+          raced = true;
+          // A concurrent append claims its intent after the refresh has judged the head and
+          // before it writes. Writing now would make that intent's own head guard throw on
+          // every later recover() -- the permanent wedge the interlock exists to prevent.
+          await expect(writer(harness, "after-intent-before-page").append(commandAt("ann-2", "2026-08-03T12:01:00.000Z")))
+            .rejects.toThrow("fault:after-intent-before-page");
+        }
+        return harness.signer.sign(pae);
+      },
+    };
+
+    const outcome = await refresher(harness, DUE, { signer: racingSigner }).refreshIdleHead();
+
+    expect(raced).toBe(true);
+    expect(outcome).toEqual({ status: "append-in-flight" });
+    expect((await servedHead(harness)).bytes).toEqual(before.bytes);
+    await expect(writer(harness).recover()).resolves.toMatchObject({ status: "recovered" });
+    const third = await refresher(harness, "2026-08-03T12:02:00.000Z").append(commandAt("ann-3", "2026-08-03T12:02:00.000Z"));
+    expect(third.sequence).toBe("0000000000000003");
+  });
+
+  it("returns a store failure as faulted, leaves the head as it was, and the next append proceeds", async () => {
+    const harness = makeHarness();
+    await writer(harness).append(command());
+    const before = await servedHead(harness);
+    const failure = new Error("disk full");
+    const failingBlobs: ReadableImmutableBlobStore = {
+      get: (path) => harness.blobs.get(path),
+      putImmutable: (path, bytes, contentType) => harness.blobs.putImmutable(path, bytes, contentType),
+      put: async () => { throw failure; },
+    };
+
+    const outcome = await refresher(harness, DUE, { blobs: failingBlobs }).refreshIdleHead();
+
+    expect(outcome).toEqual({ status: "faulted", error: failure });
+    expect((await servedHead(harness)).bytes).toEqual(before.bytes);
+    const receipt = await refresher(harness, DUE).append(commandAt("ann-2", DUE));
+    expect(receipt.sequence).toBe("0000000000000002");
+  });
+
+  it("refuses a candidate its own window check rejects, without signing or writing", async () => {
+    const harness = makeHarness();
+    await writer(harness).append(command());
+    // The trigger reads the served window, so an honest head is never due while it is issued
+    // ahead of the clock; only a deeply inverted one is. Forged here so the guard (design §5.3)
+    // is exercised directly: `issuedAt + 1ms` would be carried forward, a day past the clock.
+    const state = (await harness.stateCas.read())!.value;
+    const forged = {
+      protocol: (await servedHead(harness)).head.protocol,
+      origin: formatOrigin(SOURCE.agent, SOURCE.name),
+      sequence: state.last!.sequence,
+      entry: state.last!.entryDigest,
+      issuedAt: "2026-08-06T12:00:00.000Z",
+      refreshBy: "2026-08-02T12:00:00.000Z",
+    };
+    const payload = sealJson(forged).bytes;
+    const envelope = {
+      payloadType: MEDIA_HEAD,
+      payload: encodeBase64(payload),
+      signatures: [{ keyid: harness.signer.keyId, sig: encodeBase64(dssePreAuthEncoding(MEDIA_HEAD, payload)) }],
+    };
+    harness.blobs.force(headPath(SOURCE.name), sealJson(envelope).bytes, MEDIA_HEAD);
+    const signCount = harness.signCount();
+
+    const outcome = await refresher(harness, "2026-08-04T12:00:00.000Z").refreshIdleHead();
+
+    expect(outcome).toEqual({
+      status: "refused",
+      reason: "head-issued-ahead",
+      current: { issuedAt: "2026-08-06T12:00:00.000Z", refreshBy: "2026-08-02T12:00:00.000Z" },
+    });
+    expect(harness.signCount()).toBe(signCount);
+    expect((await servedHead(harness)).bytes).toEqual(sealJson(envelope).bytes);
   });
 });

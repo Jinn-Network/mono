@@ -1,0 +1,75 @@
+{
+  "name": "recovery-reaches-other-accounts",
+  "description": "A new key minted by the founding account can consent another account back in. A consented account cannot recover alone.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "c",
+      "key": "K4",
+      "voucher": "A",
+      "from": "02-01"
+    },
+    {
+      "id": "b",
+      "key": "K2",
+      "voucher": "B",
+      "from": "02-02",
+      "consentBy": "K1"
+    },
+    {
+      "id": "alone",
+      "key": "K6",
+      "voucher": "B",
+      "from": "03-15"
+    },
+    {
+      "id": "n",
+      "key": "K3",
+      "voucher": "A",
+      "from": "04-01"
+    },
+    {
+      "id": "back",
+      "key": "K7",
+      "voucher": "B",
+      "from": "05-01",
+      "consentBy": "K3"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "b",
+      "by": "K4",
+      "at": "03-01"
+    },
+    {
+      "target": "g",
+      "by": "K4",
+      "at": "03-01"
+    },
+    {
+      "target": "c",
+      "by": "K4",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K3",
+      "expect": "accepted"
+    },
+    {
+      "key": "K6",
+      "expect": "consent-chain-violation"
+    },
+    {
+      "key": "K7",
+      "expect": "accepted"
+    }
+  ]
+}

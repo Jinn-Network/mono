@@ -10,7 +10,7 @@
  */
 
 import { createPublicKey, verify as cryptoVerify } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -24,6 +24,7 @@ import {
   verifySourceChain,
   type AnnouncementEntry,
   type HighWaterMark,
+  type SourceHead,
   type SourceIdentity,
 } from "@jinn-network/record-discovery-protocol";
 import { parseWellKnownDocument } from "@jinn-network/record-discovery-serve";
@@ -38,6 +39,7 @@ import {
   refreshWorkspacePublicationWellKnown,
   resolveWorkspacePublicationSourceName,
   withWorkspacePublicationSourceLock,
+  type WorkspacePublicationHeadRefresh,
 } from "./publication-source.js";
 import { startPublicationArchiveServer, type PublicationArchiveServer } from "./publication-serve.js";
 import { PUBLICATION_LOCK_INDEX_PATH } from "./publication-lock-index.js";
@@ -421,5 +423,230 @@ describe("workspace publication source name", () => {
     writeRunPublicationSource(workspaceDir, "draft-b", "guest-benchmarks");
     expect(() => resolveWorkspacePublicationSourceName(workspaceDir))
       .toThrow(/guest-benchmarks[\s\S]*house-benchmarks|house-benchmarks[\s\S]*guest-benchmarks/);
+  });
+});
+
+// #4187: a source with nothing new to announce re-signs its head before `refreshBy` lapses, so a
+// reader arriving during the idle window never fetches a stale head. Design record:
+// docs/superpowers/specs/2026-09-09-idle-head-heartbeat-design.md.
+describe("idle source head heartbeat (#4187)", () => {
+  const HOUR_MS = 60 * 60 * 1_000;
+  const hoursAgo = (hours: number, plusMs = 0): string => new Date(Date.now() - hours * HOUR_MS + plusMs).toISOString();
+
+  function decodeHead(bytes: Uint8Array): { readonly bytes: Uint8Array; readonly envelope: DsseEnvelope; readonly head: SourceHead } {
+    const envelope = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as DsseEnvelope;
+    const head = parseSourceHead(JSON.parse(new TextDecoder("utf-8", { fatal: true })
+      .decode(parseWireDsseEnvelope(envelope).payloadBytes)));
+    return { bytes, envelope, head };
+  }
+
+  function headOnDisk(workspaceDir: string) {
+    return decodeHead(new Uint8Array(readFileSync(join(publicationServeRoot(workspaceDir), headPath(SOURCE_NAME).slice(1)))));
+  }
+
+  /** The runbook's cold-sync check: well-known, head, walk to genesis, chain verification at `now`. */
+  async function coldCheck(server: PublicationArchiveServer, workspaceDir: string, ports = verificationPorts(workspaceDir, new Date())) {
+    const listed = parseWellKnownDocument(await getJson(`${server.url}${WELL_KNOWN_PATH}`)).sources[0]!;
+    const served = decodeHead(await getBytes(`${server.url}${listed.headPath}`));
+    const entries = await coldWalk(server.url, SOURCE_NAME, listed.archiveRoot);
+    const outcome = await verifySourceChain({
+      head: served.head,
+      headSignature: served.envelope,
+      entries: (async function* () { for (const signed of entries) yield signed; })(),
+      ports,
+    });
+    return { served, entries, outcome };
+  }
+
+  /** A run whose publication stage froze its announcement time and has not announced yet. */
+  function writeRunWithStage(workspaceDir: string, draftId: string, state: "in-progress" | "complete", announcedAt: string): void {
+    mkdirSync(runsDir(workspaceDir), { recursive: true });
+    writeFileSync(runStatePath(workspaceDir, draftId), JSON.stringify({
+      publication: {
+        source: { agentKeyRef: "workspace-owner", name: SOURCE_NAME },
+        registration: { state, announcedAt },
+        accounting: { state: "not-started" },
+        report: { state: "not-started" },
+      },
+    }), "utf8");
+  }
+
+  test("re-signs a lapsed head at the same position, so the cold-sync check passes", async () => {
+    const workspaceDir = workspace("publication-serve-heartbeat-lapsed-");
+    for (const [index, label] of ["first", "second", "third"].entries()) {
+      await announce(workspaceDir, label, `2026-08-13T12:0${index}:00Z`);
+    }
+    const idle = headOnDisk(workspaceDir);
+    // Round-10: the head was last signed with the last announcement and has since lapsed.
+    expect(Date.parse(idle.head.refreshBy)).toBeLessThan(Date.now());
+
+    const server = await startPublicationArchiveServer({ workspaceDir, sourceName: SOURCE_NAME, port: 0 });
+    try {
+      const { served, entries, outcome } = await coldCheck(server, workspaceDir);
+      expect(outcome.status).toBe("ok");
+      expect(entries).toHaveLength(3);
+      expect(server.headRefresh).toMatchObject({ status: "refreshed", previous: { issuedAt: idle.head.issuedAt, refreshBy: idle.head.refreshBy } });
+      // Only the two instants move; the chain position the head commits to does not.
+      expect(served.head).toEqual({ ...idle.head, issuedAt: served.head.issuedAt, refreshBy: served.head.refreshBy });
+      expect(Date.parse(served.head.refreshBy) - Date.parse(served.head.issuedAt)).toBe(24 * HOUR_MS);
+      expect(Date.parse(served.head.refreshBy)).toBeGreaterThan(Date.now());
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("leaves a head with more than half its window remaining byte-identical", async () => {
+    const workspaceDir = workspace("publication-serve-heartbeat-fresh-");
+    await announce(workspaceDir, "only", hoursAgo(11));
+    const before = headOnDisk(workspaceDir);
+
+    const server = await startPublicationArchiveServer({ workspaceDir, sourceName: SOURCE_NAME, port: 0 });
+    try {
+      expect(server.headRefresh).toMatchObject({ status: "not-due", current: { issuedAt: before.head.issuedAt } });
+      expect(await getBytes(`${server.url}${headPath(SOURCE_NAME)}`)).toEqual(before.bytes);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("a reader holding the re-signed head still refuses a replay of the head it replaced", async () => {
+    const workspaceDir = workspace("publication-serve-heartbeat-replay-");
+    // Idle for 13 of its 24 hours: due, and the head it is about to replace is still fresh, so
+    // freshness cannot be what refuses the replay below.
+    await announce(workspaceDir, "only", hoursAgo(13));
+    const superseded = headOnDisk(workspaceDir);
+
+    const server = await startPublicationArchiveServer({ workspaceDir, sourceName: SOURCE_NAME, port: 0 });
+    try {
+      expect(server.headRefresh?.status).toBe("refreshed");
+      const ports = verificationPorts(workspaceDir, new Date());
+      const { served, outcome } = await coldCheck(server, workspaceDir, ports);
+      expect(outcome.status).toBe("ok");
+      expect(served.head.sequence).toBe(superseded.head.sequence);
+      expect(served.head.entry).toBe(superseded.head.entry);
+
+      // A rollback mirror replays the earlier signature over the same position.
+      const replay = await verifySourceChain({
+        head: superseded.head,
+        headSignature: superseded.envelope,
+        entries: (async function* () { /* a returning reader is fed nothing above its mark */ })(),
+        ports: { ...ports, firstAdoption: false },
+      });
+      expect(replay).toEqual({ status: "broken-chain", at: "issued-at-monotonicity" });
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("a record announced after a re-sign advances the chain as it always has", async () => {
+    const workspaceDir = workspace("publication-serve-heartbeat-append-");
+    await announce(workspaceDir, "first", "2026-08-13T12:00:00Z");
+    const server = await startPublicationArchiveServer({ workspaceDir, sourceName: SOURCE_NAME, port: 0 });
+    try {
+      expect(server.headRefresh?.status).toBe("refreshed");
+      const resigned = headOnDisk(workspaceDir);
+      await announce(workspaceDir, "second", new Date(Date.parse(resigned.head.issuedAt) + 1).toISOString());
+
+      const { served, entries, outcome } = await coldCheck(server, workspaceDir);
+      expect(outcome.status).toBe("ok");
+      expect(entries.map((signed) => signed.entry.sequence)).toEqual(["0000000000000001", "0000000000000002"]);
+      expect(served.head.sequence).toBe("0000000000000002");
+      expect(served.head.entry).not.toBe(resigned.head.entry);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("re-signs on its tick a head that falls due while serving, reporting each change once", async () => {
+    const workspaceDir = workspace("publication-serve-heartbeat-tick-");
+    const reported: WorkspacePublicationHeadRefresh[] = [];
+    const server = await startPublicationArchiveServer({
+      workspaceDir, sourceName: SOURCE_NAME, port: 0, headRefreshIntervalMs: 50,
+      onHeadRefresh: (outcome) => reported.push(outcome),
+    });
+    try {
+      expect(server.headRefresh).toEqual({ status: "no-position" });
+      await announce(workspaceDir, "late", hoursAgo(13));
+      const deadline = Date.now() + 10_000;
+      while (!reported.some((outcome) => outcome.status === "not-due")) {
+        if (Date.now() > deadline) throw new Error(`no re-sign was reported: ${JSON.stringify(reported.map((outcome) => outcome.status))}`);
+        await new Promise<void>((resolve) => { setTimeout(resolve, 20); });
+      }
+      // Many ticks ran; only the changes were reported.
+      expect(reported.map((outcome) => outcome.status)).toEqual(["no-position", "refreshed", "not-due"]);
+      expect((await coldCheck(server, workspaceDir)).outcome.status).toBe("ok");
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("withholds the re-sign while a publication stage holds a frozen announcement time", async () => {
+    const workspaceDir = workspace("publication-serve-heartbeat-frozen-");
+    await announce(workspaceDir, "first", "2026-08-13T12:00:00Z");
+    // The stage froze this instant before it announced. A head re-signed now would carry a later
+    // `issuedAt`, and the writer refuses any append that does not strictly advance the head, so
+    // the stage's retry could never land.
+    const frozenAt = "2026-08-14T09:00:00.000Z";
+    writeRunWithStage(workspaceDir, "draft-frozen", "in-progress", frozenAt);
+    const before = headOnDisk(workspaceDir);
+
+    let server = await startPublicationArchiveServer({ workspaceDir, sourceName: SOURCE_NAME, port: 0 });
+    try {
+      expect(server.headRefresh).toEqual({ status: "withheld", drafts: ["draft-frozen"] });
+      expect(await getBytes(`${server.url}${headPath(SOURCE_NAME)}`)).toEqual(before.bytes);
+      // The retry the gate protects still lands at its frozen time.
+      await announce(workspaceDir, "frozen", frozenAt);
+    } finally {
+      await server.close();
+    }
+
+    writeRunWithStage(workspaceDir, "draft-frozen", "complete", frozenAt);
+    server = await startPublicationArchiveServer({ workspaceDir, sourceName: SOURCE_NAME, port: 0 });
+    try {
+      expect(server.headRefresh?.status).toBe("refreshed");
+      expect((await coldCheck(server, workspaceDir)).outcome.status).toBe("ok");
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("withholds rather than guessing when a run document cannot be read", async () => {
+    const workspaceDir = workspace("publication-serve-heartbeat-unreadable-");
+    await announce(workspaceDir, "first", "2026-08-13T12:00:00Z");
+    mkdirSync(runsDir(workspaceDir), { recursive: true });
+    writeFileSync(runStatePath(workspaceDir, "draft-torn"), "{", "utf8");
+
+    const server = await startPublicationArchiveServer({ workspaceDir, sourceName: SOURCE_NAME, port: 0 });
+    try {
+      expect(server.headRefresh).toEqual({ status: "withheld", drafts: ["draft-torn"] });
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("an interval of 0 turns the heartbeat off and serves the head as it was", async () => {
+    const workspaceDir = workspace("publication-serve-heartbeat-off-");
+    await announce(workspaceDir, "first", "2026-08-13T12:00:00Z");
+    const before = headOnDisk(workspaceDir);
+    const reported: WorkspacePublicationHeadRefresh[] = [];
+
+    const server = await startPublicationArchiveServer({
+      workspaceDir, sourceName: SOURCE_NAME, port: 0, headRefreshIntervalMs: 0, onHeadRefresh: (outcome) => reported.push(outcome),
+    });
+    try {
+      expect(server.headRefresh).toBeUndefined();
+      expect(await getBytes(`${server.url}${headPath(SOURCE_NAME)}`)).toEqual(before.bytes);
+      expect(reported).toEqual([]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("rejects an interval a timer cannot honor before binding anything", async () => {
+    const workspaceDir = workspace("publication-serve-heartbeat-interval-");
+    for (const headRefreshIntervalMs of [-1, 1.5, 2 ** 31]) {
+      await expect(startPublicationArchiveServer({ workspaceDir, sourceName: SOURCE_NAME, port: 0, headRefreshIntervalMs }))
+        .rejects.toThrow(/headRefreshIntervalMs/);
+    }
   });
 });

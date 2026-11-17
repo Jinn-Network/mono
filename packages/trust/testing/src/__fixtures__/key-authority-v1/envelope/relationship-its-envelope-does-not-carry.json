@@ -1,0 +1,38 @@
+{
+  "name": "relationship-its-envelope-does-not-carry",
+  "description": "The genesis binding ends at 02-01. A binding entry of the founding account holds controls, and its envelope carries signs-for. Its fields do not match its envelope, so it does not resolve, and it is no incumbent for a later binding of that account.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01",
+      "until": "02-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "envelope": {
+        "rel": "signs-for"
+      }
+    },
+    {
+      "id": "m",
+      "key": "K3",
+      "voucher": "A",
+      "from": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "binding-not-resolved"
+    },
+    {
+      "key": "K3",
+      "expect": "consent-chain-violation"
+    }
+  ]
+}

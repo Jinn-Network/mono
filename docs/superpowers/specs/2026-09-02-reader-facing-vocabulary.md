@@ -1,10 +1,10 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.14
+- **Version:** 1.15
 - **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-12; v1.4: 2026-09-16;
   v1.5: 2026-09-17; v1.6: 2026-09-18; v1.7: 2026-09-19; v1.8: 2026-09-24; v1.9: 2026-09-26;
   v1.10: 2026-09-29; v1.11: 2026-11-14; v1.12: 2026-11-14; v1.13: 2026-11-17;
-  v1.14: 2026-11-17)
+  v1.14: 2026-11-17; v1.15: 2026-11-17)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
@@ -130,6 +130,16 @@
   contract, the split v1.13 applied to refusals. The product prints the reader's own per-proof note
   and coverage block, which `@colophon-claims/check` now exports; the card's labels are a copy its
   tests hold to the reader's source. Neither surface joins §7 item 5's scan. No earlier disposition
+  changes.
+- **v1.15** (#5278): rules the label the reader's *Timestamps* and *Timestamp coverage* lines print
+  for each record a timestamp proof covers, which no earlier version ruled. One of the two labels
+  is `matrix`, the raw claim value for the proof that covers `matrix.json`, so a reader met the word
+  §5 hides in exactly these two blocks. The new `matrix` row in §4.2 renames it to **the runs**,
+  §5's name for that record, whole: the label opens a line, so it is neither a heading nor a column
+  header and takes no shortened form. The raw value stays in `--json` and in the sealed claim's
+  `anchors`, where it is contract, the split the `declared-but-absent` row already applies. `lock`,
+  the other label, names no §5 concept and is not reached. Workspace verification and the web card
+  follow, as v1.14 requires of any concept they share with the reader. No earlier disposition
   changes.
 
 ## 1. Scope
@@ -405,6 +415,7 @@ rows that needed it, not retrofitted across the document.
 | Anchor (the record) | rename + gloss | Timestamp proof | The inherited word appears once, in parentheses, in the reader's closing paragraph: *A timestamp proof (anchor) dates …*. |
 | Time basis | rename | Time source | Where a proof's time comes from (`authority-time`, `chain-time`). Not *what the timestamp covers*, which is the lock or matrix bytes the reader recomputes for a `present` proof. |
 | anchored / absent / `declared-but-absent` | rename | timestamped / none / promised but missing | The `declared-but-absent` **string in `--json` is contract**; only the human line changes. |
+| `matrix` (the label of a covered record) | rename | the runs | The label the *Timestamps* and *Timestamp coverage* lines print for the record a proof covers (`TIMESTAMP_SUBJECT_NAMES` in `cli.ts`, v1.15): *the runs timestamp proof*, *the runs: timestamped*, *the runs: none*, *the runs: promised but missing*. The proof covers `matrix.json`, the record §5 names **the runs**, so the label takes that name whole; it opens a line rather than heading one, so no shortened form applies. The raw value `matrix` is **contract**: the sealed claim's `anchors` carry it as `subject`, and `--json` prints it, so only the human line changes, as in the row above. The other label, `lock`, names no §5 concept; this row does not reach it. |
 | Trust material | rename | Trust anchors you supply | |
 | Artifact content … not fetched | keep | — | Already reader-shaped, and the caveat under it is exemplary. |
 | freeze repository | keep | — | |
@@ -439,26 +450,28 @@ under two names on those two screens, `lock: anchored` from the product and `loc
 from the reader, reads as two outcomes, which is what §5's rule of one concept, one name exists to
 stop. So wherever these two surfaces present a concept the reader tool's output presents, they
 follow §5 and this section: *Timestamps*, *Timestamp coverage*, *timestamp proof*, *time source*,
-*trust anchors you supply*, and *timestamped*, *none* and *promised but missing* for the three
-outcomes. The split v1.13 applied to refusals applies here: the human text follows §5, while
-`--json` and the result the web card receives are contract and keep `anchored`, `absent`,
-`declared-but-absent` and the check names byte for byte. No raw outcome value reaches either human
-surface; a proof's status (`present`, `verified`, `pending`, `invalid`) prints as written, as it
-does in the reader. What these surfaces print and the reader does not is the product's own
-vocabulary and is not ruled here, as #3918 left `colophon bundle verify`'s line: the operation line
+*trust anchors you supply*, *timestamped*, *none* and *promised but missing* for the three
+outcomes, and *the runs* for the record labeled `matrix` (v1.15). The split v1.13 applied to
+refusals applies here: the human text follows §5, while `--json` and the result the web card
+receives are contract and keep `anchored`, `absent`, `declared-but-absent`, the raw record labels
+and the check names byte for byte. No raw outcome value reaches either human surface; a proof's
+status (`present`, `verified`, `pending`, `invalid`) prints as written, as it does in the reader.
+What these surfaces print and the reader does not is the product's own vocabulary and is not ruled
+here, as #3918 left `colophon bundle verify`'s line: the operation line
 (`verified draft <id>: <checks>`), the record digests the card lists, and the anchoring window,
 which is named for the `anchor` and `anchoring configure` commands the claimant types. The product
 prints the per-proof note and the coverage block with the reader's own functions
 (`timestampProofEvaluationNote` and `renderTimestampCoverage`, exported by
-`@colophon-claims/check`) rather than a copy, so its words are those of the reader release it
-depends on, and its publish build fails against a reader release that does not export them. The
-web card cannot import the reader: it may import only `@colophon-claims/core`, and it renders in
-the browser. Its labels are therefore a copy, and its tests read the reader's source and fail when
-the two differ. Neither surface joins §7 item 5's scan. That test lives in the reader's package,
-which cannot render either surface, and it asserts §5 over a whole surface, while this ruling
-reaches only the timestamp-proof block. The product's notes and coverage lines are the reader's
-own functions, which the scan already reads through the reader's output; the product's per-proof
-line and the card's labels are pinned by their own packages' tests.
+`@colophon-claims/check`) rather than a copy, and labels the record each of its per-proof lines
+covers with the reader's `timestampSubjectName` (v1.15), so its words are those of the reader
+release it depends on, and its publish build fails against a reader release that does not export
+them. The web card cannot import the reader: it may import only `@colophon-claims/core`, and it
+renders in the browser. Its labels are therefore a copy, and its tests read the reader's source and
+fail when the two differ. Neither surface joins §7 item 5's scan. That test lives in the reader's
+package, which cannot render either surface, and it asserts §5 over a whole surface, while this
+ruling reaches only the timestamp-proof block. The product's notes and coverage lines are the
+reader's own functions, which the scan already reads through the reader's output; the product's
+per-proof line and the card's labels are pinned by their own packages' tests.
 
 ### 4.3 Docs
 

@@ -1,10 +1,11 @@
-import { renderTimestampCoverage, timestampProofEvaluationNote } from "@colophon-claims/check";
+import { renderTimestampCoverage, timestampProofEvaluationNote, timestampSubjectName } from "@colophon-claims/check";
 import type { RunVerifyResult } from "../operations/verify.js";
 
 // The timestamp-proof lines name each outcome as the reader tool does (reader-facing vocabulary spec
 // §4.2, v1.14; issue #5241): the claimant who reads this next runs the reader on the same records.
-// The note and the coverage block are the reader's own functions, not copies. `--json` keeps the raw
-// values, `declared-but-absent` included.
+// The note, the coverage block and each covered record's label (§4.2, v1.15; issue #5278) are the
+// reader's own functions, not copies. `--json` keeps the raw values, `declared-but-absent` and the
+// raw subject `matrix` included.
 export function renderWorkspaceVerifyHuman(value: RunVerifyResult): string {
   const lines = [`verified draft ${value.draftId}: ${value.checks.join(", ")}`];
   // The first line names only what ran. This one names what `publish` will run on the bundle that
@@ -15,7 +16,8 @@ export function renderWorkspaceVerifyHuman(value: RunVerifyResult): string {
   for (const anchor of value.anchors?.anchors ?? []) {
     const basis = [anchor.provider, anchor.timeBasis].filter((part) => part !== undefined).join(", ");
     lines.push(
-      `${anchor.subject ?? "unknown"} timestamp proof: ${basis.length === 0 ? "unknown provider/time source" : basis}, `
+      `${anchor.subject === undefined ? "unknown" : timestampSubjectName(anchor.subject)} timestamp proof: `
+      + `${basis.length === 0 ? "unknown provider/time source" : basis}, `
       + `${anchor.status}, record ${anchor.recordSha256}`,
     );
     lines.push(`  ${timestampProofEvaluationNote(anchor)}`);

@@ -20,6 +20,7 @@ import type {
   IntegrityAnchorsReport,
   PublicBundleAnchorTrustMaterial,
 } from "./anchor/check.js";
+import type { ClaimAnchorSubject } from "./profile/anchor-claims.js";
 import type { PublicBundleSigner, PublicBundleSignerRole } from "./signers.js";
 import { refuse } from "./profile/errors.js";
 import { verifyDomainBinding, type VerifiedDomainBinding } from "./identity/domain-binding.js";
@@ -135,8 +136,11 @@ function aliasPublisherNames(text: string, prefix: string, suffixes: readonly st
  * byte, because the conformance kit's `expectedMessagePattern` pins it. So the words change here,
  * on the human line only, after publisher-chosen names are aliased. Every rule is anchored at the
  * start of the message, so it rewrites the refusing module's fixed wording and never text a
- * publisher chose. Paths, fingerprints, identifiers and check labels (`matrix-rederivation:`) are
- * printed as written. Applied in order: the timestamp-proof lead is renamed before its reasons.
+ * publisher chose. The two admission-reviewer rules start from the review path the admission replay
+ * prefixes (`resolutions.<n>.reviews.<n>: ` or `replacementLedger.entries.<n>.reviews.<n>: `,
+ * optionally after `binary admission replay failed: `). Paths, fingerprints, identifiers and check
+ * labels (`matrix-rederivation:`) are printed as written. Applied in order: the timestamp-proof lead
+ * is renamed before its reasons.
  */
 const READER_WORDING: readonly (readonly [RegExp, string])[] = [
   [/^Matrix v2 failed deterministic assembly-3\.0 replay$/u,
@@ -163,9 +167,9 @@ const READER_WORDING: readonly (readonly [RegExp, string])[] = [
     "the trusted judges must be exactly the judges the runs reference"],
   [/^evaluator <identifier: see --json> keyId is not derived from its SPKI$/u,
     "judge <identifier: see --json> keyId is not derived from its SPKI"],
-  [/^([\s\S]*: )?reviewer signature or evaluator\/key binding is invalid$/u,
+  [/^((?:binary admission replay failed: )?(?:resolutions|replacementLedger\.entries)\.\d+\.reviews\.\d+: )?reviewer signature or evaluator\/key binding is invalid$/u,
     "$1reviewer signature or judge/key binding is invalid"],
-  [/^([\s\S]*: )?review verdict must be one Result Evaluation envelope with one signature$/u,
+  [/^((?:binary admission replay failed: )?(?:resolutions|replacementLedger\.entries)\.\d+\.reviews\.\d+: )?review verdict must be one Result Evaluation envelope with one signature$/u,
     "$1review verdict must be one DSSE-signed Result Evaluation with one signature"],
   [/^report-envelope: invalid DSSE envelope: (?:TrustCoreError: )?(?:DSSE envelope )?/u,
     "report-envelope: the signed result is not valid DSSE: "],
@@ -289,10 +293,20 @@ export function timestampProofEvaluationNote(entry: AnchorVerificationEntry): st
     : "time source not evaluated: no trust anchors supplied";
 }
 
+/** What each record a timestamp proof covers is called in the human lines (spec §4.2, v1.15; issue
+ * #5278). `matrix` covers `matrix.json`, which §5 names *the runs* and hides as "Matrix"; `lock`
+ * names no §5 concept and prints as written. `--json` and the sealed claim keep the raw subject. */
+const TIMESTAMP_SUBJECT_NAMES: Readonly<Record<ClaimAnchorSubject, string>> = { lock: "lock", matrix: "the runs" };
+
+/** Exported so the product's workspace `verify` names each subject as the reader does. */
+export function timestampSubjectName(subject: ClaimAnchorSubject): string {
+  return TIMESTAMP_SUBJECT_NAMES[subject];
+}
+
 function renderAnchor(entry: AnchorVerificationEntry): string {
   const value = anchoredValue(entry);
   const head = [
-    `  ${entry.subject ?? "unresolved"} timestamp proof`,
+    `  ${entry.subject === undefined ? "unresolved" : timestampSubjectName(entry.subject)} timestamp proof`,
     entry.timeBasis ?? "unknown time source",
     entry.status,
     ...(value === undefined ? [] : [value]),
@@ -306,12 +320,13 @@ function anchorProfileName(profile: string): string {
 }
 
 function renderSubject(subject: AnchorSubjectReport): string {
+  const name = timestampSubjectName(subject.subject);
   if (subject.outcome === "declared-but-absent") {
-    return `  ${subject.subject}: promised but missing — this run promised `
+    return `  ${name}: promised but missing — this run promised `
       + `${subject.declaredProfiles?.map(anchorProfileName).join(", ") ?? "a timestamp provider"} and the bundle carries no matching timestamp proof`;
   }
-  if (subject.outcome === "absent") return `  ${subject.subject}: none — no timestamp proof was carried and none was promised`;
-  return `  ${subject.subject}: timestamped`;
+  if (subject.outcome === "absent") return `  ${name}: none — no timestamp proof was carried and none was promised`;
+  return `  ${name}: timestamped`;
 }
 
 /** The `Timestamp coverage` block: one line per subject, outcome named as §4.2 rules it. Exported

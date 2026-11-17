@@ -1,0 +1,42 @@
+{
+  "name": "consent-at-the-revocation-instant",
+  "description": "For authority the boundary is exclusive: a consent taking effect at the revocation's instant holds.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "c",
+      "key": "K4",
+      "voucher": "A",
+      "from": "02-01"
+    },
+    {
+      "id": "x",
+      "key": "K5",
+      "voucher": "C",
+      "from": "03-01",
+      "consentBy": "K4"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "c",
+      "by": "K1",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K5",
+      "expect": "accepted"
+    },
+    {
+      "key": "K4",
+      "expect": "revoked"
+    }
+  ]
+}

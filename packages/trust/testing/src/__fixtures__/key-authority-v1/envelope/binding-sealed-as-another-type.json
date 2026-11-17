@@ -1,0 +1,38 @@
+{
+  "name": "binding-sealed-as-another-type",
+  "description": "A binding entry's envelope carries its fields under the payload type of an in-toto statement. Its key signed those bytes as another kind of record, so the entry is no readable binding: it does not resolve, and its key consents no one.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "envelope": {
+        "type": "application/vnd.in-toto+json"
+      }
+    },
+    {
+      "id": "c",
+      "key": "K3",
+      "voucher": "B",
+      "from": "03-01",
+      "consentBy": "K2"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "binding-not-resolved"
+    },
+    {
+      "key": "K3",
+      "expect": "consent-chain-violation"
+    }
+  ]
+}
