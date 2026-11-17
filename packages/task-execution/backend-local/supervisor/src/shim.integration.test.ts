@@ -64,8 +64,10 @@ it("survives SIGTERM aimed at its group and remains the outcome recorder", async
   mkdirSync(metaDir, { recursive: true });
   mkdirSync(secretsDir, { recursive: true });
   // The harness's lifetime is causal on this test, not on a timer: it announces itself, then
-  // blocks until the test releases it. A timed harness can be reaped before the signal lands,
-  // which turns the assertion below into ESRCH noise instead of a statement about the shim.
+  // blocks until the test releases it. If the test fails first, afterEach removes the root, and
+  // the harness exits once its ready file is gone or the test process is gone. A timed harness
+  // can be reaped before the signal lands, which turns the assertion below into ESRCH noise
+  // instead of a statement about the shim.
   const child = spawnShim(
     { attemptId: "attempt-2", nonce: "nonce-2", metaDir, secretsDir },
     {
@@ -74,8 +76,10 @@ it("survives SIGTERM aimed at its group and remains the outcome recorder", async
         "-e",
         `const fs = require('node:fs');`
         + `fs.writeFileSync(${JSON.stringify(ready)}, '1');`
+        + `const owner = ${process.pid};`
         + `const timer = setInterval(() => {`
-        + ` if (fs.existsSync(${JSON.stringify(release)})) { clearInterval(timer); process.exit(0); }`
+        + ` let ownerAlive = true; try { process.kill(owner, 0); } catch { ownerAlive = false; }`
+        + ` if (!ownerAlive || fs.existsSync(${JSON.stringify(release)}) || !fs.existsSync(${JSON.stringify(ready)})) { clearInterval(timer); process.exit(0); }`
         + `}, 10);`,
       ],
       env: {},
