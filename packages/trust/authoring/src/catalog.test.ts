@@ -4,10 +4,14 @@ import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  didPkh,
   dssePreAuthEncoding,
   parseExactDsseEnvelope,
+  recordDigest,
   sealRevocation,
   sealTrustPolicy,
+  TRUST_KEY_BINDING_MEDIA_TYPE,
+  TRUST_POLICY_MEDIA_TYPE,
   TRUST_REVOCATION_FORMAT,
   validateKeyBinding,
   validateTrustPolicy,
@@ -23,6 +27,10 @@ import {
   appendOperator,
   authorCatalog,
   completePolicyPurposes,
+  planRevocation,
+  rebindRoles,
+  REVOCATION_ANCHOR_PROTOCOL,
+  revocationAnchorDigest,
   revokeBinding,
   sealPolicySuccessor,
   voucherAccountSigner,
@@ -38,6 +46,7 @@ const AGENT_A = "urn:uuid:00000000-0000-4000-8000-00000000000a";
 const AGENT_B = "urn:uuid:00000000-0000-4000-8000-00000000000b";
 const ANCHOR_A = "sha256:1111111111111111111111111111111111111111111111111111111111111111" as const;
 const ANCHOR_B = "sha256:2222222222222222222222222222222222222222222222222222222222222222" as const;
+const ANCHOR_C = "sha256:3333333333333333333333333333333333333333333333333333333333333333" as const;
 const TIME_A = "2026-08-07T12:00:00.000Z";
 const TIME_B = "2026-08-08T12:00:00.000Z";
 const REFRESH_BY = "2027-02-07T00:00:00.000Z";
@@ -542,59 +551,268 @@ describe("sealPolicySuccessor", () => {
   });
 });
 
-describe("revokeBinding", () => {
-  it("is designed but deliberately unimplemented (§3.3)", async () => {
-    await expect(revokeBinding({
-      catalogPath: "/tmp/whatever.json",
-      voucher: signer,
-      target: ANCHOR_A,
-      effectiveTime: TIME_A,
-      anchor: declaration(ANCHOR_A, "ab"),
-    })).rejects.toThrow(/designed but not implemented/u);
-  });
+/**
+ * Fixtures for the voucher account's signature (key authority section 8). This package carries no
+ * secp256k1 signer, so the one real signature it checks is precomputed: account 0x11…11 (address
+ * `FIXTURE_ACCOUNT`) signing, with EIP-191 `personal_sign`, the DSSE pre-authentication encoding of
+ * `FIXTURE_REVOCATION`. It depends on the revocation record format alone. `FOREIGN_SIGNATURE` is a
+ * well-formed signature by another account over unrelated bytes.
+ */
+const FIXTURE_ACCOUNT = "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A" as const;
+const FIXTURE_SIGNATURE = "0x5450ac565bba6f1a9e5344a647be896a58e56f73b3cf35905a86388dd1d4aa1b214d6085a238ad1c9123aceaf1e9276116b58e747e7572530606b51419296d6f1b" as const;
+const FOREIGN_SIGNATURE = "0x477479927650b311720f632b6de61d09af8332e9cba307dd1a12cf3bfe277d6561663d28900ed9ab87d6f51c9e5e0314e755edda0b1bef679e2e40498367776d1b" as const;
+const FIXTURE_REVOCATION = {
+  protocol: TRUST_REVOCATION_FORMAT,
+  target: ANCHOR_A,
+  revokedBy: didPkh(84532, FIXTURE_ACCOUNT),
+  anchors: [{ digest: ANCHOR_B }],
+  effectiveFrom: TIME_B,
+};
 
-  it("signs as the binding's voucher account: its did:pkh, EIP-191 over the DSSE pre-authentication encoding", async () => {
-    const { bindings } = await genesis();
-    const target = bindings[0]!;
-    const asked: Uint8Array[] = [];
-    const voucher = {
-      address: EOA,
+/** A voucher that answers every request with `signature` and records what it was asked to sign. */
+function recordingVoucher(address: `0x${string}`, signature: `0x${string}`) {
+  const asked: Uint8Array[] = [];
+  return {
+    asked,
+    voucher: {
+      address,
       async signMessage(input: { readonly message: { readonly raw: Uint8Array } }): Promise<`0x${string}`> {
         asked.push(input.message.raw);
-        return `0x${"44".repeat(65)}`;
+        return signature;
       },
-    };
+    },
+  };
+}
 
-    const account = voucherAccountSigner(voucher);
+describe("voucherAccountSigner", () => {
+  it("names the binding's voucher: its keyId is the did:pkh authorRoleBinding wrote", async () => {
+    const { bindings } = await genesis();
     // Key authority section 8, "The voucher account": `revokedBy` is the did:pkh of the binding's voucher.
-    expect(validateKeyBinding(target.envelopeBytes).value!.voucher).toMatchObject({
-      did: account.keyId,
+    expect(validateKeyBinding(bindings[0]!.envelopeBytes).value!.voucher).toEqual({
+      kind: "account",
+      did: voucherAccountSigner(signer).keyId,
       contractAccount: false,
     });
-    const sealed = await sealRevocation({
-      protocol: TRUST_REVOCATION_FORMAT,
-      target: target.digest,
-      revokedBy: account.keyId,
-      anchors: [{ digest: ANCHOR_B }],
-      effectiveFrom: TIME_B,
-    }, account.dsseSigner);
+  });
+
+  it("signs a revocation with EIP-191 over the DSSE pre-authentication encoding", async () => {
+    const { asked, voucher } = recordingVoucher(FIXTURE_ACCOUNT, FIXTURE_SIGNATURE);
+    const account = voucherAccountSigner(voucher);
+
+    const sealed = await sealRevocation(FIXTURE_REVOCATION, account.dsseSigner);
     const envelope = parseExactDsseEnvelope(sealed.envelopeBytes);
     expect(envelope.signatures).toEqual([
-      { keyid: account.keyId, sig: Buffer.from("44".repeat(65), "hex").toString("base64") },
+      { keyid: account.keyId, sig: Buffer.from(FIXTURE_SIGNATURE.slice(2), "hex").toString("base64") },
     ]);
     // "An account's signature": over the pre-authentication encoding, never the bare payload.
     expect(asked).toEqual([dssePreAuthEncoding(envelope.payloadType, envelope.payloadBytes)]);
   });
 
+  it("refuses a signature that does not recover to the voucher's address", async () => {
+    const { voucher } = recordingVoucher(FIXTURE_ACCOUNT, FOREIGN_SIGNATURE);
+    await expect(sealRevocation(FIXTURE_REVOCATION, voucherAccountSigner(voucher).dsseSigner))
+      .rejects.toThrow(/does not recover to/u);
+  });
+
   it("refuses an account signature that is not 65 bytes", async () => {
-    const voucher = { address: EOA, async signMessage(): Promise<`0x${string}`> { return `0x${"44".repeat(64)}`; } };
-    const account = voucherAccountSigner(voucher);
-    await expect(sealRevocation({
-      protocol: TRUST_REVOCATION_FORMAT,
-      target: ANCHOR_A,
-      revokedBy: account.keyId,
-      anchors: [{ digest: ANCHOR_B }],
-      effectiveFrom: TIME_B,
-    }, account.dsseSigner)).rejects.toThrow(/65 bytes/u);
+    const { voucher } = recordingVoucher(FIXTURE_ACCOUNT, `0x${"44".repeat(64)}`);
+    await expect(sealRevocation(FIXTURE_REVOCATION, voucherAccountSigner(voucher).dsseSigner))
+      .rejects.toThrow(/65 bytes/u);
+  });
+
+  it("signs nothing but revocations, and never asks the account to", async () => {
+    const { asked, voucher } = recordingVoucher(FIXTURE_ACCOUNT, FIXTURE_SIGNATURE);
+    const { dsseSigner } = voucherAccountSigner(voucher);
+    const payloadBytes = new TextEncoder().encode("{}");
+    for (const payloadType of [TRUST_KEY_BINDING_MEDIA_TYPE, TRUST_POLICY_MEDIA_TYPE, "application/json"]) {
+      await expect(dsseSigner({
+        payloadType,
+        payloadBytes,
+        preAuthEncoding: dssePreAuthEncoding(payloadType, payloadBytes),
+      })).rejects.toThrow(/signs only revocations/u);
+    }
+    expect(asked).toEqual([]);
+  });
+});
+
+describe("revocationAnchorDigest", () => {
+  const revokedBy = didPkh(84532, EOA);
+
+  it("is the sha256 of the revocation-anchor/v1 preimage: protocol, sorted targets, revokedBy (§3.2b)", () => {
+    const preimage = JSON.stringify({
+      protocol: "https://spec.jinn.network/trust/revocation-anchor/v1",
+      targets: [ANCHOR_A, ANCHOR_B],
+      revokedBy,
+    });
+    const expected = recordDigest(new TextEncoder().encode(preimage));
+    expect(REVOCATION_ANCHOR_PROTOCOL).toBe("https://spec.jinn.network/trust/revocation-anchor/v1");
+    expect(revocationAnchorDigest({ targets: [ANCHOR_B, ANCHOR_A], revokedBy })).toBe(expected);
+    expect(revocationAnchorDigest({ targets: [ANCHOR_A, ANCHOR_B], revokedBy })).toBe(expected);
+  });
+
+  it("refuses an empty, duplicated or misspelled target set, and a revoker that is not ASCII", () => {
+    expect(() => revocationAnchorDigest({ targets: [], revokedBy })).toThrow(/at least one/u);
+    expect(() => revocationAnchorDigest({ targets: [ANCHOR_A, ANCHOR_A], revokedBy })).toThrow(/more than once/u);
+    expect(() => revocationAnchorDigest({
+      targets: [ANCHOR_A.toUpperCase() as `sha256:${string}`],
+      revokedBy,
+    })).toThrow(/lowercase sha256/u);
+    expect(() => revocationAnchorDigest({ targets: [ANCHOR_A], revokedBy: `${revokedBy}é` })).toThrow(/ASCII/u);
+  });
+});
+
+describe("planRevocation", () => {
+  it("names the anchor digest to submit once the voucher is shown to be every target's voucher", async () => {
+    const { path, bindings } = await genesis();
+    const targets = [bindings[1]!.digest, bindings[0]!.digest];
+    const plan = await planRevocation({ catalogPath: path, voucher: signer, targets });
+    expect(plan.revokedBy).toBe(didPkh(84532, EOA));
+    expect(plan.targets).toEqual([...targets].sort());
+    expect(plan.anchorDigest).toBe(revocationAnchorDigest({ targets, revokedBy: plan.revokedBy }));
+  });
+
+  it("refuses a voucher that did not vouch for a target, before any anchor exists", async () => {
+    const { path, bindings } = await genesis();
+    const other = { address: FIXTURE_ACCOUNT, async signMessage(): Promise<`0x${string}`> { throw new Error("must not sign"); } };
+    await expect(planRevocation({ catalogPath: path, voucher: other, targets: [bindings[0]!.digest] }))
+      .rejects.toThrow(/is not the voucher of binding/u);
+  });
+});
+
+describe("revokeBinding", () => {
+  async function revocationInput(override: Partial<Parameters<typeof revokeBinding>[0]> = {}) {
+    const { path, bindings } = await genesis();
+    const targets = [bindings[0]!.digest];
+    const anchorDigest = revocationAnchorDigest({ targets, revokedBy: didPkh(84532, EOA) });
+    const { asked, voucher } = recordingVoucher(EOA, FOREIGN_SIGNATURE);
+    const before = await readFile(path);
+    return {
+      path,
+      bindings,
+      asked,
+      before,
+      input: {
+        catalogPath: path,
+        voucher,
+        targets,
+        effectiveTime: TIME_B,
+        anchor: declaration(anchorDigest, "cd"),
+        ...override,
+      },
+    };
+  }
+
+  it("refuses, before signing, a voucher that is not the target binding's voucher", async () => {
+    const other = recordingVoucher(FIXTURE_ACCOUNT, FIXTURE_SIGNATURE);
+    const { path, before, input } = await revocationInput();
+    await expect(revokeBinding({ ...input, voucher: other.voucher })).rejects.toThrow(/is not the voucher of binding/u);
+    expect(other.asked).toEqual([]);
+    expect(await readFile(path)).toEqual(before);
+  });
+
+  it("refuses a target the catalog does not carry", async () => {
+    const { input, asked } = await revocationInput();
+    await expect(revokeBinding({ ...input, targets: [ANCHOR_B] })).rejects.toThrow(/carries no binding/u);
+    expect(asked).toEqual([]);
+  });
+
+  it("refuses an anchor whose digest is not the revocation-anchor/v1 preimage of the act (law 6)", async () => {
+    const { input, asked } = await revocationInput();
+    // The binding's own anchor: referencing it would date the revocation back to the binding's birth.
+    await expect(revokeBinding({ ...input, anchor: declaration(ANCHOR_A, "ab") }))
+      .rejects.toThrow(/revocation-anchor\/v1/u);
+    expect(asked).toEqual([]);
+  });
+
+  it("refuses an effective time that is not the millisecond ISO UTC form (law 6)", async () => {
+    const { input, asked } = await revocationInput();
+    await expect(revokeBinding({ ...input, effectiveTime: "2026-08-08T12:00:00Z" })).rejects.toThrow(/millisecond/u);
+    expect(asked).toEqual([]);
+  });
+
+  it("writes nothing when the voucher's signature does not recover to its address", async () => {
+    const { path, before, input, asked } = await revocationInput();
+    await expect(revokeBinding(input)).rejects.toThrow(/does not recover to/u);
+    expect(asked).toHaveLength(1);
+    expect(await readFile(path)).toEqual(before);
+  });
+});
+
+describe("rebindRoles", () => {
+  const SOLVER_ROLES = ["solver-delivery", "solver-settlement", "solver-discovery"] as const;
+
+  it("appends the replacement bindings and their fresh anchor, with no policy successor", async () => {
+    const { root, path, bindings, policyGenesisDigest } = await genesis();
+    const replacements = await bindingsFor({
+      root, label: "a-solver-rotated", agent: AGENT_A, roles: SOLVER_ROLES, anchorDigest: ANCHOR_B, validFrom: TIME_B,
+    });
+    const before = await readCatalog(path);
+
+    const result = await rebindRoles({ catalogPath: path, replacements, anchor: declaration(ANCHOR_B, "cd") });
+
+    expect(result.bindings.map(({ digest }) => digest)).toEqual(replacements.map(({ digest }) => digest));
+    const after = await readCatalog(path);
+    expect(after.policyGenesisDigest).toBe(policyGenesisDigest);
+    expect(after.policies).toEqual(before.policies);
+    expect(after.anchors.map(({ digest }) => digest)).toEqual([ANCHOR_A, ANCHOR_B]);
+    expect(after.bindings.map(({ digest }) => digest)).toEqual(
+      [...bindings, ...replacements].map(({ digest }) => digest),
+    );
+    expect(after.revocations).toEqual([]);
+  });
+
+  it("refuses an anchor the catalog already declares: a rebind's anchor is always fresh (law 1)", async () => {
+    const { root, path } = await genesis();
+    const replacements = await bindingsFor({
+      root, label: "a-solver-reused", agent: AGENT_A, roles: SOLVER_ROLES, anchorDigest: ANCHOR_A, validFrom: TIME_B,
+    });
+    await expect(rebindRoles({ catalogPath: path, replacements, anchor: declaration(ANCHOR_A, "ab") }))
+      .rejects.toThrow(/already declares anchor/u);
+  });
+
+  it("refuses a replacement whose role the Agent does not hold under that voucher", async () => {
+    const { root, path } = await genesis();
+    const replacements = await bindingsFor({
+      root, label: "a-evaluator", agent: AGENT_A, roles: ["evaluator-verdict"], anchorDigest: ANCHOR_B, validFrom: TIME_B,
+    });
+    await expect(rebindRoles({ catalogPath: path, replacements, anchor: declaration(ANCHOR_B, "cd") }))
+      .rejects.toThrow(/replaces no binding/u);
+  });
+
+  it("refuses to bind a key the Agent already holds: rotating to the same key is no rotation", async () => {
+    const { root, path } = await genesis();
+    // The genesis store, opened again: the same keys, re-authored under a new anchor.
+    const replacements = await bindingsFor({
+      root, label: "a-solver", agent: AGENT_A, roles: SOLVER_ROLES, anchorDigest: ANCHOR_B, validFrom: TIME_B,
+    });
+    await expect(rebindRoles({ catalogPath: path, replacements, anchor: declaration(ANCHOR_B, "cd") }))
+      .rejects.toThrow(/already binds key/u);
+  });
+
+  it("refuses once every binding under the voucher is revoked: the successor would have no authority", async () => {
+    const { root, path, bindings } = await genesis();
+    const catalog = await readCatalog(path) as Awaited<ReturnType<typeof readCatalog>> & {
+      revocations: { digest: string; envelope: string }[];
+    };
+    const revokedBy = didPkh(84532, EOA);
+    for (const binding of bindings) {
+      const revocation = await sealRevocation({
+        protocol: TRUST_REVOCATION_FORMAT,
+        target: binding.digest,
+        revokedBy,
+        anchors: [{ digest: ANCHOR_B }],
+        effectiveFrom: TIME_B,
+      }, async () => [{ keyid: revokedBy, signature: new Uint8Array(65) }]);
+      catalog.revocations.push({
+        digest: revocation.recordDigest,
+        envelope: Buffer.from(revocation.envelopeBytes).toString("base64"),
+      });
+    }
+    await writeFile(path, JSON.stringify(catalog));
+    const replacements = await bindingsFor({
+      root, label: "a-solver-late", agent: AGENT_A, roles: SOLVER_ROLES, anchorDigest: ANCHOR_C, validFrom: TIME_B,
+    });
+    await expect(rebindRoles({ catalogPath: path, replacements, anchor: declaration(ANCHOR_C, "ef") }))
+      .rejects.toThrow(/rebind before revoking/u);
   });
 });

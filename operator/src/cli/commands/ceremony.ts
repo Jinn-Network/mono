@@ -1,6 +1,7 @@
 /**
- * `jinn ceremony init | join | show` — the operator-facing production path that CREATES the trust
- * artifacts the native fleet daemon verifies (spec/2026-08-07-native-identity-ceremony.md §4).
+ * `jinn ceremony init | join | rotate | show`: the operator-facing production path that CREATES the
+ * trust artifacts the native fleet daemon verifies (spec/2026-08-07-native-identity-ceremony.md §4),
+ * and retires and replaces role keys (`rotate`, §3.2).
  *
  * The one-swap estate shipped a complete trust VERIFICATION layer and, until this verb, no
  * production way to produce what it verifies: `jinn native-vertical identity` mints a store, and a
@@ -43,15 +44,28 @@ import {
   openCatalogAuthority,
   openRoleSigners,
   performEoaCeremony,
+  planRevocation,
+  rebindRoles,
+  revokeBinding,
   roleBindingTerms,
   type AnchorLocator,
   type CatalogAuthoritySigner,
   type FinalizedAnchorObservation,
   type NativeRoleIdentityRole,
+  type RevocationPlan,
   type RoleSigner,
   type SealedBindingEntry,
 } from '@jinn-network/trust-authoring';
-import { recordDigest, validateTrustPolicy, type TrustPolicy } from '@jinn-network/trust-core';
+import {
+  didPkh,
+  recordDigest,
+  validateKeyBinding,
+  validateRevocation,
+  validateTrustPolicy,
+  type KeyBinding,
+  type Revocation,
+  type TrustPolicy,
+} from '@jinn-network/trust-core';
 
 import type { CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS } from '../command.js';
@@ -236,7 +250,11 @@ function resolveDir(ctx: CommandContext, parsed: Parsed): string {
   return dir;
 }
 
-function parseRoleSets(ctx: CommandContext, raw: string | undefined): readonly RoleSetName[] {
+function parseRoleSets(
+  ctx: CommandContext,
+  raw: string | undefined,
+  options: { readonly requireRequester: boolean } = { requireRequester: true },
+): readonly RoleSetName[] {
   if (raw === undefined || raw.trim().length === 0) {
     invalid(ctx, 'ceremony requires --role-sets (comma-separated: requester,admission,solver,evaluator)');
   }
@@ -255,7 +273,7 @@ function parseRoleSets(ctx: CommandContext, raw: string | undefined): readonly R
   // §4.4: the fleet runtime ALWAYS opens requester custody (the projector's requester-association
   // resolver needs `requester-submission`), even for an operator who is solver-only in intent. A
   // ceremony that skipped it would mint a catalog whose owner's own daemon refuses to boot.
-  if (!names.includes('requester')) {
+  if (options.requireRequester && !names.includes('requester')) {
     invalid(
       ctx,
       '--role-sets must include `requester`: the native fleet runtime opens requester custody on every boot, '
@@ -637,7 +655,7 @@ async function buildProvisionPlan(input: {
 async function assertSafeOwnership(
   ctx: CommandContext,
   deps: CeremonyCommandDeps,
-  plan: ProvisionPlan,
+  plan: Pick<ProvisionPlan, 'custody'>,
   rpcUrl: string | undefined,
 ): Promise<void> {
   let owns: boolean;
@@ -702,13 +720,16 @@ async function mintCustody(input: {
   return { signers, authority, created };
 }
 
+/** The parts of a plan that name who a binding is for and which Safe settles for it. */
+type BindingPlan = Pick<ProvisionPlan, 'agentIri' | 'admissionAgent' | 'custody'>;
+
 /** Which Agent IRI owns a given role: admission is its own authority, everything else is the operator. */
-function agentForRole(plan: ProvisionPlan, role: NativeRoleIdentityRole): string {
+function agentForRole(plan: BindingPlan, role: NativeRoleIdentityRole): string {
   return role === 'admission' ? plan.admissionAgent ?? plan.agentIri : plan.agentIri;
 }
 
 async function authorBindings(input: {
-  readonly plan: ProvisionPlan;
+  readonly plan: BindingPlan;
   readonly signers: ReadonlyMap<NativeRoleIdentityRole, RoleSigner>;
   readonly ceremonySigner: { readonly address: `0x${string}`; signMessage(m: { readonly message: { readonly raw: Uint8Array } }): Promise<`0x${string}`> };
   readonly validFrom: string;
@@ -1339,6 +1360,444 @@ async function runJoin(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
   }
 }
 
+// ── rotate ─────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Where an in-progress rotation records the stores it minted, so a re-run after an interruption
+ * reopens them instead of minting a second set of keys. The catalog itself says which half has
+ * landed: a replacement key it binds is rebound, a retired binding it revokes is revoked.
+ */
+function rotationReceiptPath(dir: string): string {
+  return join(dir, 'ceremony', 'rotation.json');
+}
+
+interface RotationReceipt {
+  readonly schemaVersion: 1;
+  readonly roleSets: readonly RoleSetName[];
+  /** The new store per family, minted for this rotation. */
+  readonly stores: Partial<Record<RoleSetName, string>>;
+  readonly completedAt?: string;
+}
+
+function readRotationReceipt(dir: string): RotationReceipt | undefined {
+  const path = rotationReceiptPath(dir);
+  if (!existsSync(path)) return undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as RotationReceipt;
+    return parsed.schemaVersion === 1 && Array.isArray(parsed.roleSets) && typeof parsed.stores === 'object'
+      ? parsed
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeRotationReceipt(dir: string, receipt: RotationReceipt): void {
+  const path = rotationReceiptPath(dir);
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  writeFileSync(path, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
+}
+
+/** One retiring role: its current key and the catalog binding of that key the rotation revokes. */
+interface RetiringRole {
+  readonly role: NativeRoleIdentityRole;
+  readonly agent: string;
+  readonly keyId: string;
+  readonly bindingDigests: readonly `sha256:${string}`[];
+}
+
+/** The catalog's bindings and revocations, read structurally. Verification is the opener's job. */
+function catalogRecords(file: CatalogFileShape): {
+  readonly bindings: readonly { readonly digest: `sha256:${string}`; readonly binding: KeyBinding }[];
+  readonly revocations: readonly Revocation[];
+} {
+  const bindings = file.bindings.flatMap((entry) => {
+    if (typeof entry.envelope !== 'string' || typeof entry.digest !== 'string') return [];
+    const report = validateKeyBinding(new Uint8Array(Buffer.from(entry.envelope, 'base64')));
+    return report.conforms && report.value !== undefined
+      ? [{ digest: entry.digest as `sha256:${string}`, binding: report.value }]
+      : [];
+  });
+  const revocations = file.revocations.flatMap((entry) => {
+    const envelope = (entry as { envelope?: unknown }).envelope;
+    if (typeof envelope !== 'string') return [];
+    const report = validateRevocation(new Uint8Array(Buffer.from(envelope, 'base64')));
+    return report.conforms && report.value !== undefined ? [report.value] : [];
+  });
+  return { bindings, revocations };
+}
+
+/** A UTC stamp safe in a file name, so a rotated store never lands on an existing path. */
+function rotationStamp(now: Date): string {
+  return now.toISOString().replace(/[-:]/gu, '').replace(/\.\d{3}Z$/u, 'Z');
+}
+
+/**
+ * `jinn ceremony rotate` (spec §3.2 rotation, §6 laws 1 and 6): retires every key of the named role
+ * families and binds new ones, for an operator `init` or `join` already provisioned.
+ *
+ * A store holds all of a family's keys under one password and is never rewritten, so a family is
+ * the unit: the rotation mints a NEW store for it, then
+ *   1. rebinds: one fresh `ceremony-anchor/v1` anchor over the replacement keys, then their
+ *      bindings, vouched by the same agent EOA (`rebindRoles`);
+ *   2. revokes: one fresh `revocation-anchor/v1` anchor, then the agent EOA's revocation of every
+ *      retired binding (`planRevocation`, `revokeBinding`);
+ *   3. points `identityStores.<family>` at the new store.
+ * The rebind comes first because a replacement draws its authority from a binding of the same
+ * Agent and voucher that still stands at its effective start, and an admission Agent has no other.
+ * The voucher check runs before either anchor is sent, so a rotation the catalog would ignore
+ * spends no gas.
+ */
+async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyCommandDeps): Promise<void> {
+  const execute = resolveExecute(ctx, parsed);
+  const progress = progressWriter(ctx, parsed);
+  const dir = resolveDir(ctx, parsed);
+  const configPath = parsed.values.config ?? join(dir, 'config.json');
+  const roleSets = parseRoleSets(ctx, parsed.values['role-sets'], { requireRequester: false });
+  const config = readConfigObject(configPath);
+  const agentIri = typeof config.agentIri === 'string' && config.agentIri.length > 0 ? config.agentIri : undefined;
+  const admissionAgent = typeof config.admissionAgent === 'string' && config.admissionAgent.length > 0
+    ? config.admissionAgent
+    : undefined;
+  const genesisPin = typeof config.trustPolicyGenesisDigest === 'string' ? config.trustPolicyGenesisDigest : undefined;
+  const configuredStores = (config.identityStores !== null && typeof config.identityStores === 'object')
+    ? config.identityStores as Partial<Record<RoleSetName, unknown>>
+    : {};
+  if (agentIri === undefined || genesisPin === undefined) {
+    return invalid(
+      ctx,
+      `ceremony rotate needs a provisioned operator, and ${configPath} has no agentIri or trustPolicyGenesisDigest`,
+      'Rotation retires keys a ceremony already bound. Run `jinn ceremony init` or `join` first.',
+    );
+  }
+  for (const family of roleSets) {
+    if (typeof configuredStores[family] !== 'string') {
+      invalid(ctx, `ceremony rotate --role-sets names "${family}", but ${configPath} has no identityStores.${family}`);
+    }
+  }
+  if (roleSets.includes('admission') && admissionAgent === undefined) {
+    invalid(ctx, `ceremony rotate --role-sets names "admission", but ${configPath} has no admissionAgent`);
+  }
+  const catalogPath = parsed.values.catalog
+    ?? (typeof config.trustRootsPath === 'string' ? config.trustRootsPath : join(dir, 'trust.json'));
+
+  const serviceIndexRaw = parsed.values['service-index'];
+  const serviceIndex = serviceIndexRaw === undefined ? undefined : Number(serviceIndexRaw);
+  if (serviceIndex !== undefined && (!Number.isInteger(serviceIndex) || serviceIndex < 1)) {
+    invalid(ctx, `--service-index must be a positive integer, got "${serviceIndexRaw}"`);
+  }
+  const anchorTargetRaw = parsed.values['anchor-target'];
+  if (anchorTargetRaw !== undefined && !/^0x[0-9a-fA-F]{40}$/u.test(anchorTargetRaw)) {
+    invalid(ctx, `--anchor-target must be a 20-byte hex address, got "${anchorTargetRaw}"`);
+  }
+  const timeoutRaw = parsed.values['finality-timeout-ms'];
+  const finalityTimeoutMs = timeoutRaw === undefined ? DEFAULT_FINALITY_TIMEOUT_MS : Number(timeoutRaw);
+  if (!Number.isFinite(finalityTimeoutMs) || finalityTimeoutMs <= 0) {
+    invalid(ctx, `--finality-timeout-ms must be a positive number, got "${timeoutRaw}"`);
+  }
+
+  let custody: CeremonyChainCustody;
+  try {
+    custody = await deps.readChainCustody({ dir, ...(serviceIndex === undefined ? {} : { serviceIndex }) });
+  } catch (cause) {
+    return invalid(
+      ctx,
+      `the operator's earning state at ${dir} could not be read: ${cause instanceof Error ? cause.message : String(cause)}`,
+      'Rotation re-vouches with the agent EOA the earning bootstrap created.',
+    );
+  }
+  const rpcUrl = parsed.values['rpc-url'];
+  await assertSafeOwnership(ctx, deps, { custody }, rpcUrl);
+  const plan: BindingPlan = { agentIri, ...(admissionAgent === undefined ? {} : { admissionAgent }), custody };
+
+  const password = resolveCeremonyPassword({ dir, env: ctx.env });
+  if ('refusal' in password) {
+    return emitEnvelope({
+      code: 'invalid_invocation',
+      message: password.refusal,
+      hint: password.hint,
+      exampleCli: EXAMPLE_CLI,
+      details: { feature: 'ceremony', state: 'password-identity-unresolvable', sideEffects: false },
+    }, { writer: ctx.writer, exit: ctx.exit });
+  }
+
+  // The keys being retired: the ones the configured stores hold now, and their catalog bindings.
+  const catalog = catalogRecords(loadCatalogFile(ctx, catalogPath));
+  const voucherDid = didPkh(84532, custody.agentEoa);
+  const retiring: RetiringRole[] = [];
+  for (const family of roleSets) {
+    let current: ReadonlyMap<NativeRoleIdentityRole, RoleSigner>;
+    try {
+      // eslint-disable-next-line no-await-in-loop -- bounded (≤4 families).
+      current = await openRoleSigners({
+        storePath: configuredStores[family] as string,
+        password: password.password,
+        ownedRoles: orderedRolesForSet(family),
+        create: false,
+      });
+    } catch (cause) {
+      return invalid(ctx, `the ${family} store at ${String(configuredStores[family])} could not be opened: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+    for (const [role, signer] of current) {
+      const agent = agentForRole(plan, role);
+      const bindingDigests = catalog.bindings
+        .filter(({ binding }) => binding.agent === agent && binding.key.didKey === signer.keyId)
+        .map(({ digest }) => digest);
+      if (bindingDigests.length === 0) {
+        invalid(ctx, `${catalogPath} binds no ${role} key ${signer.keyId} for ${agent}; there is nothing to rotate`);
+      }
+      retiring.push({ role, agent, keyId: signer.keyId, bindingDigests });
+    }
+  }
+  const revokedByVoucher = new Set(catalog.revocations
+    .filter(({ revokedBy }) => revokedBy === voucherDid)
+    .map(({ target }) => target));
+  const allTargets = retiring.flatMap(({ bindingDigests }) => bindingDigests);
+  const pendingTargets = allTargets.filter((digest) => !revokedByVoucher.has(digest));
+
+  // Key authority section 8: only each binding's voucher account can revoke it. Shown against the
+  // catalog before either anchor is sent; planning never asks the account to sign.
+  const planningVoucher = {
+    address: custody.agentEoa,
+    async signMessage(): Promise<`0x${string}`> { throw new Error('planning a revocation signs nothing'); },
+  };
+  let revocationPlan: RevocationPlan | undefined;
+  if (pendingTargets.length > 0) {
+    try {
+      revocationPlan = await planRevocation({ catalogPath, voucher: planningVoucher, targets: pendingTargets });
+    } catch (cause) {
+      return invalid(
+        ctx,
+        `the agent EOA ${custody.agentEoa} cannot revoke the retiring bindings: ${cause instanceof Error ? cause.message : String(cause)}`,
+        'A role binding is revoked by the account that vouched for it. Run rotate with the earning service whose EOA ran the ceremony (--service-index).',
+      );
+    }
+  }
+
+  const prior = readRotationReceipt(dir);
+  // A receipt whose stores the config already names finished everything but its own completion
+  // mark. Resuming it would take the NEW keys for the retiring ones and revoke them.
+  const resuming = prior !== undefined && prior.completedAt === undefined
+    && !roleSets.some((family) => configuredStores[family] === prior.stores[family]);
+  if (resuming && JSON.stringify([...prior.roleSets].sort()) !== JSON.stringify([...roleSets].sort())) {
+    invalid(
+      ctx,
+      `a rotation of ${prior.roleSets.join(',')} is in progress (${rotationReceiptPath(dir)})`,
+      `Re-run it with --role-sets ${prior.roleSets.join(',')} to finish it.`,
+    );
+  }
+  const stamp = rotationStamp(new Date());
+  const newStores: Partial<Record<RoleSetName, string>> = Object.fromEntries(roleSets.map((family) => [
+    family,
+    resuming && typeof prior.stores[family] === 'string'
+      ? prior.stores[family]
+      : join(dir, 'identity', `${family}.rotated-${stamp}.enc.json`),
+  ]));
+
+  if (!execute) {
+    emitResult(
+      {
+        schemaVersion: 1,
+        kind: 'ceremony_rotate_plan',
+        executeAuthorized: false,
+        sideEffects: false,
+        dir,
+        configPath,
+        catalogPath,
+        roleSets,
+        agentEoa: custody.agentEoa,
+        safeOwnershipVerified: true,
+        resuming,
+        retiring: retiring.map(({ role, agent, keyId, bindingDigests }) => ({ role, agent, keyId, bindingDigests })),
+        newStores,
+        revocationAnchorDigest: revocationPlan?.anchorDigest ?? null,
+        passwordSource: password.source,
+        warnings: password.warnings,
+        restartRequired: true,
+      },
+      () => [
+        'jinn ceremony rotate: PLAN (no side effects)',
+        '',
+        `operator dir        ${dir}`,
+        `catalog             ${catalogPath}`,
+        `agent EOA           ${custody.agentEoa}`,
+        '',
+        'retiring',
+        ...retiring.map(({ role, keyId }) => `  ${role.padEnd(24)} ${keyId}`),
+        '',
+        'new stores',
+        ...Object.entries(newStores).map(([family, path]) => `  ${family.padEnd(10)} ${path}`),
+        '',
+        'Re-run with --execute to mint the new stores, anchor and author the replacement bindings, then anchor and',
+        'author the revocation of the retiring ones. Two anchors, two finality waits.',
+      ].join('\n'),
+      {
+        json: Boolean(parsed.values.json),
+        human: Boolean(parsed.values.human),
+        writer: ctx.writer,
+        stdoutIsTty: ctx.stdoutIsTty,
+        noColor: Boolean(ctx.env.NO_COLOR),
+      },
+    );
+    return;
+  }
+
+  // Recorded BEFORE any store is minted, so an interrupted run reopens these stores rather than
+  // minting a second set of keys.
+  if (!resuming) writeRotationReceipt(dir, { schemaVersion: 1, roleSets, stores: newStores });
+  const replacementSigners = new Map<NativeRoleIdentityRole, RoleSigner>();
+  const storesCreated: string[] = [];
+  for (const family of roleSets) {
+    const storePath = newStores[family]!;
+    const existed = existsSync(storePath);
+    // eslint-disable-next-line no-await-in-loop -- bounded (≤4 families).
+    const minted = await openRoleSigners({
+      storePath,
+      password: password.password,
+      ownedRoles: orderedRolesForSet(family),
+      create: true,
+    });
+    for (const [role, signer] of minted) replacementSigners.set(role, signer);
+    if (!existed) storesCreated.push(storePath);
+  }
+  const boundKeys = new Set(catalog.bindings.map(({ binding }) => `${binding.agent} ${binding.key.didKey}`));
+  const unbound = new Map([...replacementSigners].filter(([role, signer]) =>
+    !boundKeys.has(`${agentForRole(plan, role)} ${signer.keyId}`)));
+
+  const session = await deps.openAnchorSession({
+    dir,
+    serviceIndex: custody.serviceIndex,
+    password: password.password,
+    anchorTarget: (anchorTargetRaw as `0x${string}` | undefined) ?? custody.agentEoa,
+    ...(rpcUrl === undefined ? {} : { rpcUrl }),
+  });
+  const anchorAndWait = async (digest: `sha256:${string}`, act: 'rebind' | 'revocation'): Promise<AnchorLocator> => {
+    // Both halves always submit: a rebind's anchor and a revocation's are fresh for their act (§6).
+    const locator = await session.submit(digest);
+    progress({
+      schemaVersion: 1,
+      kind: 'ceremony_anchor_submitted',
+      act,
+      anchorDigest: digest,
+      transactionHash: locator.transactionHash,
+      anchorTime: locator.anchorTime,
+      note: 'waiting for the finalized tag (Base Sepolia trails head by roughly 10-20 minutes)',
+    }, `${act} anchor submitted ${locator.transactionHash} at ${locator.anchorTime}\n`
+      + '  waiting for the finalized tag (Base Sepolia trails head by roughly 10-20 minutes)');
+    await session.waitForFinalized({
+      digest,
+      locator,
+      timeoutMs: finalityTimeoutMs,
+      pollMs: FINALITY_POLL_MS,
+      onProgress: (elapsedMs) => {
+        progress({ schemaVersion: 1, kind: 'ceremony_finality_wait', act, anchorDigest: digest, elapsedMs },
+          `  still waiting for finality, ${Math.round(elapsedMs / 1000)}s elapsed`);
+      },
+    });
+    return locator;
+  };
+  try {
+    const ceremonySigner = { address: custody.agentEoa, signMessage: (m: { readonly message: { readonly raw: Uint8Array } }) => session.signMessage(m) };
+    let rebindAnchor: { digest: `sha256:${string}`; transactionHash: `0x${string}`; validFrom: string } | undefined;
+    if (unbound.size > 0) {
+      const anchorDigest = ceremonyAnchorDigest({
+        agentIri,
+        ...(admissionAgent === undefined ? {} : { admissionAgent }),
+        safeAddress: custody.safeAddress,
+        keys: [...unbound.values()].map(({ role, keyId }) => ({ role, keyId })),
+      });
+      const locator = await anchorAndWait(anchorDigest, 'rebind');
+      const replacements = await authorBindings({
+        plan,
+        signers: unbound,
+        ceremonySigner,
+        validFrom: locator.anchorTime,
+        anchorDigest,
+      });
+      await rebindRoles({ catalogPath, replacements: [...replacements], anchor: anchorDeclaration(anchorDigest, locator) });
+      rebindAnchor = { digest: anchorDigest, transactionHash: locator.transactionHash, validFrom: locator.anchorTime };
+    }
+
+    let revocation: { digest: `sha256:${string}`; transactionHash: `0x${string}`; effectiveTime: string } | undefined;
+    if (revocationPlan !== undefined) {
+      const locator = await anchorAndWait(revocationPlan.anchorDigest, 'revocation');
+      await revokeBinding({
+        catalogPath,
+        voucher: ceremonySigner,
+        targets: revocationPlan.targets,
+        effectiveTime: locator.anchorTime,
+        anchor: anchorDeclaration(revocationPlan.anchorDigest, locator),
+      });
+      revocation = { digest: revocationPlan.anchorDigest, transactionHash: locator.transactionHash, effectiveTime: locator.anchorTime };
+    }
+
+    const writeResult = writeNativeIdentityConfig({
+      configPath,
+      values: {
+        agentIri,
+        ...(admissionAgent === undefined ? {} : { admissionAgent }),
+        identityStores: newStores,
+        trustRootsPath: catalogPath,
+        trustPolicyGenesisDigest: genesisPin as `sha256:${string}`,
+      },
+    });
+    writeRotationReceipt(dir, { schemaVersion: 1, roleSets, stores: newStores, completedAt: new Date().toISOString() });
+
+    emitResult(
+      {
+        schemaVersion: 1,
+        kind: 'ceremony_rotate_complete',
+        executeAuthorized: true,
+        sideEffects: true,
+        dir,
+        catalogPath,
+        roleSets,
+        resumed: resuming,
+        retired: retiring.map(({ role, agent, keyId, bindingDigests }) => ({ role, agent, keyId, bindingDigests })),
+        bindings: [...replacementSigners].map(([role, { keyId }]) => ({ role, agent: agentForRole(plan, role), keyId })),
+        rebindAnchor: rebindAnchor ?? null,
+        revocationAnchor: revocation ?? null,
+        storesCreated,
+        configWriteBack: writeResult,
+        warnings: password.warnings,
+        restartRequired: true,
+        nextSteps: [
+          `Copy ${catalogPath} to every other operator's trustRootsPath; the genesis digest did not move, so their configs need no edit.`,
+          'Restart every daemon: assertFresh makes a changed catalog under a running daemon a hard refusal.',
+        ],
+      },
+      (raw) => {
+        const v = raw as { retired: { role: string; keyId: string }[]; bindings: { role: string; keyId: string }[] };
+        return [
+          'jinn ceremony rotate: COMPLETE',
+          '',
+          `catalog             ${catalogPath}`,
+          ...(revocation === undefined ? [] : [`retired from        ${revocation.effectiveTime}`]),
+          '',
+          'retired',
+          ...v.retired.map(({ role, keyId }) => `  ${role.padEnd(24)} ${keyId}`),
+          '',
+          'bound',
+          ...v.bindings.map(({ role, keyId }) => `  ${role.padEnd(24)} ${keyId}`),
+          '',
+          'next',
+          `  - Copy ${catalogPath} to every other operator's trustRootsPath.`,
+          '  - Restart every daemon.',
+        ].join('\n');
+      },
+      {
+        json: Boolean(parsed.values.json),
+        human: Boolean(parsed.values.human),
+        writer: ctx.writer,
+        stdoutIsTty: ctx.stdoutIsTty,
+        noColor: Boolean(ctx.env.NO_COLOR),
+      },
+    );
+  } finally {
+    await session.close?.();
+  }
+}
+
 // ── show ───────────────────────────────────────────────────────────────────────────────────────
 
 async function runShow(ctx: CommandContext, parsed: Parsed, deps: CeremonyCommandDeps): Promise<void> {
@@ -1527,6 +1986,7 @@ export function createCeremonyCommand(deps?: CeremonyCommandDeps): CommandModule
     helpText: `Usage:
   jinn ceremony init --dir <operator home> --role-sets <families> --authority-store <path> [--execute]
   jinn ceremony join --dir <operator home> --role-sets <families> --catalog <path> --genesis <digest> --authority-store <path> [--execute]
+  jinn ceremony rotate --dir <operator home> --role-sets <families> [--catalog <path>] [--execute]
   jinn ceremony show [--catalog <path>] [--store <path>]
 
 Status:
@@ -1549,7 +2009,19 @@ Status:
   it REUSES that anchor and those IRIs rather than minting a second identity and spending gas twice.
   After the catalog is sealed, a re-run refuses instead, and names the config keys still outstanding.
 
-Options (init and join):
+  \`rotate\` retires every key of the named role families for an operator init or join already
+  provisioned, for instance after a key leaks. A family's keys share one store, so the family is the
+  unit: rotate mints a new store, binds its keys under a fresh anchor, then revokes the retiring
+  bindings under a second fresh anchor, signed by the agent EOA that vouched for them, and finally
+  points identityStores at the new store. The replacement binding comes first because it draws its
+  authority from the binding it replaces. The retired keys stop verifying from the revocation
+  anchor's block time; what they signed before it still verifies. No catalog authority is needed:
+  the trust policy names Agent IRIs, and a rotation keeps them. An interrupted rotate is re-run with
+  the same command: <dir>/ceremony/rotation.json names the stores it minted, and the catalog shows
+  which half landed. Rotation cannot help when the agent EOA itself is compromised: that account is
+  the voucher, so a binding under a new EOA needs consent, which rotate does not author.
+
+Options (init, join, and rotate; rotate takes no --authority-store or --genesis):
   --dir <path>               Operator home (default ~/.jinn-client). The keystore, identity stores,
                              and config.json are resolved beneath it.
   --config <path>            Config file to write back to (default <dir>/config.json)
@@ -1588,6 +2060,7 @@ Examples:
   jinn ceremony init --dir ~/.jinn-client --role-sets requester,admission,solver,evaluator --authority-store ~/.jinn-ceremony/authority.enc.json
   JINN_PASSWORD=... jinn ceremony init --dir ~/.jinn-client --role-sets requester,admission,solver,evaluator --authority-store ~/.jinn-ceremony/authority.enc.json --execute
   JINN_PASSWORD=... jinn ceremony join --dir ~/.jinn-client-op-b --role-sets requester,solver --catalog ~/.jinn-client/trust.json --genesis sha256:<printed by init> --authority-store ~/.jinn-ceremony/authority.enc.json --execute
+  JINN_PASSWORD=... jinn ceremony rotate --dir ~/.jinn-client --role-sets solver --execute
   jinn ceremony show --catalog ~/.jinn-client/trust.json
 `,
     async run(ctx: CommandContext): Promise<void> {
@@ -1599,8 +2072,9 @@ Examples:
           return invalid(ctx, error instanceof Error ? error.message : String(error));
         }
         const verb = parsed.positionals[0];
-        if (parsed.positionals.length !== 1 || (verb !== 'init' && verb !== 'join' && verb !== 'show')) {
-          return invalid(ctx, 'ceremony requires the `init`, `join`, or `show` subcommand');
+        if (parsed.positionals.length !== 1
+          || (verb !== 'init' && verb !== 'join' && verb !== 'rotate' && verb !== 'show')) {
+          return invalid(ctx, 'ceremony requires the `init`, `join`, `rotate`, or `show` subcommand');
         }
         if (deps === undefined) {
           return emitEnvelope({
@@ -1613,6 +2087,7 @@ Examples:
         }
         if (verb === 'show') return await runShow(ctx, parsed, deps);
         if (verb === 'init') return await runInit(ctx, parsed, deps);
+        if (verb === 'rotate') return await runRotate(ctx, parsed, deps);
         return await runJoin(ctx, parsed, deps);
       } catch (cause) {
         // The envelope and the exit code were already emitted at the refusal site; this only stops

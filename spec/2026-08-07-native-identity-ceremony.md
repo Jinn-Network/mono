@@ -1,6 +1,10 @@
 # Native Identity Ceremony — production trust-artifact provisioning
 
-**Version:** 0.7 (§3.2's deferred `revokeBinding` signs as the target binding's voucher account,
+**Version:** 0.8 (rotation ships, after issue #5236: §3.2's `revokeBinding` is implemented with
+`planRevocation`, `revocationAnchorDigest` and the rebind writer `rebindRoles`, §4.5 adds
+`jinn ceremony rotate`, and §7 states what revocation and rebind can and cannot do when the voucher
+account itself is the compromised key. v0.7 made §3.2's deferred `revokeBinding` sign as the target
+binding's voucher account,
 not the catalog authority, whose revocation has no effect under key authority section 8, after
 issue #5211. v0.6 corrected §3.2b's and §7's statement of the escaped-revocation residual after
 issue #5144: records for one key under one voucher now share revocations, and the residual's actor
@@ -30,7 +34,7 @@ proceed without. Register and vocabulary follow the trust-layer design
 ([`docs/superpowers/specs/2026-07-27-trust-and-identity-layer-design.md`](../docs/superpowers/specs/2026-07-27-trust-and-identity-layer-design.md)).
 
 **Out of scope:** revocation/rotation implementation (surface designed here, execution
-deferred to a follow-up issue), catalog distribution beyond file copy, mainnet provisioning
+deferred to a follow-up issue; implemented under issue #5236, v0.8), catalog distribution beyond file copy, mainnet provisioning
 (DR-2026-08-05 decision 8: native mode refuses mainnet), Sybil economics, HSM custody.
 
 ---
@@ -372,28 +376,65 @@ export function sealPolicySuccessor(input: { … }): Promise<…>;
 /** The revocation signer for a binding's voucher account. keyId, which is the
  * revocation's revokedBy, is didPkh(84532, voucher.address), spelled as
  * authorRoleBinding spells the voucher; the signature is a 65-byte EIP-191
- * personal_sign over the DSSE pre-authentication encoding. */
+ * personal_sign over the DSSE pre-authentication encoding. v0.8: it signs
+ * revocations and nothing else, and refuses a signature that does not recover
+ * to voucher.address. */
 export function voucherAccountSigner(voucher: CeremonySigner): {
   readonly keyId: DidPkh;
   readonly dsseSigner: DsseSigner;
 };
 
-// ── designed, implementation deferred (follow-up issue) ─────────────────────
-/** Seals a Revocation targeting a binding digest (schema + resolver support
- * already shipped: catalog schema `revocations`, native-trust-catalog.ts:57,77,
- * 298-306; binding-resolver applies anchored revocations at effective time), and
- * the rebind flow (revoke + authorRoleBinding for the replacement key + new
- * anchor). Surface fixed here so rotation needs no schema change. Signed by the
- * target binding's voucher account through voucherAccountSigner, never by the
- * catalog authority (see below). */
+// ── rotation (v0.8; designed in v0.1-v0.7, implemented under issue #5236) ───
+/** The §3.2b revocation-anchor/v1 digest of one revocation act. */
+export function revocationAnchorDigest(input: {
+  readonly targets: readonly `sha256:${string}`[];
+  readonly revokedBy: string;
+}): `sha256:${string}`;
+
+/** Before any anchor: shows voucher is every target's voucher (and not a
+ * contract account, and has not already revoked it) and names the act's
+ * revocation-anchor/v1 digest. Signs nothing. */
+export function planRevocation(input: {
+  readonly catalogPath: string;
+  readonly voucher: CeremonySigner;
+  readonly targets: readonly `sha256:${string}`[];
+}): Promise<{ revokedBy: DidPkh; targets: readonly `sha256:${string}`[];
+  anchorDigest: `sha256:${string}` }>;
+
+/** Seals one Revocation per target, signed by the voucher account through
+ * voucherAccountSigner, never by the catalog authority (see below), and appends
+ * them with their one anchor. Refuses, before signing, a voucher that is not
+ * every target's, an anchor that is not the act's revocation-anchor/v1 digest
+ * (law 6), and an effectiveTime that is not millisecond ISO UTC; writes nothing
+ * when the signature does not recover to the voucher. No policy successor. */
 export function revokeBinding(input: {
   readonly catalogPath: string;
   readonly voucher: CeremonySigner;    // performEoaCeremony's EOA signer shape
-  readonly target: `sha256:${string}`;
-  readonly effectiveTime: string;
+  readonly targets: readonly `sha256:${string}`[];   // v0.8: one act may revoke several
+  readonly effectiveTime: string;      // the anchor's block time, verbatim
   readonly anchor: AnchorDeclaration;
-}): Promise<…>;
+}): Promise<{ revokedBy; effectiveTime; revocations: { target; digest }[] }>;
+
+/** The rebind half: appends replacement bindings (authorRoleBinding for the new
+ * keys) and their fresh ceremony-anchor/v1 anchor. No policy successor. Refuses a
+ * declared anchor (law 1), a key the Agent already holds, a role the Agent does
+ * not hold under the replacement's voucher, and an Agent whose bindings under
+ * that voucher are all revoked (the replacement would have no section 7
+ * authority: rebind BEFORE revoking). */
+export function rebindRoles(input: {
+  readonly catalogPath: string;
+  readonly replacements: readonly SealedBindingEntry[];
+  readonly anchor: AnchorDeclaration;
+}): Promise<{ bindings: { role; agent; keyId; digest }[] }>;
 ```
+
+**Rotation order (v0.8).** The two acts run rebind first, then revocation. A replacement binding
+draws its authority under key authority section 7 from a `controls` binding of the same Agent and
+voucher that stands at its effective start. Rebound first, it draws on the binding it replaces,
+and the later revocation takes nothing back (section 6). Revoked first, an Agent whose only binding
+was the retired one, as an admission Agent's is, has nothing left to draw on, and its replacement
+fails the consent chain. Since the two anchors are separate transactions, the replacement's
+effective start precedes the revocation's effective time.
 
 **Who signs a revocation (v0.7).** `revokeBinding` takes the target binding's **voucher
 account**: the ceremony EOA that `authorRoleBinding` named as the binding's `did:pkh` voucher.
@@ -1016,6 +1057,31 @@ same supplied `JINN_PASSWORD` per operator: B, homed at `~/.jinn-client-op-b`, i
 the hard-coded `~/.jinn-client/keystore-password` fallback (§4.1) and must set the env var
 for every run.
 
+### 4.5 `jinn ceremony rotate`: retire and replace role keys (v0.8)
+
+For an operator `init` or `join` already provisioned: `--dir`, `--role-sets <families>`,
+optional `--catalog` (default: the config's `trustRootsPath`), `--rpc-url`, `--anchor-target`,
+`--service-index`, `--finality-timeout-ms`, `--dry-run` (default) / `--execute`. A family's keys
+share one store, and a store is never rewritten, so the family is the unit of rotation. No
+catalog authority is needed: the policy names Agent IRIs, and a rotation keeps them.
+
+1. Read the config (Agent IRIs, the family's current store, the genesis pin), the earning
+   custody, and the Safe-ownership preflight, as `init` does.
+2. Open the current stores and find each key's catalog bindings. `planRevocation` shows the agent
+   EOA is their voucher **before either anchor is sent**; a mismatch refuses with no gas spent.
+3. Record `<dir>/ceremony/rotation.json` naming the new store per family, then mint those stores.
+4. **Rebind**: submit a fresh `ceremony-anchor/v1` anchor over the replacement keys (§3.2b), wait
+   for finality, author the replacement bindings with `validFrom` = its block time, `rebindRoles`.
+5. **Revoke**: submit a fresh `revocation-anchor/v1` anchor, wait for finality, `revokeBinding`
+   with `effectiveTime` = its block time.
+6. Write `identityStores.<family>` = the new store, then mark the receipt complete. Restart every
+   daemon after distributing the catalog.
+
+A re-run after an interruption reopens the stores the receipt names, skips a half the catalog
+already shows (a replacement key it binds, a retiring binding it revokes), and submits fresh
+anchors for what remains; neither half reuses an anchor. A receipt whose stores the config already
+names is complete: resuming it would take the new keys for the retiring ones.
+
 ## 5. Catalog governance
 
 **One shared catalog, one genesis.** All operators of a deployment verify against the same
@@ -1201,12 +1267,35 @@ successor (authority key is not on the host). Key custody files are `0o600` unde
 dirs (`role-identities.ts:331-333,386-393`); the password never enters config
 (`JINN_PASSWORD` env-only).
 
-**Ceremony signer compromise.** The agent EOA signs ceremonies and owns the Safe link; its
-compromise is an operator-level incident (it already controls settlement on-chain). The
-trust layer's answer is revocation + rebind (§3.2 deferred surface) — the catalog schema and
-resolver already enforce anchored, effective-time revocations
-(`native-trust-catalog.ts:57,77,298-306`), so the artifact model needs no change when the
-rotation flow ships.
+**Role key compromise.** A leaked role key is retired with `jinn ceremony rotate` (§4.5): the
+family's new keys are bound under the same agent EOA, and the retiring bindings are revoked by
+that EOA, their voucher account and the only account key authority section 8 lets revoke a native
+role binding. The retired key stops verifying from the revocation anchor's block time; evidence it
+signed before then still verifies, because revocation is never retroactive. Every key in the
+family's store is rotated, since they share one file and one password.
+
+**Ceremony signer compromise (v0.8, corrected).** The agent EOA signs ceremonies and owns the Safe
+link; its compromise is an operator-level incident (it already controls settlement on-chain).
+Earlier versions named revocation and rebind as the trust layer's answer. They are not one, and
+this is what they can and cannot do when the voucher account itself is the compromised key:
+
+- **Revocation cannot evict the holder.** The voucher account is the one account whose
+  revocation of the bindings it vouched for counts (section 8), and whoever holds its key holds
+  that power too. The operator can revoke what the holder binds, and the holder can revoke what
+  the operator binds; neither side gains a lasting position.
+- **Rebind under the same account cannot evict the holder either.** Self-extension (section 7)
+  lets any binding under that voucher authorize a new one, so the holder can bind keys of its
+  own to the Agent through a ceremony it signs, exactly as the operator can.
+- **Rebind under a new account is not available in a native catalog.** A binding under another
+  voucher needs consent from a key of the Agent with `bindings` scope (section 7), and no native
+  role binding holds one (§3.2a). `rebindRoles` refuses a replacement under another voucher.
+- **What still holds** is the procedural bound of §3.2b: a record counts only once it is in the
+  verifiers' catalog, and catalog writes go through whoever distributes that file.
+- **What remains** lies outside rotation. The catalog authority seals a policy successor that no
+  longer accepts the Agent IRI (and the admission IRI) in any purpose; from the moment verifiers
+  load it, every key of that Agent fails at step 9, for evidence of any time, since the policy is
+  read at verification. The operator then provisions a new Agent IRI under a new account, and the
+  authority accepts it in a further successor.
 
 ## 8. Rejected alternatives
 
@@ -1247,8 +1336,8 @@ PR train into `integration/evidence-v1`, stacked, each green alone:
   surgical five-key write-back with a read-back assertion; CLI tests over injected deps
   (the `native-requester.ts` test pattern).
 - **Follow-up issue (filed at PR3 merge): rotation.** `revokeBinding` + rebind flow +
-  `jinn ceremony rotate`, on the §3.2 surface. Implementation deferred; schema and resolver
-  already support it.
+  `jinn ceremony rotate`, on the §3.2 surface. Implemented under issue #5236 (v0.8, §3.2, §4.5,
+  §7); the schema and resolver needed no change.
 
 Guards: docs-only artifacts of this spec (this file + the DR addendum) trip neither
 `generate-architecture.mjs --check` nor `phase-d-transition-deletion.test.mjs`; the train
