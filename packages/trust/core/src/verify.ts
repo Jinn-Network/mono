@@ -402,6 +402,19 @@ async function bindingStands(
   return await authorityUsable(resolved, atTime, walk, revocationsThatCount) && chainHolds(resolved, walk);
 }
 
+/**
+ * Whether a resolved binding stands at `atTime` (key authority section 6), for a leg outside
+ * this module that takes authority from one: the account binding an `agentId` composition rests
+ * on (section 4). It is `bindingStands`, on a walk of its own.
+ */
+export async function checkBindingStands(
+  resolved: ResolvedBinding,
+  atTime: string,
+  deps: BindingAuthorityDeps,
+): Promise<boolean> {
+  return bindingStands(resolved, atTime, startWalk(deps));
+}
+
 /** What one binding's record offers §7.4a, before the batch it was sealed in
  * is settled. */
 interface ChainReading {
