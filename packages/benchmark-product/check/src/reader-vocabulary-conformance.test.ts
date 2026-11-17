@@ -8,32 +8,41 @@
  *
  * 1. **No hidden term reaches a reader.** Section 5 closes by naming the nouns a reader never meets.
  *    Nine leave by hiding; `CAS` leaves by rename, so it is checked by the second assertion.
- * 2. **No section 5 concept is presented under a second name.** A concept's other names are its
- *    contract spellings (section 5's third column), the names section 4 retires for it (the
- *    "Reader-visible term today" of every rename row whose reader-facing name is the concept's), and
- *    `CAS` for *evidence file*. The exception set is section 5's headings rule, read from the section 4
- *    rows that mark themselves as a heading form, plus the four names section 5 licenses for **the
- *    runs**.
+ * 2. **No section 5 concept is presented under a second name.** Asserted twice. Over the spec
+ *    itself, as section 7 words it: every section 4 row that presents a section 5 concept gives it
+ *    that concept's name, with section 5's headings rule as the exception set (read from the
+ *    section 4 rows that mark themselves as a heading form) and the four names section 5 licenses
+ *    for **the runs**. And over the generated strings: a concept's other names are its contract
+ *    spellings (section 5's third column), the names section 4 retires for it (the "Reader-visible
+ *    term today" of every rename row whose reader-facing name is the concept's), and `CAS` for
+ *    *evidence file*; none may reach a reader.
  *
  * Every list is read from the spec. Each parser checks the shape it reads and the counts the spec
  * states in words ("nine nouns", "Three rows", "four names"), so an edit that changes the spec's
- * shape fails here by name rather than quietly widening or narrowing the test. The two lists that
- * are restated here, `OTHER_SENSES` and the surface inventory, say why next to themselves.
+ * shape fails here by name rather than quietly widening or narrowing the test. The lists that are
+ * restated here, `OTHER_SENSES` and the surface inventories, say why next to themselves.
  *
  * What counts as reader-facing (the surface set):
  *
  * - The five report assets `buildPublicAssets` writes (`index.html`, `README.md`, `share.txt`,
- *   `badge.svg`, `social-card.svg`), at the composed `/10` format, for every method this package
- *   renders and for the conditional branches listed in `REPORT_PROFILES`. Formats `/2` to `/8` are
- *   not scanned: their pages are frozen into published bundles, which the reader byte-compares, so
- *   no change can reach them and no change can repair them.
+ *   `badge.svg`, `social-card.svg`), at the newest format the reader supports (`/10` today), for
+ *   every method this package renders and for the conditional branches listed in
+ *   `REPORT_PROFILES`. Older formats are not scanned. Every published format's page is
+ *   byte-compared by the reader against its own rebuild, so no change can reach it and no change
+ *   can repair it; that now includes `/10`, which `check` 0.2.1 reads (see `BUNDLE_V10_FORMAT`).
+ *   The violations recorded against `/10` are retired by the format that replaces its page, and a
+ *   new format fails the surface inventory below until this test scans it.
  * - `colophon-check`'s human output: the usage text, the stdout of a checked bundle (every shape in
  *   `READER_RENDERS`), and stderr (every refusal the characterization suite reaches, pinned in
  *   `characterization/testing/checker-outputs.expected.json` and held equal to the real CLI by
- *   `checker-outputs.test.ts`, plus the operational refusals and the two notes).
+ *   `checker-outputs.test.ts`, plus the operational refusals and the two notes). Every flag the
+ *   usage text lists is mapped to the rendering that covers its output (`CLI_FLAGS`).
  *
  * Not covered: `--json` output (contract, spec section 2), the product CLI and web app (outside the
- * spec's section 1 scope; #5241 asks for a ruling), docs prose, and the frozen formats above.
+ * spec's section 1 scope; #5241 asks for a ruling), docs prose, the older formats above, and section
+ * 4 renames whose reader-facing name is not a section 5 concept (`Unjudged` to *Not judged*, `Alpha`
+ * to *Confidence level*): the glossary rules concepts, and those rows are held by each rename
+ * unit's own gates.
  *
  * What is shown without being named is masked before matching (spec section 3: a hidden concept "may
  * still be *shown* (a digest, a file link) without being *named*"): digests, file paths, protocol
@@ -43,18 +52,17 @@
  * that word.
  *
  * Violations already on `next` are recorded in `KNOWN_VIOLATIONS`, each with the open issue that
- * owns it. The ledger must equal what the surfaces carry exactly: a new violation fails, and so
- * does a recorded one that has gone, so the list cannot outlive the strings it describes. To
- * regenerate it after a change that is meant:
+ * owns it (`OWNERS`), or `NO_OWNING_ISSUE` where no issue covers it yet, so the ledger says so
+ * instead of borrowing an issue that does not. The ledger must equal what the surfaces carry
+ * exactly: a new violation fails, and so does a recorded one that has gone, so the list cannot
+ * outlive the strings it describes. To regenerate it after a change that is meant:
  *
  *   GLOSSARY_CONFORMANCE_PRINT=1 yarn vitest run src/reader-vocabulary-conformance.test.ts
  *
  * and copy the printed entries, keeping each owner.
  */
 
-import { readFileSync, readdirSync } from "node:fs";
-import { join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { BENCHMARKING_METHOD_IDS, SIX_VARIABLE_DISCLOSURE_SPECIFICATION } from "@jinn-network/benchmarking-records";
 import type { IntegrityAnchorsReport } from "./anchor/check.js";
@@ -64,7 +72,7 @@ import { ANCHOR_CASES } from "./characterization/testing/anchor-cases.js";
 import { renderVerifiedBundle, runVerifierCli } from "./cli.js";
 import type { FreezeRepoVerificationResult } from "./freeze-repo.js";
 import { domainBindingProof, type VerifiedDomainBinding } from "./identity/domain-binding.js";
-import { BUNDLE_V10_FORMAT } from "./manifest.js";
+import { BUNDLE_V10_FORMAT, SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
 import type { PublicBundleSigner } from "./signers.js";
 import { goldenInput } from "./testing/golden-asset-input.js";
 import type { PublicBundleVerificationResult, VerifiedPublicBundleSnapshot } from "./verify.js";
@@ -314,6 +322,47 @@ const ALIASES: ReadonlyMap<GlossaryRow, readonly { readonly alias: string; reado
   return [row, [...aliases.values()]];
 }));
 
+/** A name as section 4 and section 5 are compared: markup off, lowercase, a trailing plural off. */
+function normalized(name: string): string {
+  return plain(name).toLowerCase().replace(/(?<=[a-z])s$/u, "");
+}
+
+/**
+ * Assertion 2 over the spec, as section 7 words it: "It asserts over §4's **Reader-facing name**
+ * column, with the rows §5's headings rule marks as headings or column headers as its exception
+ * set." A section 4 row presents a section 5 concept when its reader-facing name is the concept's,
+ * when a term it retires is one of the concept's contract spellings or a term section 5 collapses
+ * into it, or when its note marks it a heading form of the concept. Such a row must give the
+ * concept its own name, or a name that contains it (section 5: a heading that *contains* a canonical
+ * name "is not in this class and needs no exception"). The exceptions are the heading forms that
+ * point back to the concept, and the names section 5 licenses for **the runs**. Every other row is
+ * returned as a second name.
+ */
+function secondNamesInSectionFour(): string[] {
+  const findings: string[] = [];
+  for (const row of RULINGS) {
+    const names = ruledNames(row.name);
+    if (names.length === 0) continue;
+    const whole = plain(row.name);
+    const terms = ruledNames(row.term).map(normalized);
+    const concepts = new Set<GlossaryRow>(HEADING_FORMS.filter((form) => form.name === whole).map((form) => form.concept));
+    for (const entry of GLOSSARY) {
+      const spellings = [...entry.contractSpellings, ...(STATED_COLLAPSES.get(entry) ?? [])].map(normalized);
+      if (names.some((name) => normalized(name) === normalized(entry.name)) || terms.some((term) => spellings.includes(term))) {
+        concepts.add(entry);
+      }
+    }
+    for (const concept of concepts) {
+      if (HEADING_FORMS.some((form) => form.name === whole && form.concept === concept)) continue;
+      if (concept === RUNS_COLLAPSE.concept && RUNS_COLLAPSE.names.includes(whole)) continue;
+      for (const name of names) {
+        if (!termPattern(concept.name).test(name)) findings.push(`section ${row.section} "${row.term}" presents ${concept.name} as "${name}"`);
+      }
+    }
+  }
+  return findings;
+}
+
 /**
  * Words that also name a different, ruled thing on some surfaces. Restated rather than derived
  * because section 4 rules these by example, not as a token: the generated strings inflect them
@@ -344,86 +393,25 @@ const REPORT_ASSETS = ["index.html", "README.md", "share.txt", "badge.svg", "soc
 const READER_SURFACES = ["colophon-check usage", "colophon-check stdout", "colophon-check stderr"] as const;
 type Surface = (typeof REPORT_ASSETS)[number] | (typeof READER_SURFACES)[number];
 
-/** Every non-test source module in `check/src` audited for reader-facing emission. A new file
- * fails the inventory check below until its surface is covered here or classified as non-reader. */
-const CHECK_SRC_INVENTORY: ReadonlySet<string> = new Set([
-  "admission/application.ts",
-  "admission/contracts.ts",
-  "admission/index.ts",
-  "admission/intake.ts",
-  "admission/prompted-commitment.ts",
-  "admission/prompted-selection.ts",
-  "admission/result-evaluation.ts",
-  "admission/screening-sample.ts",
-  "admission/verification.ts",
-  "anchor/check.ts",
-  "assembly-v3.ts",
-  "assets.ts",
-  "bin.ts",
-  "binding/beacon-binding.ts",
-  "binding/report-face.ts",
-  "capabilities.ts",
-  "characterization/testing/anchor-cases.ts",
-  "characterization/testing/binary-admission-bundles.ts",
-  "characterization/testing/bundle-cases.ts",
-  "characterization/testing/evidence-native-bundles.ts",
-  "characterization/testing/golden-variants.ts",
-  "characterization/testing/observe.ts",
-  "characterization/testing/signature-cases.ts",
-  "characterization/testing/signers.ts",
-  "cli.ts",
-  "comparison.ts",
-  "denominators.ts",
-  "freeze-repo.ts",
-  "identifier-presentation.ts",
-  "identity/did-key.ts",
-  "identity/domain-binding.ts",
-  "identity/report-face.ts",
-  "index.ts",
-  "legacy-closures.ts",
-  "manifest.ts",
-  "outcome.ts",
-  "profile/admission-receipts.ts",
-  "profile/anchor-claims.ts",
-  "profile/artifacts.ts",
-  "profile/assembly-ports.ts",
-  "profile/binary-judge-manifest.ts",
-  "profile/binary-qualification.ts",
-  "profile/branding-assets.ts",
-  "profile/branding.ts",
-  "profile/claim-consistency.ts",
-  "profile/claim.ts",
-  "profile/disclosure.ts",
-  "profile/errors.ts",
-  "profile/external-import.ts",
-  "profile/inspect-assurance.ts",
-  "profile/inspect-disclosure.ts",
-  "profile/inspect-manifest.ts",
-  "profile/isolation.ts",
-  "profile/owner-controlled-publication.ts",
-  "profile/pinning-evidence.ts",
-  "profile/ports.ts",
-  "profile/preview-log.ts",
-  "profile/run-results.ts",
-  "profile/signing.ts",
-  "profile/suite-coverage.ts",
-  "profile/task-selection.ts",
-  "profile/terminal-bench-2-1-comparability.ts",
-  "profile/terminal-bench-2-1-pins.ts",
-  "profile/trust.ts",
-  "profile/venue.ts",
-  "profile/verdict.ts",
-  "reader-instructions.ts",
-  "report-prose-review.ts",
-  "schema.ts",
-  "signers.ts",
-  "testing/expect-refusal.ts",
-  "testing/golden-asset-input.ts",
-  "verify.ts",
-  "version.ts",
-]);
+/** The format whose page this test scans. A newer supported format is a new page, so the surface
+ * inventory below fails until this is moved to it and its violations are recorded. */
+const SCANNED_FORMAT = BUNDLE_V10_FORMAT;
 
-const goldenFacts = await goldenInput(BUNDLE_V10_FORMAT);
+/**
+ * Every flag `colophon-check`'s usage text lists, and the rendering in `readerSurfaces` that reaches
+ * the human output it adds. A flag the usage text gains is a new reader-facing output, so the
+ * inventory check below fails until its output is rendered here and recorded in this map.
+ */
+const CLI_FLAGS: Readonly<Record<string, string>> = {
+  "--json": "not scanned: `--json` keys and values are contract (spec section 2)",
+  "--tsa-root": "READER_RENDERS: every anchor report the characterization suite builds, trust anchors supplied or not",
+  "--ots-headers": "READER_RENDERS (chain-time anchors) and the malformed-headers refusal in readerSurfaces",
+  "--freeze-repo": "FREEZE_RESULTS and the freeze note in readerSurfaces",
+  "--identity-binding": "READER_RENDERS (both binding mechanisms) and the binding note in readerSurfaces",
+  "--help": "the usage text, which `-h` and a bare invocation print too",
+};
+
+const goldenFacts = await goldenInput(SCANNED_FORMAT);
 const ARMS = Object.keys((goldenFacts.report.results as { perSubject: { results: { arms: object } }[] })
   .perSubject[0]!.results.arms);
 const sha = (character: string): string => character.repeat(64);
@@ -771,7 +759,7 @@ const SHOWN: readonly RegExp[] = [
   /\b(?:urn|did:key):[^\s,;)"']+/giu,
   /<identifier: see --json>(?::[\w-]+)?/gu,
   /(?:sha256:)?\b[0-9a-f]{64}\b/giu,
-  /(?<![\w/-])(?:[\w.-]+\/)*[\w.-]+\.(?:json|jsonl|bin|html|svg|txt|md)(?:#[\w-]+)?/giu,
+  /(?<![\w/-])(?:[\w.-]+\/)*[\w.-]+\.(?:jsonl|json|bin|html|svg|txt|md)(?:#[\w-]+)?/giu,
   /@[\w-]+\/[\w.@-]+/gu,
   /\bcolophon-(?:check|verify)\b/gu,
   /(?<![\w-])--[\w-]+/gu,
@@ -840,6 +828,15 @@ const SET_ASIDE: readonly { readonly pattern: RegExp; readonly owner?: GlossaryR
 
 function blank(text: string, pattern: RegExp): string {
   return text.replace(pattern, (match) => match.replace(/[^\n]/gu, " "));
+}
+
+/** Blanks in `target` every span `pattern` matches in `source`, a same-length text it was masked from. */
+function blankWhere(target: string, source: string, pattern: RegExp): string {
+  let result = target;
+  for (const match of source.matchAll(pattern)) {
+    result = result.slice(0, match.index) + " ".repeat(match[0].length) + result.slice(match.index + match[0].length);
+  }
+  return result;
 }
 
 /** A term as a whole word or phrase, any case, with a plural on its last word where it inflects.
@@ -914,11 +911,14 @@ function blankInlineJson(text: string): string {
 
 /**
  * Section 4.2 keeps the reader tool's `Artifact content` block whole ("Already reader-shaped, and
- * the caveat under it is exemplary"). The block opens with its heading line and continues through
- * every indented line beneath it.
+ * the caveat under it is exemplary"). Its row names a block, not a phrase, by eliding the plain
+ * words between its heading and its last line (`Artifact content … not fetched`); the block opens
+ * with that heading line and continues through every indented line beneath it. Only such a row
+ * names a block: a kept word (`Bundle`) keeps the word, not whatever a later output indents beneath
+ * it, and an ellipsis inside a quoted string (`What is recomputed is …`) shortens the quotation.
  */
 const KEPT_BLOCK_HEADINGS: ReadonlySet<string> = new Set(RULINGS
-  .filter((row) => row.section === "4.2" && /^keep/u.test(row.ruling))
+  .filter((row) => row.section === "4.2" && /^keep/u.test(row.ruling) && /^[^`…]+ … [^`…]+$/u.test(row.term))
   .flatMap((row) => ruledNames(row.term).slice(0, 1)));
 
 function blankKeptBlocks(text: string): string {
@@ -982,18 +982,6 @@ interface Violation {
   readonly units: readonly string[];
 }
 
-/**Every non-test `.ts` source file under `check/src`, relative to `check/src`. */
-function checkSourceModules(directory: string, root = directory): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const fullPath = join(directory, entry.name);
-    if (entry.isDirectory()) return checkSourceModules(fullPath, root);
-    if (!entry.isFile() || !entry.name.endsWith(".ts") || entry.name.endsWith(".d.ts") || entry.name.endsWith(".test.ts")) {
-      return [];
-    }
-    return [relative(root, fullPath)];
-  });
-}
-
 function ledgerDifferences(
   observed: readonly Violation[],
   recorded: readonly KnownViolation[],
@@ -1020,25 +1008,43 @@ function ledgerDifferences(
       if (!seenUnits.includes(unit)) diffs.push(`stale recorded unit under ${key}: ${JSON.stringify(unit)}`);
     }
   }
+  const seen = new Set<string>();
   for (const entry of recorded) {
-    if (!Number.isInteger(entry.owner) || entry.owner <= 0) {
-      diffs.push(`invalid owner issue on ${ledgerKey(entry)}: ${String(entry.owner)}`);
+    const key = ledgerKey(entry);
+    if (seen.has(key)) diffs.push(`recorded twice: ${key}`);
+    seen.add(key);
+    if (entry.owner !== NO_OWNING_ISSUE && !Object.hasOwn(OWNERS, entry.owner)) {
+      diffs.push(`owner of ${key} is #${String(entry.owner)}, which OWNERS does not list`);
     }
-    if (entry.units.length === 0) {
-      diffs.push(`empty units on ${ledgerKey(entry)}`);
-    }
+    if (entry.units.length === 0) diffs.push(`no units recorded for ${key}`);
   }
   return diffs;
 }
 
+/** Section 4.1 applied to `check/src/assets.ts`: every report asset. */
 const REPORT_VIOLATION_OWNER = 3862 as const;
+/**
+ * The reader tool's refusal lines and the recomputed-checks caveat (`CHECK_SUBJECTS` in
+ * `outcome.ts`). The issue's body cites the timestamp-proof refusals as its examples; what it asks
+ * section 4.2 to rule is whether a refusal line, which is also the `--json` `message` value,
+ * follows section 5 at all, and that ruling decides every stderr entry below. PR #5219, which
+ * closed #3863, names it as the tracker for "the reader's refusal lines from deeper modules".
+ */
 const READER_PROSE_AND_REFUSAL_OWNER = 5251 as const;
 
-interface KnownViolation extends Violation {
-  /** The open GitHub issue on Jinn-Network/mono that owns retiring or ruling this violation. */
-  readonly owner: number;
-}
+/** The open issues on Jinn-Network/mono that own recorded violations: each either retires its
+ * entries or rules them out of section 5's reach, and its change updates this ledger. */
+const OWNERS = {
+  [REPORT_VIOLATION_OWNER]: "Report page vocabulary",
+  [READER_PROSE_AND_REFUSAL_OWNER]: "the reader tool's refusal lines and recomputed-checks caveat",
+} as const;
 
+/** A placeholder, not an owner: the violation is real and no open issue covers it yet. */
+const NO_OWNING_ISSUE = "no owning issue" as const;
+
+interface KnownViolation extends Violation {
+  readonly owner: keyof typeof OWNERS | typeof NO_OWNING_ISSUE;
+}
 
 const REPORT_ASSET_SET: ReadonlySet<string> = new Set(REPORT_ASSETS);
 
@@ -1067,10 +1073,16 @@ function scan(surface: Surface, rendered: readonly Rendered[]): Violation[] {
     for (const { name, pattern } of HIDDEN_PATTERNS) {
       for (const match of shown.matchAll(pattern)) record("hidden term", name, match.index);
     }
-    // Hidden nouns are blanked before the second scan, so one occurrence is reported once.
-    const named = [...HIDDEN_PATTERNS.map(({ pattern }) => pattern), ...RULED, ...senses].reduce(blank, blankKeptBlocks(shown));
+    // Hidden nouns are blanked before the second scan, so one occurrence is reported once. Ruled
+    // names and other senses are found in the text as written, since the masks above can cut one
+    // (`wilson@1` is a method identifier inside the kept caption `Exact wilson@1 values from the
+    // sealed Report`); every mask keeps positions, so a span found in `text` is the same span here.
+    const named = [...RULED, ...senses].reduce(
+      (masked, pattern) => blankWhere(masked, text, pattern),
+      HIDDEN_PATTERNS.map(({ pattern }) => pattern).reduce(blank, blankKeptBlocks(shown)),
+    );
     const spans = SET_ASIDE.flatMap(({ pattern, owner }) =>
-      [...shown.matchAll(pattern)].map((match) => ({ start: match.index, end: match.index + match[0].length, owner })));
+      [...text.matchAll(pattern)].map((match) => ({ start: match.index, end: match.index + match[0].length, owner })));
     for (const { concept, name, pattern } of ALIAS_PATTERNS) {
       for (const match of named.matchAll(pattern)) {
         const end = match.index + match[0].length;
@@ -1102,18 +1114,22 @@ function ledger(violations: readonly Violation[]): Record<string, readonly strin
   return Object.fromEntries(violations.map((violation) => [ledgerKey(violation), violation.units]).sort(([left], [right]) => (left! < right! ? -1 : 1)));
 }
 
-/** The observed ledger as source for `KNOWN_VIOLATIONS`, keeping each recorded owner. */
+/**
+ * The observed ledger as source for `KNOWN_VIOLATIONS`, keeping each recorded owner. An entry the
+ * ledger does not have yet prints `OWNER_REQUIRED`, which is defined nowhere, so a regenerated
+ * ledger does not load until someone names the issue that owns the new violation, or writes
+ * `NO_OWNING_ISSUE` and says so where the change is reviewed.
+ */
 function printLedger(observed: readonly Violation[]): string {
   const owners = new Map(KNOWN_VIOLATIONS.map((known) => [ledgerKey(known), known.owner]));
   const sorted = [...observed].sort((left, right) => (ledgerKey(left) < ledgerKey(right) ? -1 : 1));
   return sorted.map((violation) => {
     const owner = owners.get(ledgerKey(violation));
-    const defaultOwner = REPORT_ASSET_SET.has(violation.surface) ? "REPORT_VIOLATION_OWNER" : "READER_PROSE_AND_REFUSAL_OWNER";
     const ownerCode = owner === REPORT_VIOLATION_OWNER
       ? "REPORT_VIOLATION_OWNER"
       : owner === READER_PROSE_AND_REFUSAL_OWNER
         ? "READER_PROSE_AND_REFUSAL_OWNER"
-        : owner !== undefined ? String(owner) : defaultOwner;
+        : owner === NO_OWNING_ISSUE ? "NO_OWNING_ISSUE" : "OWNER_REQUIRED";
     return [
       "  {",
       `    surface: ${JSON.stringify(violation.surface)}, rule: ${JSON.stringify(violation.rule)}, name: ${JSON.stringify(violation.name)},`,
@@ -1485,9 +1501,13 @@ const KNOWN_VIOLATIONS: readonly KnownViolation[] = [
       "colophon-check: claim package anchors is not the exact projection of verified facts",
     ],
   },
+  // PLACEHOLDER, no owning issue. The `Timestamps` and `Timestamp coverage` blocks name each
+  // covered record by its claim anchor subject (`lock`, `matrix`), so a reader meets "matrix". No
+  // section 4.2 row rules that label, #5251 covers the refusal lines and the caveat only, and #5241
+  // the operator surfaces only.
   {
     surface: "colophon-check stdout", rule: "hidden term", name: "Matrix",
-    owner: READER_PROSE_AND_REFUSAL_OWNER,
+    owner: NO_OWNING_ISSUE,
     units: [
       "matrix timestamp proof",
       "matrix: none — no timestamp proof was carried and none was promised",
@@ -1716,8 +1736,6 @@ const KNOWN_VIOLATIONS: readonly KnownViolation[] = [
     surface: "index.html", rule: "second name", name: "the result",
     owner: REPORT_VIOLATION_OWNER,
     units: [
-      "Exact pairwise-disagreement@1 values from the sealed Report",
-      "Exact wilson@1 values from the sealed Report",
       "Method and assurance facts stored in the Report",
       "None recorded in the sealed Report.",
       "Report <sha256>",
@@ -1935,6 +1953,10 @@ describe("the spec reads as this test expects", () => {
     expect([...glossRow!.term.matchAll(/`([^`]+)`/gu)].map((match) => match[1])).toEqual(CHECK_NAMES);
   });
 
+  test("the only kept block section 4.2 names is the Artifact content block", () => {
+    expect([...KEPT_BLOCK_HEADINGS]).toEqual(["Artifact content"]);
+  });
+
   test("the reader tool's verdict verb is the shipped one, not the reserved placeholder", () => {
     const recompute = GLOSSARY.find((row) => row.concept === "Running the checks again over the bundle");
     expect(recompute?.name).toBe("recompute");
@@ -1943,6 +1965,12 @@ describe("the spec reads as this test expects", () => {
     for (const output of READER_RENDERS) {
       expect(output).toMatch(/^Recomputed: \d+ of \d+ checks passed/u);
     }
+  });
+});
+
+describe("section 4 presents each section 5 concept under one name", () => {
+  test("every section 4 name for a concept is its own, a heading form of it, or a licensed name for the runs", () => {
+    expect(secondNamesInSectionFour()).toEqual([]);
   });
 });
 
@@ -1990,9 +2018,19 @@ describe("reader-facing strings", () => {
     }
   });
 
-  test("carry exactly the recorded violations, each owned by an open issue", async () => {
+  test("the page scanned is the newest format's: a new format is a new page", () => {
+    expect(SCANNED_FORMAT).toBe(SUPPORTED_BUNDLE_FORMATS.at(-1));
+  });
+
+  test("every flag the usage text lists has its output rendered here", async () => {
+    const usage = (await runVerifierCli([])).stderr;
+    const flags = [...new Set([...usage.matchAll(/(?<![\w-])--[a-z][\w-]*/gu)].map((match) => match[0]))].sort();
+    expect(flags).toEqual(Object.keys(CLI_FLAGS).sort());
+  });
+
+  test("carry exactly the recorded violations, each with its owner", async () => {
     const observed = await observedViolations();
     if (process.env["GLOSSARY_CONFORMANCE_PRINT"] === "1") console.log(printLedger(observed));
-    expect(ledger(observed)).toEqual(ledger(KNOWN_VIOLATIONS));
+    expect(ledgerDifferences(observed, KNOWN_VIOLATIONS)).toEqual([]);
   });
 });
