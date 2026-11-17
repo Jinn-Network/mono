@@ -1,10 +1,13 @@
 import { createServer, type Server } from "node:http";
-import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { canonicalJsonBytes } from "@jinn-network/trust-core";
+import { canonicalJsonBytes, RFC3161_TSA_ANCHOR_PROFILE } from "@jinn-network/trust-core";
+import { createFixtureAuthority, KIT_AUTHORITY_SEED } from "@jinn-network/trust-testing";
 import {
+  BENCHMARK_ACCOUNTING_MEDIA_TYPE,
+  MATRIX_MEDIA_TYPE,
   cellIdempotencyKey,
   expectedCellSet,
   parseBenchmarkAccounting,
@@ -13,8 +16,10 @@ import {
 } from "@jinn-network/benchmarking-records";
 import { RECORD_KINDS, type SourceHead } from "@jinn-network/record-discovery-protocol";
 import { DELIVERY_MEDIA_TYPE, TASK_EXECUTION_PROTOCOL_URI, sealDelivery, sealSubmission } from "@jinn-network/task-execution-protocol";
+import { atomicWriteFileSync } from "../fs/atomic.js";
 import { appendRunJournalEntry } from "../run/journal.js";
 import { writeCancelMarker } from "../run/cancel-marker.js";
+import { readEntryAnchorLedger } from "../run/entry-anchor-ledger.js";
 import { recordPublicationOrigin, recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import { acquirePublicationLock } from "../run/publication-lock.js";
 import {
@@ -37,7 +42,7 @@ import {
   HARBOR_TRIAL_RESULT_ROLE,
 } from "../runtime/harbor/venue.js";
 import { harborSelectionManifestBytes, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
-import { artifactsDir, publicationServeRoot } from "../workspace/layout.js";
+import { artifactsDir, publicationServeRoot, workspaceMetadataPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { createLocalVenue } from "../venue/venue.js";
 import { armAdd } from "./arms.js";
@@ -197,6 +202,42 @@ function writeHarborArchive(input: { runSha256: string; cellKey: string; dispatc
   writeFileSync(indexPath, canonicalJsonBytes({ schema: "jinn.network/benchmark-product/harbor-archive-index/1", runSha256: input.runSha256, cellKey: input.cellKey, dispatchIndex: input.dispatch, submissionSha256: input.submissionSha256, attemptUri: input.attempt, archiveSha256 } as never));
 }
 
+const anchorAuthority = createFixtureAuthority(KIT_AUTHORITY_SEED);
+
+/**
+ * Configures an RFC 3161 entry anchor provider for this workspace, answered in process. Each
+ * substantive append on the source then obtains an anchor, and the next release of the source lock
+ * announces it on its own entry at one millisecond after the head, then two, and so on.
+ */
+function configureEntryAnchoring(): void {
+  const path = workspaceMetadataPath(workspaceDir);
+  atomicWriteFileSync(path, JSON.stringify({
+    ...JSON.parse(readFileSync(path, "utf8")),
+    anchoring: [{ providerProfile: RFC3161_TSA_ANCHOR_PROFILE, endpoint: "https://timestamp.invalid/tsr" }],
+  }, null, 2));
+  createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks", { sources: { [RFC3161_TSA_ANCHOR_PROFILE]: {
+    profile: RFC3161_TSA_ANCHOR_PROFILE,
+    // After every entry this fixture's clock produces, so the entry-anchor skew check accepts it.
+    async obtainProof({ subjectSha256 }: { subjectSha256: string }) {
+      return anchorAuthority.mintTimeStampToken({ subjectSha256, genTime: "20260813130000Z" }).tokenDer;
+    },
+  } } });
+}
+
+/** Another draft of the workspace announcing at this host's clock, far after the fixture's clock. */
+async function announceAnotherRecord(): Promise<{ readonly sequence: string }> {
+  const bytes = new TextEncoder().encode("another draft's record");
+  return withWorkspacePublicationSourceLock(workspaceDir, async () => {
+    const source = createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks");
+    await source.writer.recover();
+    return source.writer.append({
+      timestamp: new Date().toISOString(),
+      announcement: { announcementId: "another-draft", action: "available", record: { kind: RECORD_KINDS.task, digest: `sha256:${sha256Hex(bytes)}`, mediaType: "text/plain" } },
+      record: { bytes, contentType: "text/plain" },
+    });
+  });
+}
+
 describe("publication.accounting operation", () => {
   test("publishes partial Accounting and Matrix v2 post-hoc without executing a backend", async () => {
     const now = clock();
@@ -337,6 +378,101 @@ describe("publication.accounting operation", () => {
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(during).toEqual({ status: "withheld", drafts: ["draft-1"] });
     expect((await refreshWorkspacePublicationHead(workspaceDir, "colophon-benchmarks")).status).toBe("refreshed");
+  });
+
+  // #5348. Accounting announces its inputs in one source-lock hold and its own records in a later
+  // one. Releasing the input hold announces one entry anchor per input appended, at one millisecond
+  // after the head, then two, and so on, so with two inputs the anchors reach the time planned for
+  // the Accounting record. No concurrency is involved.
+  test("finishes with entry anchoring configured and two inputs to announce (#5348)", async () => {
+    const now = clock();
+    const fixture = await registeredClosed(now);
+    const cell = fixture.cells[0]!;
+    const first = capture(fixture.runSha256, cell, 1);
+    appendRunJournalEntry(workspaceDir, "draft-1", { kind: "cell-event", at: "2026-08-13T13:00:02Z", event: { cellKey: cell.cellKey, armId: cell.armId, replicate: cell.replicate, dispatch: 1, kind: "error", replaceable: true, replaceableReason: "expired" } });
+    const second = capture(fixture.runSha256, cell, 2);
+    configureEntryAnchoring();
+
+    const result = await publicationAccounting(context(now), { draftId: "draft-1" });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    const state = readRunState(workspaceDir, "draft-1")!;
+    expect(state.publication!.accounting.state).toBe("complete");
+    expect(state.publication!.matrixV2.state).toBe("complete");
+    // The anchor over each input entry was announced after the inputs and before the Accounting record.
+    const source = createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks");
+    const durable = (await source.writer.readState())!;
+    const ledger = readEntryAnchorLedger(workspaceDir, source.source.agent, "colophon-benchmarks");
+    for (const submissionSha256 of [first, second]) {
+      const input = Object.values(durable.announcements).find((entry) => entry.receipt.record?.digest === `sha256:${submissionSha256}`)!.receipt;
+      const anchorId = ledger.rows.find((row) => row.sequence === input.sequence)?.announcedAnnouncementId;
+      expect(anchorId).toBeDefined();
+      expect(durable.announcements[anchorId!]!.receipt.sequence < state.publication!.accounting.receipt!.sourceSequence).toBe(true);
+    }
+  });
+
+  // #5348. Another draft of the workspace can announce between accounting's input hold and the hold
+  // that announces its own records, at a time far past the one planned for them.
+  test("finishes when another announcement lands on the source between its inputs and its own records (#5348)", async () => {
+    const now = clock();
+    const fixture = await registeredClosed(now);
+    capture(fixture.runSha256, fixture.cells[0]!);
+    let other: { readonly sequence: string } | undefined;
+    const result = await publicationAccounting(context(now), { draftId: "draft-1" }, { afterInputsBeforeCutoff: async () => {
+      other = await announceAnotherRecord();
+    } });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    const state = readRunState(workspaceDir, "draft-1")!;
+    expect(state.publication!.accounting.state).toBe("complete");
+    expect(state.publication!.matrixV2.state).toBe("complete");
+    expect(state.publication!.accounting.receipt!.sourceSequence > other!.sequence).toBe(true);
+  });
+
+  // #5348. The fault lands after the Accounting record is appended and before the plan journal
+  // records it, so the retry asks to announce the Accounting record again and Matrix v2 for the
+  // first time. Between the attempts the head moves past the time planned for Matrix v2: either the
+  // heartbeat's withheld check releases the source lock, which announces the pending anchor over
+  // the Accounting entry at the very millisecond planned for Matrix v2, or another draft announces.
+  test.each([
+    "a pending entry anchor is announced",
+    "another announcement lands on the source",
+  ] as const)("a retry after %s keeps the Accounting entry already announced and finishes (#5348)", async (move) => {
+    const now = clock();
+    const fixture = await registeredClosed(now);
+    capture(fixture.runSha256, fixture.cells[0]!);
+    if (move === "a pending entry anchor is announced") configureEntryAnchoring();
+    let faulted = false;
+    const first = await publicationAccounting(context(now), { draftId: "draft-1" }, { recordPlanFaults: { async at({ action }) {
+      if (action === "announce" && !faulted) { faulted = true; throw new Error("fixture crash after the Accounting append"); }
+    } } });
+    expect(first.ok).toBe(false);
+    expect(faulted).toBe(true);
+    const source = createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks");
+    const announced = Object.values((await source.writer.readState())!.announcements);
+    const accounting = announced.filter((entry) => entry.receipt.record?.contentType === BENCHMARK_ACCOUNTING_MEDIA_TYPE).map((entry) => entry.receipt);
+    expect(accounting).toHaveLength(1);
+    expect(announced.some((entry) => entry.receipt.record?.contentType === MATRIX_MEDIA_TYPE)).toBe(false);
+
+    let moved: string;
+    if (move === "a pending entry anchor is announced") {
+      expect((await refreshWorkspacePublicationHead(workspaceDir, "colophon-benchmarks")).status).toBe("withheld");
+      const anchorId = readEntryAnchorLedger(workspaceDir, source.source.agent, "colophon-benchmarks").rows
+        .find((row) => row.sequence === accounting[0]!.sequence)?.announcedAnnouncementId;
+      expect(anchorId).toBeDefined();
+      moved = (await source.writer.readState())!.announcements[anchorId!]!.receipt.sequence;
+    } else {
+      moved = (await announceAnotherRecord()).sequence;
+    }
+
+    const retried = await publicationAccounting(context(now), { draftId: "draft-1" });
+    expect(retried.ok, JSON.stringify(retried)).toBe(true);
+    if (!retried.ok) return;
+    // The retry rebuilt the same Accounting record and left its one entry exactly as announced.
+    const after = Object.values((await source.writer.readState())!.announcements);
+    expect(after.filter((entry) => entry.receipt.record?.digest === `sha256:${retried.result.accountingSha256}`).map((entry) => entry.receipt)).toEqual(accounting);
+    const state = readRunState(workspaceDir, "draft-1")!;
+    expect(state.publication!.accounting.receipt).toEqual({ sourceSequence: accounting[0]!.sequence, entrySha256: accounting[0]!.entryDigest.slice(7) });
+    expect(state.publication!.matrixV2.state).toBe("complete");
+    expect(state.publication!.matrixV2.receipt!.sourceSequence > moved).toBe(true);
   });
 
   test("keeps Matrix v2 resumable when a writer-owned scope record becomes unavailable", async () => {

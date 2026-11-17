@@ -26,7 +26,7 @@ import { assembleMatrixV2, verifyMatrixV2 } from "@jinn-network/benchmarking-run
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { createDiscoverySourceAnnouncementPort } from "@jinn-network/record-publication";
-import { executePublicationPlan, type OriginVerificationPort, type PublicationArtifact, type PublicationPlan, type PublicationRecord } from "@jinn-network/record-publication";
+import { executePublicationPlan, type OriginVerificationPort, type PublicationArtifact, type PublicationFaultInjector, type PublicationPlan, type PublicationRecord } from "@jinn-network/record-publication";
 import { DELIVERY_MEDIA_TYPE, SUBMISSION_MEDIA_TYPE, DeliveryRecordSchema, SubmissionRecordSchema } from "@jinn-network/task-execution-protocol";
 import { refuse } from "../errors.js";
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
@@ -58,6 +58,8 @@ export interface PublicationAccountingDeps {
   readonly afterInputsBeforeCutoff?: () => Promise<void>;
   /** Test-only sealed-scope tampering seam; production callers always omit it. */
   readonly transformAccountingScope?: (stream: AccountingScopeStream) => AccountingScopeStream;
+  /** Test-only crash seam in the Accounting and Matrix v2 plan: after each action, before its journal checkpoint. */
+  readonly recordPlanFaults?: PublicationFaultInjector;
 }
 export interface PublicationAccountingResult {
   readonly accountingSha256: string;
@@ -526,6 +528,7 @@ export function publicationAccounting(
           objects: source.artifactStore, journal: createWorkspacePublicationJournal(context.workspaceDir, input.draftId, "accounting"),
           authority: { async authorizeAnnouncement({ record }) { requireWorkspaceAuthorship({ workspaceDir: context.workspaceDir, recordSha256: record.digest.slice(7), recordKind: record.kind, author: state.owner }); } },
           announce: { async announce(value) { const receipt = await createDiscoverySourceAnnouncementPort({ writer: source.writer }).announce(value) as Receipt; receipts.set(value.record.id, receipt); return receipt; } },
+          faults: deps.recordPlanFaults,
         });
       });
       const source = createWorkspacePublicationSource(context.workspaceDir, publication.source.name);
