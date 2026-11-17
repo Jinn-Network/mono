@@ -486,7 +486,12 @@ describe("a Safe ceremony checked with this verifier (§7.2, §7.2a)", () => {
     };
   }
 
-  async function verifyWith(message: SiweCeremonyMessage, witnessed: Uint8Array = serializeCeremonyMessage("safe", message)) {
+  /** `seal` writes the witness statement's envelope: by default its accepted author's key signs it. */
+  async function verifyWith(
+    message: SiweCeremonyMessage,
+    witnessed: Uint8Array = serializeCeremonyMessage("safe", message),
+    seal: (statement: ReturnType<typeof witnessPayload>) => Uint8Array | Promise<Uint8Array> = signWitnessPayload,
+  ) {
     const ceremonyEvidence: SafeCeremonyEvidence = {
       type: "safe",
       message,
@@ -514,13 +519,13 @@ describe("a Safe ceremony checked with this verifier (§7.2, §7.2a)", () => {
       isGenesis: true,
       revocations: [],
       ceremonyEvidence,
-      witness: outerWitness(payload, sealWitnessPayload(payload)),
+      witness: outerWitness(payload, await seal(payload)),
     };
     return verifyEnvelopeBinding(
       { envelopeBytes: sealWitnessPayload({}), key: KEY, agent: AGENT, family: "verdicts", atTime: "2026-03-01T00:00:00Z" },
       {
         bindingResolver: { resolveBinding: async () => resolved },
-        witnessVerifier: createWitnessVerifier({ acceptedVerifiers: [VERIFIER_IRI] }),
+        witnessVerifier: createWitnessVerifier(ACCEPTING),
         dsseVerifier: () => ({ validSignerKeyids: [KEY] }),
       },
     );
@@ -528,6 +533,14 @@ describe("a Safe ceremony checked with this verifier (§7.2, §7.2a)", () => {
 
   it("admits a genuine ceremony whose witness this verifier accepts", async () => {
     await expect(verifyWith(siweMessage())).resolves.toMatchObject({ ok: true });
+  });
+
+  it("refuses a genuine ceremony whose witness statement no key of its author signed", async () => {
+    await expect(verifyWith(siweMessage(), undefined, sealWitnessPayload)).resolves.toMatchObject({
+      ok: false,
+      reason: "ceremony-verification-failed",
+      detail: expect.stringMatching(/not signed by a key that stands for its author/),
+    });
   });
 
   it.each([

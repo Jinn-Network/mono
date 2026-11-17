@@ -918,7 +918,7 @@ describe("trust binding", () => {
       blockHash: statement.blockHash,
       verifier: statement.verifier,
       envelopeBytes: sealDsseEnvelope({
-        payloadBytes: encoder.encode(JSON.stringify(statement)),
+        payloadBytes: canonicalJsonBytes(statement),
         payloadType: DSSE_PAYLOAD_TYPE,
         signatures: [{ signature: Uint8Array.of(1), keyid: "did:key:zWitness" }],
       }),
