@@ -782,6 +782,52 @@ describe('a revocation of a discovery signing key, over the adapter a consumer b
   });
 });
 
+describe('ever-bound over the adapter a consumer builds (#5243)', () => {
+  /** Built the way `native-discovery-trust.ts` and `native-consumer/driver.ts` build it. */
+  async function everBoundAdapter(options: Parameters<typeof buildCatalog>[0] = {}) {
+    const fixture = await buildCatalog({ discoverySigning: true, ...options });
+    const trust = await openNativeTrustCatalog({
+      path: fixture.path,
+      expectedPolicyGenesisDigest: fixture.policyGenesisDigest,
+      anchorClient: anchorClient(fixture, []),
+      settlementOwnershipClient: OWNS,
+      now: new Date(NOW),
+    });
+    const adapter = createTrustAdapter({
+      bindingResolver: trust.resolverFor({ family: FAMILY, purpose: ROLE_PURPOSE }),
+      keyCatalog: { candidateKeys: async (agent) => [...trust.candidateKeys(agent)] },
+      verifier: trust.rawSignatureVerifier,
+      revocationAuthority: trust,
+    });
+    return { adapter, fixture };
+  }
+
+  it.each([
+    ['in effect now', {}],
+    ['revoked since', { revoked: true as const }],
+    ['expired since', { expiresAt: EXPIRED_AT }],
+  ])('reports a key ever bound when its validFrom precedes its anchor and it is %s', async (_label, options) => {
+    // The premise: the binding is valid from before its anchor, so it takes effect at the anchor
+    // time (section 7.3) and is in effect at no instant between its validFrom and that time.
+    expect(Date.parse(VALID_FROM)).toBeLessThan(Date.parse(ANCHOR_TIME));
+    const { adapter, fixture } = await everBoundAdapter(options);
+    await expect(adapter.keys.everBound(AGENT, fixture.key)).resolves.toBe(true);
+  });
+
+  it('still reports a key never bound to the Agent as never bound', async () => {
+    const { adapter, fixture } = await everBoundAdapter();
+    const unbound = ed25519Signer(generateKeyPairSync('ed25519')).id;
+    await expect(adapter.keys.everBound(AGENT, unbound)).resolves.toBe(false);
+    await expect(adapter.keys.everBound('https://spec.jinn.network/agents/someone-else', fixture.key))
+      .resolves.toBe(false);
+  });
+
+  it('still refuses a key bound only by a forged record', async () => {
+    const { adapter, fixture } = await everBoundAdapter({ forgeBindingEnvelope: true });
+    await expect(adapter.keys.everBound(AGENT, fixture.key)).rejects.toThrow(/binding did not resolve/u);
+  });
+});
+
 describe('settlement-authority association (§2.3c)', () => {
   async function openSettlement(
     fixture: CatalogFixture,
