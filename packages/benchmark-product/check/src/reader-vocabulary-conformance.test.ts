@@ -643,9 +643,11 @@ function unrenderedChecks(render: string, expected: readonly string[]): string[]
   return expected.filter((check) => !lines.some((line) => line.startsWith(`${check} `)));
 }
 
-/** The surfaces, among `texts`, none of whose renders yields reader text. */
+/** The surfaces, among `texts`, no render of which yields reader text. A single render may print
+ * nothing on a surface (a refusal prints to stderr and nothing to stdout), so the floor is one
+ * non-empty render per surface, not one per render. */
 function emptySurfaces(texts: ReadonlyMap<string, readonly string[]>): string[] {
-  return [...texts].filter(([, items]) => items.length === 0 || items.some((text) => text.trim() === "")).map(([surface]) => surface);
+  return [...texts].filter(([, items]) => items.every((text) => text.trim() === "")).map(([surface]) => surface);
 }
 
 /** Every human stdout shape this suite renders itself: one per closure, every anchor report the
@@ -2009,7 +2011,7 @@ describe("reader-facing strings", () => {
   });
 
   test("a surface that renders nothing is reported empty", () => {
-    expect(emptySurfaces(new Map([["a", ["text"]], ["b", []], ["c", ["text", "  "]]]))).toEqual(["b", "c"]);
+    expect(emptySurfaces(new Map([["a", ["text"]], ["b", []], ["c", ["  ", ""]], ["d", ["text", "  "]]]))).toEqual(["b", "c"]);
   });
 
   test("carry exactly the recorded violations, each with its owner", async () => {
