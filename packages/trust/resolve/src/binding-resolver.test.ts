@@ -1077,10 +1077,19 @@ describe("createBindingResolver", () => {
         throw new Error("not used in this test");
       }),
     };
-    const resolver = createBindingResolver({ bindings: store, anchors, chainFacts });
+    const resolver = createBindingResolver({
+      bindings: store,
+      anchors,
+      chainFacts,
+      compositionAuthority: {
+        dsseVerifier: () => ({ validSignerKeyids: [] }),
+        witnessVerifier: { verify1271Witness: async () => ({ verified: false }) },
+      },
+    });
 
     const resolved = await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, "2026-06-01T00:00:00.000Z");
     expect(resolved).toBeNull();
+    expect(chainFacts.ownerOf).toHaveBeenCalledWith(AGENT_ASSET);
   });
 
   it("does not resolve an agentId binding when no chainFacts resolver is configured", async () => {
@@ -1286,6 +1295,28 @@ describe("createBindingResolver", () => {
       });
       expect(await composed(consented)).toBeNull();
     });
+
+    it("keeps its own guarded resolver when the host's compositionAuthority carries a bindingResolver", async () => {
+      const consented = await accountLeg({
+        validFrom: "2026-02-01T00:00:00.000Z",
+        anchors: [{ digest: DIGEST_R }],
+        consent: { keyid: KEY_A, sig: btoa("declared-signers-check-the-keyid") },
+      });
+      // A host resolver with no guard of its own: if the walk ever asks it, a self-resting composition has no stop.
+      let hostCalls = 0;
+      const hostAuthority = {
+        ...compositionAuthority,
+        bindingResolver: {
+          resolveBinding: async () => {
+            hostCalls += 1;
+            if (hostCalls > 50) throw new Error("the host's resolver was asked again and again");
+            return null;
+          },
+        },
+      };
+      expect(await composed(consented, { compositionAuthority: hostAuthority })).toBeNull();
+      expect(hostCalls).toBe(0);
+    }, 5_000);
 
     it("does not compose without what judges whether the owner's record stands", async () => {
       expect(await composed(await accountLeg(), { compositionAuthority: undefined })).toBeNull();

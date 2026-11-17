@@ -425,7 +425,7 @@ async function agentIdCompositionHolds(
     // §7.2: the account vouches through an account ceremony, not one a host verified for another kind.
     if (account.binding.ceremony.type !== "eoa" && account.binding.ceremony.type !== "safe") continue;
     // eslint-disable-next-line no-await-in-loop -- sequential: the first that stands settles it.
-    if (await checkBindingStands(account, atTime, { bindingResolver, ...authority })) return true;
+    if (await checkBindingStands(account, atTime, { ...authority, bindingResolver })) return true;
   }
   return false;
 }
