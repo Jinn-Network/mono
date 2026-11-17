@@ -443,6 +443,98 @@ describe("harborCarriedEvidence — what a Harbor import carries of a trial's ow
     expect(refusalOf("trial-result.json", text).message).toContain(`names your home directory (${homedir()})`);
   });
 
+  // #5302: on a cluster or a CI runner Harbor's -o is often outside any home directory and still
+  // names the user. The record names that jobs directory in trials_dir and trial_uri, which the
+  // import removes; any other string that names it is a path of the machine that ran Harbor.
+  test.each([
+    [
+      "a file in the trial directory trial_uri names, in an exception message",
+      "trial-result.json",
+      {
+        id: "x",
+        trial_uri: "file:///scratch/alice/jobs/terminus-2/hello-world__55xttAM",
+        config: { trials_dir: "jobs/terminus-2" },
+        exception_info: {
+          exception_type: "FileNotFoundError",
+          exception_message: "[Errno 2] No such file or directory: '/scratch/alice/jobs/terminus-2/hello-world__55xttAM/agent/trajectory.json'",
+        },
+      },
+      "exception_info.exception_message",
+    ],
+    [
+      "the job directory that holds the trial trial_uri names",
+      "trial-result.json",
+      {
+        id: "x",
+        trial_uri: "file:///scratch/alice/jobs/terminus-2/hello-world__55xttAM",
+        exception_info: { exception_type: "OSError", exception_message: "cannot lock /scratch/alice/jobs/terminus-2/job.log" },
+      },
+      "exception_info.exception_message",
+    ],
+    [
+      "a trial directory trial_uri percent-encodes",
+      "trial-result.json",
+      {
+        id: "x",
+        trial_uri: "file:///data/alice%20b/jobs/oracle/hello-world__55xttAM",
+        exception_info: { exception_type: "OSError", exception_message: "cannot read /data/alice b/jobs/oracle/hello-world__55xttAM/verifier" },
+      },
+      "exception_info.exception_message",
+    ],
+    [
+      "an absolute trials_dir, in a step's exception message",
+      "trial-result.json",
+      {
+        id: "x",
+        config: { trials_dir: "/data/ci-builder/jobs/oracle" },
+        step_results: [{ exception_info: { exception_type: "OSError", exception_message: "cannot read /data/ci-builder/jobs/oracle/job.log" } }],
+      },
+      "step_results[0].exception_info.exception_message",
+    ],
+    [
+      "an absolute trials_dir, in an agent setting",
+      "trial-config.json",
+      { trial_name: "hello-world__55xttAM", trials_dir: "/data/ci-builder/jobs/oracle", agent: { kwargs: { cache_dir: "/data/ci-builder/jobs/oracle/cache" } } },
+      "agent.kwargs.cache_dir",
+    ],
+    [
+      "a Windows trial directory trial_uri names, in an exception message as Python prints it",
+      "trial-result.json",
+      {
+        id: "x",
+        trial_uri: "file:///D:/work/jobs/terminus-2/hello-world__55xttAM",
+        config: { trials_dir: "jobs\\terminus-2" },
+        exception_info: { exception_type: "PermissionError", exception_message: "[Errno 13] Permission denied: 'D:\\\\work\\\\jobs\\\\terminus-2\\\\hello-world__55xttAM\\\\agent'" },
+      },
+      "exception_info.exception_message",
+    ],
+  ])("a trial record naming %s, outside any home directory, is refused, naming the file and the field", (_what, name, record, field) => {
+    const error = refusalOf(name, JSON.stringify(record, null, 4));
+    expect(error.code).toBe("validation");
+    expect(error.issues!.map((issue) => issue.path)).toEqual([`job/trial-1/${name}`]);
+    expect(error.message).toContain(`Harbor trial file job/trial-1/${name}, at ${field}, names the jobs directory of the machine that ran Harbor`);
+  });
+
+  test("a path that only begins with the jobs directory trial_uri names, and a relative one, are carried as Harbor wrote them", () => {
+    const text = JSON.stringify({
+      id: "x",
+      trial_uri: "file:///scratch/alice/jobs/terminus-2/hello-world__55xttAM",
+      config: { trials_dir: "jobs/terminus-2", artifacts: ["/app/jobs/terminus-2-notes.txt"] },
+      exception_info: { exception_type: "OSError", exception_message: "cannot read jobs/terminus-2/hello-world__55xttAM/a and /scratch/alice/jobs/terminus-2-old/b" },
+    }, null, 4);
+    expect(carried("trial-result.json", text)).toBe(text.replace(/^ *"trial_uri": .*\n/mu, ""));
+  });
+
+  test.each([
+    ["a URL of another scheme", "https://harbor.example.com/trials/hello-world__55xttAM"],
+    ["not a URL", "scratch/alice/jobs/terminus-2/hello-world__55xttAM"],
+  ])("a trial_uri that is %s is refused: the trial directory it should name is unknown", (_what, uri) => {
+    const error = refusalOf("trial-result.json", JSON.stringify({ id: "x", trial_uri: uri }, null, 4));
+    expect(error.code).toBe("validation");
+    expect(error.message).toContain("its trial_uri is not a file: URI");
+    expect(error.message).not.toContain(uri);
+  });
+
   test.each([
     ["a bind mount", "environment.mounts", [{ type: "bind", source: "/srv/datasets", target: "/data" }], "environment.mounts[0].source"],
     ["an instruction file", "extra_instruction_paths", ["/srv/notes/instructions.md"], "extra_instruction_paths[0]"],
@@ -485,6 +577,7 @@ describe("harborCarriedEvidence — what a Harbor import carries of a trial's ow
     ["a REST URL under /users/ with a key in its query", "agent.kwargs", { endpoint: "https://api.example.com/users/me?api_key=S3cretValueXYZ" }, "agent.kwargs.endpoint", "S3cretValueXYZ"],
     ["an MCP server URL under /home/ with a token in its query", "agent.mcp_servers", [{ name: "docs", transport: "sse", url: "https://mcp.example.com/home/sse?access_token=qwerty123" }], "agent.mcp_servers[0].url", "qwerty123"],
     ["a credential used as a member name", "agent.kwargs", { headers: { "sk-proj-AbCdEf0123456789": "x" } }, "agent.kwargs.headers", "sk-proj-AbCdEf0123456789"],
+    ["a URL with a token in its fragment", "agent.kwargs", { callback: "https://app.example.com/cb#access_token=qwerty123" }, "agent.kwargs.callback", "qwerty123"],
   ])("a trial record holding %s is refused, naming the file and the field and not the value", (_what, field, value, named, secret) => {
     for (const [name, text, at] of trialRecords(field, value)) {
       const error = refusalOf(name, text);
@@ -513,6 +606,42 @@ describe("harborCarriedEvidence — what a Harbor import carries of a trial's ow
         const error = refusalOf(name, text);
         expect(`${error.message}\n${JSON.stringify(error.issues)}`, `${name} at ${field}`).not.toContain(secret);
       }
+    }
+  });
+
+  const TOKEN = "ghp_R8x2Kq9LmN4pT7vW1yZ3aB5cD6eF0gH2iJ4k";
+
+  // #5302: a secret the import does not know as one, where a rule that shows a path or a field
+  // reads it, is refused without being shown.
+  test("no refusal shows a token-shaped string, a URL fragment or a query value, whichever rule names it", () => {
+    const probes: readonly (readonly [string, unknown, string])[] = [
+      ["agent.kwargs.endpoint", `https://api.example.com/users/${TOKEN}`, TOKEN],
+      ["agent.env", { CACHE_HOME: `/home/${TOKEN}` }, TOKEN],
+      ["agent.skills", [`/srv/skills/${TOKEN}`], TOKEN],
+      ["agent.skills", ["/srv/skills/web#sig=qwerty123"], "qwerty123"],
+      ["environment.mounts", [{ type: "bind", source: "/srv/data?X-Amz-Signature=qwerty123", target: "/data" }], "qwerty123"],
+      ["agent.kwargs.api_keys", { [TOKEN]: "github" }, TOKEN],
+      ["agent.model_info", { [TOKEN]: "/home/alice/notes" }, TOKEN],
+      ["agent.model_info", { [TOKEN]: { "/home/alice": 1 } }, TOKEN],
+    ];
+    for (const [field, value, secret] of probes) {
+      for (const [name, text] of trialRecords(field, value)) {
+        const error = refusalOf(name, text);
+        expect(`${error.message}\n${JSON.stringify(error.issues)}`, `${name} at ${field}`).not.toContain(secret);
+      }
+    }
+  });
+
+  test.each([
+    ["agent kwargs", "agent.kwargs", { [TOKEN]: "x" }, "agent.kwargs"],
+    ["agent env", "agent.env", { [TOKEN]: "${HF_TOKEN}" }, "agent.env"],
+    ["an MCP server", "agent.mcp_servers", [{ name: "docs", transport: "sse", url: "https://mcp.example.com/sse", [TOKEN]: "x" }], "agent.mcp_servers[0]"],
+    ["verifier headers", "verifier.kwargs.headers", { [TOKEN]: "x" }, "verifier.kwargs.headers"],
+  ])("a token-shaped member name in %s is refused as a member name in its parent field, without the name", (_what, field, value, named) => {
+    for (const [name, text, at] of trialRecords(field, value)) {
+      const error = refusalOf(name, text);
+      expect(error.message).toContain(`at a member name in ${at.replace(field, named)}, holds a token-shaped string`);
+      expect(`${error.message}\n${JSON.stringify(error.issues)}`).not.toContain(TOKEN);
     }
   });
 
@@ -552,6 +681,18 @@ describe("harborCarriedEvidence — what a Harbor import carries of a trial's ow
   test("Harbor's reward-file message with a relative path is carried as Harbor wrote it", () => {
     const text = '{\n    "exception_info": {\n        "exception_type": "RewardFileNotFoundError",\n        "exception_message": "No reward file found at jobs/oracle/t__x/verifier/reward.txt or jobs/oracle/t__x/verifier/reward.json"\n    }\n}';
     expect(carried("trial-result.json", text)).toBe(text);
+  });
+
+  test("a long run of path separators is read in linear time", () => {
+    // #5302: a home-directory match that could start anywhere in a run of separators took about
+    // 15 seconds on the record below, and an evidence file may be 8 MiB. Read in linear time it
+    // takes about 6 milliseconds; the budget sits between the two.
+    const text = JSON.stringify({ trial_name: "hello-world__55xttAM", agent: { kwargs: { pattern: "/".repeat(200_000) } } });
+    const started = performance.now();
+    const kept = carried("trial-config.json", text);
+    const elapsed = performance.now() - started;
+    expect(kept).toBe(text);
+    expect(elapsed).toBeLessThan(1_000);
   });
 });
 
@@ -1436,6 +1577,32 @@ describe("readHarborRunImport — the official Terminal-Bench 2.1 slate", () => 
       expect(imported.error.detail).toContain(field);
       expect(imported.error.detail).toContain(shown);
       if (secret !== undefined) expect(JSON.stringify(imported.error)).not.toContain(secret);
+      expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+    });
+
+    // #5302: Harbor given an absolute -o outside any home directory on a CI runner, and the
+    // trial's exception message naming a file under it.
+    test("a trial record naming the jobs directory Harbor wrote it to on another machine is refused at import, naming the file and the field", async () => {
+      await lockedOfficialSlate();
+      const jobs = jobsAsHarborWroteThem();
+      const trialsDir = "/scratch/ci-builder/jobs/terminus-2";
+      const trialDir = `${trialsDir}/${basename(TIMED_OUT_TRIAL)}`;
+      rewriteJson(join(jobs, TIMED_OUT_TRIAL, "config.json"), (config) => {
+        config["trials_dir"] = trialsDir;
+      });
+      rewriteJson(join(jobs, TIMED_OUT_TRIAL, "result.json"), (result) => {
+        result["trial_uri"] = `file://${trialDir}`;
+        result["config"].trials_dir = trialsDir;
+        result["exception_info"].exception_message = `[Errno 2] No such file or directory: '${trialDir}/agent/trajectory.json'`;
+      });
+      const { imported } = await importJobs(jobs);
+      expect(imported.ok).toBe(false);
+      if (imported.ok) throw new Error("expected the import to be refused");
+      expect(imported.error.code).toBe("validation");
+      expect(imported.error.issues!.map((issue) => issue.path)).toEqual(["terminus-2/chess-best-move__gs92yNg/result.json"]);
+      expect(imported.error.detail).toContain(
+        "at exception_info.exception_message, names the jobs directory of the machine that ran Harbor",
+      );
       expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
     });
 

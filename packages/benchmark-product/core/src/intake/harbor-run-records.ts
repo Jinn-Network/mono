@@ -471,8 +471,9 @@ const HARBOR_HOST_PATH_FIELDS = new Set([
  * (`C:\Users\<name>`, `C:/Users/<name>`), wherever it sits in a string, with any run of
  * separators (`C:\\Users\\<name>` as Python prints a Windows path). The name stops at `?`, `#`,
  * `&`, `=`, `;`, `:` and `@`, so a reason that shows it shows no query, fragment or password
- * after it. */
-const HOME_DIRECTORY = /[\\/]+(?:home|Users)[\\/]+[^\\/\s"'`?#&=;:@]+|(?<![\w.-])\/root(?![\w.-])/iu;
+ * after it. A match starts only where a run of separators does, so a long run is read in linear
+ * time (#5302). */
+const HOME_DIRECTORY = /(?<![\\/])[\\/]+(?:home|Users)[\\/]+[^\\/\s"'`?#&=;:@]+|(?<![\w.-])\/root(?![\w.-])/iu;
 /** A `file:` URI, however its path is spelled or percent-encoded. */
 const FILE_URI = /(?<![a-z0-9+.-])file:\//iu;
 /** `prune.mjs`'s credential-shaped name, widened to the names Harbor itself treats as sensitive
@@ -483,19 +484,73 @@ const CREDENTIAL_NAME = /key|secret|token|passw(?:or)?d|credential|auth|bearer/i
  * not one of these. */
 const HARBOR_ENV_PLACEHOLDER = /^\$\{[^}:]+\}$/u;
 /** Credentials by their shape, wherever they appear. The first three are `prune.mjs`'s, with
- * `sk-` held to the start of a word so that a name ending in `task-` or `disk-` is not one. */
+ * `sk-` held to the start of a word so that a name ending in `task-` or `disk-` is not one. The
+ * fourth is a credential-shaped parameter in a URL's query or fragment (`#access_token=`). */
 const CREDENTIAL_TEXT: readonly (readonly [RegExp, string])[] = [
   [/(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{6,}/u, "a key-shaped string"],
   [/bearer\s+\S/iu, "a bearer credential"],
   [/[a-z][a-z0-9+.-]*:\/\/[^/\s?#@]*@/iu, "a URL carrying credentials"],
-  [new RegExp(`[?&;][^=&#\\s]*(?:${CREDENTIAL_NAME.source})[^=&#\\s]*=[^&#\\s]`, "iu"), "a URL carrying credentials"],
+  [new RegExp(`[?#&;][^=&#\\s]*(?:${CREDENTIAL_NAME.source})[^=&#\\s]*=[^&#\\s]`, "iu"), "a URL carrying credentials"],
   [/\*{4}/u, "a credential Harbor redacted to its first four and last three characters"],
 ];
 
+const TOKEN_SHAPED = "holds a token-shaped string, which can be a credential";
+
 /** A run of 20 or more letters, digits, `_` and `-` that mixes upper case, lower case and digits:
- * how most API keys and access tokens are spelled, and no setting name or model id is. */
+ * how most API keys and access tokens are spelled, and few setting names are. Some model ids are
+ * (`Qwen/Qwen2.5-Coder-32B-Instruct`), so such an id inside `kwargs`, `env`, `mcp_servers` or
+ * `headers` is refused. */
 function tokenShaped(text: string): boolean {
   return (text.match(/[A-Za-z0-9_-]{20,}/gu) ?? []).some((run) => /[A-Z]/u.test(run) && /[a-z]/u.test(run) && /[0-9]/u.test(run));
+}
+
+/** Whether a refusal may show `text` from a trial record: not when it holds a token-shaped run, a
+ * URL query or a fragment, any of which can be a credential (#5302). */
+function showable(text: string): boolean {
+  return !tokenShaped(text) && !/[?#]/u.test(text);
+}
+
+/** `text` with every run of `/` and `\` written as one `/`: a path as `namesPath` compares it,
+ * however Harbor or Python spelled its separators (`D:\\jobs` in an exception message). */
+function oneSeparator(text: string): string {
+  return text.replace(/[\\/]+/gu, "/");
+}
+
+/** A directory of the machine that ran Harbor, written as `oneSeparator` writes it, without a
+ * drive letter or a trailing separator. */
+function harborRunDirectory(path: string): string {
+  return oneSeparator(path).replace(/^\/?[A-Za-z]:/u, "").replace(/\/$/u, "");
+}
+
+/**
+ * The jobs directory of the machine that ran Harbor, as a trial record names it in the members
+ * the import removes (#5302): `trials_dir` when absolute, and the trial directory `trial_uri`
+ * names and the directory that holds it, which is `trials_dir` resolved. Throws when a
+ * `trial_uri` is not a `file:` URI, which Harbor 0.21 always writes.
+ */
+function harborRunDirectories(record: unknown): readonly string[] {
+  const found: string[] = [];
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(walk);
+    } else if (typeof value === "object" && value !== null) {
+      for (const [key, entry] of Object.entries(value)) {
+        if (typeof entry !== "string") {
+          walk(entry);
+        } else if (key === "trials_dir" && win32.isAbsolute(entry)) {
+          found.push(harborRunDirectory(entry));
+        } else if (key === "trial_uri") {
+          const uri = new URL(entry);
+          if (uri.protocol !== "file:") throw new Error("trial_uri is not a file: URI");
+          const trial = harborRunDirectory(decodeURIComponent(uri.pathname));
+          found.push(trial, trial.slice(0, trial.lastIndexOf("/")));
+        }
+      }
+    }
+  };
+  walk(record);
+  // The filesystem root would match every path.
+  return found.filter((path) => path !== "");
 }
 
 interface HostPath {
@@ -523,14 +578,17 @@ interface Within {
 }
 
 /**
- * Why one key or string of a carried trial record cannot be published, or nothing. `shape` is
- * its field with every array index written `[]`; a key is checked by its text alone. A credential's
- * shape is checked first, so a string that holds one is reported by its kind before any rule that
- * shows text. Paths are shown in the reason; a credential never is.
+ * Why one key or string of a carried trial record cannot be published, or nothing. `ranHarbor`
+ * is the jobs directory of the machine that ran Harbor (`harborRunDirectories`). `shape` is its
+ * field with every array index written `[]`; a key is checked by its text alone, and inside
+ * `kwargs`, `env`, `mcp_servers` or `headers` by its shape too. A credential's shape is checked
+ * first, so a string that holds one is reported by its kind before any rule that shows text. A
+ * path is shown in the reason only when it is `showable`; a credential never is.
  */
 function trialRecordStringFinding(
   text: string,
   thisMachine: readonly HostPath[],
+  ranHarbor: readonly string[],
   shape: string | undefined,
   within: Within,
 ): string | undefined {
@@ -540,37 +598,44 @@ function trialRecordStringFinding(
   for (const { what, path } of thisMachine) {
     if (namesPath(text, path)) return `names ${what} (${path})`;
   }
-  const home = HOME_DIRECTORY.exec(text);
-  if (home !== null) return `names a home directory (${home[0]})`;
-  if (FILE_URI.test(text)) return "holds a file: URI";
-  if (shape !== undefined) {
-    if (HARBOR_HOST_PATH_FIELDS.has(shape.replace(/^config\./u, "")) && win32.isAbsolute(text)) {
-      return `names a path on the machine that ran Harbor (${text})`;
-    }
+  const separated = ranHarbor.length === 0 ? text : oneSeparator(text);
+  if (ranHarbor.some((path) => namesPath(separated, path))) {
+    return "names the jobs directory of the machine that ran Harbor, which its trials_dir or trial_uri names";
   }
-  if (shape === undefined || HARBOR_ENV_PLACEHOLDER.test(text)) return undefined;
+  const home = HOME_DIRECTORY.exec(text);
+  if (home !== null) return showable(home[0]) ? `names a home directory (${home[0]})` : "names a home directory";
+  if (FILE_URI.test(text)) return "holds a file: URI";
+  if (shape === undefined) return within.settings && tokenShaped(text) ? TOKEN_SHAPED : undefined;
+  if (HARBOR_HOST_PATH_FIELDS.has(shape.replace(/^config\./u, "")) && win32.isAbsolute(text)) {
+    return showable(text)
+      ? `names a path on the machine that ran Harbor (${text})`
+      : "names a path on the machine that ran Harbor";
+  }
+  if (HARBOR_ENV_PLACEHOLDER.test(text)) return undefined;
   if (within.inEnv) return "holds an env value other than Harbor's ${NAME} placeholder, which can be a credential";
   if (within.credentialName && text !== "") return "holds a value under a credential-shaped name";
-  if (within.settings && tokenShaped(text)) return "holds a token-shaped string, which can be a credential";
+  if (within.settings && tokenShaped(text)) return TOKEN_SHAPED;
   return undefined;
 }
 
 /** The first key or string of a carried trial record that cannot be published, by its field. A
- * key is reported as a member name in the field that holds it, so the key itself is not shown. */
+ * key is reported as a member name in the field that holds it, so the key itself is not shown,
+ * and a finding under a key a refusal may not show is reported as a member of that key's field. */
 function trialRecordFinding(
   value: unknown,
   thisMachine: readonly HostPath[],
+  ranHarbor: readonly string[],
   field = "",
   shape = "",
   within: Within = { settings: false, inEnv: false, credentialName: false },
 ): { readonly field: string; readonly reason: string } | undefined {
   if (typeof value === "string") {
-    const reason = trialRecordStringFinding(value, thisMachine, shape, within);
+    const reason = trialRecordStringFinding(value, thisMachine, ranHarbor, shape, within);
     return reason === undefined ? undefined : { field, reason };
   }
   if (Array.isArray(value)) {
     for (const [index, entry] of value.entries()) {
-      const found = trialRecordFinding(entry, thisMachine, `${field}[${index}]`, `${shape}[]`, within);
+      const found = trialRecordFinding(entry, thisMachine, ranHarbor, `${field}[${index}]`, `${shape}[]`, within);
       if (found !== undefined) return found;
     }
     return undefined;
@@ -578,14 +643,15 @@ function trialRecordFinding(
   if (typeof value !== "object" || value === null) return undefined;
   for (const [key, entry] of Object.entries(value)) {
     const memberField = field === "" ? key : `${field}.${key}`;
-    const reason = trialRecordStringFinding(key, thisMachine, undefined, within);
+    const reason = trialRecordStringFinding(key, thisMachine, ranHarbor, undefined, within);
     if (reason !== undefined) return { field: `a member name in ${field === "" ? "the top level" : field}`, reason };
-    const found = trialRecordFinding(entry, thisMachine, memberField, shape === "" ? key : `${shape}.${key}`, {
+    const found = trialRecordFinding(entry, thisMachine, ranHarbor, memberField, shape === "" ? key : `${shape}.${key}`, {
       settings: within.settings || HARBOR_SETTINGS.has(key),
       inEnv: within.inEnv || key === "env",
       credentialName: within.credentialName || CREDENTIAL_NAME.test(key),
     });
-    if (found !== undefined) return found;
+    if (found === undefined) continue;
+    return showable(key) ? found : { field: `a member of ${field === "" ? "the top level" : field}`, reason: found.reason };
   }
   return undefined;
 }
@@ -702,6 +768,9 @@ function withoutParsedMembers(
  * it (after JSON unescaping):
  * - names the jobs directory (as given or resolved) or the home directory of the machine
  *   running the import, or a path under one (`namesPath`);
+ * - names the jobs directory of the machine that ran Harbor, as the record's own `trials_dir`
+ *   and `trial_uri` give it before they are removed (`harborRunDirectories`), or a path under it,
+ *   however its separators are spelled (`/scratch/<user>/jobs` on a cluster or a CI runner);
  * - names a home directory of any machine: `/home/<name>`, `/Users/<name>` or a Windows
  *   `\Users\<name>` or `/Users/<name>` anywhere in the string, or a path that starts at `/root`;
  * - holds a `file:` URI;
@@ -711,18 +780,27 @@ function withoutParsedMembers(
  * - is a non-empty value, other than that placeholder, under a credential-shaped name
  *   (`CREDENTIAL_NAME`) at any depth;
  * - holds a key-shaped `sk-` string, a bearer value, a URL with a user name or password or with a
- *   credential-shaped query parameter, or Harbor's `****` redaction (`CREDENTIAL_TEXT`);
- * - is token-shaped (`tokenShaped`) inside `kwargs`, `env`, `mcp_servers` or `headers`.
+ *   credential-shaped query or fragment parameter, or Harbor's `****` redaction
+ *   (`CREDENTIAL_TEXT`);
+ * - is token-shaped (`tokenShaped`) inside `kwargs`, `env`, `mcp_servers` or `headers`, as a
+ *   value or as a member name.
  * These are the rules `test/fixtures/harbor-0.21-jobs-terminal-bench-2-1/prune.mjs` made the
  * committed records under, less two that a claimant's run cannot meet: `prune.mjs` refuses every
  * absolute path, where a trial record names container paths (`/app`, `/tmp`, `/opt`), and every
  * non-empty `kwargs`, `mcp_servers` or `headers`, where those hold the agent's settings.
  *
- * Not detected: an absolute path of another machine outside a home directory and outside
- * those fields (`/srv/data` in an agent setting or an exception message), a home directory
- * written as `~name` or percent-encoded outside a `file:` URI, and a credential with none of
- * these shapes under an ordinary name outside `env` (a lowercase hex key in `kwargs`). Every
- * other file is carried as read and is not checked.
+ * The refusal shows a path from the record only when the path holds no token-shaped run, `?` or
+ * `#` (`showable`), and gives a field under a member name that holds one as a member of the
+ * name's parent field, so it shows no such run, query or fragment. A member name the rules refuse
+ * is never shown.
+ *
+ * Not detected: an absolute path of another machine outside a home directory, outside those
+ * fields and outside the jobs directory the record names (`/srv/data` in an agent setting or an
+ * exception message), a home directory written as `~name` or percent-encoded outside a `file:`
+ * URI, and a credential with none of these shapes under an ordinary name outside `env` (an AWS
+ * access key id, a token of letters only or a lowercase hex key in `kwargs`, or a value under a
+ * name such as `passphrase`, `pwd`, `cookie` or `session`). Every other file is carried as read
+ * and is not checked.
  */
 export function harborCarriedEvidence(jobsDir: string): CarriedEvidence {
   const hostPaths: HostPath[] = [];
@@ -765,7 +843,14 @@ export function harborCarriedEvidence(jobsDir: string): CarriedEvidence {
     )) {
       cannotRemove("removing them would change more than those fields");
     }
-    const finding = trialRecordFinding(JSON.parse(carried.replace(/^\uFEFF/u, "")), hostPaths);
+    let ranHarbor: readonly string[];
+    try {
+      // Read before the members that name it are removed (#5302).
+      ranHarbor = harborRunDirectories(parsed);
+    } catch {
+      return cannotRemove("its trial_uri is not a file: URI");
+    }
+    const finding = trialRecordFinding(JSON.parse(carried.replace(/^\uFEFF/u, "")), hostPaths, ranHarbor);
     if (finding !== undefined) {
       refuse(
         "validation",
