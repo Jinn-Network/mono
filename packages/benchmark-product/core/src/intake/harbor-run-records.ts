@@ -468,8 +468,11 @@ const HARBOR_HOST_PATH_FIELDS = new Set([
 ]);
 
 /** A home directory on Linux (`/home/<name>`, `/root`), macOS (`/Users/<name>`) or Windows
- * (`C:\Users\<name>`, `C:/Users/<name>`), wherever it sits in a string. */
-const HOME_DIRECTORY = /[\\/](?:home|Users)[\\/][^\\/\s"'`]+|(?<![\w.-])\/root(?![\w.-])/iu;
+ * (`C:\Users\<name>`, `C:/Users/<name>`), wherever it sits in a string, with any run of
+ * separators (`C:\\Users\\<name>` as Python prints a Windows path). The name stops at `?`, `#`,
+ * `&`, `=`, `;`, `:` and `@`, so a reason that shows it shows no query, fragment or password
+ * after it. */
+const HOME_DIRECTORY = /[\\/]+(?:home|Users)[\\/]+[^\\/\s"'`?#&=;:@]+|(?<![\w.-])\/root(?![\w.-])/iu;
 /** A `file:` URI, however its path is spelled or percent-encoded. */
 const FILE_URI = /(?<![a-z0-9+.-])file:\//iu;
 /** `prune.mjs`'s credential-shaped name, widened to the names Harbor itself treats as sensitive
@@ -521,8 +524,9 @@ interface Within {
 
 /**
  * Why one key or string of a carried trial record cannot be published, or nothing. `shape` is
- * its field with every array index written `[]`; a key is checked by its text alone. Paths are
- * shown in the reason; a credential never is.
+ * its field with every array index written `[]`; a key is checked by its text alone. A credential's
+ * shape is checked first, so a string that holds one is reported by its kind before any rule that
+ * shows text. Paths are shown in the reason; a credential never is.
  */
 function trialRecordStringFinding(
   text: string,
@@ -530,6 +534,9 @@ function trialRecordStringFinding(
   shape: string | undefined,
   within: Within,
 ): string | undefined {
+  for (const [pattern, what] of CREDENTIAL_TEXT) {
+    if (pattern.test(text)) return `holds ${what}`;
+  }
   for (const { what, path } of thisMachine) {
     if (namesPath(text, path)) return `names ${what} (${path})`;
   }
@@ -541,9 +548,6 @@ function trialRecordStringFinding(
       return `names a path on the machine that ran Harbor (${text})`;
     }
   }
-  for (const [pattern, what] of CREDENTIAL_TEXT) {
-    if (pattern.test(text)) return `holds ${what}`;
-  }
   if (shape === undefined || HARBOR_ENV_PLACEHOLDER.test(text)) return undefined;
   if (within.inEnv) return "holds an env value other than Harbor's ${NAME} placeholder, which can be a credential";
   if (within.credentialName && text !== "") return "holds a value under a credential-shaped name";
@@ -551,7 +555,8 @@ function trialRecordStringFinding(
   return undefined;
 }
 
-/** The first key or string of a carried trial record that cannot be published, by its field. */
+/** The first key or string of a carried trial record that cannot be published, by its field. A
+ * key is reported as a member name in the field that holds it, so the key itself is not shown. */
 function trialRecordFinding(
   value: unknown,
   thisMachine: readonly HostPath[],
@@ -574,7 +579,7 @@ function trialRecordFinding(
   for (const [key, entry] of Object.entries(value)) {
     const memberField = field === "" ? key : `${field}.${key}`;
     const reason = trialRecordStringFinding(key, thisMachine, undefined, within);
-    if (reason !== undefined) return { field: `the name of ${memberField}`, reason };
+    if (reason !== undefined) return { field: `a member name in ${field === "" ? "the top level" : field}`, reason };
     const found = trialRecordFinding(entry, thisMachine, memberField, shape === "" ? key : `${shape}.${key}`, {
       settings: within.settings || HARBOR_SETTINGS.has(key),
       inEnv: within.inEnv || key === "env",
@@ -760,7 +765,7 @@ export function harborCarriedEvidence(jobsDir: string): CarriedEvidence {
     )) {
       cannotRemove("removing them would change more than those fields");
     }
-    const finding = trialRecordFinding(JSON.parse(carried.replace(/^﻿/u, "")), hostPaths);
+    const finding = trialRecordFinding(JSON.parse(carried.replace(/^\uFEFF/u, "")), hostPaths);
     if (finding !== undefined) {
       refuse(
         "validation",

@@ -410,17 +410,18 @@ describe("harborCarriedEvidence — what a Harbor import carries of a trial's ow
     }
   });
 
-  test("a home directory of another machine in an exception message is refused, naming the field", () => {
+  // Python prints a Windows path in an OSError message with its backslashes doubled.
+  test.each([
+    ["on Linux", "[Errno 2] No such file or directory: '/home/ci-builder/.docker/config.json'", "/home/ci-builder"],
+    ["on Windows", "[Errno 2] No such file or directory: 'C:\\\\Users\\\\carol\\\\.docker\\\\config.json'", "\\\\Users\\\\carol"],
+  ])("a home directory of another machine %s in an exception message is refused, naming the field", (_where, message, shown) => {
     const text = JSON.stringify({
       id: "x",
-      exception_info: {
-        exception_type: "FileNotFoundError",
-        exception_message: "[Errno 2] No such file or directory: '/home/ci-builder/.docker/config.json'",
-      },
+      exception_info: { exception_type: "FileNotFoundError", exception_message: message },
     }, null, 4);
     const error = refusalOf("trial-result.json", text);
     expect(error.message).toContain("exception_info.exception_message");
-    expect(error.message).toContain("/home/ci-builder");
+    expect(error.message).toContain(shown);
   });
 
   // This machine's jobs and home directories are matched as paths, not as text: on a runner whose
@@ -474,12 +475,16 @@ describe("harborCarriedEvidence — what a Harbor import carries of a trial's ow
     ["a token-shaped string in agent kwargs", "agent.kwargs", { github: "ghp_R8x2Kq9LmN4pT7vW1yZ3aB5cD6eF0gH2iJ4k" }, "agent.kwargs.github", "ghp_R8x2Kq9LmN4pT7vW1yZ3aB5cD6eF0gH2iJ4k"],
     ["a bearer header in verifier kwargs", "verifier.kwargs", { headers: { "X-Upstream": "Bearer abc.def.ghi" } }, "verifier.kwargs.headers.X-Upstream", "abc.def.ghi"],
     ["a value Harbor redacted", "agent.env", { OPENROUTER_API_KEY: "sk-o****xyz" }, "agent.env.OPENROUTER_API_KEY", "sk-o****xyz"],
+    ["a value Harbor redacted, outside env", "agent.kwargs", { upstream: "sk-o****xyz" }, "agent.kwargs.upstream", "sk-o****xyz"],
     ["a secret Harbor did not recognize by its name", "environment.env", { HF_HUB_PAT: "hf_mysecretvalue" }, "environment.env.HF_HUB_PAT", "hf_mysecretvalue"],
     ["an env placeholder with a default", "verifier.env", { GRADER_TOKEN: "${GRADER_TOKEN:-plain-default-value}" }, "verifier.env.GRADER_TOKEN", "plain-default-value"],
     ["an MCP server URL with a user and password", "agent.mcp_servers", [{ name: "docs", transport: "sse", url: "https://ci:hunter2@mcp.example.com/sse" }], "agent.mcp_servers[0].url", "hunter2"],
     ["an MCP server URL with a token in its query", "agent.mcp_servers", [{ name: "docs", transport: "sse", url: "https://mcp.example.com/sse?access_token=qwerty123" }], "agent.mcp_servers[0].url", "qwerty123"],
     ["an MCP server argument that is a token", "agent.mcp_servers", [{ name: "gh", transport: "stdio", command: "github-mcp", args: ["--pat", "github_pat_11ABCDEFG0123456789abcdefXYZ"] }], "agent.mcp_servers[0].args[1]", "github_pat_11ABCDEFG0123456789abcdefXYZ"],
     ["a task git URL with a token", "task.git_url", "https://x-access-token:gho_Secret0123@github.com/org/tasks.git", "task.git_url", "gho_Secret0123"],
+    ["a REST URL under /users/ with a key in its query", "agent.kwargs", { endpoint: "https://api.example.com/users/me?api_key=S3cretValueXYZ" }, "agent.kwargs.endpoint", "S3cretValueXYZ"],
+    ["an MCP server URL under /home/ with a token in its query", "agent.mcp_servers", [{ name: "docs", transport: "sse", url: "https://mcp.example.com/home/sse?access_token=qwerty123" }], "agent.mcp_servers[0].url", "qwerty123"],
+    ["a credential used as a member name", "agent.kwargs", { headers: { "sk-proj-AbCdEf0123456789": "x" } }, "agent.kwargs.headers", "sk-proj-AbCdEf0123456789"],
   ])("a trial record holding %s is refused, naming the file and the field and not the value", (_what, field, value, named, secret) => {
     for (const [name, text, at] of trialRecords(field, value)) {
       const error = refusalOf(name, text);
@@ -488,6 +493,26 @@ describe("harborCarriedEvidence — what a Harbor import carries of a trial's ow
       expect(error.message).toContain(`Harbor trial file job/trial-1/${name}`);
       expect(error.message).toContain(at.replace(field, named));
       expect(`${error.message}\n${JSON.stringify(error.issues)}`).not.toContain(secret);
+    }
+  });
+
+  // `run import` prints the refusal, which a claimant may run in a public CI log: a string or key
+  // that holds a credential and also meets a rule that shows text is reported without the credential.
+  test("no refusal shows the credential it refuses, whichever other rule the string or key meets", () => {
+    const probes: readonly (readonly [string, unknown, string])[] = [
+      ["agent.kwargs.endpoint", "https://api.example.com/users/me?api_key=S3cretValueXYZ", "S3cretValueXYZ"],
+      ["agent.kwargs.endpoint", "https://api.github.com/users/octocat?access_token=gho_Secret0123", "gho_Secret0123"],
+      ["agent.mcp_servers", [{ name: "docs", transport: "sse", url: "https://mcp.example.com/home/sse?access_token=qwerty123" }], "qwerty123"],
+      ["agent.kwargs.remote", "/home/bob:pw123@x", "pw123"],
+      ["agent.skills", ["/srv/skills/web?token=hunter2hunter2"], "hunter2hunter2"],
+      ["agent.kwargs.headers", { "sk-proj-AbCdEf0123456789": "x" }, "sk-proj-AbCdEf0123456789"],
+      ["sk-proj-AbCdEf0123456789", "x", "sk-proj-AbCdEf0123456789"],
+    ];
+    for (const [field, value, secret] of probes) {
+      for (const [name, text] of trialRecords(field, value)) {
+        const error = refusalOf(name, text);
+        expect(`${error.message}\n${JSON.stringify(error.issues)}`, `${name} at ${field}`).not.toContain(secret);
+      }
     }
   });
 
