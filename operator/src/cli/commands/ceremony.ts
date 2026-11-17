@@ -119,8 +119,9 @@ export type CeremonyVerb = (typeof CEREMONY_VERBS)[number];
  * Every verb parses against OPTIONS, so without this a flag meant for one verb is accepted by the
  * others and ignored without a word, and these are key-custody commands. `run` refuses
  * (unused-flag) any flag the verb is not listed for, before anything is read, minted or anchored.
- * Typed against OPTIONS, so a new flag does not compile until it names the verbs that take it. The
- * help's option list marks each flag with the same verbs, and the tests hold the two equal.
+ * Typed against OPTIONS, so a new flag does not compile until it names the verbs that take it (none,
+ * for a flag every verb refuses). The help's option list marks each flag with the same verbs, and
+ * the tests hold the two equal.
  */
 export const CEREMONY_FLAG_VERBS = {
   dir: CEREMONY_VERBS,
@@ -144,11 +145,12 @@ export const CEREMONY_FLAG_VERBS = {
   json: CEREMONY_VERBS,
   // `jinn ceremony --help` is answered before any verb runs.
   help: CEREMONY_VERBS,
-  // No verb reads it: the password comes from JINN_PASSWORD or the keystore-password file. It stays
-  // accepted because operator/README.md's password resolution names it for every verb that touches
-  // keys, so refusing it would refuse an invocation that document describes.
-  'password-fd': CEREMONY_VERBS,
-} as const satisfies Record<keyof typeof OPTIONS, readonly [CeremonyVerb, ...CeremonyVerb[]]>;
+  // No verb reads it: init, join and rotate take the password from JINN_PASSWORD, else a
+  // keystore-password file (resolveCeremonyPassword), and show --store from JINN_PASSWORD only, so a
+  // password passed on a file descriptor would be set aside for another. Reading it instead would
+  // first need spec section 4 to name it as a password source.
+  'password-fd': [],
+} as const satisfies Record<keyof typeof OPTIONS, readonly CeremonyVerb[]>;
 
 function verbList(verbs: readonly string[]): string {
   return verbs.length === 1 ? verbs[0]! : `${verbs.slice(0, -1).join(', ')} and ${verbs[verbs.length - 1]}`;
@@ -165,13 +167,19 @@ function refuseUnusedFlags(ctx: CommandContext, verb: CeremonyVerb, given: reado
     flag: `--${flag}`,
     takenBy: [...CEREMONY_FLAG_VERBS[flag as keyof typeof OPTIONS]],
   }));
-  const message = `ceremony ${verb} does not take ${flags.map(({ flag, takenBy }) =>
-    `${flag} (only ${verbList(takenBy)} ${takenBy.length === 1 ? 'takes' : 'take'} it)`).join(' or ')}`;
+  const message = `ceremony ${verb} does not take ${flags.map(({ flag, takenBy }) => `${flag} (${takenBy.length === 0
+    ? 'no ceremony verb takes it'
+    : `only ${verbList(takenBy)} ${takenBy.length === 1 ? 'takes' : 'take'} it`})`).join(' or ')}`;
+  const passwordSource = unused.includes('password-fd')
+    ? ' init, join and rotate read the keystore password from JINN_PASSWORD, else <dir>/earning/keystore-password, '
+      + 'else the host-wide keystore-password file; show --store reads JINN_PASSWORD only.'
+    : '';
   emitEnvelope({
     code: 'invalid_invocation',
     message,
     hint: `Drop ${verbList(flags.map(({ flag }) => flag))}: ceremony ${verb} would not read `
-      + `${flags.length === 1 ? 'it' : 'them'}. The options in \`jinn ceremony --help\` name the verbs that take each.`,
+      + `${flags.length === 1 ? 'it' : 'them'}. The options in \`jinn ceremony --help\` name the verbs that take each.`
+      + passwordSource,
     exampleCli: EXAMPLE_CLI,
     details: { feature: 'ceremony', state: 'unused-flag', verb, flags, sideEffects: false },
   }, { writer: ctx.writer, exit: ctx.exit });
@@ -2872,8 +2880,9 @@ Options (a flag marked "<verbs> only" is taken by those verbs alone, and any oth
                              and config.json are resolved beneath it.
   --config <path>            Config file to write back to (default <dir>/config.json)
   --role-sets <list>         Comma-separated families: requester, admission, solver, evaluator.
-                             \`requester\` is mandatory — every native boot opens requester custody.
-                             show reads it only with --store: the one family that store holds.
+                             init and join require \`requester\`, since every native boot opens
+                             requester custody; rotate does not. show reads it only with --store:
+                             the one family that store holds.
   --authority-store <path>   init and join only: the DEDICATED catalog-authority keypair, held by the
                              deploy coordinator. Never an operator role key: policy-update capability
                              must survive any operator's key rotation.
@@ -2903,12 +2912,12 @@ Options (a flag marked "<verbs> only" is taken by those verbs alone, and any oth
   --human                    Human-readable output, including the anchor and finality progress lines.
   --json                     JSON output, the default when --human is not given
   --help                     This help
-  --password-fd <n>          Accepted but never read: the ceremony takes the password from
-                             JINN_PASSWORD or the keystore-password file, below.
-  JINN_PASSWORD              Required unless a keystore-password file exists (primary
-                             <dir>/earning/keystore-password, or the host-wide default-state
-                             fallback). The ceremony must run with the password the daemon
-                             will later resolve, or it mints custody the daemon cannot decrypt.
+  JINN_PASSWORD              The keystore password. init, join and rotate read it first, then
+                             <dir>/earning/keystore-password, then the host-wide default-state
+                             keystore-password file, and refuse when none of the three supplies one.
+                             show --store reads JINN_PASSWORD only. No verb takes --password-fd.
+                             The ceremony must run with the password the daemon will later
+                             resolve, or it mints custody the daemon cannot decrypt.
 
 Config write-back:
   init and join write exactly five keys onto config.json: agentIri, admissionAgent (only when the
