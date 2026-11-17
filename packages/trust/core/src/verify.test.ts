@@ -132,16 +132,16 @@ function safeWitness(messageBytes: Uint8Array, says: Record<string, unknown> = {
   };
 }
 
-/** A binding of its key to its Agent IRI, vouched by the Safe through a genuine ceremony and witness. */
+/** `base`, vouched by the Safe instead, through a genuine ceremony and witness. */
 function safeVouched(
-  overrides: Partial<KeyBinding> & Pick<KeyBinding, "agent" | "key">,
+  base: KeyBinding,
 ): { binding: KeyBinding; ceremonyEvidence: SafeCeremonyEvidence; witness: Eip1271Witness } {
-  const ceremonyEvidence = safeCeremonyEvidence(safeCeremonyMessage(overrides.agent, overrides.key.didKey));
-  const binding = keyBinding({
+  const ceremonyEvidence = safeCeremonyEvidence(safeCeremonyMessage(base.agent, base.key.didKey));
+  const binding: KeyBinding = {
+    ...base,
     voucher: { kind: "account", did: SAFE_VOUCHER_DID, contractAccount: true },
     ceremony: { type: "safe", digest: ceremonyEvidenceDigest(ceremonyEvidence) },
-    ...overrides,
-  });
+  };
   return { binding, ceremonyEvidence, witness: safeWitness(ceremonyEvidence.messageBytes) };
 }
 
@@ -1702,18 +1702,11 @@ describe("settlementJoinCheck (§7.5a)", () => {
     });
 
     test("(e) a leg whose ceremony fails fails the join", async () => {
-      const binding: KeyBinding = { ...settlementBinding(), ceremony: { type: "safe", digest: `sha256:${"e".repeat(64)}` } };
+      const safeLeg = safeVouched(settlementBinding());
       const refusing: WitnessVerifier = { verify1271Witness: async () => ({ verified: false }) };
-      const witness = {
-        chainId: 8453,
-        blockNumber: 1,
-        blockHash: `0x${"c".repeat(64)}`,
-        verifier: AGENT,
-        envelopeBytes: Uint8Array.of(1),
-      };
-      expect(await joinWith(sealedLeg({ binding, witness }), refusing))
+      expect(await joinWith(sealedLeg(safeLeg), refusing))
         .toMatchObject({ ok: false, reason: expect.stringMatching(/settlement leg does not stand/) });
-      expect(await joinWith(sealedLeg({ binding, witness }))).toMatchObject({ ok: true });
+      expect(await joinWith(sealedLeg(safeLeg))).toMatchObject({ ok: true });
     });
   });
 
@@ -1845,25 +1838,16 @@ describe("checkBindingRevocation (§7.5 step 4, §7.4b)", () => {
 
   describe("by a revoker whose ceremony only the witness leg can verify", () => {
     const COLD_KEY = "did:key:z6MkfCOLD1111111111111111111111111111111";
-    const coldBinding = keyBinding({
+    const { binding: coldBinding, ceremonyEvidence, witness } = safeVouched(keyBinding({
       agent: AGENT,
       key: { publicKey: "0x00", keyid: COLD_KEY, algorithm: "ed25519", didKey: COLD_KEY },
       voucher: { kind: "account", did: VOUCHER_DID, contractAccount: true },
       scope: ["bindings"],
-      ceremony: { type: "safe", digest: `sha256:${"e".repeat(64)}` },
-    });
+    }));
     const coldResolver = new FakeBindingResolver().register({
       key: COLD_KEY,
       agent: AGENT,
-      resolved: authorityBinding(coldBinding, {
-        witness: {
-          chainId: 8453,
-          blockNumber: 1,
-          blockHash: `0x${"c".repeat(64)}`,
-          verifier: AGENT,
-          envelopeBytes: Uint8Array.of(1),
-        },
-      }),
+      resolved: authorityBinding(coldBinding, { ceremonyEvidence, witness }),
     });
     const revoked = resolvedBinding({ binding, revocations: [revocationEntry(COLD_KEY, "2026-02-01T00:00:00Z")] });
     const witnessSays = (verified: boolean): WitnessVerifier => ({ verify1271Witness: async () => ({ verified }) });

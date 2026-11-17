@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { sealDsseEnvelope } from "@jinn-network/trust-core";
+import {
+  TRUST_KEY_BINDING_FORMAT,
+  ceremonyEvidenceDigest,
+  didPkh,
+  eip191MessageHash,
+  sealDsseEnvelope,
+  serializeCeremonyMessage,
+  verifyEnvelopeBinding,
+} from "@jinn-network/trust-core";
+import type { KeyBinding, ResolvedBinding, SafeCeremonyEvidence, SiweCeremonyMessage } from "@jinn-network/trust-core";
 import {
   ContractFunctionExecutionError,
   ContractFunctionRevertedError,
@@ -247,5 +256,94 @@ describe("createWitnessVerifier", () => {
     const result = await verifier.verify1271Witness(outerWitness(payload, envelopeBytes));
     expect(result.verified).toBe(false);
     expect(result.reason).toMatch(/magic value/);
+  });
+});
+
+// A host that wires this verifier into `verifyEnvelopeBinding` admits a Safe ceremony only when the
+// message the witness's hash is of is that record's ceremony: under a verifier that accepts the
+// witness, a genuine Safe signature over a message for another Agent IRI, key, domain or URI, or a
+// witness over another message, binds nothing.
+describe("a Safe ceremony checked with this verifier (§7.2, §7.2a)", () => {
+  const AGENT = "https://spec.jinn.network/agents/safe-vouched";
+  const KEY = "did:key:z6MkfSAFEWITNESSED111111111111111111111111";
+  const SAFE_ADDRESS = "0x4444444444444444444444444444444444444444" as const;
+
+  function siweMessage(overrides: Partial<SiweCeremonyMessage> = {}): SiweCeremonyMessage {
+    return {
+      domain: "trust.jinn.network",
+      address: SAFE_ADDRESS,
+      uri: "https://trust.jinn.network/ceremony/key-binding",
+      version: "1",
+      chainId: 84532,
+      nonce: "n-safe-witnessed",
+      issuedAt: "2026-01-01T00:00:00Z",
+      resources: [AGENT, KEY],
+      ...overrides,
+    };
+  }
+
+  async function verifyWith(message: SiweCeremonyMessage, witnessed: Uint8Array = serializeCeremonyMessage("safe", message)) {
+    const ceremonyEvidence: SafeCeremonyEvidence = {
+      type: "safe",
+      message,
+      messageBytes: serializeCeremonyMessage("safe", message),
+      signature: Uint8Array.of(0xbb),
+    };
+    const binding: KeyBinding = {
+      protocol: TRUST_KEY_BINDING_FORMAT,
+      agent: AGENT,
+      key: { publicKey: KEY, keyid: KEY, algorithm: "ed25519", didKey: KEY },
+      voucher: { kind: "account", did: didPkh(84532, SAFE_ADDRESS), contractAccount: true },
+      relationship: "controls",
+      scope: ["verdicts"],
+      validFrom: "2026-01-01T00:00:00Z",
+      ceremony: { type: "safe", digest: ceremonyEvidenceDigest(ceremonyEvidence) },
+      strength: "strong",
+      anchors: [],
+    };
+    const payload = witnessPayload({ safe: SAFE_ADDRESS, hash: eip191MessageHash(witnessed) });
+    const resolved: ResolvedBinding = {
+      binding,
+      envelopeBytes: sealWitnessPayload({}),
+      bindingDigest: `sha256:${"d".repeat(64)}`,
+      effectiveStart: binding.validFrom,
+      isGenesis: true,
+      revocations: [],
+      ceremonyEvidence,
+      witness: outerWitness(payload, sealWitnessPayload(payload)),
+    };
+    return verifyEnvelopeBinding(
+      { envelopeBytes: sealWitnessPayload({}), key: KEY, agent: AGENT, family: "verdicts", atTime: "2026-03-01T00:00:00Z" },
+      {
+        bindingResolver: { resolveBinding: async () => resolved },
+        witnessVerifier: createWitnessVerifier({ acceptedVerifiers: [VERIFIER_IRI] }),
+        dsseVerifier: () => ({ validSignerKeyids: [KEY] }),
+      },
+    );
+  }
+
+  it("admits a genuine ceremony whose witness this verifier accepts", async () => {
+    await expect(verifyWith(siweMessage())).resolves.toMatchObject({ ok: true });
+  });
+
+  it.each([
+    ["another Agent IRI", { resources: ["https://spec.jinn.network/agents/someone-else", KEY] }],
+    ["another key", { resources: [AGENT, "did:key:z6MkfSOMEOTHERKEY11111111111111111111111111"] }],
+    ["another domain", { domain: "login.example" }],
+    ["another URI", { uri: "https://trust.jinn.network/login" }],
+  ])("refuses a message naming %s, though the witness is accepted", async (_label, overrides) => {
+    await expect(verifyWith(siweMessage(overrides))).resolves.toMatchObject({
+      ok: false,
+      reason: "ceremony-verification-failed",
+    });
+  });
+
+  it("refuses a witness over another message", async () => {
+    const other = serializeCeremonyMessage("safe", siweMessage({ nonce: "n-other" }));
+    await expect(verifyWith(siweMessage(), other)).resolves.toMatchObject({
+      ok: false,
+      reason: "ceremony-verification-failed",
+      detail: expect.stringMatching(/hash/),
+    });
   });
 });
