@@ -536,3 +536,21 @@ test('self-test: override audit flags unapproved resolutions or overrides, rejec
     ],
   );
 });
+
+// The scan above reads every first-party manifest, so it must run on a change to any of them.
+// Task Execution CI is path-filtered and merge-group selection skips lanes a manifest does not
+// reach; Repository structure runs on every pull request and merge group, so the scan is wired
+// there and that workflow must stay unfiltered (#5277).
+test('the manifest scan runs in the unfiltered Repository structure workflow', () => {
+  const workflow = readFileSync(join(root, '.github/workflows/repository-structure.yml'), 'utf8');
+  const triggers = workflow.slice(workflow.indexOf('\non:'), workflow.indexOf('\nconcurrency:'));
+  for (const event of ['pull_request:', 'merge_group:']) {
+    assert.ok(triggers.includes(event), `Repository structure must trigger on ${event}`);
+  }
+  assert.ok(!/^\s+paths(?:-ignore)?:/mu.test(triggers), 'Repository structure must not path-filter its triggers');
+  assert.match(
+    workflow,
+    /^\s+run: node --test \.github\/scripts\/task-execution-package-inventory\.test\.mjs$/mu,
+    'Repository structure must run the manifest scan',
+  );
+});
