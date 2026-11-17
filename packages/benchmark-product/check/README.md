@@ -140,6 +140,7 @@ for testing an independent verifier. The kit is not in this package. It is in th
 
 ## What this does not yet prove
 
-Protocol identifiers in the installed platform packages are names, not addresses. This
-verifier fetches nothing from them. Checks run against the exact `@jinn-network/*` platform
-bytes installed from npm, and those bytes are the whole basis of every check it reports.
+Protocol identifiers in the installed platform packages that the protocol spec release serves
+resolve to their documents; the rest are names, not addresses. This verifier fetches nothing
+from them. Checks run against the exact `@jinn-network/*` platform bytes installed from npm,
+and those bytes are the whole basis of every check it reports.

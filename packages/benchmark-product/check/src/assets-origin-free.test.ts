@@ -11,7 +11,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import { buildPublicAssets, type PublicAssetInput } from "./assets.js";
-import { resolvesAtSpecOrigin } from "./identifier-presentation.js";
+import { resolvesAtSpecOrigin, SPEC_RELEASE_SERVED_PATHS } from "./identifier-presentation.js";
 import { BUNDLE_FORMAT } from "./legacy-closures.js";
 import { BUNDLE_V10_FORMAT } from "./manifest.js";
 import { goldenInput } from "./testing/golden-asset-input.js";
@@ -109,5 +109,20 @@ describe("EXTERNAL-VERIFICATION Identifier note (#2981)", () => {
     expect(named.filter(resolvesAtSpecOrigin)).toEqual([
       "https://spec.jinn.network/task-profiles/binary-judgment/2.0",
     ]);
+  });
+
+  test("attributes anchor profiles to the trust layer, and names only families the release does not serve (#4894)", () => {
+    const path = resolve(dirname(fileURLToPath(import.meta.url)), "../../EXTERNAL-VERIFICATION.md");
+    const body = readFileSync(path, "utf8");
+    const note = body.slice(body.indexOf("## Identifier note")).replace(/\s+/gu, " ");
+    // Anchor profiles come from `@jinn-network/trust-core`, not from the benchmarking protocol.
+    expect(note).toContain("the trust layer's anchor profiles (`trust/anchor-profiles/`");
+    // Every mention of anchor profiles is the trust layer's; the old note had them as benchmarking's.
+    expect(note.match(/\S+ \S+ anchor profiles/gu)).toEqual(["trust layer's anchor profiles"]);
+    // The note calls these families names, not addresses, so the served-path rule must agree.
+    for (const family of ["records/", "extensions/", "trust/anchor-profiles/"]) {
+      expect(note, family).toContain(`(\`${family}\``);
+      expect([...SPEC_RELEASE_SERVED_PATHS].filter((served) => served.startsWith(family)), family).toEqual([]);
+    }
   });
 });

@@ -200,7 +200,8 @@ Signed by
   automated grader — same operator · 1 key
 
 No files were uploaded.
-Protocol identifiers are names, not addresses — this verifier fetches nothing
+Protocol identifiers the protocol spec release serves resolve to their
+documents; the rest are names, not addresses. This verifier fetches nothing
 from them. Checks run against the exact platform bytes installed from npm.
 ```
 

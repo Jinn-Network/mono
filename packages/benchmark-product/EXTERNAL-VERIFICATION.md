@@ -577,11 +577,13 @@ under `https://spec.jinn.network/protocols/benchmarking/v1/schemas/`. That
 origin serves the Jinn protocol spec release (`Jinn-Network/spec` `v0.1.0`),
 which does not carry these schemas, so those identifiers are names, not
 addresses: fetching one returns no document, and verification fetches nothing
-from them. The same holds for benchmarking's record kinds (`records/`), anchor
-profiles (`trust/anchor-profiles/`), and extensions (`extensions/`) under that
-origin. Schema bytes are retrievable from the source repository and from the
-published `@jinn-network/benchmarking-records` npm package (`schemas/`).
-Identifiers the spec release does serve, such as the task profile
+from them. The same holds for benchmarking's record kinds (`records/`) and
+extensions (`extensions/`) and for the trust layer's anchor profiles
+(`trust/anchor-profiles/`, from `@jinn-network/trust-core`) under that origin:
+the spec release serves none of them. Schema bytes are retrievable from the
+source repository and from the published `@jinn-network/benchmarking-records`
+npm package (`schemas/`). Identifiers the spec release does serve, such as the
+task profile
 `https://spec.jinn.network/task-profiles/binary-judgment/2.0`, resolve to
 their documents; verification still reads the installed package bytes and
 fetches nothing. The product-level schemas in this package (`schemas/`)

@@ -45,7 +45,9 @@ describe("published CLI --help verb list", () => {
     expect(usage).toContain("service's machinery");
     expect(usage).not.toContain("launch, resume, preview, quote");
     expect(usage).not.toContain("terminal-bench-2.1");
-    expect(usage).toContain("Protocol identifiers in the installed platform packages are names, not addresses.");
+    // Issue #4894: served identifiers resolve, so the help may not call every identifier a name.
+    expect(usage).toContain("that the protocol spec\nrelease serves resolve to their documents; the rest are names, not addresses.");
+    expect(usage).not.toContain("Protocol identifiers in the installed platform packages are names");
   });
 });
 
