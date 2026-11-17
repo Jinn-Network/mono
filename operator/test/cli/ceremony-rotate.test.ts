@@ -18,7 +18,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { openRoleSigners, revocationAnchorDigest } from '@jinn-network/trust-authoring';
 import { didPkh, validateKeyBinding } from '@jinn-network/trust-core';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -829,6 +829,31 @@ describe('ceremony join after a rotation', () => {
     expect(refusal.details).toMatchObject({ state: 'store-elsewhere', sideEffects: false, families: ['requester'] });
     expect(String(refusal.message)).toContain(`${elsewhere} for requester`);
     expect(String(refusal.message)).not.toContain('retired');
+    unchanged();
+  });
+
+  it('refuses as rotated-family, not store-elsewhere, a family whose rotated store was moved out of <dir>/identity and the config names', async () => {
+    const h = await provisioned();
+    const first = await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'requester', '--execute']);
+    expect(first.kind).toBe('ceremony_rotate_complete');
+    // The live rotated store, moved out of <dir>/identity, with the config pointed at its new path.
+    const rotatedStore = config(h).identityStores.requester!;
+    const moved = join(h.home, 'moved', basename(rotatedStore));
+    mkdirSync(dirname(moved));
+    renameSync(rotatedStore, moved);
+    writeFileSync(h.configPath, JSON.stringify({ ...config(h), identityStores: { ...config(h).identityStores, requester: moved } }));
+    // A later rotation of another family: rotation.json no longer records requester.
+    const later = await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
+    expect(later.kind).toBe('ceremony_rotate_complete');
+    expect(rotationReceipt(h).roleSets).toEqual(['solver']);
+    const second = await secondCatalog(h);
+    const unchanged = snapshot(h, second.path);
+
+    const refusal = await run(h, joinArgv(h, second, 'requester'));
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect(refusal.details).toMatchObject({ state: 'rotated-family', sideEffects: false, families: ['requester'] });
+    expect(String(refusal.message)).toContain(moved);
     unchanged();
   });
 });
