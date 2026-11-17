@@ -22,6 +22,7 @@ import {
   buildCommitMessage,
   inspectProvenance,
   mirrorContent,
+  refuseOlderSource,
   run,
   treeChanged,
   validateBundleDir,
@@ -349,6 +350,84 @@ test('the order is asked only when a canonical host marker names another commit'
   assert.deepEqual(asked, []);
   assert.deepEqual(inspectProvenance(host, WORKFLOW_PATH), { canonical: true, sourceSha: SHA });
   cleanup(first, later, host);
+});
+
+// --- the order does not depend on the run's WORKFLOW_PATH (#5287) -----------
+
+const OTHER_WORKFLOW_PATH = '.github/workflows/other.yml';
+
+test('refuseOlderSource orders the host marker whatever workflowPath the run is given', () => {
+  // A marker is canonical only for the run's own WORKFLOW_PATH, and the order check once
+  // asked only of a canonical marker, so a run given any other path read a canonical marker
+  // as malformed and skipped the compare. The check no longer takes a workflow path; passing
+  // one shows it decides nothing.
+  const host = hostServingNextSha();
+  const head = git(host, ['rev-parse', 'HEAD']).trim();
+  const calls = [];
+
+  assert.throws(
+    () => refuseOlderSource({ hostDir: host, workflowPath: OTHER_WORKFLOW_PATH, sourceSha: SHA, exec: compareOnNext(calls) }),
+    { message: new RegExp(`^profile host refresh refused: the host serves Jinn-Network/mono@${NEXT_SHA}, a later commit than this run's source ${SHA}`, 'u') },
+  );
+  assert.deepEqual(calls, [COMPARE_ARGS(SHA, NEXT_SHA)]);
+
+  // And through run(): an older source given another path mirrors, commits and writes nothing.
+  const older = makeBundle();
+  assert.throws(
+    () => run({ bundleDir: older, hostDir: host, sourceSha: SHA, workflowPath: OTHER_WORKFLOW_PATH, expectedGroups: GROUPS, lane: 'canary', exec: compareOnNext() }),
+    { message: /^profile host refresh refused: /u },
+  );
+  assertHostStillServesNextSha(host, head);
+  cleanup(older, host);
+});
+
+test('a marker a run with another WORKFLOW_PATH wrote is ordered by the next refresh', () => {
+  // The second half of the same defect: that run's marker names its own path, so the next
+  // default-path run read it as malformed as well and served an older source over it.
+  const host = makeHostRepo();
+  refresh(makeBundle(), host);
+  const later = makeBundle({
+    commit: NEXT_SHA,
+    documents: { 'schemas/task.schema.json': '{"$id":"task","title":"later"}\n' },
+  });
+  const calls = [];
+  run({ bundleDir: later, hostDir: host, sourceSha: NEXT_SHA, workflowPath: OTHER_WORKFLOW_PATH, expectedGroups: GROUPS, lane: 'canary', exec: compareOnNext(calls) });
+  assert.deepEqual(calls, [COMPARE_ARGS(NEXT_SHA, SHA)], 'the run given another path asked the order too');
+  assert.deepEqual(inspectProvenance(host, OTHER_WORKFLOW_PATH), { canonical: true, sourceSha: NEXT_SHA });
+  const head = git(host, ['rev-parse', 'HEAD']).trim();
+
+  const older = makeBundle();
+  assert.throws(
+    () => refresh(older, host, SHA, GROUPS, 'canary', compareOnNext()),
+    { message: new RegExp(`^profile host refresh refused: the host serves Jinn-Network/mono@${NEXT_SHA}`, 'u') },
+  );
+  assert.equal(git(host, ['rev-parse', 'HEAD']).trim(), head, 'nothing was committed');
+  assert.equal(git(host, ['status', '--porcelain']).trim(), '', 'nothing was mirrored');
+  assert.equal(readFileSync(path.join(host, 'schemas/task.schema.json'), 'utf8'), '{"$id":"task","title":"later"}\n');
+  cleanup(later, older, host);
+});
+
+test('the commit on the marker\'s first line is ordered whatever the other lines say', () => {
+  // Every marker a refresh writes opens with that run's own source, whatever else its
+  // environment put on the lines after it, so the first line is the one ordered.
+  const source = `source: Jinn-Network/mono@${NEXT_SHA}`;
+  for (const [scenario, marker] of [
+    ['another generated-by', `${source}\ngenerated-by: ${OTHER_WORKFLOW_PATH}\nlane: canary\nrelease-groups: a\n`],
+    ['the source line alone', `${source}\n`],
+    ['an extra line', `${source}\ngenerated-by: ${WORKFLOW_PATH}\nlane: canary\nrelease-groups: a\nextra: x\n`],
+    ['a later line naming this run\'s source', `${source}\nsource: Jinn-Network/mono@${SHA}\ngenerated-by: ${WORKFLOW_PATH}\nlane: canary\nrelease-groups: a\n`],
+    ['CRLF line endings', `${source}\r\ngenerated-by: ${WORKFLOW_PATH}\r\nlane: canary\r\nrelease-groups: a\r\n`],
+  ]) {
+    const host = makeHostRepo({ '.jinn-profile-host-source': marker });
+    const calls = [];
+    assert.throws(
+      () => refuseOlderSource({ hostDir: host, sourceSha: SHA, exec: compareOnNext(calls) }),
+      { message: new RegExp(`^profile host refresh refused: the host serves Jinn-Network/mono@${NEXT_SHA}, `, 'u') },
+      scenario,
+    );
+    assert.deepEqual(calls, [COMPARE_ARGS(SHA, NEXT_SHA)], scenario);
+    cleanup(host);
+  }
 });
 
 test('the runbook says what a refused or unordered host refresh means for a rerun', () => {
