@@ -119,28 +119,31 @@ which separates two cases:
   second case that rerunning the same run does not change; read the marker against `next`
   to see why.
 
-The refresh itself has no step that clears a lasting case. The one input it does not
-order is a marker that is missing or malformed (not exactly the four canonical lines): it
-names no commit, so the refresh skips the compare, mirrors the bundle, and rewrites the
-marker with the run's own source. Producing that state takes either a change to the
-host repository's `.jinn-profile-host-source`, which the rule above forbids, or a refresh
-run whose `WORKFLOW_PATH` differs from the marker's `generated-by` line, because the marker
-counts as canonical only for the workflow path the run is given (issue #5287 tracks that
-bypass). Neither is a documented step. **This runbook therefore does not give a recovery step for a lasting
+The refresh itself has no step that clears a lasting case. It orders the commit on the
+marker's first line (`source: Jinn-Network/mono@<sha>`) whatever the other lines say, so a
+marker written by a run with another `WORKFLOW_PATH`, or one with lines missing or added,
+is ordered like a canonical one; only once the order check passes does the refresh rewrite
+a marker that is not exactly the four canonical lines. The one input it does not order is
+a marker that is missing or whose first line names no commit: the refresh skips the
+compare, mirrors the bundle, and rewrites the marker with the run's own source. Every
+marker a refresh writes opens with that run's source, so producing that state takes a
+change to the host repository's `.jinn-profile-host-source`, which the rule above forbids.
+That is not a documented step. **This runbook therefore does not give a recovery step for a lasting
 case. It needs a maintainer decision** between: (1) a one-time, recorded maintainer
-exception that removes or corrupts the marker in the host repository, after which the next
-refresh repairs it and the order check is off for that one refresh only; (2) a change to
+exception that removes the marker from the host repository, or rewrites its first line so
+it names no commit, after which the next refresh repairs it and the order check is off for
+that one refresh only; (2) a change to
 `refresh-profile-host.mjs` that adds an explicit, reviewed way to accept a marker commit
 GitHub cannot find; or (3) leaving the host as it is until a refresh from a later source
 can be ordered. Until a maintainer picks one, treat the red as a standing alarm.
 
 A deliberate rollback of the host to an older attested commit is **not supported**. When
-the marker is canonical and names a later commit than the one being published, the
-refresh is refused with `profile host refresh refused`, and the break-glass invocation
-below goes through the same check. The only ways past it are the two that make the marker read as malformed, named in the
-paragraph above. Neither is a documented step, and each drops the order guard for that
-refresh rather than making it accept an older commit by design. The break-glass invocation
-needs `gh` signed in where it runs.
+the marker's first line names a later commit than the one being published, the refresh is
+refused with `profile host refresh refused`, whatever `WORKFLOW_PATH` the run is given, and
+the break-glass invocation below goes through the same check. The only way past it is the
+change to the host repository named in the paragraph above. It is not a documented step,
+and it drops the order guard for that refresh rather than making it accept an older commit
+by design. The break-glass invocation needs `gh` signed in where it runs.
 
 The refresh is deliberately **not** a `needs:` of `stable-live-host-verification`. Adding
 a write-credential job to that gate's dependency chain would let a skipped refresh skip
