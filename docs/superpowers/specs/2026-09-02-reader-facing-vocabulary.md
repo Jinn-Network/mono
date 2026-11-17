@@ -151,8 +151,10 @@
   the proof's own time source: *trust anchors* for an authority-time proof, *block headers* for a
   chain-time one, in each of the three notes that name material. The authority-time notes and
   `--json` do not change. Workspace verification prints the reader's own note (v1.14), so it
-  follows with no change of its own. The usage text's closing paragraph, which uses *trust anchors*
-  for both kinds together, is not reached. No earlier disposition changes.
+  follows with no change of its own. The usage text's closing paragraph, which used *trust anchors*
+  for both kinds together, now names both (*Trust anchors and block headers are yours*), so the
+  tool never uses *trust anchors* for the block headers its notes name apart. No earlier
+  disposition changes.
 
 ## 1. Scope
 
@@ -428,7 +430,7 @@ rows that needed it, not retrofitted across the document.
 | Time basis | rename | Time source | Where a proof's time comes from (`authority-time`, `chain-time`). Not *what the timestamp covers*, which is the lock or matrix bytes the reader recomputes for a `present` proof. |
 | anchored / absent / `declared-but-absent` | rename | timestamped / none / promised but missing | The `declared-but-absent` **string in `--json` is contract**; only the human line changes. |
 | `matrix` (the label of a covered record) | rename | the runs | The label the *Timestamps* and *Timestamp coverage* lines print for the record a proof covers (`TIMESTAMP_SUBJECT_NAMES` in `cli.ts`, v1.15): *the runs timestamp proof*, *the runs: timestamped*, *the runs: none*, *the runs: promised but missing*. The proof covers `matrix.json`, the record §5 names **the runs**, so the label takes that name whole; it opens a line rather than heading one, so no shortened form applies. The raw value `matrix` is **contract**: the sealed claim's `anchors` carry it as `subject`, and `--json` prints it, so only the human line changes, as in the row above. The other label, `lock`, names no §5 concept; this row does not reach it. |
-| Trust material | rename | Trust anchors you supply | The note under each timestamp proof (`timestampProofEvaluationNote` in `cli.ts`, v1.16) names the material for that proof's own time source, because whether material was supplied is decided per profile (`evaluateAnchors`): *trust anchors* (RFC 3161 roots, `--tsa-root`) for an `authority-time` proof, *block headers* (`--ots-headers`) for a `chain-time` one. A reader who supplied only a root is not told of a chain-time proof that no trust anchors were supplied, and a reader who supplied nothing is pointed at block headers for it. |
+| Trust material | rename | Trust anchors you supply | The note under each timestamp proof (`timestampProofEvaluationNote` in `cli.ts`, v1.16) names the material for that proof's own time source, because whether material was supplied is decided per profile (`evaluateAnchors`): *trust anchors* (RFC 3161 roots, `--tsa-root`) for an `authority-time` proof, *block headers* (`--ots-headers`) for a `chain-time` one. A reader who supplied only a root is not told of a chain-time proof that no trust anchors were supplied, and a reader who supplied nothing is pointed at block headers for it. The usage text's closing paragraph names both kinds together: *trust anchors and block headers*. |
 | Artifact content … not fetched | keep | — | Already reader-shaped, and the caveat under it is exemplary. |
 | freeze repository | keep | — | |
 | No files were uploaded. | keep | — | |
@@ -462,7 +464,7 @@ under two names on those two screens, `lock: anchored` from the product and `loc
 from the reader, reads as two outcomes, which is what §5's rule of one concept, one name exists to
 stop. So wherever these two surfaces present a concept the reader tool's output presents, they
 follow §5 and this section: *Timestamps*, *Timestamp coverage*, *timestamp proof*, *time source*,
-*trust anchors you supply*, *timestamped*, *none* and *promised but missing* for the three
+*trust anchors you supply* and *block headers*, *timestamped*, *none* and *promised but missing* for the three
 outcomes, and *the runs* for the record labeled `matrix` (v1.15). The split v1.13 applied to
 refusals applies here: the human text follows §5, while `--json` and the result the web card
 receives are contract and keep `anchored`, `absent`, `declared-but-absent`, the raw record labels

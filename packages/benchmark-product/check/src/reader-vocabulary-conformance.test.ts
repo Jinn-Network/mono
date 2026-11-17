@@ -379,8 +379,9 @@ const OTHER_SENSES: readonly { readonly phrase: RegExp; readonly surfaces: "all"
   // tool never names the page, so there "report" in either case is the record.
   { phrase: /(?<![A-Za-z])report(?![A-Za-z])/gu, surfaces: "report assets", ruling: "4.1 Colophon report" },
   // Section 4.2 keeps "present rather than verified" in usage() and uses "verify" for checking an
-  // RFC 3161 or OpenTimestamps proof against supplied trust anchors ("do not verify this timestamp
-  // proof"), which is a cryptographic signature/time check, not recomputing the bundle's checks.
+  // RFC 3161 or OpenTimestamps proof against supplied trust anchors or block headers ("do not
+  // verify this timestamp proof"), which is a cryptographic signature/time check, not recomputing
+  // the bundle's checks.
   { phrase: /\bdo\s+not\s+verify\s+this\s+timestamp\s+proof\b/giu, surfaces: "all", ruling: "4.2 Trust material / timestamp proof" },
 ];
 

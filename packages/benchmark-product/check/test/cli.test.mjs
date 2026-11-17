@@ -94,9 +94,11 @@ test("usage exits 2 and states the exit contract", async () => {
   assert.match(result.stderr, /Protocol identifiers the protocol spec release serves resolve to their\ndocuments; the rest are names, not addresses/);
   assert.doesNotMatch(result.stderr, /Protocol identifiers are names/);
   assert.match(result.stderr, /platform bytes installed from npm/);
-  // The reader's words for what the caller supplies and what it checks: trust anchors and
-  // timestamp proofs, not "trust material" or a bare "anchor" (reader-facing vocabulary §4.2).
-  assert.match(result.stderr, /Trust anchors are yours, not the bundle's: with none supplied a well-formed\ntimestamp proof reports present rather than verified/);
+  // The reader's words for what the caller supplies and what it checks: trust anchors, block
+  // headers and timestamp proofs, not "trust material" or a bare "anchor" (reader-facing
+  // vocabulary §4.2, v1.16: the notes name block headers apart from trust anchors, so the usage
+  // text names both).
+  assert.match(result.stderr, /Trust anchors and block headers are yours, not the bundle's: with none supplied\nfor its time source, a well-formed timestamp proof reports present rather than\nverified, and none ships with this tool\./);
   assert.doesNotMatch(result.stderr, /[Tt]rust material/);
   assert.doesNotMatch(result.stderr, /well-formed anchor/);
   assert.doesNotMatch(result.stderr, /jinn\.network/);
