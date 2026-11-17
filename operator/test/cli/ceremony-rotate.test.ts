@@ -1015,6 +1015,171 @@ describe('ceremony join after a rotation', () => {
     unchanged();
   });
 
+  /**
+   * The run receipt after the walk above, up to the later join: the solver keys were bound under the
+   * first anchor, which only `earlierAnchors` records, and every other record of their rotation is gone.
+   */
+  async function rotatedThenJoinedElsewhere(): Promise<{ readonly h: Harness; readonly receipt: Record<string, unknown> }> {
+    const h = await provisioned();
+    const rotation = await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
+    expect(rotation.kind).toBe('ceremony_rotate_complete');
+    const joined = await run(h, joinArgv(h, await secondCatalog(h), 'requester'));
+    expect(joined.kind).toBe('ceremony_join_complete');
+    setSolverRotationAside(h);
+    const receipt = runReceipt(h);
+    expect(receipt.earlierAnchors).toEqual([{ anchorDigest: h.submitted[0]!.digest, catalogPath: h.catalogPath }]);
+    return { h, receipt };
+  }
+
+  /** Moves the solver rotated stores out of `<dir>/identity` and removes `rotation.json`. */
+  function setSolverRotationAside(h: Harness): void {
+    const setAside = join(h.home, 'set-aside');
+    mkdirSync(setAside, { recursive: true });
+    for (const name of readdirSync(join(h.dir, 'identity')).filter((entry) => entry.startsWith('solver.rotated-'))) {
+      renameSync(join(h.dir, 'identity', name), join(setAside, name));
+    }
+    rmSync(join(h.dir, 'ceremony', 'rotation.json'));
+  }
+
+  const runReceiptPath = (h: Harness) => join(h.dir, 'ceremony', 'receipt.json');
+  const runReceipt = (h: Harness) => JSON.parse(readFileSync(runReceiptPath(h), 'utf-8')) as Record<string, unknown>;
+  const earlierAnchorOf = (receipt: Record<string, unknown>) => (receipt.earlierAnchors as Record<string, unknown>[])[0]!;
+
+  /**
+   * Binds requester and solver from `<dir>` into a catalog at a new path, with --config naming a new
+   * file: join into a third operator's catalog, or init sealing one. Returns the refusal and a check
+   * that nothing was opened, anchored or written.
+   */
+  async function bindRequesterAndSolver(h: Harness, verb: 'join' | 'init'): Promise<{
+    readonly refusal: Record<string, unknown>;
+    readonly unchanged: () => void;
+  }> {
+    const freshConfig = join(h.home, 'fresh-config.json');
+    const target = verb === 'join'
+      ? await secondCatalog(h, '.jinn-operator-c')
+      : { path: join(h.home, 'fresh-trust.json'), genesis: '' };
+    const unchangedCatalog = verb === 'join' ? snapshot(h, target.path) : undefined;
+    const opened = storesOpened.length;
+    const sessions = h.calls.filter((call) => call === 'openAnchorSession').length;
+    const submissions = h.submitted.length;
+    const configBytes = readFileSync(h.configPath);
+    const argv = verb === 'join'
+      ? [...joinArgv(h, target, 'requester,solver'), '--config', freshConfig]
+      : [
+        'init', '--dir', h.dir, '--config', freshConfig, '--catalog', target.path, '--role-sets', 'requester,solver',
+        '--authority-store', h.authorityStore, '--execute',
+      ];
+    const refusal = await run(h, argv);
+    return {
+      refusal,
+      unchanged: () => {
+        unchangedCatalog?.();
+        expect(storesOpened).toHaveLength(opened);
+        expect(h.calls.filter((call) => call === 'openAnchorSession')).toHaveLength(sessions);
+        expect(h.submitted).toHaveLength(submissions);
+        expect(readFileSync(h.configPath)).toEqual(configBytes);
+        expect(existsSync(freshConfig)).toBe(false);
+        if (verb === 'init') expect(existsSync(target.path)).toBe(false);
+      },
+    };
+  }
+
+  it.each([
+    ['cannot be parsed', (receipt: Record<string, unknown>) => JSON.stringify(receipt).slice(0, 40)],
+    ['has no agentIri', (receipt: Record<string, unknown>) => JSON.stringify({ ...receipt, agentIri: undefined })],
+    ['has an earlierAnchors that is not a list', (receipt: Record<string, unknown>) =>
+      JSON.stringify({ ...receipt, earlierAnchors: earlierAnchorOf(receipt) })],
+    ['has an earlierAnchors entry whose anchorDigest is not a string', (receipt: Record<string, unknown>) =>
+      JSON.stringify({ ...receipt, earlierAnchors: [{ ...earlierAnchorOf(receipt), anchorDigest: 7 }] })],
+    ['has an earlierAnchors entry whose catalogPath is not a string', (receipt: Record<string, unknown>) =>
+      JSON.stringify({ ...receipt, earlierAnchors: [{ ...earlierAnchorOf(receipt), catalogPath: [String(earlierAnchorOf(receipt).catalogPath)] }] })],
+  ].flatMap(([damage, write]) => (['join', 'init'] as const).map((verb) => [verb, damage, write] as const)))(
+    '%s refuses, naming the file, before any store or anchor, a run receipt that %s (#5377)',
+    async (verb, _damage, write) => {
+      const { h, receipt } = await rotatedThenJoinedElsewhere();
+      writeFileSync(runReceiptPath(h), write(receipt));
+      const damaged = readFileSync(runReceiptPath(h));
+
+      const { refusal, unchanged } = await bindRequesterAndSolver(h, verb);
+
+      expect(refusal.code).toBe('invalid_invocation');
+      expect(refusal.details).toMatchObject({ state: 'run-receipt-unreadable', sideEffects: false });
+      expect(String(refusal.message)).toContain(runReceiptPath(h));
+      unchanged();
+      // Refused rather than rewritten: a later run cannot drop what the damaged file held.
+      expect(readFileSync(runReceiptPath(h))).toEqual(damaged);
+    },
+  );
+
+  it.each(['join', 'init'] as const)(
+    '%s refuses a family a rotation retired before a re-author that took the fresh anchor as the runbook describes (#5377)',
+    async (verb) => {
+      // init binds requester, admission and solver into catalog A, under one anchor; rotate retires solver.
+      const h = await provisioned();
+      const rotation = await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
+      expect(rotation.kind).toBe('ceremony_rotate_complete');
+      // The re-author of the families no rotation touched, taking the fresh anchor as
+      // docs/runbooks/native-trust-reauthor.md describes: catalog A moved aside, the run receipt left
+      // in place.
+      const previousPath = join(h.home, 'trust.previous.json');
+      renameSync(h.catalogPath, previousPath);
+      const reauthor = await run(h, [
+        'init', '--dir', h.dir, '--role-sets', 'requester,admission', '--authority-store', h.authorityStore,
+        '--previous-catalog', previousPath, '--fresh-anchor', '--execute',
+      ]);
+      expect(reauthor.kind).toBe('ceremony_init_complete');
+      // The new catalog A carries the revoked solver bindings, under the first anchor, which the run
+      // receipt still records.
+      expect(runReceipt(h).earlierAnchors).toEqual([{ anchorDigest: h.submitted[0]!.digest, catalogPath: h.catalogPath }]);
+      setSolverRotationAside(h);
+
+      const { refusal, unchanged } = await bindRequesterAndSolver(h, verb);
+
+      expect(refusal.code).toBe('invalid_invocation');
+      expect(refusal.details).toMatchObject({ state: 'rotated-family', sideEffects: false, families: ['solver'] });
+      expect(String(refusal.message)).toContain(`${h.catalogPath} revokes the solver keys`);
+      unchanged();
+    },
+  );
+
+  it('takes a fresh anchor on --fresh-anchor for the key set the run receipt names, keeping every anchor it records (#5377)', async () => {
+    // init binds into catalog A under one anchor; a join of requester alone into catalog B, under a
+    // second anchor, is the one the run receipt names.
+    const h = await provisioned();
+    const second = await secondCatalog(h);
+    const joined = await run(h, joinArgv(h, second, 'requester'));
+    expect(joined.kind).toBe('ceremony_join_complete');
+    const [first, , joinAnchor] = h.submitted;
+    expect(runReceipt(h)).toMatchObject({ anchorDigest: joinAnchor!.digest, catalogPath: second.path });
+    const previousPath = join(h.home, 'trust.previous.json');
+    renameSync(h.catalogPath, previousPath);
+    const submissions = h.submitted.length;
+
+    // A re-author of requester alone recomputes the anchor the run receipt names, which init would reuse.
+    const result = await run(h, [
+      'init', '--dir', h.dir, '--role-sets', 'requester', '--authority-store', h.authorityStore,
+      '--previous-catalog', previousPath, '--fresh-anchor', '--execute',
+    ]);
+
+    expect(result).toMatchObject({ kind: 'ceremony_init_complete', anchorReused: false, anchorDigest: joinAnchor!.digest });
+    expect(h.submitted).toHaveLength(submissions + 1);
+    const fresh = h.submitted[submissions]!;
+    expect(fresh.digest).toBe(joinAnchor!.digest);
+    expect(runReceipt(h)).toMatchObject({
+      anchorDigest: joinAnchor!.digest,
+      anchorTransactionHash: fresh.transactionHash,
+      catalogPath: h.catalogPath,
+      earlierAnchors: [
+        { anchorDigest: first!.digest, catalogPath: h.catalogPath },
+        { anchorDigest: joinAnchor!.digest, catalogPath: second.path },
+      ],
+    });
+    const help = createCeremonyCommand(h.deps).helpText.replace(/\s+/gu, ' ');
+    expect(help).toContain('--fresh-anchor');
+    expect(help).toContain('A catalog no longer at the path the run receipt records is not read');
+    expect(help).toContain('Moving the run receipt aside drops every anchor it records');
+  });
+
   it('keeps, for every role family, a role whose scope no other family holds, which is how a revoked binding names it', () => {
     const scopeOf = (role: NativeRoleIdentityRole): string => [...scopeForRole(role)].sort().join(' ');
     const families = Object.keys(ROLE_SETS) as RoleSetName[];
