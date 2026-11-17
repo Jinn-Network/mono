@@ -9,7 +9,7 @@
  * bindings under a fresh anchor (`rebindRoles`), then the voucher account's revocation of the
  * retired bindings under the act's `revocation-anchor/v1` anchor (`planRevocation`, `revokeBinding`).
  */
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rename, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -322,5 +322,50 @@ describe('a rotated role key over a real catalog (#5236)', () => {
     await expect(trust.verifyRoleBinding({
       role: 'admission', key: replacement!.keyId, agent: ADMISSION_AGENT, family: 'https://spec.jinn.network/trust-scopes/admission-receipts/v1', atTime: late.anchorTime,
     })).rejects.toThrow(/consent-chain-violation/u);
+  });
+
+  it('keeps the retired key refused in a catalog re-authored from the rotated one (#5308)', async () => {
+    const operator = await genesis();
+    const retired = bindingsOf(operator.bindings, SOLVER_ROLES);
+    const successor = await rebind(operator, { family: 'solver', agent: AGENT, roles: SOLVER_ROLES, blockSeconds: 1_786_000_600 });
+    const revokedAt = await revoke(operator, { targets: retired.map(({ digest }) => digest), blockSeconds: 1_786_001_200 });
+
+    // The re-author: the catalog moved aside, then sealed again on the genesis anchor, as `init`
+    // does when its receipt lets it reuse that anchor. It binds the families the rotation left alone.
+    const previousCatalogPath = join(operator.root, 'trust.previous.json');
+    await rename(operator.catalogPath, previousCatalogPath);
+    const genesisAnchor = operator.anchors[0]!;
+    const kept = [
+      ...await authorFamily({ storePath: operator.stores.requester, agent: AGENT, roles: REQUESTER_ROLES, anchor: genesisAnchor }),
+      ...await authorFamily({ storePath: operator.stores.admission, agent: ADMISSION_AGENT, roles: ADMISSION_ROLES, anchor: genesisAnchor }),
+    ];
+    const { policyGenesisDigest, carriedRevocations } = await authorCatalog({
+      path: operator.catalogPath,
+      authority: await openCatalogAuthority({ storePath: join(operator.root, 'authority.enc.json'), password: PASSWORD, create: true }),
+      purposes: completePolicyPurposes({
+        roleAgents: [...kept, ...retired].map(({ role, agent }) => ({ role, agent })),
+        evaluatorAgents: [AGENT],
+      }),
+      refreshBy: REFRESH_BY,
+      bindings: kept,
+      anchors: [genesisAnchor.declaration],
+      previousCatalogPath,
+    });
+    expect(carriedRevocations).toHaveLength(SOLVER_ROLES.length);
+    const trust = await open({ ...operator, policyGenesisDigest }, revokedAt);
+
+    const retiredDelivery = retired.find(({ role }) => role === 'solver-delivery')!;
+    await expect(trust.verifyRoleBinding({
+      role: 'solver-delivery', key: retiredDelivery.keyId, agent: AGENT, family: 'deliveries', atTime: revokedAt,
+    })).rejects.toThrow(/revoked/u);
+    // The carried revocation is the voucher's own record, so it is still not retroactive.
+    await expect(trust.verifyRoleBinding({
+      role: 'solver-delivery', key: retiredDelivery.keyId, agent: AGENT, family: 'deliveries', atTime: successor.at,
+    })).resolves.toMatchObject({ bindingDigest: retiredDelivery.digest });
+    // The re-authored families verify.
+    const requesterSubmission = kept.find(({ role }) => role === 'requester-submission')!;
+    await expect(trust.verifyRoleBinding({
+      role: 'requester-submission', key: requesterSubmission.keyId, agent: AGENT, family: 'authorizations', atTime: revokedAt,
+    })).resolves.toEqual({ bindingDigest: requesterSubmission.digest });
   });
 });

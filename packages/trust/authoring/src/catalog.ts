@@ -14,6 +14,7 @@ import { link, open as openFile, readFile, rename, unlink } from "node:fs/promis
 import { dirname } from "node:path";
 import { randomBytes } from "node:crypto";
 import {
+  canonicalJsonBytes,
   didPkh,
   isCalendarStrictRfc3339,
   recordDigest,
@@ -188,8 +189,102 @@ function assertLawThreePurposes(purposes: TrustPolicy["purposes"]): void {
 }
 
 /**
+ * What a re-authored catalog keeps from the catalog it replaces: every revocation, with the binding it
+ * names and every anchor either one references, all VERBATIM. A revocation is its voucher account's
+ * signature and takes effect at its anchor's block time, so a re-sealed or re-anchored copy would be
+ * a different act, and a catalog without it binds the key it retired again. The named binding is kept
+ * because a revocation reaches a key only through the record it names.
+ */
+export interface CarriedRevocations {
+  readonly revocations: readonly { readonly digest: string; readonly envelope: string }[];
+  readonly bindings: readonly Record<string, unknown>[];
+  readonly anchors: readonly AnchorDeclaration[];
+  /** The key and Agent each carried revocation retires, where the catalog holds the binding it names. */
+  readonly retired: readonly {
+    readonly revocation: string;
+    readonly agent: string;
+    readonly keyId: string;
+    readonly effectiveFrom: string;
+  }[];
+}
+
+/**
+ * Reads what `authorCatalog` carries from the catalog at `catalogPath`, and refuses, naming it, any
+ * revocation it could not carry intact. A re-author calls it, with `assertNoRetiredKeyBound`, before
+ * it spends gas on an anchor; `authorCatalog` reads the file again rather than trusting a set handed
+ * to it.
+ */
+export async function revocationsToCarry(catalogPath: string): Promise<CarriedRevocations> {
+  const { file } = await loadCatalog(catalogPath);
+  const bindings = catalogBindings(file);
+  const anchors = new Map<string, AnchorDeclaration>();
+  const carriedBindings = new Map<string, Record<string, unknown>>();
+  const retired: CarriedRevocations["retired"][number][] = [];
+  for (const entry of file.revocations) {
+    const report = validateRevocation(new Uint8Array(Buffer.from(entry.envelope, "base64")));
+    if (!report.conforms || report.value === undefined) {
+      throw new TrustAuthoringError(`trust catalog revocation ${entry.digest} is not a conforming sealed Revocation`);
+    }
+    const revocation = report.value;
+    const target = bindings.findIndex(({ digest }) => digest === revocation.target);
+    const named = target === -1 ? undefined : bindings[target]!;
+    for (const { digest } of [...revocation.anchors, ...(named?.binding.anchors ?? [])]) {
+      const declared = file.anchors.find((anchor) => anchor.digest === digest);
+      if (declared === undefined) {
+        throw new TrustAuthoringError(
+          `revocation ${entry.digest} in ${catalogPath} relies on anchor ${digest}, which that catalog does not `
+            + "declare, so it cannot be carried; a catalog without it would bind the key it retired again",
+        );
+      }
+      anchors.set(digest, declared);
+    }
+    if (named !== undefined) {
+      // `catalogBindings` keeps the file's order, so the parsed index is the raw entry's.
+      carriedBindings.set(named.digest, file.bindings[target]!);
+      retired.push({
+        revocation: entry.digest,
+        agent: named.binding.agent,
+        keyId: named.binding.key.didKey,
+        effectiveFrom: revocation.effectiveFrom,
+      });
+    }
+  }
+  return {
+    revocations: [...file.revocations],
+    bindings: [...carriedBindings.values()],
+    anchors: [...anchors.values()],
+    retired,
+  };
+}
+
+/**
+ * Refuses, naming the revocation, a re-author that binds a key a carried revocation retired, for the
+ * same Agent. That is the retired key binding again, and beside the carried record it would be a
+ * second binding of one key to one Agent, which the catalog opener refuses as a conflict.
+ */
+export function assertNoRetiredKeyBound(
+  carried: CarriedRevocations,
+  keys: readonly { readonly agent: string; readonly keyId: string }[],
+): void {
+  for (const key of keys) {
+    const retired = carried.retired.find(({ agent, keyId }) => agent === key.agent && keyId === key.keyId);
+    if (retired !== undefined) {
+      throw new TrustAuthoringError(
+        `revocation ${retired.revocation} retired key ${key.keyId} for ${key.agent} from ${retired.effectiveFrom}; `
+          + "a re-authored catalog carries that revocation and must not bind the key again",
+      );
+    }
+  }
+}
+
+/**
  * Seals the genesis policy and writes the catalog. Refuses to overwrite an existing path: a second
  * genesis at the same location would strand every pin that named the first one.
+ *
+ * A re-author names the catalog it replaces as `previousCatalogPath`, and the new catalog carries
+ * every revocation that one held (`revocationsToCarry`). It refuses, writing nothing, when one cannot
+ * be carried intact, when `anchors` declares an anchor a carried record relies on differently (that
+ * would move the record's time), and when a binding binds a key a carried revocation retired.
  */
 export async function authorCatalog(input: {
   readonly path: string;
@@ -199,7 +294,14 @@ export async function authorCatalog(input: {
   readonly bindings: readonly SealedBindingEntry[];
   readonly anchors: readonly AnchorDeclaration[];
   readonly signerSet?: SignerSet;
-}): Promise<{ readonly policyGenesisDigest: `sha256:${string}`; readonly newestPolicyVersion: number }> {
+  /** The catalog this one replaces, moved aside for a re-author. */
+  readonly previousCatalogPath?: string;
+}): Promise<{
+  readonly policyGenesisDigest: `sha256:${string}`;
+  readonly newestPolicyVersion: number;
+  /** The digests of the revocations carried from `previousCatalogPath`, in its order. */
+  readonly carriedRevocations: readonly string[];
+}> {
   const bindings = dedupeByDigest(input.bindings);
   if (bindings.length === 0) throw new TrustAuthoringError("a trust catalog requires at least one binding");
   if (input.anchors.length === 0) throw new TrustAuthoringError("a trust catalog requires at least one anchor");
@@ -208,6 +310,23 @@ export async function authorCatalog(input: {
   for (const binding of bindings) {
     if (!input.anchors.some(({ digest }) => digest === binding.anchorDigest)) {
       throw new TrustAuthoringError(`binding ${binding.digest} references undeclared anchor ${binding.anchorDigest}`);
+    }
+  }
+
+  const carried: CarriedRevocations = input.previousCatalogPath === undefined
+    ? { revocations: [], bindings: [], anchors: [], retired: [] }
+    : await revocationsToCarry(input.previousCatalogPath);
+  assertNoRetiredKeyBound(carried, bindings);
+  const anchors = [...input.anchors];
+  for (const declaration of carried.anchors) {
+    const declared = anchors.find(({ digest }) => digest === declaration.digest);
+    if (declared === undefined) {
+      anchors.push(declaration);
+    } else if (!Buffer.from(canonicalJsonBytes(declared)).equals(canonicalJsonBytes(declaration))) {
+      throw new TrustAuthoringError(
+        `anchor ${declaration.digest} is declared differently than in ${input.previousCatalogPath!}; carrying the `
+          + "revocations and bindings that rely on it would move their time",
+      );
     }
   }
 
@@ -225,12 +344,16 @@ export async function authorCatalog(input: {
     format: NATIVE_TRUST_CATALOG_FORMAT,
     policyGenesisDigest: sealed.recordDigest,
     policies: [{ digest: sealed.recordDigest, envelope: b64(sealed.envelopeBytes) }],
-    anchors: [...input.anchors],
-    bindings: bindings.map(bindingEntry),
-    revocations: [],
+    anchors,
+    bindings: [...bindings.map(bindingEntry), ...carried.bindings],
+    revocations: [...carried.revocations],
   };
   await writeExclusive(input.path, JSON.stringify(catalog));
-  return { policyGenesisDigest: sealed.recordDigest, newestPolicyVersion: 1 };
+  return {
+    policyGenesisDigest: sealed.recordDigest,
+    newestPolicyVersion: 1,
+    carriedRevocations: carried.revocations.map(({ digest }) => digest),
+  };
 }
 
 /**

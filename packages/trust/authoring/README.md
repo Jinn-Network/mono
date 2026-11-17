@@ -32,6 +32,11 @@ The dependency direction is one-way: `authoring` depends on `core`; `resolve` ne
 - **Catalog** — `authorCatalog` (genesis, refuses to overwrite), `appendOperator` (late join:
   append + hash-linked policy successor, genesis digest unchanged), `sealPolicySuccessor` (refresh
   and authority rotation).
+- **Re-authoring**: `authorCatalog` given `previousCatalogPath`, the catalog it replaces, writes every
+  revocation that catalog holds verbatim, with the binding each names and the anchors both reference,
+  so no retired key binds again. It refuses, writing nothing, a revocation it cannot carry intact, an
+  anchor declared differently from the replaced catalog, and a binding of a key a carried revocation
+  retired. `revocationsToCarry` and `assertNoRetiredKeyBound` run the same checks before an anchor.
 - **Role key rotation**: two acts, each under its own fresh anchor, in this order. `rebindRoles`
   appends replacement bindings for new keys, authored by `authorRoleBinding` under the same voucher.
   Then `planRevocation` checks the voucher can revoke the retiring bindings and names the act's

@@ -37,6 +37,7 @@ import { randomUUID } from 'node:crypto';
 import {
   anchorDeclaration,
   appendOperator,
+  assertNoRetiredKeyBound,
   authorCatalog,
   authorRoleBinding,
   completePolicyPurposes,
@@ -46,9 +47,11 @@ import {
   performEoaCeremony,
   planRevocation,
   rebindRoles,
+  revocationsToCarry,
   revokeBinding,
   roleBindingTerms,
   type AnchorLocator,
+  type CarriedRevocations,
   type CatalogAuthoritySigner,
   type FinalizedAnchorObservation,
   type NativeRoleIdentityRole,
@@ -93,6 +96,7 @@ const OPTIONS = {
   'anchor-target': { type: 'string' as const },
   'service-index': { type: 'string' as const },
   catalog: { type: 'string' as const },
+  'previous-catalog': { type: 'string' as const },
   genesis: { type: 'string' as const },
   store: { type: 'string' as const },
   'finality-timeout-ms': { type: 'string' as const },
@@ -375,6 +379,48 @@ function recordedLocator(locator: AnchorLocator | undefined): AnchorLocator | un
     // binding's `validFrom` verbatim, so a resume without it would author a different catalog.
     && typeof locator.anchorTime === 'string' && locator.anchorTime.length > 0;
   return ok ? locator : undefined;
+}
+
+/**
+ * `--previous-catalog`: the catalog a re-author replaces, moved aside so `init` can seal the new one
+ * at the same path. Read before anything is minted or anchored, so a catalog whose revocations cannot
+ * be carried refuses before gas is spent.
+ */
+async function resolvePreviousCatalog(
+  ctx: CommandContext,
+  parsed: Parsed,
+): Promise<{ readonly path: string; readonly carried: CarriedRevocations } | undefined> {
+  const raw = parsed.values['previous-catalog'];
+  if (raw === undefined) return undefined;
+  const path = raw.startsWith('~/') ? join(ctx.env.HOME ?? homedir(), raw.slice(2)) : raw;
+  if (!isAbsolute(path)) invalid(ctx, `--previous-catalog must be an absolute path, got "${raw}"`);
+  try {
+    return { path, carried: await revocationsToCarry(path) };
+  } catch (cause) {
+    return invalid(
+      ctx,
+      `the previous catalog at ${path} cannot be carried forward: ${cause instanceof Error ? cause.message : String(cause)}`,
+      'Pass the catalog this re-author replaces, unchanged since it was moved aside.',
+    );
+  }
+}
+
+/**
+ * Why this `init` replaces a catalog, or `undefined`. A catalog sealed in its place without
+ * `--previous-catalog` would drop every revocation the replaced one holds, and each key they retired
+ * would bind again. The run receipt shows this operator sealed a catalog at this path; the rotation
+ * receipt shows it revoked keys in one.
+ */
+function replacedCatalogEvidence(dir: string, catalogPath: string): string | undefined {
+  const receipt = readReceipt(dir);
+  if (receipt?.catalogPath === catalogPath && typeof receipt.policyGenesisDigest === 'string') {
+    return `${receiptPath(dir)} records that this operator sealed a catalog at ${catalogPath} `
+      + `(genesis ${receipt.policyGenesisDigest})`;
+  }
+  if (existsSync(rotationReceiptPath(dir))) {
+    return `${rotationReceiptPath(dir)} records a key rotation, whose revocations the replaced catalog holds`;
+  }
+  return undefined;
 }
 
 function readConfigObject(configPath: string): Record<string, unknown> {
@@ -811,7 +857,7 @@ function emitCompletion(ctx: CommandContext, parsed: Parsed, value: Record<strin
         kind: string; dir: string; agentIri: string; admissionAgent?: string; catalogPath: string;
         policyGenesisDigest: string; anchorTransactionHash: string; anchorReused: boolean;
         validFrom: string; storesCreated: string[]; bindings: { role: string; keyId: string }[];
-        warnings: string[]; nextSteps: string[];
+        carriedRevocations?: string[]; warnings: string[]; nextSteps: string[];
       };
       return [
         `jinn ceremony ${v.kind === 'ceremony_init_complete' ? 'init' : 'join'} — COMPLETE`,
@@ -823,6 +869,9 @@ function emitCompletion(ctx: CommandContext, parsed: Parsed, value: Record<strin
         `genesis digest      ${v.policyGenesisDigest}`,
         `anchor tx           ${v.anchorTransactionHash}${v.anchorReused ? ' (reused from a previous run)' : ''}`,
         `validFrom           ${v.validFrom}`,
+        ...(v.carriedRevocations === undefined || v.carriedRevocations.length === 0
+          ? []
+          : [`revocations carried ${v.carriedRevocations.length}`]),
         '',
         'bindings',
         ...v.bindings.map((binding) => `  ${binding.role.padEnd(24)} ${binding.keyId}`),
@@ -904,6 +953,8 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
     }, { writer: ctx.writer, exit: ctx.exit });
   }
 
+  const previous = await resolvePreviousCatalog(ctx, parsed);
+
   const writeBackPlan = planNativeIdentityWriteBack({
     configPath: plan.configPath,
     values: {
@@ -936,6 +987,9 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
         catalogPath: plan.catalogPath,
         anchorTarget: plan.anchorTarget,
         identityStores: plan.identityStores,
+        ...(previous === undefined
+          ? {}
+          : { previousCatalogPath: previous.path, revocationsCarried: previous.carried.revocations.length }),
         passwordSource: password.source,
         warnings: password.warnings,
         configWriteBack: writeBackPlan,
@@ -943,6 +997,9 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
       },
       (value) => humanPlan(plan, 'init', [
         `password source     ${(value as { passwordSource: string }).passwordSource}`,
+        ...(previous === undefined
+          ? []
+          : [`previous catalog    ${previous.path} (${previous.carried.revocations.length} revocations carried)`]),
         `config keys         ${writeBackPlan.written.join(', ')}`,
         ...(writeBackPlan.outstanding.length === 0
           ? []
@@ -979,8 +1036,62 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
       details: { feature: 'ceremony', state: 'catalog-exists', sideEffects: false },
     }, { writer: ctx.writer, exit: ctx.exit });
   }
+  const replaced = previous === undefined ? replacedCatalogEvidence(plan.dir, plan.catalogPath) : undefined;
+  if (replaced !== undefined) {
+    return emitEnvelope({
+      code: 'invalid_invocation',
+      message: `this init would replace a catalog: ${replaced}. Sealed without it, the new catalog would drop every `
+        + 'revocation the replaced one holds, and each key they retired would bind again.',
+      hint: 'Pass the replaced catalog as --previous-catalog <path>, the file as it was when moved aside, and init '
+        + 'carries its revocations into the new one.',
+      exampleCli: EXAMPLE_CLI,
+      details: { feature: 'ceremony', state: 'previous-catalog-required', sideEffects: false },
+    }, { writer: ctx.writer, exit: ctx.exit });
+  }
 
   const { signers, authority, created } = await mintCustody({ plan, password: password.password });
+  if (previous !== undefined) {
+    // Before any anchor: a carried revocation retired one of these keys, so the new catalog could
+    // only bind it again beside the revoked record.
+    try {
+      assertNoRetiredKeyBound(
+        previous.carried,
+        [...signers.values()].map(({ role, keyId }) => ({ agent: agentForRole(plan, role), keyId })),
+      );
+    } catch (cause) {
+      return emitEnvelope({
+        code: 'invalid_invocation',
+        message: cause instanceof Error ? cause.message : String(cause),
+        hint: `init binds the keys in ${join(plan.dir, 'identity')}/<family>.enc.json, and after \`jinn ceremony rotate\` `
+          + 'those stores hold the keys it retired, not the ones identityStores names. A rotated family cannot be '
+          + 're-authored by init.',
+        exampleCli: EXAMPLE_CLI,
+        details: { feature: 'ceremony', state: 'retired-key-bound', sideEffects: created.length > 0 },
+      }, { writer: ctx.writer, exit: ctx.exit });
+    }
+  }
+
+  // After `jinn ceremony rotate`, identityStores names the rotated store, while the store init opens
+  // still holds the keys that rotation retired. Refused whatever --previous-catalog names: a copy
+  // older than the rotation holds none of its revocations, so nothing later would catch it.
+  const configured = readConfigObject(plan.configPath).identityStores;
+  const rotatedFamilies = plan.roleSets.filter((family) => {
+    const named = configured !== null && typeof configured === 'object'
+      ? (configured as Record<string, unknown>)[family]
+      : undefined;
+    return typeof named === 'string' && named !== storePathFor(plan.dir, family);
+  });
+  if (rotatedFamilies.length > 0) {
+    return emitEnvelope({
+      code: 'invalid_invocation',
+      message: `${plan.configPath} names a different store than init would open for ${rotatedFamilies.join(', ')}: `
+        + `after \`jinn ceremony rotate\`, ${join(plan.dir, 'identity')}/<family>.enc.json holds the keys it retired, `
+        + 'and init would bind them again.',
+      hint: 'A rotated family cannot be re-authored by init.',
+      exampleCli: EXAMPLE_CLI,
+      details: { feature: 'ceremony', state: 'rotated-family', sideEffects: created.length > 0 },
+    }, { writer: ctx.writer, exit: ctx.exit });
+  }
 
   // §6 law 1 — the anchor goes first, and its block time is the only correct `validFrom`.
   const anchorDigest = ceremonyAnchorDigest({
@@ -1051,7 +1162,7 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
       anchorDigest,
     });
 
-    const { policyGenesisDigest } = await authorCatalog({
+    const { policyGenesisDigest, carriedRevocations } = await authorCatalog({
       path: plan.catalogPath,
       authority,
       // §6 law 3 completeness: every native:<role>, BOTH admission spellings, and
@@ -1062,6 +1173,7 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
       refreshBy: refreshByFrom(validFrom),
       bindings: [...bindings],
       anchors: [anchorDeclaration(anchorDigest, locator)],
+      ...(previous === undefined ? {} : { previousCatalogPath: previous.path }),
     });
 
     // Stage 2: the catalog is sealed. Recorded BEFORE the config write so that a crash between the
@@ -1104,6 +1216,7 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
       anchorTransactionHash: locator.transactionHash,
       anchorReused: reusedAnchor !== undefined,
       validFrom,
+      carriedRevocations,
       storesCreated: created,
       bindings: bindings.map(({ role, agent, keyId }) => ({ role, agent, keyId })),
       configWriteBack: writeResult,
@@ -2055,6 +2168,13 @@ Status:
   it REUSES that anchor and those IRIs rather than minting a second identity and spending gas twice.
   After the catalog is sealed, a re-run refuses instead, and names the config keys still outstanding.
 
+  RE-AUTHORING. To seal a catalog again over the same directory, move it aside and run init with
+  --previous-catalog <where it went>. Every revocation it holds is carried into the new catalog
+  verbatim, with the binding each names and the anchors both reference, so a retired key stays
+  retired. Without the flag, init refuses once its receipt shows it sealed a catalog at --catalog or
+  <dir>/ceremony/rotation.json exists. With it, init refuses, before any anchor, to bind a key a
+  carried revocation retired, which is what it would do for a family \`rotate\` replaced.
+
   \`rotate\` retires every key of the named role families for an operator init or join already
   provisioned, for instance after a key leaks. A family's keys share one store, so the family is the
   unit: rotate mints a new store, binds its keys under a fresh anchor, points identityStores at the
@@ -2079,6 +2199,7 @@ Options (init, join, and rotate; rotate takes no --authority-store or --genesis)
                              Never an operator role key: policy-update capability must survive any
                              operator's key rotation.
   --catalog <path>           Trust catalog path (default <dir>/trust.json; required for join)
+  --previous-catalog <path>  init only: the catalog a re-author replaces (see RE-AUTHORING above)
   --genesis <digest>         join only: the sha256 genesis digest init printed. The pin is what makes
                              a join a join rather than an unnoticed fork onto a different catalog.
   --rpc-url <url>            Base Sepolia RPC (defaults to the configured chain)
