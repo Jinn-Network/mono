@@ -13,6 +13,7 @@ import {
   compareCalendarStrictRfc3339Instants,
   compareCodeUnitStrings,
   isCalendarStrictRfc3339,
+  matchSafeCeremony,
   parseSignedRecordEnvelope,
   recordDigest,
   verifyEoaCeremony,
@@ -131,9 +132,10 @@ export interface CreateBindingResolverOptions {
    * question more than 64 times ends as an outage (`TrustResolveError`, `RESOLUTION_FAILED`). */
   readonly compositionAuthority?: Pick<BindingAuthorityDeps, "dsseVerifier" | "witnessVerifier">;
   /** §7.5 step 3 for the ceremonies nothing in this package can verify:
-   * `safe` (this resolver holds no witness verifier; `verify.ts` checks the
-   * record's message and witness again, with the verifier its caller injects),
-   * `oidc-machine` (anchored JWKS) and `github-human`. A host that
+   * `safe` (this resolver holds no witness verifier, so it asks here only
+   * about a record whose message and witness statement it has checked as
+   * `verify.ts` does, and `verify.ts` checks them again, with the verifier its
+   * caller injects), `oidc-machine` (anchored JWKS) and `github-human`. A host that
    * can verify them says so here, record by record. Omit it and those
    * bindings simply fail to resolve: `verify.ts` takes a resolved binding as
    * this resolver's word that its ceremony was checked. A record the leg cannot
@@ -153,12 +155,10 @@ export interface CreateBindingResolverOptions {
   /** The deployment's choice under the ceremony currency text,
    * `https://spec.jinn.network/profiles/ceremony-currency/v1`. Omit it and the
    * text is not applied: every ceremony is checked as before it. Supply it and
-   * an `eoa` ceremony must also hold under the text at its record's effective
-   * start, here and, because each resolved binding carries this profile, in
-   * `verify.ts`. A `termsCutover` must be readable and needs `requireAnchors`,
-   * since only an anchor fixes the effective start. Here a `safe` ceremony is
-   * the host's leg: a host that verifies one in `verifyHostedCeremony` applies
-   * the text there, and `verify.ts` applies it to the record's message again. */
+   * an `eoa` or `safe` ceremony must also hold under the text at its record's
+   * effective start, here and, because each resolved binding carries this
+   * profile, in `verify.ts`. A `termsCutover` must be readable and needs
+   * `requireAnchors`, since only an anchor fixes the effective start. */
   readonly ceremonyCurrency?: CeremonyCurrencyProfile;
   /** Observability seam for §7.3's "the conflict is surfaced to policy" --
    * `trust-resolve` has no policy layer of its own. */
@@ -326,19 +326,47 @@ function parseCaip19ChainId(caip19: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
+/** The offline part of a `safe` ceremony (§7.2, §7.2a), as `verify.ts` checks it: the record commits to
+ * the Safe ceremony it carries, the witness says it checked the voucher's Safe on the voucher's chain
+ * for the hash of those exact bytes, and the message names this record's Agent and key on the
+ * profile's domain and URI (`matchSafeCeremony`). Under the ceremony currency text it must also hold
+ * at the record's effective start. Whether to believe the witness is not decided here. */
+function safeCeremonyMatches(
+  { record, effectiveStart }: EffectiveBinding,
+  currency: CeremonyCurrencyProfile | undefined,
+): boolean {
+  const { ceremonyEvidence: evidence, witness } = record;
+  try {
+    return evidence?.type === "safe"
+      && witness !== undefined
+      && ceremonyEvidenceDigest(evidence) === record.binding.ceremony.digest
+      && matchSafeCeremony(evidence, witness, record.binding, currency === undefined
+        ? undefined
+        : { profile: currency, effectiveStart }).matches;
+  } catch {
+    return false; // Evidence that cannot be read verifies nothing.
+  }
+}
+
 /** §7.5 step 3, before anything else is asked of a record: whether this
  * package or the host can verify its ceremony at all. `trust-core` verifies
  * `eoa` offline; `agentId` is composition, below, which is keyed on the
- * voucher, so the label must name that voucher or the leg never runs. */
+ * voucher, so the label must name that voucher or the leg never runs. The host
+ * is asked about a `safe` ceremony only once its offline part holds, so a Safe
+ * record never resolves on the host's word alone. */
 async function ceremonyCanBeVerified(
-  record: SealedKeyBindingRecord,
-  verifyHostedCeremony: CreateBindingResolverOptions["verifyHostedCeremony"],
+  entry: EffectiveBinding,
+  { verifyHostedCeremony, ceremonyCurrency }: Pick<CreateBindingResolverOptions, "verifyHostedCeremony" | "ceremonyCurrency">,
 ): Promise<boolean> {
+  const { record } = entry;
   switch (record.binding.ceremony.type) {
     case "eoa":
       return true;
     case "agentId":
       return record.binding.voucher.kind === "agentId";
+    case "safe":
+      if (verifyHostedCeremony === undefined || !safeCeremonyMatches(entry, ceremonyCurrency)) return false;
+      return verifyHostedCeremony(record);
     default:
       return verifyHostedCeremony === undefined ? false : verifyHostedCeremony(record);
   }
@@ -534,7 +562,7 @@ async function ceremonyVerified(
   leg: CompositionLeg,
 ): Promise<boolean> {
   const { record } = entry;
-  if (!(await ceremonyCanBeVerified(record, options.verifyHostedCeremony))) return false;
+  if (!(await ceremonyCanBeVerified(entry, options))) return false;
   if (record.binding.ceremony.type === "eoa" && !eoaCeremonyVerified(entry, options.ceremonyCurrency)) return false;
   return agentIdCompositionHolds(record, atTime, peers, leg);
 }
@@ -704,7 +732,7 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
       if (!isWithinWindow(candidate.record.binding, candidate.effectiveStart, atTime)) continue;
       if (!signedByItsKey(candidate.record)) continue;
       // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
-      if (await ceremonyCanBeVerified(candidate.record, options.verifyHostedCeremony)) forKeyAtTime.push(candidate);
+      if (await ceremonyCanBeVerified(candidate, options)) forKeyAtTime.push(candidate);
     }
     if (forKeyAtTime.length === 0) return null;
 
@@ -718,7 +746,9 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
 
     // §7.3's conflict is between bindings, and a record whose own ceremony fails
     // is not one: it cannot beat a record that verifies, whatever its time. Alone
-    // it still resolves, so that verification can name what failed.
+    // an `eoa` record still resolves, so that verification can name what failed.
+    // A `safe` record whose ceremony fails never gets here: it resolves only on the
+    // host's say-so, and the host is not asked about it.
     const verified = withComposition.filter(
       (candidate) => candidate.record.binding.ceremony.type !== "eoa"
         || eoaCeremonyVerified(candidate, options.ceremonyCurrency),

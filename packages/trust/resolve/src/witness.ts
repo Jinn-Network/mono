@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { parseDsseEnvelope } from "@jinn-network/trust-core";
-import type { Eip1271Witness, WitnessResult, WitnessVerifier } from "@jinn-network/trust-core";
+import { canonicalJsonBytes, parseExactDsseEnvelope } from "@jinn-network/trust-core";
+import type { DsseChainVerifier, Eip1271Witness, WitnessResult, WitnessVerifier } from "@jinn-network/trust-core";
 import { isAddress, isHex, size } from "viem";
 
 import { ERC1271_IS_VALID_SIGNATURE_ABI, ERC1271_MAGIC_VALUE } from "./abis.js";
@@ -18,17 +18,19 @@ import { isReadAnswered } from "./contract-answer.js";
 // injected archive-RPC client -- a real cost, named in the design, and the
 // reason witnesses from policy-accepted verifiers are the practical path.
 //
-// Deliberately deferred, consistent with the finding recorded against
-// `trust-core`'s `policy.ts` (`DsseChainVerifier`, T7): cryptographically
-// verifying the witness envelope's own DSSE signature against its
-// signer's `did:key` is multicodec-aware decode work not implemented
-// anywhere in this tree yet. This module checks envelope well-formedness
-// (decodes, carries at least one signature) and the mandatory content
-// match (structural authenticity) -- not signature authenticity. Trusting
-// a witness's signed content is conditioned entirely on the witness's
-// Agent IRI being in the caller's policy-accepted set, exactly as the
-// design assigns ("witness-verifier acceptability is a §9 policy purpose
-// ... decided by the CALLER"). Flagged as a finding.
+// A statement's `verifier` is whatever its writer put there, so naming an
+// accepted author is not that author's word. Its word is a statement one of
+// its keys signed: the caller says which keys stand for which author
+// (`verifierKeys`) and supplies `trust-core`'s DSSE verifier port
+// (`dsseVerifier`), which this module asks who signed the envelope. The
+// signed bytes are the DSSE pre-authentication encoding of the envelope's
+// `payloadType` and payload, and the payload must be the statement's own
+// RFC 8785 form (`canonicalJsonBytes`, what `sealSignedRecord` writes) inside
+// an envelope `sealDsseEnvelope` wrote byte for byte, so every reader reads
+// one statement from them: a repeated member or a second payload is refused,
+// not resolved by one parser's rule. A statement no key of its accepted
+// author signed has no accepted author, and goes to the archive like any
+// other.
 // ---------------------------------------------------------------------------
 
 /** The decoded shape of a witness statement's DSSE payload (§7.2a). Carries
@@ -47,8 +49,10 @@ export interface WitnessStatementPayload {
 }
 
 /** Structural injection seam for hermetic tests -- a real host wires this
- * to an archive-capable viem client. */
+ * to an archive-capable viem client. `getChainId` is the chain the client's
+ * node serves, as viem's `PublicClient.getChainId` reports it. */
 export interface ArchiveReadClient {
+  getChainId: () => Promise<number>;
   readContract: (args: {
     address: `0x${string}`;
     abi: typeof ERC1271_IS_VALID_SIGNATURE_ABI;
@@ -64,27 +68,39 @@ export interface CreateWitnessVerifierOptions {
    * `verifier-agent` policy-purpose lookup -- `trust-resolve` never makes
    * this decision itself). */
   readonly acceptedVerifiers?: readonly string[];
+  /** The working keys (`did:key`) that stand for each accepted verifier's
+   * Agent IRI, as the caller established them (for example by verifying their
+   * binding to that IRI). A statement naming an accepted verifier is that
+   * verifier's word only when one of these keys signed it. */
+  readonly verifierKeys?: ReadonlyMap<string, readonly string[]>;
+  /** `trust-core`'s DSSE verifier port, asked which keys signed a witness
+   * envelope. Without it no statement is believed on its author's word. */
+  readonly dsseVerifier?: DsseChainVerifier;
   /** Archive re-execution fallback (§7.2a). Omit to fail closed when the
-   * witness author is not policy-accepted. A read no node took throws: that is an
-   * outage, and says nothing about the witness. Anything a node said about the
-   * block and contract the statement chose is an answer. */
+   * witness author is not policy-accepted, or did not sign the statement. A
+   * statement is put only to a client serving the statement's chain. A read
+   * no node took throws, as does a client that cannot say which chain it
+   * serves: that is an outage, and says nothing about the witness. Anything a
+   * node said about the block and contract the statement chose is an answer. */
   readonly archiveClient?: ArchiveReadClient;
 }
 
-function parseWitnessPayload(envelopeBytes: Uint8Array): WitnessStatementPayload | undefined {
-  let decoded;
-  try {
-    decoded = parseDsseEnvelope(envelopeBytes);
-  } catch {
-    return undefined;
-  }
+const UNREADABLE_STATEMENT = "witness envelope does not decode to a signed statement.";
+
+/** The statement a witness envelope carries, or why none can be read. The
+ * envelope must be the bytes `sealDsseEnvelope` writes and its payload the
+ * statement's own RFC 8785 form, so no reader of these bytes reads another
+ * statement from them than the one their signer signed. */
+function parseWitnessPayload(envelopeBytes: Uint8Array): WitnessStatementPayload | string {
+  let payloadBytes: Uint8Array;
   let payload: unknown;
   try {
-    payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(decoded.payloadBytes));
+    ({ payloadBytes } = parseExactDsseEnvelope(envelopeBytes));
+    payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(payloadBytes));
   } catch {
-    return undefined;
+    return UNREADABLE_STATEMENT;
   }
-  if (typeof payload !== "object" || payload === null) return undefined;
+  if (typeof payload !== "object" || payload === null) return UNREADABLE_STATEMENT;
   const candidate = payload as Record<string, unknown>;
   if (
     typeof candidate["chainId"] !== "number"
@@ -96,9 +112,38 @@ function parseWitnessPayload(envelopeBytes: Uint8Array): WitnessStatementPayload
     || typeof candidate["signature"] !== "string"
     || typeof candidate["result"] !== "string"
   ) {
-    return undefined;
+    return UNREADABLE_STATEMENT;
+  }
+  if (!isCanonicalForm(payloadBytes, payload)) {
+    return "witness statement is not its own RFC 8785 serialization.";
   }
   return candidate as unknown as WitnessStatementPayload;
+}
+
+/** Whether `bytes` are `value`'s RFC 8785 form. A repeated member, which
+ * parsers resolve differently, never is. */
+function isCanonicalForm(bytes: Uint8Array, value: unknown): boolean {
+  try {
+    const canonical = canonicalJsonBytes(value);
+    return canonical.length === bytes.length && canonical.every((byte, index) => byte === bytes[index]);
+  } catch {
+    return false;
+  }
+}
+
+/** Whether one of `keys` signed the envelope. What the port cannot read was
+ * signed by no one. */
+function signedByOneOf(
+  dsseVerifier: DsseChainVerifier | undefined,
+  envelopeBytes: Uint8Array,
+  keys: readonly string[] | undefined,
+): boolean {
+  if (dsseVerifier === undefined || keys === undefined) return false;
+  try {
+    return dsseVerifier(envelopeBytes).validSignerKeyids.some((keyid) => keys.includes(keyid));
+  } catch {
+    return false;
+  }
 }
 
 function contentMatches(payload: WitnessStatementPayload, witness: Eip1271Witness): boolean {
@@ -122,11 +167,13 @@ function canBeReexecuted(payload: WitnessStatementPayload): boolean {
 
 /**
  * Builds a `WitnessVerifier` (§7.2a): checks the witness envelope decodes
- * and is signed, and that its content matches the outer `Eip1271Witness`
- * claim (the lifted-witness defense); if the witness's own author is
- * policy-accepted, the witness-attested `isValidSignature` result is
- * trusted directly. Otherwise falls back to archive re-execution when an
- * `archiveClient` is configured, and fails closed when it is not.
+ * to a statement in its exact form, and that its content matches the outer
+ * `Eip1271Witness` claim (the lifted-witness defense); if the witness's own
+ * author is policy-accepted and one of the keys that stand for it signed the
+ * statement, the witness-attested `isValidSignature` result is trusted
+ * directly. Otherwise falls back to archive re-execution on the statement's
+ * chain when an `archiveClient` is configured, and fails closed when it is
+ * not.
  */
 export function createWitnessVerifier(options: CreateWitnessVerifierOptions = {}): WitnessVerifier {
   const acceptedVerifiers = new Set(options.acceptedVerifiers ?? []);
@@ -138,9 +185,7 @@ export function createWitnessVerifier(options: CreateWitnessVerifierOptions = {}
         return { verified: false, reason: "witness cannot be read." };
       }
       const payload = parseWitnessPayload(witness.envelopeBytes);
-      if (payload === undefined) {
-        return { verified: false, reason: "witness envelope does not decode to a signed statement." };
-      }
+      if (typeof payload === "string") return { verified: false, reason: payload };
       if (!contentMatches(payload, witness)) {
         return {
           verified: false,
@@ -148,7 +193,12 @@ export function createWitnessVerifier(options: CreateWitnessVerifierOptions = {}
         };
       }
 
-      if (acceptedVerifiers.has(payload.verifier)) {
+      const accepted = acceptedVerifiers.has(payload.verifier);
+      if (accepted && signedByOneOf(
+        options.dsseVerifier,
+        witness.envelopeBytes,
+        options.verifierKeys?.get(payload.verifier),
+      )) {
         return payload.result === ERC1271_MAGIC_VALUE
           ? { verified: true }
           : {
@@ -160,13 +210,24 @@ export function createWitnessVerifier(options: CreateWitnessVerifierOptions = {}
       if (options.archiveClient === undefined) {
         return {
           verified: false,
-          reason: `witness author "${payload.verifier}" is not policy-accepted, and no archive client is `
-            + "configured for re-execution.",
+          reason: (accepted
+            ? `witness statement is not signed by a key that stands for its author "${payload.verifier}"`
+            : `witness author "${payload.verifier}" is not policy-accepted`)
+            + ", and no archive client is configured for re-execution.",
         };
       }
 
       if (!canBeReexecuted(payload)) {
         return { verified: false, reason: "witness statement cannot be put to the archive." };
+      }
+
+      // Another chain's state says nothing about this statement.
+      const servedChainId = await options.archiveClient.getChainId();
+      if (servedChainId !== payload.chainId) {
+        return {
+          verified: false,
+          reason: `archive client serves chain ${String(servedChainId)}, not the statement's chain ${payload.chainId}.`,
+        };
       }
 
       let magicValue: unknown;

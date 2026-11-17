@@ -1,10 +1,13 @@
 # Native Identity Ceremony — production trust-artifact provisioning
 
-**Version:** 0.11 (a new rotation never takes an existing store as its new one, after issue #5345:
+**Version:** 0.12 (a new rotation never takes an existing store as its new one, after issue #5345:
 §4.5 names the store a rotation mints, refuses (`new-store-exists`) when a file is already at that
-path, as one started in the same second as the last would find, and states that a new rotation
-never skips a family. v0.10 stopped a lost or unreadable rotation receipt from restarting a
-rotation, after issue #5329: §4.5 refuses a `rotation.json` that cannot be read, and a new rotation while another key for
+path, as one started in the same second as the last would find, and states that a new rotation never
+skips a family. v0.11 let a rotation whose receipt was lost after its config repoint be finished,
+after issue #5346: §4.5 adds `--retiring-store`, which names the store that rotation was retiring
+and revokes its keys only when the catalog bears that out, and the `another-key-bound` refusal names
+it. v0.10 stopped a lost or unreadable rotation receipt from restarting a rotation, after issue
+#5329: §4.5 refuses a `rotation.json` that cannot be read, and a new rotation while another key for
 one of its roles is still bound and unrevoked; writes the receipt by temporary file and rename;
 takes each act's block time from the finality read; states that a resumed act also anchors afresh
 when the recorded digest differs; and adds `--resubmit-anchor` for a recorded anchor that never
@@ -1091,8 +1094,8 @@ for every run.
 
 For an operator `init` or `join` already provisioned: `--dir`, `--role-sets <families>`,
 optional `--catalog` (default: the config's `trustRootsPath`), `--rpc-url`, `--anchor-target`,
-`--service-index`, `--finality-timeout-ms`, `--resubmit-anchor` (below), `--dry-run` (default) /
-`--execute`. A family's keys share one store, and a store is never rewritten, so the family is the
+`--service-index`, `--finality-timeout-ms`, `--resubmit-anchor` and `--retiring-store` (below),
+`--dry-run` (default) / `--execute`. A family's keys share one store, and a store is never rewritten, so the family is the
 unit of rotation. No catalog authority is needed: the policy names Agent IRIs, and a rotation keeps
 them.
 
@@ -1129,16 +1132,17 @@ nothing but the mark, rather than rotating the keys it just bound. A receipt wri
 rotate records no retiring stores; it falls back to the config, which that version repointed last,
 so once the config names its new stores that rotation is complete.
 
-A new rotation mints each new store at `<dir>/identity/<family>.rotated-<stamp>.enc.json`, where
-`<stamp>` is the UTC second the run started, and never takes a store it finds there as a new one:
-when a file is already at that path it refuses (`new-store-exists`), before anything is minted or
-anchored, in the plan as well. The stamp is to the second, so a rotation started in the same second
-as the one whose store the config names, which a chain with instant finality allows, names the
-store it is about to retire; after the clock steps back it can name an earlier rotation's store.
-Taken as the new store, either would bind no new key, and the rotation would retire nothing, or
-revoke the keys the config names and point the config at keys a rotation retired. A new rotation
-also never skips a family the way a resumed v0.8 receipt does: it opens the store it retires and
-refuses unless the catalog binds each key there, so it never completes with nothing retired.
+A new rotation without `--retiring-store` (below) mints each new store at
+`<dir>/identity/<family>.rotated-<stamp>.enc.json`, where `<stamp>` is the UTC second the run
+started, and never takes a store it finds there as a new one: when a file is already at that path it
+refuses (`new-store-exists`), before anything is minted or anchored, in the plan as well. The stamp
+is to the second, so a rotation started in the same second as the one whose store the config names,
+which a chain with instant finality allows, names the store it is about to retire; after the clock
+steps back it can name an earlier rotation's store. Taken as the new store, either would bind no new
+key, and the rotation would retire nothing, or revoke the keys the config names and point the config
+at keys a rotation retired. A new rotation also never skips a family the way a resumed v0.8 receipt
+does: it opens the store it retires and refuses unless the catalog binds each key there, so it never
+completes with nothing retired.
 
 From step 5 on, the receipt is the only record of the store being retired, so rotate never reads a
 receipt it cannot use as no rotation. A `rotation.json` that exists but does not parse, or lacks the
@@ -1150,8 +1154,29 @@ and rotating from the config would revoke the keys it bound and leave the ones i
 binding names no role, so a role is matched by its Agent and exact scope, and the keys of the
 config's other stores are set aside first, because roles of different families can share both (the
 discovery roles, the settlement roles). The refusal says to restore the receipt, which the re-run
-then resumes. A resumed rotation is not checked this way: its receipt names both stores, and the
-other key the catalog binds is its own replacement.
+then resumes, or, when it is lost for good, to finish the rotation with `--retiring-store` (below).
+A resumed rotation is not checked this way: its receipt names both stores, and the other key the
+catalog binds is its own replacement.
+
+A receipt lost for good leaves the store being retired where it was: rotate never moves or rewrites
+a store, so it is the one `identityStores` named before that rotation (for a store `init` or `join`
+minted, `<dir>/identity/<family>.enc.json`). `--retiring-store <family>=<path>`, given once for each
+family of `--role-sets`, finishes that rotation from it. The run takes the store each flag names as
+the retiring store and the store `identityStores` names as the new one, so it mints no store. Before
+anything is anchored, and in the plan as well, it refuses (`retiring-store-mismatch`) unless the
+catalog shows what that rotation's rebind left: the named store is not the one the config names,
+every key of the store the config names has a binding the agent EOA has not revoked, and each key of
+the named store was bound, for the same role, earlier than that key. A rotation binds its
+replacement after the key it retires, so the keys it just bound never pass for the ones it was
+retiring. The `another-key-bound` check then runs with the named stores' keys set aside as well,
+and refuses while any other key for those roles is bound and unrevoked: the named stores are then
+not all that rotation was retiring. A named store whose bindings are all revoked already is refused,
+as there is nothing to finish. Past those checks the run writes a receipt naming both stores, as a
+new rotation does, and goes on as a rotation whose rebind has landed: it submits a fresh revocation
+anchor and revokes the named stores' keys. A revocation anchor the lost receipt recorded is never
+declared, so the retired keys stop verifying from the fresh anchor's block time. The flag applies
+only when no rotation is unfinished; on a re-run of an unfinished one it must name the stores that
+receipt retires, and the run resumes it.
 
 A recorded anchor that never reads back finalized, for example a transaction dropped after it
 mined, leaves every re-run waiting on it until `--finality-timeout-ms` runs out. The way forward
