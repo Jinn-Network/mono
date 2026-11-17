@@ -1966,7 +1966,10 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
       message,
       hint: '--retiring-store names, for each family of the rotation whose receipt was lost, the store identityStores '
         + 'named before that rotation. rotate revokes its keys only when the catalog binds the keys identityStores names '
-        + 'now, unrevoked, and bound each one after the key it replaces.',
+        + 'now, unrevoked, and bound each one after the key it replaces. If identityStores.<family> in '
+        + `${configPath} was pointed back at the store being retired, point it at the store the lost rotation bound, `
+        + `which rotate minted as ${join(dir, 'identity', '<family>.rotated-<stamp>.enc.json')}, and re-run with `
+        + '--retiring-store naming the store being retired.',
       exampleCli: EXAMPLE_CLI,
       details: { feature: 'ceremony', state: 'retiring-store-mismatch', sideEffects: false },
     }, { writer: ctx.writer, exit: ctx.exit });
@@ -2180,6 +2183,7 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
         agentEoa: custody.agentEoa,
         safeOwnershipVerified: true,
         resuming,
+        recovering,
         retiring: retiring.map(({ role, agent, keyId, bindingDigests }) => ({ role, agent, keyId, bindingDigests })),
         newStores,
         revocationAnchorDigest: revocationPlan?.anchorDigest ?? null,
@@ -2200,8 +2204,18 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
         'new stores',
         ...Object.entries(newStores).map(([family, path]) => `  ${family.padEnd(10)} ${path}`),
         '',
-        'Re-run with --execute to mint the new stores, anchor and author the replacement bindings, then anchor and',
-        'author the revocation of the retiring ones. Two anchors, two finality waits.',
+        // Finishing a lost rotation: the checks above showed every replacement key bound, so there is
+        // no rebind, and at least one retiring binding unrevoked, so there is one revocation.
+        ...(recovering
+          ? [
+            'This run finishes a rotation whose rotation.json was lost after it repointed the config. It mints no store:',
+            'the new stores are the ones identityStores names, which that rotation bound. Re-run with --execute to',
+            'anchor and author the revocation of the retiring keys. One anchor, one finality wait.',
+          ]
+          : [
+            'Re-run with --execute to mint the new stores, anchor and author the replacement bindings, then anchor and',
+            'author the revocation of the retiring ones. Two anchors, two finality waits.',
+          ]),
       ].join('\n'),
       {
         json: Boolean(parsed.values.json),

@@ -1,6 +1,9 @@
 # Native Identity Ceremony — production trust-artifact provisioning
 
-**Version:** 0.12 (a new rotation never takes an existing store as its new one, after issue #5345:
+**Version:** 0.13 (§4.5 states the refusal of a run with nothing left to finish as `rotate` applies
+it, after issue #5365: the run refuses when every binding of the named stores' keys is revoked
+already, not when one named store's are. v0.12 made a new rotation never take an existing store as
+its new one, after issue #5345:
 §4.5 names the store a rotation mints, refuses (`new-store-exists`) when a file is already at that
 path, as one started in the same second as the last would find, and states that a new rotation never
 skips a family. v0.11 let a rotation whose receipt was lost after its config repoint be finished,
@@ -1170,8 +1173,8 @@ the named store was bound, for the same role, earlier than that key. A rotation 
 replacement after the key it retires, so the keys it just bound never pass for the ones it was
 retiring. The `another-key-bound` check then runs with the named stores' keys set aside as well,
 and refuses while any other key for those roles is bound and unrevoked: the named stores are then
-not all that rotation was retiring. A named store whose bindings are all revoked already is refused,
-as there is nothing to finish. Past those checks the run writes a receipt naming both stores, as a
+not all that rotation was retiring. When every binding of the named stores' keys is revoked already,
+the run refuses, as there is nothing to finish. Past those checks the run writes a receipt naming both stores, as a
 new rotation does, and goes on as a rotation whose rebind has landed: it submits a fresh revocation
 anchor and revokes the named stores' keys. A revocation anchor the lost receipt recorded is never
 declared, so the retired keys stop verifying from the fresh anchor's block time. The flag applies
