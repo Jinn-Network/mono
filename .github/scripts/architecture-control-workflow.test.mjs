@@ -693,3 +693,21 @@ test('with a green release surface the gate keeps its selection rule', () => {
     assert.equal(runGate(steps, { ...lane, ...green }).conclusion, expected, JSON.stringify(lane));
   }
 });
+
+test('the required jobs are bounded well above their run time and well below the queue timeout', () => {
+  // Both jobs run `node --test` suites with no per-test timeout, so a hung test would hold a
+  // required check until the 180-minute merge queue check-response timeout ejects the entry.
+  // Recent runs take about 1 to 1.5 minutes (release surface) and under 1 minute (control).
+  const source = readArchitectureControlWorkflow();
+  const jobs = [
+    ['  platform-architecture-control:', '  verification-selection:', 10],
+    ['  platform-release-surface:', '  platform-verification-reusable:', 15],
+  ];
+  for (const [start, end, minutes] of jobs) {
+    const job = sliceJob(source, start, end);
+    const bound = job.match(/^ {4}timeout-minutes: (?<minutes>\d+)$/mu)?.groups?.minutes;
+    assert.ok(bound, `${start.trim()} sets timeout-minutes`);
+    assert.equal(Number(bound), minutes);
+    assert.ok(Number(bound) < 180, `${start.trim()} stays below the 180-minute queue timeout`);
+  }
+});
