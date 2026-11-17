@@ -363,7 +363,12 @@ verification as `not-run`; only `runVerify` authenticates the signature and
 independently re-derives the Matrix, Report, and claim consistency. The
 report action revalidates this route, so a reload shows the same durable
 Report and claim facts. Named verification checks and digests are rendered
-on success; record-integrity or recomputation divergence is a prominent
+on success. When the draft has reported, the result also carries
+`readerChecksNotRun` (the same names `workspace verify --json` returns): the
+reader checks the sealed claim names that `verify` did not run and `publish`
+runs on the bundle. The success card lists them under "Not run here"; a draft
+that has not reported carries no such field and the card shows no list.
+Record-integrity or recomputation divergence is a prominent
 typed error and never a passing status.
 
 The browser submits only the draft id. The server resolves the immutable

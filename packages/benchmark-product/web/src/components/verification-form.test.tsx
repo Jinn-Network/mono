@@ -35,6 +35,40 @@ describe("verification action presentation", () => {
     expect(markup).not.toContain("<pre");
   });
 
+  test("lists the reader checks verify did not run when the result carries them", () => {
+    actionState.current = {
+      status: "success",
+      result: {
+        checks: ["matrix-rederivation", "report-verification", "claim-consistency"],
+        matrixSha256: "a".repeat(64),
+        reportEnvelopeSha256: "b".repeat(64),
+        readerChecksNotRun: ["manifest", "evidence-closure", "trust"],
+      },
+    };
+    const markup = renderToStaticMarkup(<VerificationForm action={action} draftId="draft-1" />);
+    expect(markup).toContain("Not run here (publish runs them on the bundle)");
+    expect(markup).toContain("<li>manifest</li><li>evidence-closure</li><li>trust</li>");
+  });
+
+  test("shows no not-run list when the result omits the field", () => {
+    actionState.current = {
+      status: "success",
+      result: { checks: ["matrix-rederivation"], matrixSha256: "a".repeat(64) },
+    };
+    const markup = renderToStaticMarkup(<VerificationForm action={action} draftId="draft-1" />);
+    expect(markup).toContain("Verification passed");
+    expect(markup).not.toContain("Not run here");
+  });
+
+  test("treats a malformed not-run field as an unreadable result", () => {
+    actionState.current = {
+      status: "success",
+      result: { checks: ["matrix-rederivation"], matrixSha256: "a".repeat(64), readerChecksNotRun: [1] },
+    };
+    const markup = renderToStaticMarkup(<VerificationForm action={action} draftId="draft-1" />);
+    expect(markup).toContain("unreadable result");
+  });
+
   test("renders per-anchor status and the pending-window warning", () => {
     actionState.current = {
       status: "success",

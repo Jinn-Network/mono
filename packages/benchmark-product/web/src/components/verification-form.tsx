@@ -31,6 +31,7 @@ interface VerificationResult {
     readonly subjects: readonly VerificationSubject[];
   };
   readonly anchoringWindow?: { readonly closingOperation: "report" };
+  readonly readerChecksNotRun?: readonly string[];
 }
 
 function isVerificationResult(value: unknown): value is VerificationResult {
@@ -38,7 +39,9 @@ function isVerificationResult(value: unknown): value is VerificationResult {
   const candidate = value as Partial<VerificationResult>;
   return Array.isArray(candidate.checks) && candidate.checks.every((check) => typeof check === "string")
     && typeof candidate.matrixSha256 === "string"
-    && (candidate.reportEnvelopeSha256 === undefined || typeof candidate.reportEnvelopeSha256 === "string");
+    && (candidate.reportEnvelopeSha256 === undefined || typeof candidate.reportEnvelopeSha256 === "string")
+    && (candidate.readerChecksNotRun === undefined
+      || (Array.isArray(candidate.readerChecksNotRun) && candidate.readerChecksNotRun.every((check) => typeof check === "string")));
 }
 
 export function VerificationForm({ action, draftId }: VerificationFormProps) {
@@ -66,6 +69,10 @@ export function VerificationForm({ action, draftId }: VerificationFormProps) {
         </dl>
         <p className="mt-3 font-medium">Named checks</p>
         <ul className="list-disc pl-5">{result.checks.map((check) => <li key={check}>{check}</li>)}</ul>
+        {result.readerChecksNotRun !== undefined && result.readerChecksNotRun.length > 0 ? <>
+          <p className="mt-3 font-medium">Not run here (publish runs them on the bundle)</p>
+          <ul className="list-disc pl-5">{result.readerChecksNotRun.map((check) => <li key={check}>{check}</li>)}</ul>
+        </> : null}
         {result.anchors !== undefined ? <>
           <p className="mt-3 font-medium">Anchors</p>
           {result.anchors.anchors.length === 0
