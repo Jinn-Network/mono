@@ -1529,3 +1529,147 @@ describe("createBindingResolver", () => {
     expect(resolved?.isGenesis).toBe(true);
   });
 });
+
+// Within one resolve the agentId composition leg reuses an answer only where the compositions it consulted
+// that are being decided now are the ones that were being decided when it was given (`answerOnce`).
+describe("the agentId composition leg's answers within one resolve", () => {
+  const owner = privateKeyToAccount(`0x${"6".repeat(64)}`);
+  const ownerVoucher = { kind: "account" as const, did: didPkh(84532, owner.address), contractAccount: false };
+  const GENESIS = "2026-01-01T00:00:00.000Z";
+  const at = "2026-06-01T00:00:00.000Z";
+  const anchors = fakeAnchors({
+    [DIGEST_A]: GENESIS,
+    [DIGEST_B]: "2026-02-01T00:00:00.000Z",
+    [DIGEST_R]: "2026-03-01T00:00:00.000Z",
+  });
+  /** Trusts each envelope's declared keyids: these cases are about which compositions hold, not signatures. */
+  const declaredSigners: DsseChainVerifier = (envelopeBytes) => ({
+    validSignerKeyids: parseDsseEnvelope(envelopeBytes).signatures
+      .map((signature) => signature.keyid)
+      .filter((keyid): keyid is string => keyid !== undefined),
+  });
+
+  function keyNamed(name: string): KeyBinding["key"] {
+    const didKey = `did:key:z${name}`;
+    return { publicKey: `pk-${name}`, keyid: didKey, algorithm: "secp256k1", didKey };
+  }
+
+  /** `key` bound under the agentId with token `tokenId`. */
+  function underAgentId(key: KeyBinding["key"], tokenId: number, overrides: Partial<KeyBinding> = {}): KeyBinding {
+    return accountBinding({
+      key,
+      voucher: { kind: "agentId", caip19: `eip155:84532/erc721:0x2222222222222222222222222222222222222222/${tokenId}` },
+      ceremony: { type: "agentId", digest: CEREMONY_DIGEST },
+      strength: deriveStrength("agentId"),
+      ...overrides,
+    });
+  }
+
+  /** `binding`'s record, its envelope declaring the key it binds as its signer. */
+  function sealedRecord(binding: KeyBinding, bindingDigest: Sha256Digest): SealedKeyBindingRecord {
+    const envelopeBytes = sealDsseEnvelope({
+      payloadBytes: canonicalJsonBytes(binding),
+      payloadType: TRUST_KEY_BINDING_MEDIA_TYPE,
+      signatures: [{ signature: Uint8Array.of(1), keyid: binding.key.didKey }],
+    });
+    return { binding, envelopeBytes, bindingDigest };
+  }
+
+  /** A genuine ceremony of the owner's account over `[AGENT, didKey]`. */
+  async function ownerCeremony(didKey: string): Promise<EoaCeremonyEvidence> {
+    const message = {
+      domain: "trust.jinn.network",
+      address: owner.address,
+      uri: "https://trust.jinn.network/ceremony/key-binding",
+      version: "1" as const,
+      chainId: 84532,
+      nonce: "reuse-nonce",
+      issuedAt: GENESIS,
+      resources: [AGENT, didKey],
+    };
+    const messageBytes = serializeCeremonyMessage("eoa", message);
+    const signature = hexToBytes(await owner.signMessage({ message: { raw: messageBytes } }));
+    return { type: "eoa", message, messageBytes, signature };
+  }
+
+  /** What resolves for `key` at `at` over `stored`, with the registry naming the owner as every agentId's
+   * owner. A store asked more than 20000 times throws a plain error, so a leg with no bound fails here rather than run on. */
+  function resolveOver(stored: readonly SealedKeyBindingRecord[], key: string) {
+    let lookups = 0;
+    return createBindingResolver({
+      bindings: {
+        listBindingsForAgent: async () => {
+          lookups += 1;
+          if (lookups > 20_000) throw new Error("the store was asked more than 20000 times");
+          return stored;
+        },
+        listRevocationsForTargets: async () => [],
+      },
+      anchors,
+      chainFacts: {
+        ownerOf: async () => owner.address,
+        getAgentWalletAtBlock: async () => {
+          throw new Error("not used in this test");
+        },
+      },
+      compositionAuthority: { dsseVerifier: declaredSigners, witnessVerifier: { verify1271Witness: async () => ({ verified: false }) } },
+    }).resolveBinding({ key, agent: AGENT }, at);
+  }
+
+  // The owner holds agentIds X and Y. Key K is bound under the owner's account as the Agent's genesis and,
+  // at the same instant, under Y as `operates` with the lower digest. Key J is bound under X and, later,
+  // under Y. X's and Y's compositions both ask whether an owner's binding of K stands at the instant, and
+  // the answer depends on whether Y's composition is being decided. While it is, K's Y record rests on Y
+  // and does not hold, so the owner's record answers for K and stands: Y holds. While only X is, Y holds,
+  // so K's Y record wins on its lower digest and no owner's binding answers for K: X does not hold. An
+  // answer reused by question alone carries the first into the second wherever J's Y record is decided
+  // first, and J's X record, the earlier, then wins.
+  it("gives a key the agentId record whose composition holds, in either stored order", async () => {
+    const [agentIdX, agentIdY] = [11, 12];
+    const keyK = keyNamed("ReuseK");
+    const keyJ = keyNamed("ReuseJ");
+    const ceremonyEvidence = await ownerCeremony(keyK.didKey);
+    const genesisOfK: SealedKeyBindingRecord = {
+      ...sealedRecord(
+        accountBinding({ key: keyK, voucher: ownerVoucher, ceremony: { type: "eoa", digest: ceremonyEvidenceDigest(ceremonyEvidence) } }),
+        `sha256:${"2".repeat(64)}`,
+      ),
+      ceremonyEvidence,
+    };
+    const kUnderY = sealedRecord(underAgentId(keyK, agentIdY, { relationship: "operates" }), `sha256:${"1".repeat(64)}`);
+    const jUnderX = sealedRecord(underAgentId(keyJ, agentIdX, { anchors: [{ digest: DIGEST_B }] }), `sha256:${"3".repeat(64)}`);
+    const jUnderY = sealedRecord(underAgentId(keyJ, agentIdY, { anchors: [{ digest: DIGEST_R }] }), `sha256:${"4".repeat(64)}`);
+
+    const stored = [genesisOfK, kUnderY, jUnderX, jUnderY];
+    const resolved = await Promise.all([stored, [...stored].reverse()].map((order) => resolveOver(order, keyJ.didKey)));
+    expect(resolved.map((binding) => binding?.bindingDigest)).toEqual([jUnderY.bindingDigest, jUnderY.bindingDigest]);
+  });
+
+  // Each ring key is bound under its own agentId and under the owner's account, all at one instant, so
+  // deciding one composition asks what resolves for every other ring key while it is being decided. The
+  // owner's records carry no ceremony evidence and never stand, so no composition holds and the owner's
+  // record answers for the key. The guard answers by which compositions are being decided, so the answers
+  // one question needs grow with the ring: here a ring of 7 needs 33, and a ring of 8 needs 65, one more
+  // than the 64 the leg allows, so it is the narrowest ring that ends as an outage.
+  function resolveRingOf(width: number) {
+    const ring = Array.from("ABCDEFGH".slice(0, width), (letter, index) => {
+      const key = keyNamed(`Ring${letter}`);
+      const digest = (kind: string) => `sha256:${kind.repeat(62)}${(16 + index).toString(16)}` as Sha256Digest;
+      return [
+        sealedRecord(underAgentId(key, 100 + index), digest("e")),
+        sealedRecord(accountBinding({ key, voucher: ownerVoucher }), digest("f")),
+      ];
+    }).flat();
+    return resolveOver(ring, ring[0]!.binding.key.didKey);
+  }
+
+  it("follows a ring of 7 compositions at one instant to the guard's answer", async () => {
+    expect((await resolveRingOf(7))?.binding.voucher).toEqual(ownerVoucher);
+  });
+
+  it("ends a resolve as an outage at a ring of 8 compositions at one instant", async () => {
+    // The message names the bound, so this also fails if the bound moves down. #5338 may have the leg decide
+    // this ring instead of ending the resolve: that change makes this line the ring of 7's expectation.
+    await expect(resolveRingOf(8)).rejects.toMatchObject({ code: "RESOLUTION_FAILED", message: expect.stringContaining("more than 64 times") });
+  });
+});
