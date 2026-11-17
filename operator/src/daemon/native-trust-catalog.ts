@@ -563,9 +563,13 @@ export async function openNativeTrustCatalog(input: {
     },
     assertFresh,
     candidateKeys(agent) {
+      // The discovery trust adapter's `everBound` resolves each key at `probeAt`, so it must be an
+      // instant the binding is in effect: its effective start, which is later than `validFrom` when
+      // the binding's earliest anchor is (#5243). The opener above observed every binding's anchors,
+      // so the start is always defined; `validFrom` is only the type's fallback.
       return bindings.filter(({ binding }) => binding.agent === agent).map(({ binding }) => ({
         keyid: binding.key.didKey,
-        probeAt: binding.validFrom,
+        probeAt: effectiveStartOf(binding) ?? binding.validFrom,
       }));
     },
     policy: policyFor,
