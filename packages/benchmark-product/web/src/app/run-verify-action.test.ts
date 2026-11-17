@@ -71,11 +71,10 @@ describe("run.verify GUI/CLI field equivalence", () => {
     );
   });
 
-  test("the action carries the reader checks verify did not run, though the card does not show them yet", async () => {
+  test("the action carries the reader checks verify did not run", async () => {
     // Issue #4940: a reported run names the reader checks `publish` runs on the bundle that `verify`
     // did not. The action passes the field through unchanged, as it does every key above.
-    // `VerificationForm` reads only the keys it names, so the card does not render this one until
-    // issue #5026 decides how it should look.
+    // `VerificationForm` renders it (issue #5026).
     const result: RunVerifyResult = {
       draftId: "draft-1",
       checks: ["matrix-rederivation", "report-verification", "claim-consistency"],
