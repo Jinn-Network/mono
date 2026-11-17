@@ -1207,15 +1207,40 @@ test("a refusal's human line uses the reader's names while --json keeps the modu
   }
 });
 
-// Every rule is anchored at the message's start, so wording that only contains a rule's words, as
-// publisher-chosen text can, prints unchanged.
+// Every rule but the two admission-reviewer rules is anchored at the message's start, so a rule's
+// own words after other text, as publisher-chosen text can carry them, print unchanged. Each body
+// is one rule's wording; removing any one rule's `^` changes its line.
 test("refusal wording is rewritten only where a rule matches from the message's start", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
-  const message = 'manifest entry "digest mismatch for x.json" is missing';
-  const result = await runVerifierCli(["bundle"], {
-    verify: async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); },
-  });
-  assert.equal(result.stderr, `colophon-check: ${message}\n`);
+  const hex = "3".repeat(64);
+  const lead = "carried timestamp proof is invalid: ";
+  for (const body of [
+    "Matrix v2 failed deterministic assembly-3.0 replay",
+    "carried anchor is invalid: the proof does not verify",
+    `${lead}the anchored digest ${hex} is neither this bundle's sealed Run nor its sealed Matrix`,
+    `${lead}subject.kind is lock, but its digest resolves to this bundle's sealed Run`,
+    `${lead}subject.kind is lock, but its digest resolves to this bundle's sealed Matrix`,
+    `${lead}an authority-time lock anchor carries no comparable genTime`,
+    `${lead}no proof verifier implements the anchor profile example-profile`,
+    "anchor record digest mismatch",
+    "evidence record digest mismatch",
+    'digest mismatch for "share.txt"',
+    `matrix-rederivation: re-derived digest sha256:${hex} !== received sha256:${hex}`,
+    "verdict catalog does not match Matrix verdict closure",
+    `verdict ${hex} evaluator mismatch`,
+    "evaluator trust set must exactly equal Matrix-referenced evaluators",
+    "evaluator <identifier: see --json> keyId is not derived from its SPKI",
+    "report-envelope: invalid DSSE envelope: TrustCoreError: DSSE envelope payload is not strict standard or URL-safe base64.",
+    "Report author/keyId/didKey are not derived from the bundled Report SPKI",
+    "report-recompute: recomputed results do not match the sealed Report results",
+    "claim package anchors is not the exact projection of verified facts",
+  ]) {
+    const message = `unknown member: ${body}`;
+    const result = await runVerifierCli(["bundle"], {
+      verify: async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); },
+    });
+    assert.equal(result.stderr, `colophon-check: ${message}\n`, message);
+  }
 });
 
 test("freeze-repo failures keep identifiers in --json and alias them for a human", async () => {

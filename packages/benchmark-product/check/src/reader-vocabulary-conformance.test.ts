@@ -52,7 +52,7 @@
  * reader are masked too, so a ruled name that happens to contain an inherited word is not read as
  * that word.
  *
- * Violations already on `next` are recorded in `KNOWN_VIOLATIONS`, each with the open issue that
+ * Violations already on `next` are recorded in `KNOWN_VIOLATIONS`, each with the issue that
  * owns it (`OWNERS`). The ledger must equal what the surfaces carry
  * exactly: a new violation fails, and so does a recorded one that has gone, so the list cannot
  * outlive the strings it describes. To regenerate it after a change that is meant:
