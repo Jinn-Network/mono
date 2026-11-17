@@ -35,7 +35,7 @@ import type {
   Sha256Digest,
 } from "@jinn-network/trust-core";
 
-import { TrustResolveError, invalidInput } from "./errors.js";
+import { TrustResolveError, invalidInput, resolutionFailed } from "./errors.js";
 
 // ---------------------------------------------------------------------------
 // §7.3's at-time binding resolution, composed for `BindingResolver`:
@@ -120,7 +120,14 @@ export interface CreateBindingResolverOptions {
    * authority section 4 composes only with one that stands at the instant (section 6): in window,
    * signed by the key it binds, its ceremony verified, no authorized revocation before that
    * instant, and its chain holding. That is `trust-core`'s `checkBindingStands`, which reads
-   * revocations, consents and witnesses with these legs. Omit it and no agentId binding composes. */
+   * revocations, consents and witnesses with these legs. Omit it and no agentId binding composes.
+   *
+   * What it costs: within one `resolveBinding` call the leg reads the registry once per agentId, and
+   * answers each composition, and each owner binding's standing at an instant, once, reusing the
+   * answer wherever its cycle guard would answer alike. So however records lean on one another, the
+   * work grows polynomially with the records the store lists. Only compositions at one instant that
+   * rest on one another in a ring can need more than one answer; a call that would answer one
+   * question more than 64 times ends as an outage (`TrustResolveError`, `RESOLUTION_FAILED`). */
   readonly compositionAuthority?: Pick<BindingAuthorityDeps, "dsseVerifier" | "witnessVerifier">;
   /** §7.5 step 3 for the ceremonies nothing in this package can verify:
    * `safe` (the witness leg in `verify.ts` does not tie a witness to this
@@ -293,6 +300,15 @@ async function effectiveTimeOfRevocation(
   return earliest === undefined ? undefined : laterOf(revocation.effectiveFrom, earliest);
 }
 
+/** Whether `trust-core` counts a revocation effective at `effectiveTime` when it judges authority at
+ * `atTime`: one strictly before it, or one whose time cannot be read. Nothing is in window at an
+ * instant that cannot be read, so nothing is counted there. */
+function countedBefore(effectiveTime: string, atTime: string): boolean {
+  if (!isCalendarStrictRfc3339(atTime)) return false;
+  const order = compareCalendarStrictRfc3339Instants(effectiveTime, atTime);
+  return order === undefined || order < 0;
+}
+
 function isWithinWindow(binding: KeyBinding, effectiveStart: string, atTime: string): boolean {
   if (compareTimes(atTime, effectiveStart) < 0) return false;
   if (binding.expiresAt !== undefined && compareTimes(atTime, binding.expiresAt) > 0) return false;
@@ -363,18 +379,90 @@ function eoaSignatureAndContentVerified(record: SealedKeyBindingRecord): boolean
   return verified;
 }
 
+/** How many answers one resolve may give one question of the composition leg. One is enough unless
+ * compositions at one instant rest on one another in a ring: the guard then answers by which of them
+ * are being decided, and a ring wide enough would have that number grow exponentially. */
+const ANSWERS_PER_QUESTION = 64;
+
+/** An answer the composition leg gave in one resolve, and what it rests on: every composition whose
+ * guard it consulted, itself among them when it rests on itself, and which of those were being
+ * decided when it was asked. */
+interface LegAnswer {
+  readonly consulted: ReadonlySet<string>;
+  readonly beingDecided: string;
+  readonly holds: boolean;
+}
+
+/** What the composition leg has worked out in one resolve: the registry's owner of each agentId it
+ * read, and its answers, by question. */
+interface LegMemo {
+  readonly owners: Map<string, Promise<string>>;
+  readonly answers: Map<string, LegAnswer[]>;
+}
+
+/** Where a resolve stands in the composition leg: the memo of the resolve it is part of, the
+ * compositions being decided on its call chain, each as its Agent, agentId and instant, and the
+ * compositions the question it serves has consulted so far. */
+interface LegContext {
+  readonly memo: LegMemo;
+  readonly composing: ReadonlySet<string>;
+  readonly consulted: Set<string>;
+}
+
 /** What the agentId composition leg reads with in one resolve: the registry, what judges a
- * binding's standing, and this resolver, carrying the compositions the asking resolve is part of
- * deciding, each as its Agent, agentId and instant. */
-interface CompositionLeg {
+ * binding's standing, and this resolver, at the place in the leg the asking resolve stands. */
+interface CompositionLeg extends LegContext {
   readonly chainFacts: ChainFactResolver | undefined;
   readonly authority: CreateBindingResolverOptions["compositionAuthority"];
-  readonly composing: ReadonlySet<string>;
   readonly resolveAt: (
     query: BindingResolverQuery,
     atTime: string,
-    composing: ReadonlySet<string>,
+    context: LegContext,
   ) => Promise<ResolvedBinding | null>;
+}
+
+/** Which of `consulted` are being decided on `composing`, written out so that two such sets compare as text. */
+function beingDecidedOn(composing: ReadonlySet<string>, consulted: ReadonlySet<string>): string {
+  return JSON.stringify([...consulted].filter((composition) => composing.has(composition)).sort(compareCodeUnitStrings));
+}
+
+/**
+ * Answers `question` once per resolve where it can. What the store, the registry and the host's legs
+ * say is fixed for the resolve, so an answer depends only on which of the compositions it consulted
+ * were being decided: asked again while the same ones are, every guard it met answers alike, and so
+ * does it. Otherwise `work` answers it afresh under `composing`, recording what it consults. Either
+ * way the asking question has consulted all of it.
+ */
+async function answerOnce(
+  asking: LegContext,
+  question: string,
+  composing: ReadonlySet<string>,
+  work: (answering: LegContext) => Promise<boolean>,
+): Promise<boolean> {
+  const given = asking.memo.answers.get(question) ?? [];
+  let answer = given.find(({ consulted, beingDecided }) => beingDecidedOn(asking.composing, consulted) === beingDecided);
+  if (answer === undefined) {
+    if (given.length >= ANSWERS_PER_QUESTION) {
+      resolutionFailed(`the agentId composition leg would answer one question more than ${ANSWERS_PER_QUESTION} times in one `
+        + "resolve: compositions at one instant rest on one another in a ring too wide to follow.");
+    }
+    const consulted = new Set<string>();
+    const holds = await work({ memo: asking.memo, composing, consulted });
+    answer = { consulted, beingDecided: beingDecidedOn(asking.composing, consulted), holds };
+    asking.memo.answers.set(question, [...(asking.memo.answers.get(question) ?? []), answer]);
+  }
+  for (const composition of answer.consulted) asking.consulted.add(composition);
+  return answer.holds;
+}
+
+/** The registry is read once per agentId in a resolve: what it says is one of that resolve's facts. */
+function ownerOf(memo: LegMemo, chainFacts: ChainFactResolver, caip19: string): Promise<string> {
+  let owner = memo.owners.get(caip19);
+  if (owner === undefined) {
+    owner = (async () => chainFacts.ownerOf(caip19))();
+    memo.owners.set(caip19, owner);
+  }
+  return owner;
 }
 
 /** §7.2's agentId composition leg, as key authority section 4 states it: the account the
@@ -382,8 +470,10 @@ interface CompositionLeg {
  * voucher, that stands at `atTime` (section 6). Authority is named by key, so the binding is what
  * resolves for its key at that instant, and `checkBindingStands` judges it, with this resolver
  * answering for every record its walk asks about. A composition that rests on itself holds nothing
- * up, as chains do not (section 7): asked again while it is being decided, it does not hold. (See
- * the module's finding re: `ownerOf` having no historical block parameter.) */
+ * up, as chains do not (section 7): asked again while it is being decided, it does not hold. Each
+ * composition, and each owner binding's standing, is answered once per resolve (`answerOnce`), keyed
+ * by all it reads: the composition, the owner and the owner's keys, or the Agent, owner, key and
+ * instant. (See the module's finding re: `ownerOf` having no historical block parameter.) */
 async function agentIdCompositionHolds(
   candidate: SealedKeyBindingRecord,
   atTime: string,
@@ -392,42 +482,45 @@ async function agentIdCompositionHolds(
 ): Promise<boolean> {
   const { agent, voucher } = candidate.binding;
   if (voucher.kind !== "agentId") return true; // composition applies only to agentId vouchers
-  const { chainFacts, authority } = leg;
+  const { chainFacts, authority, resolveAt } = leg;
   if (chainFacts === undefined || authority === undefined) return false;
 
   const chainId = parseCaip19ChainId(voucher.caip19);
   if (chainId === undefined) return false;
 
   const composition = `${agent}\u001f${voucher.caip19}\u001f${atTime}`;
+  leg.consulted.add(composition);
   if (leg.composing.has(composition)) return false;
 
   let ownerAddress: string;
   try {
-    ownerAddress = await chainFacts.ownerOf(voucher.caip19);
+    ownerAddress = await ownerOf(leg.memo, chainFacts, voucher.caip19);
   } catch (cause) {
     if (cause instanceof TrustResolveError && cause.code === "INVALID_INPUT") return false;
     throw cause;
   }
   const ownerDid = didPkhFromAddress(chainId, ownerAddress);
+  const ownerKeys = [...new Set(peers
+    .filter(({ record }) => record.binding.voucher.kind === "account" && record.binding.voucher.did === ownerDid)
+    .map(({ record }) => record.binding.key.didKey))].sort(compareCodeUnitStrings);
 
   const composing = new Set([...leg.composing, composition]);
-  const bindingResolver: BindingResolver = {
-    resolveBinding: (query, at) => leg.resolveAt(query, at, composing),
-  };
-  const ownerKeys = new Set(peers
-    .filter(({ record }) => record.binding.voucher.kind === "account" && record.binding.voucher.did === ownerDid)
-    .map(({ record }) => record.binding.key.didKey));
-  for (const key of [...ownerKeys].sort(compareCodeUnitStrings)) {
-    // eslint-disable-next-line no-await-in-loop -- sequential: the first that stands settles it.
-    const account = await bindingResolver.resolveBinding({ key, agent }, atTime);
-    if (account === null || account.binding.agent !== agent) continue;
-    if (account.binding.voucher.kind !== "account" || account.binding.voucher.did !== ownerDid) continue;
-    // §7.2: the account vouches through an account ceremony, not one a host verified for another kind.
-    if (account.binding.ceremony.type !== "eoa" && account.binding.ceremony.type !== "safe") continue;
-    // eslint-disable-next-line no-await-in-loop -- sequential: the first that stands settles it.
-    if (await checkBindingStands(account, atTime, { ...authority, bindingResolver })) return true;
-  }
-  return false;
+  return answerOnce(leg, JSON.stringify(["composition", composition, ownerDid, ownerKeys]), composing, async (deciding) => {
+    for (const key of ownerKeys) {
+      // eslint-disable-next-line no-await-in-loop -- sequential: the first that stands settles it.
+      const stands = await answerOnce(deciding, JSON.stringify(["standing", agent, ownerDid, key, atTime]), deciding.composing, async (judging) => {
+        const bindingResolver: BindingResolver = { resolveBinding: (query, at) => resolveAt(query, at, judging) };
+        const account = await bindingResolver.resolveBinding({ key, agent }, atTime);
+        if (account === null || account.binding.agent !== agent) return false;
+        if (account.binding.voucher.kind !== "account" || account.binding.voucher.did !== ownerDid) return false;
+        // §7.2: the account vouches through an account ceremony, not one a host verified for another kind.
+        if (account.binding.ceremony.type !== "eoa" && account.binding.ceremony.type !== "safe") return false;
+        return checkBindingStands(account, atTime, { ...authority, bindingResolver });
+      });
+      if (stands) return true;
+    }
+    return false;
+  });
 }
 
 /** §7.5 step 3 for a record this resolver has in hand, whatever is resolving. */
@@ -580,9 +673,9 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
   const resolveAt = async (
     query: BindingResolverQuery,
     atTime: string,
-    composing: ReadonlySet<string>,
+    context: LegContext,
   ): Promise<ResolvedBinding | null> => {
-    const leg: CompositionLeg = { chainFacts: options.chainFacts, authority: options.compositionAuthority, composing, resolveAt };
+    const leg: CompositionLeg = { ...context, chainFacts: options.chainFacts, authority: options.compositionAuthority, resolveAt };
     const allForAgent = await options.bindings.listBindingsForAgent(query.agent);
 
     const withEffectiveStart: EffectiveBinding[] = [];
@@ -665,7 +758,10 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
         namedInWindow.length > 0 && isWithinWindow(winner.record.binding, winner.effectiveStart, effectiveTime)
       )) continue;
       const targetScope: string[] = [];
-      for (const named of namedInWindow) {
+      // A resolve the composition leg makes is judged only at its own instant, by the revocations
+      // `trust-core` counts there, so it works out the target scope of those alone. So no composition
+      // reaches one at a later instant, and compositions can rest on one another only at one instant.
+      for (const named of leg.composing.size === 0 || countedBefore(effectiveTime, atTime) ? namedInWindow : []) {
         // eslint-disable-next-line no-await-in-loop -- revocation sets are small.
         if (await ceremonyVerified(named, effectiveTime, readable, options, leg)) targetScope.push(...named.record.binding.scope);
       }
@@ -696,6 +792,10 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
   };
 
   return {
-    resolveBinding: (query: BindingResolverQuery, atTime: string) => resolveAt(query, atTime, new Set()),
+    resolveBinding: (query: BindingResolverQuery, atTime: string) => resolveAt(query, atTime, {
+      memo: { owners: new Map(), answers: new Map() },
+      composing: new Set(),
+      consulted: new Set(),
+    }),
   };
 }

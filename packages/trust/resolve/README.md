@@ -30,6 +30,16 @@ revocations, consents and witnesses, so the host passes its DSSE and witness leg
 as `compositionAuthority`; without them no `agentId` binding composes. A
 composition that rests on itself holds nothing up.
 
+Within one `resolveBinding` call the leg reads the registry once per agentId and
+answers each composition, and each owner binding's standing at an instant, once,
+reusing the answer wherever its cycle guard would answer alike. A resolve it makes
+for its own walk works out a revocation's target scope only where that walk counts
+the revocation, before the instant asked about, so compositions can rest on one
+another only at one instant. So the work grows polynomially with the records a
+store lists. Only a ring of compositions at one instant can ask for more than one
+answer to a question, and a call that would give one question more than 64 answers
+ends as an outage (`RESOLUTION_FAILED`).
+
 The genesis binding of an Agent IRI is the first record placed for it. At a tie
 at that instant, a record that claims founding, a `controls` binding that names
 no consent, goes ahead of one that does not, and records of one voucher are
