@@ -23,10 +23,9 @@ import { once } from 'node:events';
 import { hostname, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { openRoleSigners, revocationAnchorDigest, scopeForRole } from '@jinn-network/trust-authoring';
-import { didPkh, validateKeyBinding } from '@jinn-network/trust-core';
+import { didPkh, validateKeyBinding, validateRevocation } from '@jinn-network/trust-core';
 import { privateKeyToAccount } from 'viem/accounts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { validateRevocation } from '@jinn-network/trust-core';
 
 import {
   ceremonyAnchorDigest,
@@ -1919,6 +1918,63 @@ describe('ceremony rotate, one run at a time on an operator directory (#5366)', 
     expect(existsSync(lockPathOf(h))).toBe(false);
     expect((await run(h, rotateArgv(h, ['--execute']))).kind).toBe('ceremony_rotate_complete');
     expect(readdirSync(join(h.dir, 'ceremony')).sort()).toEqual(['receipt.json', 'rotation.json']);
+  });
+
+  /**
+   * An exit that records `<dir>/ceremony` when a refusal calls it. In production the exit is
+   * `process.exit`, which runs no `finally`, so what is there at that moment is what stays.
+   */
+  const recordingExit = (h: Harness, seen: string[][]) => () => {
+    seen.push(readdirSync(join(h.dir, 'ceremony')).sort());
+  };
+  const writeLock = (h: Harness, holder: { readonly pid: number; readonly token: string }) => {
+    writeFileSync(lockPathOf(h), `${JSON.stringify({ host: hostname(), startedAt: new Date().toISOString(), ...holder })}\n`);
+  };
+
+  it('leaves no file of its own in <dir>/ceremony when it refuses, though the process exits right there', async () => {
+    const h = await provisioned();
+    writeLock(h, { pid: process.pid, token: 'live' });
+    const before = readdirSync(join(h.dir, 'ceremony')).sort();
+    const atExit: string[][] = [];
+
+    const refusal = await run(h, rotateArgv(h, ['--execute']), recordingExit(h, atExit));
+
+    expect(refusal.details).toMatchObject({ state: 'rotation-in-progress', holder: { token: 'live' } });
+    expect(atExit).toEqual([before]);
+  });
+
+  it('removes the takeover file it created when another run takes a stale lock first, before the refusal exits', async () => {
+    const h = await provisioned();
+    const { pid: gone } = spawnSync(process.execPath, ['-e', '']);
+    writeLock(h, { pid: gone, token: 'killed' });
+    const before = readdirSync(join(h.dir, 'ceremony')).sort();
+    // Once this run has created the takeover file, another run's lock replaces the stale one.
+    afterWrite.path = `${lockPathOf(h)}.takeover`;
+    afterWrite.then = () => { writeLock(h, { pid: process.pid, token: 'faster' }); };
+    const atExit: string[][] = [];
+
+    const refusal = await run(h, rotateArgv(h, ['--execute']), recordingExit(h, atExit));
+
+    expect(refusal.details).toMatchObject({ state: 'rotation-in-progress', holder: { token: 'faster' } });
+    expect(atExit).toEqual([before]);
+    // With no takeover file left, a lock left later by a killed run is still taken over by itself.
+    writeLock(h, { pid: gone, token: 'killed-again' });
+    expect((await run(h, rotateArgv(h, ['--execute']))).kind).toBe('ceremony_rotate_complete');
+  });
+
+  it('leaves alone a takeover file it did not create, and names it, when it refuses', async () => {
+    const h = await provisioned();
+    const { pid: gone } = spawnSync(process.execPath, ['-e', '']);
+    writeLock(h, { pid: gone, token: 'killed' });
+    writeFileSync(`${lockPathOf(h)}.takeover`, '{}\n');
+    const before = readdirSync(join(h.dir, 'ceremony')).sort();
+    const atExit: string[][] = [];
+
+    const refusal = await run(h, rotateArgv(h, ['--execute']), recordingExit(h, atExit));
+
+    expect(refusal.details).toMatchObject({ state: 'rotation-in-progress', holder: { token: 'killed' } });
+    expect(String(refusal.hint)).toContain(`${lockPathOf(h)}.takeover`);
+    expect(atExit).toEqual([before]);
   });
 
   it('takes no keys from a store that appears at its new store\'s path after its checks ran, and undoes what it wrote', async () => {
