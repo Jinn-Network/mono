@@ -130,6 +130,16 @@ function aliasPublisherNames(text: string, prefix: string, suffixes: readonly st
   return `${text.slice(0, nameStart)}${IDENTIFIER_ALIAS}${text.slice(end)}`;
 }
 
+/** A field path a refusal leads with (`screeningTable.rows`, `resolutions.0.reviews.1.packet`). It
+ * holds no space, so no publisher prose can stand in for one. */
+const FIELD_PATH = String.raw`[A-Za-z][\w-]*(?:\.[\w-]+|\[\d+\])*`;
+
+/** A rule for an admission replay refusal: the replay's lead and the field paths it prefixes are
+ * kept as written (`$1`), and `tail`, the refusing module's fixed words, is reworded. */
+function admissionRefusal(tail: string, wording: string): readonly [RegExp, string] {
+  return [new RegExp(`^((?:binary admission replay failed: )?(?:${FIELD_PATH}: )+)${tail}$`, "u"), `$1${wording}`];
+}
+
 /**
  * The reader-facing vocabulary spec's refusal-lines row (section 4.2, #5251): the human line names
  * each concept by its section 5 name, while `--json` keeps the refusing module's `message` byte for
@@ -140,7 +150,15 @@ function aliasPublisherNames(text: string, prefix: string, suffixes: readonly st
  * prefixes (`resolutions.<n>.reviews.<n>: ` or `replacementLedger.entries.<n>.reviews.<n>: `,
  * optionally after `binary admission replay failed: `). Paths, fingerprints, identifiers and check
  * labels (`matrix-rederivation:`) are printed as written. Applied in order: the timestamp-proof lead
- * is renamed before its reasons.
+ * is renamed before its reasons, and a label (`sealed Report: `, `claim package: `) before the
+ * rules that read what follows it.
+ *
+ * The rules below the `Issue #5299` comment rule the refusal templates the characterization suite
+ * does not reach. The glossary conformance test reads every template the reader's modules write,
+ * from their source, and fails on one whose human line still carries a word section 5 hides or
+ * renames unless a rule here rewords it or the test records why it stays. The admission replay's
+ * rules (`admissionRefusal`) start from the field paths the replay prefixes, which hold no space,
+ * and a rule that leads with a run's `cellKey` starts from the fingerprint that opens it.
  */
 const READER_WORDING: readonly (readonly [RegExp, string])[] = [
   [/^Matrix v2 failed deterministic assembly-3\.0 replay$/u,
@@ -179,6 +197,128 @@ const READER_WORDING: readonly (readonly [RegExp, string])[] = [
     "report-recompute: the recomputed result does not match the sealed result"],
   [/^claim package ([\s\S]+) is not the exact projection of verified facts$/u,
     "the claim's field $1 does not agree with the records here"],
+
+  // Issue #5299. Labels first: the page builder names the record it reads, the claim builder itself.
+  [/^sealed Report: /u, "report.json: "],
+  [/^stored claim package: /u, "claim-package.json: "],
+  [/^claim package: /u, "the claim: "],
+  [/^((?:report|claim-package)\.json: )method ("[\s\S]*") has no bundle-asset projection$/u,
+    "$1method $2 has no presentation on the bundle's pages"],
+  [/^((?:report|claim-package)\.json: |the claim: )expected exactly one (?:Report )?subject \(this product's single-Matrix Report shape\)$/u,
+    "$1expected results over exactly one matrix.json (this product's shape)"],
+  [/^((?:report|claim-package)\.json: )arm ([\s\S]+) lacks exact wilson@1 facts$/u, "$1configuration $2 lacks exact wilson@1 facts"],
+  [/^the claim: Report results do not carry /u, "the claim: the result does not carry "],
+  [/^the claim: method ("[\s\S]*") has no claim-package projection$/u, "the claim: no claim can be derived for method $1"],
+  [/^the claim: only the anchored binary-qualification closure carries a disclosure section — this projection has no qualification, and no other closure version expresses one$/u,
+    "the claim: only the anchored binary-qualification closure carries a section on what was pinned — this claim has no qualification, and no other closure version expresses one"],
+
+  // The admission replay.
+  admissionRefusal("record digest is not canonical sha256", "record fingerprint is not in canonical form"),
+  admissionRefusal("authority evidence is not an exact compact DSSE envelope", "authority evidence is not exact compact DSSE"),
+  admissionRefusal("review verdict is not an exact compact DSSE envelope", "review verdict is not exact compact DSSE"),
+  admissionRefusal(String.raw`v2 table must cover all (\d+) pool item digests in sorted order`,
+    "v2 table must cover all $2 pool item fingerprints in sorted order"),
+  admissionRefusal("reviewers must have distinct evaluator identities and keys", "reviewers must have distinct judge identities and keys"),
+  admissionRefusal("roster does not bind the exact reviewer evaluator/key pairs", "roster does not bind the exact reviewer judge/key pairs"),
+  admissionRefusal("two-human ledger entry is missing its required review evidence digests",
+    "two-human ledger entry is missing its required review evidence fingerprints"),
+
+  // Timestamp proofs, as the claim's anchors are projected.
+  [/^anchor record is not the exact sealed encoding of a conforming AnchorEvidence: /u,
+    "the timestamp proof is not the exact sealed encoding of a conforming AnchorEvidence: "],
+  [/^anchor covers ((?:sha256:)?[0-9a-f]{64}), which is neither this bundle's sealed Run nor its sealed Matrix$/u,
+    "the timestamp proof covers $1, which is neither this bundle's sealed run.json nor its sealed matrix.json"],
+  [/^anchor names subject kind ([\s\S]+), but the record its digest resolves to is ([\s\S]+)$/u,
+    "the timestamp proof's subject.kind is $1, but the record it covers is $2"],
+  [/^no proof verifier implements the anchor profile /u, "no proof verifier implements the profile "],
+
+  // Fingerprints.
+  [/^(Task|solve output) has an invalid digest$/u, "$1 has an invalid fingerprint"],
+  [/^((?:binary|[0-9a-f]{64}\/[\s\S]+\/\d+) Task has no EvaluationSpec )digest$/u, "$1fingerprint"],
+  [/^([0-9a-f]{64}\/[\s\S]+\/\d+ final solve Submission )digest disagrees$/u, "$1fingerprint disagrees"],
+
+  // Runs (a Matrix cell).
+  [/^comparison cell ([\s\S]+) (is absent from the verified assembly|names an unknown Task)$/u, "comparison run $1 $2"],
+  [/^assembly does not cover every expected cell$/u, "assembly does not cover every expected run"],
+  [/^((?:solve|evaluation) (?:Submission|Delivery) (?:sha256:)?[0-9a-f]{64} names an unknown )cell$/u, "$1run"],
+  [/^(solve (?:Submission|Delivery) (?:sha256:)?[0-9a-f]{64} (?:dispatch is outside its|is outside its exact) )cell( lineage)$/u, "$1run$2"],
+  [/^(solve Delivery (?:sha256:)?[0-9a-f]{64} does not bind its )cell( Task\/attempt)$/u, "$1run's$2"],
+  [/^(evaluation Submission (?:sha256:)?[0-9a-f]{64} is outside its )cell\/evaluator( domain)$/u, "$1run/judge$2"],
+  [/^evaluation graph names an unknown cell$/u, "evaluation graph names an unknown run"],
+  [/^terminal evaluation is outside its exact cell\/index lineage$/u, "terminal evaluation is outside its exact run/index lineage"],
+  [/^evaluation graph contains a successful lineage not consumed by an exact cell verdict$/u,
+    "evaluation graph contains a successful lineage not consumed by an exact run verdict"],
+  [/^verdict ((?:sha256:)?[0-9a-f]{64}) cell references do not match Matrix$/u, "verdict $1 run references do not match matrix.json"],
+  [/^external-import\.json names a cellKey more than once$/u, "external-import.json names a run more than once"],
+  [/^external-import\.json rows are not exactly the sealed Matrix cell keys$/u,
+    "external-import.json rows are not exactly the runs in the sealed matrix.json"],
+  [/^separate Inspect assurance contains an embedded Matrix vote$/u, "separate Inspect assurance contains an embedded vote on the runs"],
+
+  // Configurations (an arm).
+  [/^qualification does not exactly cover the Run arm set$/u, "qualification does not exactly cover the sealed Run's configurations"],
+  [/^Run arm ([\s\S]+) instrument pin differs$/u, "Run configuration $1 judge pin differs"],
+  [/^Run arm ([\s\S]+) has no exact judge-instrument pin$/u, "Run configuration $1 has no exact judge pin"],
+  [/^binary runtime selection arms differ from qualification and Run pins$/u,
+    "binary runtime selection configurations differ from qualification and Run pins"],
+  [/^snapshot-serving probe model is not the model of any bound arm$/u,
+    "snapshot-serving probe model is not the model of any bound configuration"],
+  [/^Inspect Delivery has no exact selected arm configuration$/u, "Inspect Delivery has no exact selected configuration"],
+  [/^credential-free Inspect arm carries provider evidence$/u, "credential-free Inspect configuration carries provider evidence"],
+  [/^Inspect provider evidence differs from the sealed arm\/runtime selection$/u,
+    "Inspect provider evidence differs from the sealed configuration/runtime selection"],
+  [/^the screening instrument is reused as a run judge arm$/u, "the screening instrument is reused as a run judge configuration"],
+
+  // Judges (an instrument or evaluator).
+  [/^instrument ((?:sha256:)?[0-9a-f]{64}) is (missing$|invalid: )/u, "judge $1 is $2"],
+  [/^instrument is not exact canonical profile bytes$/u, "the judge record is not exact canonical profile bytes"],
+  [/^same-execution Inspect score carries false separate-evaluator lineage$/u,
+    "same-execution Inspect score carries false separate-judge lineage"],
+  [/^pre-evaluation terminal cannot claim an evaluator identity$/u, "pre-evaluation terminal cannot claim a judge identity"],
+  [/^partial evaluation lineage must name its evaluator and exact Task$/u, "partial evaluation lineage must name its judge and exact Task"],
+
+  // The result (a Report) and its limitations.
+  [/^a Report carrying /u, "a result carrying "],
+  [/^(bundle format [\s\S]+ declares a (?:non-)?qualifying closure, but its sealed )Report( declares method [\s\S]+)$/u,
+    "$1report.json$2"],
+  [/^(a \S+(?: "[^"\s]+")? bundle must carry \S+ on its )Report$/u, "$1report.json"],
+  [/^the bundle does not carry the disclosure-specification record its Report names$/u,
+    "the bundle does not carry the disclosure-specification record its report.json names"],
+  [/^verified Report payload does not match report\.json$/u, "the verified result's payload does not match report.json"],
+  [/^verified Report identity is absent$/u, "the verified result's identity is absent"],
+  [/^report trust keyId must equal didKey$/u, "the result's signing keyId must equal its didKey"],
+  [/^Report limitations carry the /u, "the result's limitations carry the "],
+  [/^Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history$/u,
+    "the result's limitations are not exactly the ones derived from the sealed Run and rehearsal history"],
+  [/^claim rehearsal and verified Report disclosure disagree$/u, "the claim's rehearsal and the verified result's limitations disagree"],
+  [/^(a bundle declaring owner-controlled-publication must seal the publication-source sentence in its )Report limitations, right after the venue sentences$/u,
+    "$1result's limitations, right after the sentences on where it ran"],
+  [/^(a bundle declaring terminal-bench-2-1-comparability must seal the comparability sentence once in its )Report limitations, right after the venue and binary-instrument lines$/u,
+    "$1result's limitations, right after the lines on where it ran and the binary-instrument lines"],
+  [/^(the sealed Run declares task selection "[\s\S]*", but this bundle does not declare the "task-selection" capability that states it on )the report face(; a bundle cannot pass while hiding who chose its tasks)$/u,
+    "$1the bundle's pages$2"],
+
+  // Records a module names by a hidden noun: the catalog, a projection, an envelope, a declaration.
+  [/^the bundle's evidence catalog (does not match the pinned v4 grammar|assigns no freeze-artifact role)$/u, "the bundle's evidence.json $1"],
+  [/^evidence catalog contains missing or unreachable records$/u, "evidence.json lists missing or unreachable records"],
+  [/^EvaluationSpec ((?:sha256:)?[0-9a-f]{64}) is not in the catalog$/u,
+    "EvaluationSpec $1 is not among the EvaluationSpecs read for the runs' Tasks"],
+  [/^static bundle is not the exact platform metadata projection$/u,
+    "static-bundle.json is not exactly the platform metadata derived from matrix.json and report.json"],
+  [/^qualification admission projection differs from portable replay$/u, "qualification.json's admission fields differ from the portable replay"],
+  [/^(a \S+ bundle's )qualification document must keep its frozen (\S+) projection literal$/u,
+    "$1qualification.json must keep claimSchema at its frozen $2 value"],
+  [/^(\S+) is not the exact projection of verified public facts$/u, "$1 is not exactly the file rebuilt from the verified public facts"],
+  [/^claim externalImport section is not the exact projection of the authenticated marker$/u,
+    "the claim's externalImport section does not agree with the authenticated marker"],
+  [/^Inspect summary measurement count differs from the sealed projections$/u,
+    "Inspect summary measurement count differs from the sealed scoring.projections"],
+  [/^Inspect summary measurement differs from its sealed projection$/u,
+    "Inspect summary measurement differs from its sealed scoring.projections entry"],
+  [/^Inspect summary differs from its sealed scorer projections$/u, "Inspect summary differs from its sealed scoring.projections"],
+  [/^verdict envelope (payloadType|payload) /u, "the signed verdict's $1 "],
+  [/^verdict envelope carries /u, "the signed verdict carries "],
+  [/^(this bundle declares the "task-selection" capability, but its sealed Run carries no task-selection\/v1) declaration( for it to state)$/u,
+    "$1$2"],
 ];
 
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/gu;
@@ -784,12 +924,14 @@ export async function runVerifierCli(
     })}\n`
     : `${renderVerifiedBundle(result, identity)}${freezeRepo === undefined ? "" : renderFreezeRepoCheck(freezeRepo)}`;
   // Both notes are emitted, because a reader who supplied two flags is owed the outcome of both.
+  // The refusal is worded on its own, so a wording rule reads it from its start as it does a bundle
+  // refusal (#5299); the note's lead is fixed text.
   const notes = parsed.json
     ? ""
     : [
-      ...(freezeRepoFailure === undefined ? [] : [`freeze repository not checked: ${freezeRepoFailure.message}`]),
-      ...(identityFailure === undefined ? [] : [`domain binding not applied: ${identityFailure.message}`]),
-    ].map((note) => `colophon-check: ${humanRefusalDetail(note)}\n`).join("");
+      ...(freezeRepoFailure === undefined ? [] : [["freeze repository not checked", freezeRepoFailure.message]]),
+      ...(identityFailure === undefined ? [] : [["domain binding not applied", identityFailure.message]]),
+    ].map(([lead, message]) => `colophon-check: ${lead}: ${humanRefusalDetail(message)}\n`).join("");
   // A drifted freeze repository is a verdict about the artifact and takes precedence: exit 1 is
   // what the usage text promises for it, and an operational failure on a different flag must not
   // silently re-code that verdict as 2.

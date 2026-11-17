@@ -12,8 +12,9 @@ import { toChecksumAddress } from "@jinn-network/trust-core";
 // genuine, verifiable signatures, not fakes. This is the only ceremony
 // type the kit signs for real. A Safe signature is checked only by its 1271
 // witness, which the kit's fake `WitnessVerifier` stands in for, so a Safe
-// fixture carries a genuine message and witness statement but a placeholder
-// signature (`fixtures.ts`). agentId/OIDC/GitHub-human ceremonies are the
+// fixture carries a genuine message and witness statement payload, but its
+// Safe signature and the statement's DSSE signature are placeholders
+// (`fixtures.ts`). agentId/OIDC/GitHub-human ceremonies are the
 // resolver's job (`trust-resolve`'s `binding-resolver.ts`), and `verify.ts`'s
 // own ceremony leg trusts a non-null `ResolvedBinding` for those types
 // without re-verifying (see `verifyCeremonyLeg` in trust-core's `verify.ts`)

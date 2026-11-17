@@ -8,6 +8,7 @@ import {
   TRUST_REVOCATION_MEDIA_TYPE,
   canonicalJsonBytes,
   ceremonyEvidenceDigest,
+  checkBindingStands,
   deriveStrength,
   didPkh,
   eip191MessageHash,
@@ -39,6 +40,7 @@ import type {
   SealedRevocationRecord,
 } from "./binding-resolver.js";
 import { invalidInput, resolutionFailed } from "./errors.js";
+import { createWitnessVerifier } from "./witness.js";
 
 const AGENT = "https://spec.jinn.network/agents/1";
 const KEY_A = "did:key:zKeyA";
@@ -170,9 +172,10 @@ function witnessOver(safe: string, messageBytes: Uint8Array, signature: Uint8Arr
  * `safe` under EIP-1271, and a witness that `safe` accepted it. */
 function safeCeremony(
   safe: `0x${string}`,
-  { resources = [AGENT, KEY_A], issuedAt = "2026-01-01T00:00:00.000Z", nonce = "safe-nonce" }: {
+  { resources = [AGENT, KEY_A], issuedAt = "2026-01-01T00:00:00.000Z", expirationTime, nonce = "safe-nonce" }: {
     readonly resources?: readonly string[];
     readonly issuedAt?: string;
+    readonly expirationTime?: string;
     readonly nonce?: string;
   } = {},
 ): { readonly ceremonyEvidence: SafeCeremonyEvidence; readonly witness: Eip1271Witness } {
@@ -184,6 +187,7 @@ function safeCeremony(
     chainId: 84532,
     nonce,
     issuedAt,
+    ...(expirationTime === undefined ? {} : { expirationTime }),
     resources,
   };
   const messageBytes = serializeCeremonyMessage("safe", message);
@@ -1184,6 +1188,105 @@ describe("createBindingResolver", () => {
     it("leaves out a record of another key under this voucher", async () => {
       const key = { publicKey: "pk", keyid: KEY_OWNER, algorithm: "secp256k1", didKey: KEY_OWNER };
       expect(await targetsAsked(record(accountBinding({ key, anchors: [{ digest: DIGEST_B }] }), DIGEST_B))).toEqual([DIGEST_A]);
+    });
+  });
+
+  // Key authority section 8, rule 2: a key's own revocation draws on the `bindings` scope of the record it
+  // names only when that record's ceremony verifies. For a Safe's record, the resolver checks the ceremony
+  // before it asks the host, applying the ceremony currency text at that record's own effective start.
+  describe("a key's own revocation naming a Safe's record of that key (key authority section 8)", () => {
+    const SAFE = "0x5afe00000000000000000000000000000000cafe" as const;
+    const voucher = { kind: "account" as const, did: didPkh(84532, SAFE), contractAccount: true };
+    const SIBLING = "2026-02-01T00:00:00.000Z";
+    const REVOKED = "2026-03-01T00:00:00.000Z";
+    const at = "2026-06-01T00:00:00.000Z";
+    const anchors = fakeAnchors({
+      [DIGEST_A]: "2026-01-01T00:00:00.000Z",
+      [DIGEST_B]: SIBLING,
+      [DIGEST_R]: REVOKED,
+    });
+    /** Trusts each envelope's declared keyids: these cases are about ceremonies, not envelope signatures. */
+    const declaredSigners: DsseChainVerifier = (envelopeBytes) => ({
+      validSignerKeyids: parseDsseEnvelope(envelopeBytes).signatures
+        .map((signature) => signature.keyid)
+        .filter((keyid): keyid is string => keyid !== undefined),
+    });
+    const sealedBy = (fields: unknown, payloadType: string, keyid: string): Uint8Array =>
+      sealDsseEnvelope({ payloadBytes: canonicalJsonBytes(fields), payloadType, signatures: [{ signature: Uint8Array.of(1), keyid }] });
+
+    /** The Safe's record of KEY_A anchored at `digest`, committing to and carrying `ceremony`, sealed by KEY_A. */
+    function safeRecordOf(
+      digest: Sha256Digest,
+      scope: KeyBinding["scope"],
+      validFrom: string,
+      ceremony: ReturnType<typeof safeCeremony>,
+    ): SealedKeyBindingRecord {
+      const binding = accountBinding({
+        voucher,
+        scope,
+        validFrom,
+        ceremony: { type: "safe", digest: ceremonyEvidenceDigest(ceremony.ceremonyEvidence) },
+        strength: deriveStrength("safe"),
+        anchors: [{ digest }],
+      });
+      return { binding, envelopeBytes: sealedBy(binding, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_A), bindingDigest: digest, ...ceremony };
+    }
+
+    // The key's genuine record founds the IRI and holds no `bindings` scope, so the key's revocation of a
+    // sibling can draw that scope only from the sibling.
+    const genuine = safeRecordOf(DIGEST_A, ["verdicts"], "2026-01-01T00:00:00.000Z", safeCeremony(SAFE, { nonce: "genuine-nonce" }));
+    const sibling = (ceremony: Parameters<typeof safeCeremony>[1]) =>
+      safeRecordOf(DIGEST_B, ["bindings"], SIBLING, safeCeremony(SAFE, { nonce: "sibling-nonce", ...ceremony }));
+
+    /** KEY_A revokes `named` at REVOKED: the target scope the resolver reports for that revocation, whether the
+     * genuine record still stands at `at` as trust-core judges it with this package's witness verifier, and
+     * whether the host was asked about `named`. The host vouches for whatever it is asked about. */
+    async function revokingItsOwn(named: SealedKeyBindingRecord, options: Partial<CreateBindingResolverOptions> = {}) {
+      const revocation = revocationFields({ target: named.bindingDigest, revokedBy: KEY_A, anchors: [{ digest: DIGEST_R }], effectiveFrom: REVOKED });
+      const revoked: SealedRevocationRecord = { revocation, envelopeBytes: sealedBy(revocation, TRUST_REVOCATION_MEDIA_TYPE, KEY_A) };
+      const verifyHostedCeremony = vi.fn(async (_record: SealedKeyBindingRecord) => true);
+      const resolver = createBindingResolver({
+        bindings: {
+          ...fakeStore([genuine, named]),
+          listRevocationsForTargets: async (targets) => (targets.includes(named.bindingDigest) ? [revoked] : []),
+        },
+        anchors,
+        verifyHostedCeremony,
+        recordSignedByItsKey: (entry) => declaredSigners(entry.envelopeBytes).validSignerKeyids.includes(entry.binding.key.didKey),
+        ...options,
+      });
+      const resolved = await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, at);
+      expect(resolved?.bindingDigest).toBe(DIGEST_A);
+      const witnessVerifier = createWitnessVerifier({
+        acceptedVerifiers: [WITNESS_AUTHOR],
+        verifierKeys: new Map([[WITNESS_AUTHOR, [WITNESS_KEY]]]),
+        dsseVerifier: declaredSigners,
+      });
+      return {
+        targetScopes: resolved!.revocations.map(({ targetScope }) => targetScope),
+        stands: await checkBindingStands(resolved!, at, { bindingResolver: resolver, dsseVerifier: declaredSigners, witnessVerifier }),
+        hostAsked: verifyHostedCeremony.mock.calls.some(([asked]) => asked === named),
+      };
+    }
+
+    it("draws no scope from a record whose message names another key, nor asks the host about it", async () => {
+      const forged = sibling({ resources: [AGENT, "did:key:zKeyElsewhere"] });
+      expect(await revokingItsOwn(forged)).toStrictEqual({ targetScopes: [undefined], stands: true, hostAsked: false });
+      expect(await revokingItsOwn(sibling({}))).toStrictEqual({ targetScopes: [["bindings"]], stands: false, hostAsked: true });
+    });
+
+    it("draws no scope from a record whose ceremony fails the currency text at its own effective start, read there and not later", async () => {
+      // Issued after the record takes effect: the text is all it fails, there, and it would hold the text at the
+      // revocation's time.
+      const premature = sibling({ issuedAt: "2026-02-15T00:00:00.000Z" });
+      expect(await revokingItsOwn(premature)).toStrictEqual({ targetScopes: [["bindings"]], stands: false, hostAsked: true });
+      expect(await revokingItsOwn(premature, { ceremonyCurrency: {} }))
+        .toStrictEqual({ targetScopes: [undefined], stands: true, hostAsked: false });
+
+      // Expired before the revocation's time: it holds the text when the record takes effect, and would fail it later.
+      const current = sibling({ issuedAt: SIBLING, expirationTime: "2026-02-15T00:00:00.000Z" });
+      expect(await revokingItsOwn(current, { ceremonyCurrency: {} }))
+        .toStrictEqual({ targetScopes: [["bindings"]], stands: false, hostAsked: true });
     });
   });
 
