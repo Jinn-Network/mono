@@ -964,6 +964,13 @@ test("aliasing a hostile publisher name stays linear in its length", async () =>
       `claim package ${"x is not the exact projection of verified facts ".repeat(25_000)}y`,
       `claim package ${"x is not the exact projection of verified facts ".repeat(25_000)}y`,
     ],
+    // Two #5299 rules once read a publisher-sized middle with `[\s\S]+` twice, which took seconds on
+    // these inputs. Each now reads a single token there, so neither costs more than one scan.
+    [`a ${" bundle must carry ".repeat(50_000)}`, `a ${" bundle must carry ".repeat(50_000)}`],
+    [
+      `a ${" bundle's qualification document must keep its frozen ".repeat(16_000)}`,
+      `a ${" bundle's qualification document must keep its frozen ".repeat(16_000)}`,
+    ],
   ]) {
     const started = performance.now();
     const result = await runVerifierCli(["bundle"], {
@@ -1412,6 +1419,219 @@ test("refusal wording is rewritten only where a rule matches from the message's 
     });
     assert.equal(result.stderr, `colophon-check: ${message}\n`, message);
   }
+});
+
+// Issue #5299: the refusal templates the characterization suite never reaches, ruled against the
+// same section 5 glossary. Each row is one module's message and the human line a reader gets; --json
+// keeps the message byte for byte. `src/reader-vocabulary-conformance.test.ts` reads every template
+// from the source and fails on one that still carries a hidden or renamed word without a reason.
+const READER_WORDING_5299 = (() => {
+  const hex = "5".repeat(64);
+  const replay = "binary admission replay failed: ";
+  return [
+    // Labels: the page builder names the record it read, the claim builder the claim.
+    ["sealed Report: invalid binary qualification: arms is empty", "report.json: invalid binary qualification: arms is empty"],
+    ["stored claim package: expected a {lower, upper, alpha} interval", "claim-package.json: expected a {lower, upper, alpha} interval"],
+    ['claim package: binary-instrument version "2" is not supported', 'the claim: binary-instrument version "2" is not supported'],
+    ['sealed Report: method "example" has no bundle-asset projection', `report.json: method "example" has no presentation on the bundle's pages`],
+    [
+      "stored claim package: expected exactly one subject (this product's single-Matrix Report shape)",
+      "claim-package.json: expected results over exactly one matrix.json (this product's shape)",
+    ],
+    [
+      "claim package: expected exactly one Report subject (this product's single-Matrix Report shape)",
+      "the claim: expected results over exactly one matrix.json (this product's shape)",
+    ],
+    ["sealed Report: arm baseline lacks exact wilson@1 facts", "report.json: configuration baseline lacks exact wilson@1 facts"],
+    [
+      "claim package: Report results do not carry paired-delta@1's comparison shape",
+      "the claim: the result does not carry paired-delta@1's comparison shape",
+    ],
+    ['claim package: method "example" has no claim-package projection', 'the claim: no claim can be derived for method "example"'],
+    [
+      "claim package: only the anchored binary-qualification closure carries a disclosure section — this projection has no qualification, and no other closure version expresses one",
+      "the claim: only the anchored binary-qualification closure carries a section on what was pinned — this claim has no qualification, and no other closure version expresses one",
+    ],
+    // The admission replay: its lead and field paths print as written.
+    [`${replay}resolutions.0.reviews.1.packet: record digest is not canonical sha256`, `${replay}resolutions.0.reviews.1.packet: record fingerprint is not in canonical form`],
+    ["admissionManifestSha256: record digest is not canonical sha256", "admissionManifestSha256: record fingerprint is not in canonical form"],
+    [
+      "screeningSampleCommitment: screeningTable.sampleCommitmentSha256: record digest is not canonical sha256",
+      "screeningSampleCommitment: screeningTable.sampleCommitmentSha256: record fingerprint is not in canonical form",
+    ],
+    [`${replay}resolutions.2.operatorAssertion: authority evidence is not an exact compact DSSE envelope`, `${replay}resolutions.2.operatorAssertion: authority evidence is not exact compact DSSE`],
+    [`${replay}replacementLedger.entries.0.reviews.1: review verdict is not an exact compact DSSE envelope`, `${replay}replacementLedger.entries.0.reviews.1: review verdict is not exact compact DSSE`],
+    [`${replay}screeningTable.rows: v2 table must cover all 664 pool item digests in sorted order`, `${replay}screeningTable.rows: v2 table must cover all 664 pool item fingerprints in sorted order`],
+    ["resolutions.3: reviewers must have distinct evaluator identities and keys", "resolutions.3: reviewers must have distinct judge identities and keys"],
+    [`${replay}replacementLedger.entries.1: roster does not bind the exact reviewer evaluator/key pairs`, `${replay}replacementLedger.entries.1: roster does not bind the exact reviewer judge/key pairs`],
+    [
+      `${replay}replacementLedger.entries.1: two-human ledger entry is missing its required review evidence digests`,
+      `${replay}replacementLedger.entries.1: two-human ledger entry is missing its required review evidence fingerprints`,
+    ],
+    // Timestamp proofs, as the claim's anchors are projected.
+    [
+      "anchor record is not the exact sealed encoding of a conforming AnchorEvidence: unexpected field",
+      "the timestamp proof is not the exact sealed encoding of a conforming AnchorEvidence: unexpected field",
+    ],
+    [
+      `anchor covers ${hex}, which is neither this bundle's sealed Run nor its sealed Matrix`,
+      `the timestamp proof covers ${hex}, which is neither this bundle's sealed run.json nor its sealed matrix.json`,
+    ],
+    ["anchor names subject kind lock, but the record its digest resolves to is matrix", "the timestamp proof's subject.kind is lock, but the record it covers is matrix"],
+    ["no proof verifier implements the anchor profile example-profile", "no proof verifier implements the profile example-profile"],
+    // Fingerprints.
+    ["Task has an invalid digest", "Task has an invalid fingerprint"],
+    ["solve output has an invalid digest", "solve output has an invalid fingerprint"],
+    ["binary Task has no EvaluationSpec digest", "binary Task has no EvaluationSpec fingerprint"],
+    [`${hex}/baseline/1 Task has no EvaluationSpec digest`, `${hex}/baseline/1 Task has no EvaluationSpec fingerprint`],
+    [`${hex}/arm A/1 final solve Submission digest disagrees`, `${hex}/arm A/1 final solve Submission fingerprint disagrees`],
+    // Runs.
+    [`comparison cell ${hex}/baseline/1 is absent from the verified assembly`, `comparison run ${hex}/baseline/1 is absent from the verified assembly`],
+    [`comparison cell ${hex}/baseline/1 names an unknown Task`, `comparison run ${hex}/baseline/1 names an unknown Task`],
+    ["assembly does not cover every expected cell", "assembly does not cover every expected run"],
+    [`solve Submission ${hex} names an unknown cell`, `solve Submission ${hex} names an unknown run`],
+    [`evaluation Submission ${hex} names an unknown cell`, `evaluation Submission ${hex} names an unknown run`],
+    [`solve Delivery ${hex} names an unknown cell`, `solve Delivery ${hex} names an unknown run`],
+    [`solve Submission ${hex} dispatch is outside its cell lineage`, `solve Submission ${hex} dispatch is outside its run lineage`],
+    [`solve Delivery ${hex} is outside its exact cell lineage`, `solve Delivery ${hex} is outside its exact run lineage`],
+    [`solve Delivery ${hex} does not bind its cell Task/attempt`, `solve Delivery ${hex} does not bind its run's Task/attempt`],
+    [`evaluation Submission ${hex} is outside its cell/evaluator domain`, `evaluation Submission ${hex} is outside its run/judge domain`],
+    ["evaluation graph names an unknown cell", "evaluation graph names an unknown run"],
+    ["terminal evaluation is outside its exact cell/index lineage", "terminal evaluation is outside its exact run/index lineage"],
+    [
+      "evaluation graph contains a successful lineage not consumed by an exact cell verdict",
+      "evaluation graph contains a successful lineage not consumed by an exact run verdict",
+    ],
+    [`verdict ${hex} cell references do not match Matrix`, `verdict ${hex} run references do not match matrix.json`],
+    ["external-import.json names a cellKey more than once", "external-import.json names a run more than once"],
+    ["external-import.json rows are not exactly the sealed Matrix cell keys", "external-import.json rows are not exactly the runs in the sealed matrix.json"],
+    ["separate Inspect assurance contains an embedded Matrix vote", "separate Inspect assurance contains an embedded vote on the runs"],
+    // Configurations.
+    ["qualification does not exactly cover the Run arm set", "qualification does not exactly cover the sealed Run's configurations"],
+    ["Run arm candidate instrument pin differs", "Run configuration candidate judge pin differs"],
+    ["Run arm candidate has no exact judge-instrument pin", "Run configuration candidate has no exact judge pin"],
+    ["binary runtime selection arms differ from qualification and Run pins", "binary runtime selection configurations differ from qualification and Run pins"],
+    ["snapshot-serving probe model is not the model of any bound arm", "snapshot-serving probe model is not the model of any bound configuration"],
+    ["Inspect Delivery has no exact selected arm configuration", "Inspect Delivery has no exact selected configuration"],
+    ["credential-free Inspect arm carries provider evidence", "credential-free Inspect configuration carries provider evidence"],
+    ["Inspect provider evidence differs from the sealed arm/runtime selection", "Inspect provider evidence differs from the sealed configuration/runtime selection"],
+    ["the screening instrument is reused as a run judge arm", "the screening instrument is reused as a run judge configuration"],
+    // Judges.
+    [`instrument sha256:${hex} is missing`, `judge sha256:${hex} is missing`],
+    [`instrument sha256:${hex} is invalid: unexpected field`, `judge sha256:${hex} is invalid: unexpected field`],
+    ["instrument is not exact canonical profile bytes", "the judge record is not exact canonical profile bytes"],
+    ["same-execution Inspect score carries false separate-evaluator lineage", "same-execution Inspect score carries false separate-judge lineage"],
+    ["pre-evaluation terminal cannot claim an evaluator identity", "pre-evaluation terminal cannot claim a judge identity"],
+    ["partial evaluation lineage must name its evaluator and exact Task", "partial evaluation lineage must name its judge and exact Task"],
+    // The result and its limitations.
+    [
+      "a Report carrying example-extension is publishable only on benchmark-product-public-bundle/8",
+      "a result carrying example-extension is publishable only on benchmark-product-public-bundle/8",
+    ],
+    [
+      "bundle format benchmark-product-public-bundle/7 declares a qualifying closure, but its sealed Report declares method example",
+      "bundle format benchmark-product-public-bundle/7 declares a qualifying closure, but its sealed report.json declares method example",
+    ],
+    ["a benchmark-product-public-bundle/8 bundle must carry example-extension on its Report", "a benchmark-product-public-bundle/8 bundle must carry example-extension on its report.json"],
+    [
+      'a benchmark-product-public-bundle/10 "disclosure-specification" bundle must carry example-extension on its Report',
+      'a benchmark-product-public-bundle/10 "disclosure-specification" bundle must carry example-extension on its report.json',
+    ],
+    [
+      "the bundle does not carry the disclosure-specification record its Report names",
+      "the bundle does not carry the disclosure-specification record its report.json names",
+    ],
+    ["verified Report payload does not match report.json", "the verified result's payload does not match report.json"],
+    ["verified Report identity is absent", "the verified result's identity is absent"],
+    ["report trust keyId must equal didKey", "the result's signing keyId must equal its didKey"],
+    [
+      "Report limitations carry the publication-source sentence, but the bundle does not declare owner-controlled-publication",
+      "the result's limitations carry the publication-source sentence, but the bundle does not declare owner-controlled-publication",
+    ],
+    [
+      "Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history",
+      "the result's limitations are not exactly the ones derived from the sealed Run and rehearsal history",
+    ],
+    ["claim rehearsal and verified Report disclosure disagree", "the claim's rehearsal and the verified result's limitations disagree"],
+    [
+      "a bundle declaring owner-controlled-publication must seal the publication-source sentence in its Report limitations, right after the venue sentences",
+      "a bundle declaring owner-controlled-publication must seal the publication-source sentence in its result's limitations, right after the sentences on where it ran",
+    ],
+    [
+      "a bundle declaring terminal-bench-2-1-comparability must seal the comparability sentence once in its Report limitations, right after the venue and binary-instrument lines",
+      "a bundle declaring terminal-bench-2-1-comparability must seal the comparability sentence once in its result's limitations, right after the lines on where it ran and the binary-instrument lines",
+    ],
+    [
+      'the sealed Run declares task selection "operator-chosen", but this bundle does not declare the "task-selection" capability that states it on the report face; a bundle cannot pass while hiding who chose its tasks',
+      `the sealed Run declares task selection "operator-chosen", but this bundle does not declare the "task-selection" capability that states it on the bundle's pages; a bundle cannot pass while hiding who chose its tasks`,
+    ],
+    // Records named by a hidden noun.
+    ["the bundle's evidence catalog does not match the pinned v4 grammar", "the bundle's evidence.json does not match the pinned v4 grammar"],
+    ["the bundle's evidence catalog assigns no freeze-artifact role", "the bundle's evidence.json assigns no freeze-artifact role"],
+    ["evidence catalog contains missing or unreachable records", "evidence.json lists missing or unreachable records"],
+    [`EvaluationSpec ${hex} is not in the catalog`, `EvaluationSpec ${hex} is not among the EvaluationSpecs read for the runs' Tasks`],
+    ["static bundle is not the exact platform metadata projection", "static-bundle.json is not exactly the platform metadata derived from matrix.json and report.json"],
+    ["qualification admission projection differs from portable replay", "qualification.json's admission fields differ from the portable replay"],
+    [
+      "a benchmark-product-public-bundle/7 bundle's qualification document must keep its frozen benchmark-product.claim-package/2 projection literal",
+      "a benchmark-product-public-bundle/7 bundle's qualification.json must keep claimSchema at its frozen benchmark-product.claim-package/2 value",
+    ],
+    ["index.html is not the exact projection of verified public facts", "index.html is not exactly the file rebuilt from the verified public facts"],
+    ["claim externalImport section is not the exact projection of the authenticated marker", "the claim's externalImport section does not agree with the authenticated marker"],
+    ["Inspect summary measurement count differs from the sealed projections", "Inspect summary measurement count differs from the sealed scoring.projections"],
+    ["Inspect summary measurement differs from its sealed projection", "Inspect summary measurement differs from its sealed scoring.projections entry"],
+    ["Inspect summary differs from its sealed scorer projections", "Inspect summary differs from its sealed scoring.projections"],
+    ["verdict envelope payload is not valid JSON", "the signed verdict's payload is not valid JSON"],
+    ["verdict envelope carries duplicate measurement names", "the signed verdict carries duplicate measurement names"],
+    [
+      'this bundle declares the "task-selection" capability, but its sealed Run carries no task-selection/v1 declaration for it to state',
+      'this bundle declares the "task-selection" capability, but its sealed Run carries no task-selection/v1 for it to state',
+    ],
+  ];
+})();
+
+test("the refusals the characterization suite never reaches use the reader's names, and --json keeps the module's message", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  for (const [message, human] of READER_WORDING_5299) {
+    const verify = async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); };
+    const result = await runVerifierCli(["bundle"], { verify });
+    assert.equal(result.exitCode, 1, message);
+    assert.equal(result.stderr, `colophon-check: ${human}\n`, message);
+
+    const json = await runVerifierCli(["bundle", "--json"], { verify });
+    assert.equal(json.stderr, "", message);
+    assert.equal(JSON.parse(json.stdout).message, message);
+  }
+});
+
+// The same rules, after text a publisher could choose: each prints unchanged, so no rule rewords text
+// that does not start where its module's words start.
+test("the #5299 refusal wording is rewritten only where a rule matches from the message's start", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  for (const [body] of READER_WORDING_5299) {
+    const message = `unknown member: ${body}`;
+    const result = await runVerifierCli(["bundle"], {
+      verify: async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); },
+    });
+    assert.equal(result.stderr, `colophon-check: ${message}\n`, message);
+  }
+});
+
+// A freeze-repository or domain-binding refusal reaches a reader inside a note, and is worded as a
+// bundle refusal is: from its own start, with the note's lead in front.
+test("a note's refusal is worded from its own start, and --json keeps it", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const message = "the bundle's evidence catalog assigns no freeze-artifact role";
+  const deps = {
+    verify: async () => verified({ format: "benchmark-product-public-bundle/2", identity: "a".repeat(64), checks: ["manifest"], ...V6_IDENTITIES }),
+    freezeRepo: () => Promise.reject(Object.assign(new Error(message), { code: "not-found" })),
+  };
+  const human = await runVerifierCli(["bundle", "--freeze-repo", "repo"], deps);
+  assert.equal(human.exitCode, 2);
+  assert.equal(human.stderr, "colophon-check: freeze repository not checked: the bundle's evidence.json assigns no freeze-artifact role\n");
+
+  const json = await runVerifierCli(["bundle", "--json", "--freeze-repo", "repo"], deps);
+  assert.equal(JSON.parse(json.stdout).freezeRepo.message, message);
 });
 
 test("freeze-repo failures keep identifiers in --json and alias them for a human", async () => {

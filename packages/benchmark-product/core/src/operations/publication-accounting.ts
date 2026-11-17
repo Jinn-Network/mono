@@ -26,7 +26,7 @@ import { assembleMatrixV2, verifyMatrixV2 } from "@jinn-network/benchmarking-run
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { createDiscoverySourceAnnouncementPort } from "@jinn-network/record-publication";
-import { executePublicationPlan, type OriginVerificationPort, type PublicationArtifact, type PublicationFaultInjector, type PublicationPlan, type PublicationRecord } from "@jinn-network/record-publication";
+import { executePublicationPlan, type OriginVerificationPort, type PublicationAnnouncementPort, type PublicationArtifact, type PublicationFaultInjector, type PublicationPlan, type PublicationRecord } from "@jinn-network/record-publication";
 import { DELIVERY_MEDIA_TYPE, SUBMISSION_MEDIA_TYPE, DeliveryRecordSchema, SubmissionRecordSchema } from "@jinn-network/task-execution-protocol";
 import { refuse } from "../errors.js";
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
@@ -34,7 +34,7 @@ import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receip
 import { foldRunJournal, foldRunJournalLineage, readRunJournalEntries, type RunJournalEntry } from "../run/journal.js";
 import { readPublicationOrigin, requireWorkspaceAuthorship, recordWorkspaceAuthorship, WORKSPACE_AUTHORSHIP_ROLE } from "../run/publication-authority.js";
 import { assessPublicationCompatibility } from "../run/publication-compatibility.js";
-import { createWorkspacePublicationJournal, createWorkspacePublicationSource, publicArchiveUrl, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
+import { createWorkspacePublicationJournal, createWorkspacePublicationSource, publicArchiveUrl, recordPath, withWorkspacePublicationSourceLock, type WorkspacePublicationSource } from "../run/publication-source.js";
 import { acquirePublicationLock } from "../run/publication-lock.js";
 import { requireRunState, writeRunState } from "../run/state.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
@@ -60,6 +60,8 @@ export interface PublicationAccountingDeps {
   readonly transformAccountingScope?: (stream: AccountingScopeStream) => AccountingScopeStream;
   /** Test-only crash seam in the Accounting and Matrix v2 plan: after each action, before its journal checkpoint. */
   readonly recordPlanFaults?: PublicationFaultInjector;
+  /** Test-only crash seam in the input plan: after each action, before its journal checkpoint. */
+  readonly inputPlanFaults?: PublicationFaultInjector;
 }
 export interface PublicationAccountingResult {
   readonly accountingSha256: string;
@@ -91,6 +93,29 @@ async function probeArtifactExact(base: string, digest: `sha256:${string}`, byte
   if (observed.length !== bytes.length || !observed.every((value, index) => value === bytes[index])) {
     throw new Error(`public accounting artifact probe did not return exact bytes for ${digest}`);
   }
+}
+/**
+ * The announcement port for accounting's plans, used under the source lock: a plan's time is the
+ * earliest a record is announced, not the exact time (#5348, #5349). Every retry replays the plan,
+ * but the head may have passed a planned time since it was planned: through entry anchors, which
+ * each release of the source lock announces at one millisecond after the head and on, or through
+ * another draft. The writer refuses an append that does not strictly advance the head, so
+ * announcing at exactly that time could never succeed. A record the source already holds under the
+ * plan's announcement id is reused without a new append, so it replays as it was; any other is
+ * announced at its planned time, or one millisecond after the served head once the head has
+ * reached that time.
+ */
+function announceAfterServedHead(source: WorkspacePublicationSource): PublicationAnnouncementPort {
+  const announcer = createDiscoverySourceAnnouncementPort({ writer: source.writer });
+  return { async announce(value) {
+    const announced = (await source.writer.readState())?.announcements[value.idempotencyKey];
+    if (announced !== undefined) {
+      if (announced.receipt.record?.digest !== value.record.digest) throw new Error(`source announcement ${value.idempotencyKey} names a different record than ${value.record.id}`);
+      return announced.receipt;
+    }
+    const announcementTimestamp = timestampAfter(value.record.announcementTimestamp!, (await source.head.getExact())?.issuedAt, "publication.accounting.announcedAt");
+    return announcer.announce({ ...value, record: { ...value.record, announcementTimestamp } });
+  } };
 }
 function receiptPosition(source: { agent: string; name: string }, receipt: Receipt) {
   return { kind: "record-discovery" as const, source, position: { sequence: receipt.sequence, entry: receipt.entryDigest } };
@@ -126,6 +151,7 @@ async function publishInputs(input: {
   supportMembers: readonly PublicationMember[];
   verifyOrigin?: OriginVerificationPort;
   owner: string;
+  faults?: PublicationFaultInjector;
 }): Promise<{ source: { agent: string; name: string }; cutoff: Receipt }> {
   return withWorkspacePublicationSourceLock(input.workspaceDir, async () => {
     const source = createWorkspacePublicationSource(input.workspaceDir, input.sourceName);
@@ -151,7 +177,8 @@ async function publishInputs(input: {
         authority: { async authorizeAnnouncement({ record }) {
           requireWorkspaceAuthorship({ workspaceDir: input.workspaceDir, recordSha256: record.digest.slice(7), recordKind: record.kind, author: input.owner });
         } },
-        announce: createDiscoverySourceAnnouncementPort({ writer: source.writer }),
+        announce: announceAfterServedHead(source),
+        faults: input.faults,
       });
       for (const member of members) {
         if ("kind" in member && member.actions.includes("announce")) await probeExact(input.publicBaseUrl, member.digest, member.bytes);
@@ -170,7 +197,10 @@ async function publishInputs(input: {
       const durable = await source.writer.readState();
       const existing = Object.values(durable?.announcements ?? {}).find((entry) => entry.receipt.record?.digest === digest);
       const receipt = existing?.receipt ?? await source.writer.append({
-          timestamp: timestamp(at, ordinal++),
+          // The ordinal counts only this attempt's appends, so on a retry it can name the time of an
+          // input an earlier attempt announced, and the head may have passed it between attempts
+          // (#5349). As in the input plan, that time is therefore the earliest, not the exact one.
+          timestamp: timestampAfter(timestamp(at, ordinal++), (await source.head.getExact())?.issuedAt, "publication.accounting.announcedAt"),
           announcement: {
             announcementId: `accounting-input:${input.draftId}:${dispatch.submissionSha256}`,
             action: "available",
@@ -382,6 +412,7 @@ export function publicationAccounting(
             return announcedAt;
           },
           dispatches, supportMembers: [...supportMembers.values()], verifyOrigin: deps.verifyOrigin, owner: state.owner,
+          faults: deps.inputPlanFaults,
         })
         : { source: createWorkspacePublicationSource(context.workspaceDir, publication.source.name).source, cutoff: { sequence: publication.accounting.sourceCutoff!.sourceSequence, entryDigest: `sha256:${publication.accounting.sourceCutoff!.entrySha256}` as const } };
       publication = state.publication!;
@@ -524,28 +555,15 @@ export function publicationAccounting(
       await withWorkspacePublicationSourceLock(context.workspaceDir, async () => {
         const source = createWorkspacePublicationSource(context.workspaceDir, publication.source.name);
         await source.writer.recover();
-        const announcer = createDiscoverySourceAnnouncementPort({ writer: source.writer });
+        // The head can pass these records' planned times between the input hold and this one (#5348):
+        // releasing the input hold announces an entry anchor per input appended, and another draft
+        // can announce. Under this lock only this hold's own appends move the head.
+        const announcer = announceAfterServedHead(source);
         await executePublicationPlan(plan, {
           objects: source.artifactStore, journal: createWorkspacePublicationJournal(context.workspaceDir, input.draftId, "accounting"),
           authority: { async authorizeAnnouncement({ record }) { requireWorkspaceAuthorship({ workspaceDir: context.workspaceDir, recordSha256: record.digest.slice(7), recordKind: record.kind, author: state.owner }); } },
           announce: { async announce(value) {
-            // The planned time is the earliest this record is announced, not the exact time (#5348).
-            // The head can pass it between the input hold and this one: releasing the input hold
-            // announces an entry anchor per input appended, at one millisecond after the head, then
-            // two, and so on, and another draft can announce. The writer refuses an append that does
-            // not strictly advance the head, and every retry replays this plan, so announcing at
-            // exactly the planned time could never succeed. Under this lock only this hold's own
-            // appends move the head. A record the source already holds under this plan's
-            // announcement id is never appended again, so a retry leaves its entry as it was.
-            const announced = (await source.writer.readState())?.announcements[value.idempotencyKey];
-            let receipt: Receipt;
-            if (announced !== undefined) {
-              if (announced.receipt.record?.digest !== value.record.digest) throw new Error(`source announcement ${value.idempotencyKey} names a different record than ${value.record.id}`);
-              receipt = announced.receipt;
-            } else {
-              const announcementTimestamp = timestampAfter(value.record.announcementTimestamp!, (await source.head.getExact())?.issuedAt, "publication.accounting.announcedAt");
-              receipt = await announcer.announce({ ...value, record: { ...value.record, announcementTimestamp } }) as Receipt;
-            }
+            const receipt = await announcer.announce(value) as Receipt;
             receipts.set(value.record.id, receipt);
             return receipt;
           } },
