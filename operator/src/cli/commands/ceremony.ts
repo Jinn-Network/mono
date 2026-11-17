@@ -110,6 +110,74 @@ const OPTIONS = {
 
 type Parsed = ReturnType<typeof parseArgs<{ options: typeof OPTIONS; allowPositionals: true }>>;
 
+export const CEREMONY_VERBS = ['init', 'join', 'rotate', 'show'] as const;
+export type CeremonyVerb = (typeof CEREMONY_VERBS)[number];
+
+/**
+ * The verbs that take each flag: the one table every verb's accepted flags come from.
+ *
+ * Every verb parses against OPTIONS, so without this a flag meant for one verb is accepted by the
+ * others and ignored without a word, and these are key-custody commands. `run` refuses
+ * (unused-flag) any flag the verb is not listed for, before anything is read, minted or anchored.
+ * Typed against OPTIONS, so a new flag does not compile until it names the verbs that take it. The
+ * help's option list marks each flag with the same verbs, and the tests hold the two equal.
+ */
+export const CEREMONY_FLAG_VERBS = {
+  dir: CEREMONY_VERBS,
+  config: CEREMONY_VERBS,
+  // show reads it only to open the --store it lists.
+  'role-sets': CEREMONY_VERBS,
+  'authority-store': ['init', 'join'],
+  catalog: CEREMONY_VERBS,
+  'previous-catalog': ['init'],
+  genesis: ['join'],
+  store: ['show'],
+  'rpc-url': CEREMONY_VERBS,
+  'anchor-target': ['init', 'join', 'rotate'],
+  'service-index': ['init', 'join', 'rotate'],
+  'finality-timeout-ms': ['init', 'join', 'rotate'],
+  'resubmit-anchor': ['rotate'],
+  'retiring-store': ['rotate'],
+  execute: ['init', 'join', 'rotate'],
+  'dry-run': ['init', 'join', 'rotate'],
+  human: CEREMONY_VERBS,
+  json: CEREMONY_VERBS,
+  // `jinn ceremony --help` is answered before any verb runs.
+  help: CEREMONY_VERBS,
+  // No verb reads it: the password comes from JINN_PASSWORD or the keystore-password file. It stays
+  // accepted because operator/README.md's password resolution names it for every verb that touches
+  // keys, so refusing it would refuse an invocation that document describes.
+  'password-fd': CEREMONY_VERBS,
+} as const satisfies Record<keyof typeof OPTIONS, readonly [CeremonyVerb, ...CeremonyVerb[]]>;
+
+function verbList(verbs: readonly string[]): string {
+  return verbs.length === 1 ? verbs[0]! : `${verbs.slice(0, -1).join(', ')} and ${verbs[verbs.length - 1]}`;
+}
+
+/** Refuses each flag in `given` that `verb` does not take, naming it and the verbs that do. */
+function refuseUnusedFlags(ctx: CommandContext, verb: CeremonyVerb, given: readonly string[]): void {
+  const unused = [...new Set(given)].filter((flag) => {
+    const takers: readonly CeremonyVerb[] = CEREMONY_FLAG_VERBS[flag as keyof typeof OPTIONS];
+    return !takers.includes(verb);
+  });
+  if (unused.length === 0) return;
+  const flags = unused.map((flag) => ({
+    flag: `--${flag}`,
+    takenBy: [...CEREMONY_FLAG_VERBS[flag as keyof typeof OPTIONS]],
+  }));
+  const message = `ceremony ${verb} does not take ${flags.map(({ flag, takenBy }) =>
+    `${flag} (only ${verbList(takenBy)} ${takenBy.length === 1 ? 'takes' : 'take'} it)`).join(' or ')}`;
+  emitEnvelope({
+    code: 'invalid_invocation',
+    message,
+    hint: `Drop ${verbList(flags.map(({ flag }) => flag))}: ceremony ${verb} would not read `
+      + `${flags.length === 1 ? 'it' : 'them'}. The options in \`jinn ceremony --help\` name the verbs that take each.`,
+    exampleCli: EXAMPLE_CLI,
+    details: { feature: 'ceremony', state: 'unused-flag', verb, flags, sideEffects: false },
+  }, { writer: ctx.writer, exit: ctx.exit });
+  throw new CeremonyRefusal(message);
+}
+
 /** §5: genesis + ~6 months. `openNativeTrustCatalog` hard-refuses an expired policy. */
 const REFRESH_BY_MONTHS = 6;
 /** §6 law 4: the Base Sepolia `finalized` tag trails head by roughly 10-20 minutes. */
@@ -2580,7 +2648,7 @@ export function createCeremonyCommand(deps?: CeremonyCommandDeps): CommandModule
   jinn ceremony init --dir <operator home> --role-sets <families> --authority-store <path> [--execute]
   jinn ceremony join --dir <operator home> --role-sets <families> --catalog <path> --genesis <digest> --authority-store <path> [--execute]
   jinn ceremony rotate --dir <operator home> --role-sets <families> [--catalog <path>] [--execute]
-  jinn ceremony show [--catalog <path>] [--store <path>]
+  jinn ceremony show [--catalog <path>] [--store <path> --role-sets <family>]
 
 Status:
   \`init\` provisions the FIRST operator and the shared catalog genesis; \`join\` adds operator N+1 to
@@ -2665,39 +2733,49 @@ Status:
   while another key for those roles is bound that neither the named stores nor the configured ones
   hold. It then sends a fresh revocation anchor and revokes the named stores' keys.
 
-Options (init, join, and rotate; rotate takes no --authority-store or --genesis):
+Options (a flag marked "<verbs> only" is taken by those verbs alone, and any other verb refuses it
+(unused-flag) before it reads any store, catalog or chain state; an unmarked flag is taken by all four):
   --dir <path>               Operator home (default ~/.jinn-client). The keystore, identity stores,
                              and config.json are resolved beneath it.
   --config <path>            Config file to write back to (default <dir>/config.json)
   --role-sets <list>         Comma-separated families: requester, admission, solver, evaluator.
                              \`requester\` is mandatory — every native boot opens requester custody.
-  --authority-store <path>   The DEDICATED catalog-authority keypair, held by the deploy coordinator.
-                             Never an operator role key: policy-update capability must survive any
-                             operator's key rotation.
-  --catalog <path>           Trust catalog path (default <dir>/trust.json; required for join)
+                             show reads it only with --store: the one family that store holds.
+  --authority-store <path>   init and join only: the DEDICATED catalog-authority keypair, held by the
+                             deploy coordinator. Never an operator role key: policy-update capability
+                             must survive any operator's key rotation.
+  --catalog <path>           Trust catalog path (default <dir>/trust.json; required for join). rotate
+                             and show default to the config's trustRootsPath when it names one.
   --previous-catalog <path>  init only: the catalog a re-author replaces (see RE-AUTHORING above)
   --genesis <digest>         join only: the sha256 genesis digest init printed. The pin is what makes
                              a join a join rather than an unnoticed fork onto a different catalog.
+  --store <path>             show only: additionally list an identity store's role -> did:key ids
+                             (needs JINN_PASSWORD and --role-sets)
   --rpc-url <url>            Base Sepolia RPC (defaults to the configured chain)
-  --anchor-target <address>  Address the anchor calldata is sent to (default: this operator's own EOA)
-  --service-index <n>        Which earning service supplies the EOA and Safe (default: the primary)
-  --finality-timeout-ms <n>  How long to wait for the finalized tag (default 2700000, i.e. 45 min)
+  --anchor-target <address>  init, join and rotate only: address the anchor calldata is sent to
+                             (default: this operator's own EOA)
+  --service-index <n>        init, join and rotate only: which earning service supplies the EOA and
+                             Safe (default: the primary)
+  --finality-timeout-ms <n>  init, join and rotate only: how long to wait for the finalized tag
+                             (default 2700000, i.e. 45 min)
   --resubmit-anchor          rotate only: send a fresh anchor for the act an unfinished rotation
                              resumes, in place of a recorded one that never reads back finalized
   --retiring-store <family>=<path>
                              rotate only, once for each --role-sets family: the store a rotation
                              whose rotation.json was lost after the repoint was retiring
-  --execute                  Perform the ceremony. Without it, nothing is minted, sent, or written.
-  --dry-run                  Force the read-only plan. Refuses if combined with --execute.
+  --execute                  init, join and rotate only: perform the ceremony. Without it, nothing is
+                             minted, sent, or written.
+  --dry-run                  init, join and rotate only: force the read-only plan. Refuses if
+                             combined with --execute.
   --human                    Human-readable output, including the anchor and finality progress lines.
+  --json                     JSON output, the default when --human is not given
+  --help                     This help
+  --password-fd <n>          Accepted but never read: the ceremony takes the password from
+                             JINN_PASSWORD or the keystore-password file, below.
   JINN_PASSWORD              Required unless a keystore-password file exists (primary
                              <dir>/earning/keystore-password, or the host-wide default-state
                              fallback). The ceremony must run with the password the daemon
                              will later resolve, or it mints custody the daemon cannot decrypt.
-
-Options (show):
-  --catalog <path>           Catalog to inspect (default: the config's trustRootsPath)
-  --store <path>             Additionally list an identity store's role -> did:key ids (needs JINN_PASSWORD)
 
 Config write-back:
   init and join write exactly five keys onto config.json: agentIri, admissionAgent (only when the
@@ -2716,8 +2794,12 @@ Examples:
     async run(ctx: CommandContext): Promise<void> {
       try {
         let parsed: Parsed;
+        let given: string[];
         try {
-          parsed = parseArgs({ args: ctx.argv, options: OPTIONS, allowPositionals: true }) as Parsed;
+          const result = parseArgs({ args: ctx.argv, options: OPTIONS, allowPositionals: true, tokens: true });
+          parsed = result as Parsed;
+          // The flags actually passed: `values` cannot tell a boolean's default from the flag.
+          given = result.tokens.flatMap((token) => (token.kind === 'option' ? [token.name] : []));
         } catch (error) {
           return invalid(ctx, error instanceof Error ? error.message : String(error));
         }
@@ -2726,6 +2808,7 @@ Examples:
           || (verb !== 'init' && verb !== 'join' && verb !== 'rotate' && verb !== 'show')) {
           return invalid(ctx, 'ceremony requires the `init`, `join`, `rotate`, or `show` subcommand');
         }
+        refuseUnusedFlags(ctx, verb, given);
         if (deps === undefined) {
           return emitEnvelope({
             code: 'bootstrap_incomplete',
