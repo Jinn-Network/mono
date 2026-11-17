@@ -512,7 +512,7 @@ function credentialParameter(text: string): boolean {
  * URL scheme is read from the start of its run of scheme characters, so that a long run is read
  * once and not from every letter of it (#5332). */
 const CREDENTIAL_TEXT: readonly (readonly [(text: string) => boolean, string])[] = [
-  [(text) => /(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{6,}/u.test(text), "a key-shaped string"],
+  [(text) => /(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{6}/u.test(text), "a key-shaped string"],
   [(text) => /bearer\s+\S/iu.test(text), "a bearer credential"],
   [(text) => /(?<![a-z0-9+.-])[0-9+.-]*[a-z][a-z0-9+.-]*:\/\/[^/\s?#@]*@/iu.test(text), "a URL carrying credentials"],
   [credentialParameter, "a URL carrying credentials"],

@@ -729,6 +729,8 @@ describe("harborCarriedEvidence — what a Harbor import carries of a trial's ow
     ["a name that holds bearer", "?bearer=x"],
     ["a second question mark", "a?b?key=v"],
     ["a question mark and a semicolon", "?;key=v"],
+    ["a name between two question marks", "?key?x=1"],
+    ["a name before a semicolon after an ampersand", "&key;x=1"],
     ["a value that is an equals sign", "?key=="],
     ["a name that ends at the equals sign of the value before it", "?x=1&Key=2"],
     ["a parameter inside text", "see https://h/p?token=abc, then"],
@@ -793,8 +795,8 @@ describe("harborCarriedEvidence — what a Harbor import carries of a trial's ow
   });
 
   // #5332: each check below took time that grew with the square of the run, or threw. An evidence
-  // file may be 8 MiB. Before the fix the first took about 160 seconds on a 1,000,000-letter run
-  // (7 seconds on 100,000, as measured in the issue) and the third about 3 minutes; the 8 MiB run
+  // file may be 8 MiB. Before the fix the first took more than ten minutes on a 1,000,000-letter run
+  // (7 seconds on 100,000, as measured in the issue, growing with the square of the run) and the third more than half an hour; the 8 MiB run
   // threw a RangeError. Read once, each takes well under a second; the budget leaves a loaded
   // runner room.
   const EVIDENCE_CAP = 8 * 1024 * 1024;
@@ -838,6 +840,13 @@ describe("harborCarriedEvidence — what a Harbor import carries of a trial's ow
     const error = refusalOf("trial-config.json", JSON.stringify({ trial_name: "hello-world__55xttAM", agent: { kwargs: { note } } }));
     expect(error.code).toBe("validation");
     expect(error.message).toContain("at agent.kwargs.note, holds a token-shaped string");
+  });
+
+  test("a key-shaped run up to the evidence cap is refused as key-shaped, not an internal error", () => {
+    const note = "sk-" + "a".repeat(EVIDENCE_CAP - 200);
+    const error = refusalOf("trial-config.json", JSON.stringify({ trial_name: "hello-world__55xttAM", agent: { kwargs: { note } } }));
+    expect(error.code).toBe("validation");
+    expect(error.message).toContain("at agent.kwargs.note, holds a key-shaped string");
   });
 });
 
