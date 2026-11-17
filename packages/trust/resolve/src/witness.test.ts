@@ -21,6 +21,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ERC1271_IS_VALID_SIGNATURE_ABI, ERC1271_MAGIC_VALUE } from "./abis.js";
 import { createWitnessVerifier } from "./witness.js";
+import type { ArchiveReadClient } from "./witness.js";
 
 const VERIFIER_IRI = "https://spec.jinn.network/agents/verifier-1";
 const SAFE = "0x4444444444444444444444444444444444444444";
@@ -71,7 +72,7 @@ const ACCEPTING = {
 };
 
 /** An archive client serving CHAIN_ID. */
-function archive(readContract: (...args: never[]) => Promise<unknown>) {
+function archive(readContract: ArchiveReadClient["readContract"]): ArchiveReadClient {
   return { getChainId: async () => CHAIN_ID, readContract };
 }
 
