@@ -500,6 +500,17 @@ interface HostPath {
   readonly path: string;
 }
 
+/** Whether `text` names `path` or something under it: an occurrence of `path` not followed by a
+ * letter, digit, `_` or `-`, or by a `.` and one of those, so that `/home/runner-7` does not name
+ * `/home/runner` and a path that ends a sentence is still named. */
+function namesPath(text: string, path: string): boolean {
+  for (let at = text.indexOf(path); at !== -1; at = text.indexOf(path, at + 1)) {
+    const after = text.slice(at + path.length, at + path.length + 2);
+    if (!/^(?:[\w-]|\.[\w-])/u.test(after)) return true;
+  }
+  return false;
+}
+
 /** Where a string sits in a trial record: the settings, the `env` and the credential-shaped name
  * it is under. */
 interface Within {
@@ -520,7 +531,7 @@ function trialRecordStringFinding(
   within: Within,
 ): string | undefined {
   for (const { what, path } of thisMachine) {
-    if (text.includes(path)) return `names ${what} (${path})`;
+    if (namesPath(text, path)) return `names ${what} (${path})`;
   }
   const home = HOME_DIRECTORY.exec(text);
   if (home !== null) return `names a home directory (${home[0]})`;
@@ -684,8 +695,8 @@ function withoutParsedMembers(
  *
  * Then it refuses the trial record, naming the file and the field, when any key or string left in
  * it (after JSON unescaping):
- * - contains the jobs directory (as given or resolved) or the home directory of the machine
- *   running the import;
+ * - names the jobs directory (as given or resolved) or the home directory of the machine
+ *   running the import, or a path under one (`namesPath`);
  * - names a home directory of any machine: `/home/<name>`, `/Users/<name>` or a Windows
  *   `\Users\<name>` or `/Users/<name>` anywhere in the string, or a path that starts at `/root`;
  * - holds a `file:` URI;

@@ -423,6 +423,25 @@ describe("harborCarriedEvidence — what a Harbor import carries of a trial's ow
     expect(error.message).toContain("/home/ci-builder");
   });
 
+  // This machine's jobs and home directories are matched as paths, not as text: on a runner whose
+  // home is /home/runner, /home/runner-7 is another machine's home, not under this one.
+  test("a home directory whose path begins with your home directory's is not read as yours", () => {
+    const other = `${homedir()}-7`;
+    for (const [name, text] of trialRecords("environment.mounts", [{ type: "bind", source: `${other}/datasets`, target: "/data" }])) {
+      const { message } = refusalOf(name, text);
+      expect(message).toContain(other);
+      expect(message).not.toContain("your home directory");
+    }
+  });
+
+  test("your home directory at the end of a sentence is still read as yours", () => {
+    const text = JSON.stringify({
+      id: "x",
+      exception_info: { exception_type: "PermissionError", exception_message: `cannot write to ${homedir()}.` },
+    }, null, 4);
+    expect(refusalOf("trial-result.json", text).message).toContain(`names your home directory (${homedir()})`);
+  });
+
   test.each([
     ["a bind mount", "environment.mounts", [{ type: "bind", source: "/srv/datasets", target: "/data" }], "environment.mounts[0].source"],
     ["an instruction file", "extra_instruction_paths", ["/srv/notes/instructions.md"], "extra_instruction_paths[0]"],
