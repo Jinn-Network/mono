@@ -524,10 +524,31 @@ export function publicationAccounting(
       await withWorkspacePublicationSourceLock(context.workspaceDir, async () => {
         const source = createWorkspacePublicationSource(context.workspaceDir, publication.source.name);
         await source.writer.recover();
+        const announcer = createDiscoverySourceAnnouncementPort({ writer: source.writer });
         await executePublicationPlan(plan, {
           objects: source.artifactStore, journal: createWorkspacePublicationJournal(context.workspaceDir, input.draftId, "accounting"),
           authority: { async authorizeAnnouncement({ record }) { requireWorkspaceAuthorship({ workspaceDir: context.workspaceDir, recordSha256: record.digest.slice(7), recordKind: record.kind, author: state.owner }); } },
-          announce: { async announce(value) { const receipt = await createDiscoverySourceAnnouncementPort({ writer: source.writer }).announce(value) as Receipt; receipts.set(value.record.id, receipt); return receipt; } },
+          announce: { async announce(value) {
+            // The planned time is the earliest this record is announced, not the exact time (#5348).
+            // The head can pass it between the input hold and this one: releasing the input hold
+            // announces an entry anchor per input appended, at one millisecond after the head, then
+            // two, and so on, and another draft can announce. The writer refuses an append that does
+            // not strictly advance the head, and every retry replays this plan, so announcing at
+            // exactly the planned time could never succeed. Under this lock only this hold's own
+            // appends move the head. A record the source already holds under this plan's
+            // announcement id is never appended again, so a retry leaves its entry as it was.
+            const announced = (await source.writer.readState())?.announcements[value.idempotencyKey];
+            let receipt: Receipt;
+            if (announced !== undefined) {
+              if (announced.receipt.record?.digest !== value.record.digest) throw new Error(`source announcement ${value.idempotencyKey} names a different record than ${value.record.id}`);
+              receipt = announced.receipt;
+            } else {
+              const announcementTimestamp = timestampAfter(value.record.announcementTimestamp!, (await source.head.getExact())?.issuedAt, "publication.accounting.announcedAt");
+              receipt = await announcer.announce({ ...value, record: { ...value.record, announcementTimestamp } }) as Receipt;
+            }
+            receipts.set(value.record.id, receipt);
+            return receipt;
+          } },
           faults: deps.recordPlanFaults,
         });
       });
