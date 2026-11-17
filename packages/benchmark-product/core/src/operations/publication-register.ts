@@ -17,6 +17,7 @@ import {
   sha256,
   type OriginVerificationPort,
   type PublicationArtifact,
+  type PublicationFaultInjector,
   type PublicationPlan,
   type PublicationRecord,
 } from "@jinn-network/record-publication";
@@ -79,6 +80,8 @@ export interface PublicationRegisterDeps {
   readonly verifyOrigin?: OriginVerificationPort;
   /** Test-only crash seam after the completed registration plan is publicly probed, before its RunState checkpoint. */
   readonly afterPlanBeforeCheckpoint?: () => Promise<void>;
+  /** Test-only crash seam in the registration plan: after each action, before its journal checkpoint. */
+  readonly planFaults?: PublicationFaultInjector;
 }
 
 async function probeExact(base: string, digest: `sha256:${string}`, bytes: Uint8Array): Promise<void> {
@@ -434,6 +437,7 @@ export function publicationRegister(
             receipt = durable;
             return durable;
           } },
+          faults: deps.planFaults,
         });
       });
       // A completed executor journal can be replayed without calling announce, so recover the
