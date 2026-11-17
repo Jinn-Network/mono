@@ -8,6 +8,7 @@ import {
   dssePreAuthEncoding,
   parseExactDsseEnvelope,
   recordDigest,
+  sealKeyBinding,
   sealRevocation,
   sealTrustPolicy,
   TRUST_KEY_BINDING_MEDIA_TYPE,
@@ -676,6 +677,50 @@ describe("planRevocation", () => {
     const other = { address: FIXTURE_ACCOUNT, async signMessage(): Promise<`0x${string}`> { throw new Error("must not sign"); } };
     await expect(planRevocation({ catalogPath: path, voucher: other, targets: [bindings[0]!.digest] }))
       .rejects.toThrow(/is not the voucher of binding/u);
+  });
+
+  it("refuses a target vouched by a contract account, and asks the account to sign nothing", async () => {
+    const { path, bindings } = await genesis();
+    const catalog = JSON.parse(await readFile(path, "utf8")) as { bindings: Record<string, unknown>[] };
+    // authorRoleBinding always writes `contractAccount: false`, so only a hand-made catalog reaches
+    // this: the same binding, re-sealed with its voucher marked a contract account.
+    const original = validateKeyBinding(bindings[0]!.envelopeBytes).value!;
+    const sealed = await sealKeyBinding(
+      { ...original, voucher: { kind: "account", did: didPkh(84532, EOA), contractAccount: true } },
+      async () => [{ keyid: original.key.keyid, signature: new Uint8Array(64) }],
+    );
+    catalog.bindings[0] = {
+      ...catalog.bindings[0],
+      digest: sealed.recordDigest,
+      envelope: Buffer.from(sealed.envelopeBytes).toString("base64"),
+    };
+    await writeFile(path, JSON.stringify(catalog));
+    const { asked, voucher } = recordingVoucher(EOA, FIXTURE_SIGNATURE);
+
+    await expect(planRevocation({ catalogPath: path, voucher, targets: [sealed.recordDigest] }))
+      .rejects.toThrow(/is vouched by a contract account, which cannot revoke/u);
+    expect(asked).toEqual([]);
+  });
+
+  it("refuses a target this voucher has already revoked", async () => {
+    const { path, bindings } = await genesis();
+    const catalog = JSON.parse(await readFile(path, "utf8")) as { revocations: Record<string, unknown>[] };
+    const revokedBy = didPkh(84532, EOA);
+    const revocation = await sealRevocation({
+      protocol: TRUST_REVOCATION_FORMAT,
+      target: bindings[0]!.digest,
+      revokedBy,
+      anchors: [{ digest: ANCHOR_B }],
+      effectiveFrom: TIME_B,
+    }, async () => [{ keyid: revokedBy, signature: new Uint8Array(65) }]);
+    catalog.revocations.push({
+      digest: revocation.recordDigest,
+      envelope: Buffer.from(revocation.envelopeBytes).toString("base64"),
+    });
+    await writeFile(path, JSON.stringify(catalog));
+
+    await expect(planRevocation({ catalogPath: path, voucher: signer, targets: [bindings[0]!.digest] }))
+      .rejects.toThrow(new RegExp(`binding ${bindings[0]!.digest} is already revoked by ${revokedBy}`, "u"));
   });
 });
 
