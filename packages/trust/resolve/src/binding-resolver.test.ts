@@ -1322,6 +1322,63 @@ describe("createBindingResolver", () => {
       expect(await composed(await accountLeg(), { compositionAuthority: undefined })).toBeNull();
     });
 
+    // Each agentId's key is also one of the owner's keys, all at one instant, so deciding one
+    // composition asks what resolves for every other agentId's key, and decides that composition while
+    // the first is being decided: a ring. The guard answers by which compositions are being decided, so a
+    // ring has exponentially many answers to give in its width. A narrow one is followed, and its answer is
+    // the guard's: no composition holds, and the owner's record answers for the key. A wide one ends the
+    // resolve as an outage.
+    function ringOf(letters: string) {
+      const ring = Array.from(letters, (letter, index): SealedKeyBindingRecord[] => {
+        const didKey = `did:key:zRing${letter}`;
+        const key = { publicKey: `pk-ring-${letter}`, keyid: didKey, algorithm: "secp256k1", didKey };
+        const vouched = accountBinding({
+          key,
+          voucher: { kind: "agentId", caip19: `eip155:84532/erc721:0x2222222222222222222222222222222222222222/${100 + index}` },
+          ceremony: { type: "agentId", digest: CEREMONY_DIGEST },
+          strength: deriveStrength("agentId"),
+        });
+        // The owner's record of the same key carries no ceremony evidence, so it never stands.
+        const owned = accountBinding({ key, voucher: ownerVoucher });
+        const digest = (kind: string) => `sha256:${kind.repeat(62)}${(16 + index).toString(16)}` as Sha256Digest;
+        return [
+          { binding: vouched, envelopeBytes: sealedBy(vouched, TRUST_KEY_BINDING_MEDIA_TYPE, didKey), bindingDigest: digest("e") },
+          { binding: owned, envelopeBytes: sealedBy(owned, TRUST_KEY_BINDING_MEDIA_TYPE, didKey), bindingDigest: digest("f") },
+        ];
+      }).flat();
+      let lookups = 0;
+      const resolver = createBindingResolver({
+        bindings: {
+          ...fakeStore(ring),
+          listBindingsForAgent: async () => {
+            lookups += 1;
+            if (lookups > 20_000) throw new Error("the store was asked more than 20000 times");
+            return ring;
+          },
+        },
+        anchors,
+        chainFacts,
+        compositionAuthority,
+        recordSignedByItsKey: (entry) => declaredSigners(entry.envelopeBytes).validSignerKeyids.includes(entry.binding.key.didKey),
+      });
+      return {
+        resolve: () => resolver.resolveBinding({ key: ring[0]!.binding.key.didKey, agent: AGENT }, at),
+        lookups: () => lookups,
+      };
+    }
+
+    it("follows a narrow ring of compositions at one instant to the guard's answer", async () => {
+      const ring = ringOf("ABCDE");
+      expect((await ring.resolve())?.binding.voucher).toEqual(ownerVoucher);
+      expect(ring.lookups()).toBeLessThan(100);
+    });
+
+    it("ends a resolve as an outage rather than follow a ring of compositions at one instant too wide to follow", async () => {
+      const ring = ringOf("ABCDEFGHJK");
+      await expect(ring.resolve()).rejects.toMatchObject({ code: "RESOLUTION_FAILED" });
+      expect(ring.lookups()).toBeLessThan(1_000);
+    });
+
     describe("under a deployment's ceremony currency profile", () => {
       it("composes with the owner's record whose ceremony meets it", async () => {
         expect((await composed(await accountLeg(), { ceremonyCurrency: {} }))?.bindingDigest).toBe(DIGEST_A);

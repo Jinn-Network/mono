@@ -104,6 +104,8 @@ class World {
   /** The registry's owner of each agentId. */
   readonly registry = new Map<string, `0x${string}`>();
   lookups = 0;
+  /** Past this many lookups the store fails, so a case about the work of a resolve ends however much it would do. */
+  lookupLimit = Number.POSITIVE_INFINITY;
 
   constructor(
     readonly requireAnchors: boolean,
@@ -166,6 +168,7 @@ class World {
     return {
       listBindingsForAgent: async (agent) => {
         this.lookups += 1;
+        if (this.lookups > this.lookupLimit) throw new Error(`the store was asked more than ${this.lookupLimit} times`);
         return records.filter(({ binding }) => binding.agent === agent);
       },
       listRevocationsForTargets: async (targets) =>
@@ -1200,6 +1203,76 @@ describe.each([
       await w.bind({ key: COLD_KEY, signer: SECOND_OWNER, validFrom: T1, consentBy: GENESIS_KEY });
       expect(await w.verdict(GENESIS_KEY)).toMatchObject(notResolved);
       expect(await w.verdict(COLD_KEY)).toMatchObject(refusedChain);
+    });
+
+    // Each of the owner's account bindings joins by the consent of an agentId binding's key that took
+    // effect just before it, and nothing roots them, so judging the composition at one of them reaches
+    // the composition at every earlier one. Decided again on every path that reaches it, that is work
+    // exponential in the records; decided once, it is about one lookup per pair per instant. The owner's
+    // bindings `operate` rather than `control`, so none is another's incumbent and each walk reads one
+    // consent: what is counted is the composition leg's own work.
+    test("is decided once per resolve however many of the owner's bindings lean on agentId bindings", async () => {
+      const w = world();
+      w.registry.set(AGENT_ID, SECOND_OWNER.address);
+      await bindGenesis(w);
+      const pairs = 20;
+      const minute = (index: number) => new Date(Date.parse(T1) + index * 60_000).toISOString();
+      let leaning = GENESIS_KEY;
+      for (let index = 0; index < pairs; index += 1) {
+        leaning = testDidKey(`binding-authority-leaning-${index}`);
+        // eslint-disable-next-line no-await-in-loop -- fixtures build in order.
+        await w.bind({ key: leaning, signer: SECOND_OWNER, agentId: AGENT_ID, validFrom: minute(2 * index) });
+        // eslint-disable-next-line no-await-in-loop -- fixtures build in order.
+        await w.bind({
+          key: testDidKey(`binding-authority-leant-on-${index}`),
+          signer: SECOND_OWNER,
+          relationship: "operates",
+          validFrom: minute(2 * index + 1),
+          consentBy: leaning,
+        });
+      }
+      w.lookupLimit = 2 * pairs * pairs;
+      expect(await w.verdictInStoredOrder(leaning)).toMatchObject(notResolved);
+    });
+
+    // Now the owner's genesis roots every composition, each agentId binding joins by its consent with no
+    // `bindings` scope to give on, and each was retired by its own key later on. The genesis operates, so
+    // it is no incumbent of the owner's other bindings, and those sort before it, so every composition
+    // asks after each of them first. A resolve the leg makes is judged only at its own instant, so it does
+    // not work out the scope of a revocation that takes effect after it, no composition reaches the one
+    // at that later instant, and each is still decided once.
+    test("is decided once per resolve when the agentId bindings leant on are retired later", async () => {
+      const w = world();
+      w.registry.set(AGENT_ID, SECOND_OWNER.address);
+      const ownerKey = "did:key:zzzzKeeper";
+      await w.bind({ key: ownerKey, signer: SECOND_OWNER, validFrom: T0, relationship: "operates" });
+      const marks = [..."123456789ABCDEFGHJKL"];
+      const minute = (index: number) => new Date(Date.parse(T1) + index * 60_000).toISOString();
+      let leaning = ownerKey;
+      for (const [index, mark] of marks.entries()) {
+        leaning = `did:key:zB${mark}`;
+        // eslint-disable-next-line no-await-in-loop -- fixtures build in order.
+        const vouched = await w.bind({
+          key: leaning,
+          signer: SECOND_OWNER,
+          agentId: AGENT_ID,
+          validFrom: minute(2 * index),
+          consentBy: ownerKey,
+          scope: ["verdicts"],
+        });
+        // eslint-disable-next-line no-await-in-loop -- fixtures build in order.
+        await w.bind({
+          key: `did:key:zA${mark}`,
+          signer: SECOND_OWNER,
+          relationship: "operates",
+          validFrom: minute(2 * index + 1),
+          consentBy: leaning,
+        });
+        // eslint-disable-next-line no-await-in-loop -- fixtures build in order.
+        await w.revoke(vouched, leaning, T4);
+      }
+      w.lookupLimit = 4 * marks.length * marks.length;
+      expect(await w.verdictInStoredOrder(leaning)).toMatchObject(stands);
     });
   });
 
