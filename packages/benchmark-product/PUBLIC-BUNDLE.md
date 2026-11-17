@@ -127,13 +127,16 @@ reproduction. Version 2 carries no anchors, so the anchor trust-material flags
 below do not apply to it. It returns **six checks**.
 
 One kind of version 2 bundle names a later line. A run whose screening was
-prompted — its claim carries `method.parameters.promptedScreeningProfile ===
-"prompted-codex-screening/v1"` — pins `@0.2.1`, with `@0.2` as the compatible
-line and `@0.2.0` on bundles materialized before `0.2.1` existed. Prompted
-screening does not move the format, so such a bundle is still `.../2`, and the
-released `@colophon-claims/verify@0.1.0` refuses it at `claim-consistency`: that
-reader rebuilds the verification command with its own `@0.1.0` line, which
-differs from the `@0.2.1` (or historical `@0.2.0`) line the claim names. Read a
+prompted pins `@0.2.1`, with `@0.2` as the compatible line and `@0.2.0` on
+bundles materialized before `0.2.1` existed. The bundle's `run.json` is what
+marks such a run: its `analysisPlan` has an entry whose
+`parameters.promptedScreeningProfile` is `"prompted-codex-screening/v1"`, and
+the producer stamps the later line exactly when one entry does. The claim
+package's own `method.parameters` do not carry that key on a `.../2`: only the
+run's `binary-instrument` entry carries it, and a `.../2` reports one of the
+run's other analyses. Prompted screening does not move the format, so such a
+bundle is still `.../2`, and the released `@colophon-claims/verify@0.1.0`
+refuses it: that reader is older than the line the claim names. Read a
 bundle that pins `@0.2.1` with `@0.2`. A bundle that pins `@0.2.0` is different:
 no published reader from `0.2.1` on reads it, `@0.2` included, although its claim
 names `@0.2` as the compatible line. Each refuses it under `record-integrity`: at
@@ -206,8 +209,8 @@ fourth axis, and only anchoring, qualification, and disclosure select the format
 `"prompted-codex-screening/v1"` on a prompted bundle and absent otherwise. The
 refusal a prompted v4 earns from a reader too old for it is not v7's: v7 is
 refused on the format, before the claim is read, while a prompted v4 is a format
-`0.1.0` and `0.2.0` both support and is refused on the claim inside it. That
-case is described in
+`0.1.0` and `0.2.0` both support, so each of them accepts the format and refuses
+the bundle at a later step. That case is described in
 [A listed format is not on its own a verdict either](#reading-a-bundle-with-a-reader-that-is-too-old).
 
 V4 carries no anchors, so the anchor trust-material flags below do not apply to
@@ -899,7 +902,7 @@ Installing or running a Colophon package needs Node 22 or newer, with the npm th
 | `bundle.json` format | Pinned line | Compatible line | Checks | Anchor flags |
 | --- | --- | --- | --- | --- |
 | `benchmark-product-public-bundle/2`, unprompted | `@0.1.0` | `@0.1` | six | not applicable |
-| `benchmark-product-public-bundle/2`, prompted screening | `@0.2.1` (`@0.2.0` on a bundle materialized before `0.2.1` existed) | `@0.2` when the pin is `@0.2.1`, and `@0.1` refuses it at `claim-consistency`; for a `@0.2.0` pin, no published reader from `0.2.1` on reads it, `@0.2` included, each refusing at `claim-consistency`, or at `report-verification` on a bundle sealed with the `0.2.0` evaluator semantics; `@0.2.0` is the only published reader whose rebuild names that line, and it refuses at `report-verification` a bundle sealed with the `0.2.1` semantics | six | not applicable |
+| `benchmark-product-public-bundle/2`, prompted screening | `@0.2.1` (`@0.2.0` on a bundle materialized before `0.2.1` existed) | `@0.2` when the pin is `@0.2.1`, and `@0.1` refuses it; for a `@0.2.0` pin, no published reader from `0.2.1` on reads it, `@0.2` included, each refusing at `claim-consistency`, or at `report-verification` on a bundle sealed with the `0.2.0` evaluator semantics; `@0.2.0` is the only published reader whose rebuild names that line, and it refuses at `report-verification` a bundle sealed with the `0.2.1` semantics | six | not applicable |
 | `benchmark-product-public-bundle/4`, unprompted | `@0.1.0` | `@0.1` | six | not applicable |
 | `benchmark-product-public-bundle/4`, prompted screening | `@0.2.1` (`@0.2.0` on a bundle materialized before `0.2.1` existed) | `@0.2` when the pin is `@0.2.1`, and `@0.1` refuses it; for a `@0.2.0` pin, no published reader from `0.2.1` on reads it, `@0.2` included, each refusing at `claim-consistency`, or at `report-verification` on a bundle sealed with the `0.2.0` evaluator semantics; `@0.2.0` is the only published reader whose rebuild names that line, and it refuses at `report-verification` a bundle sealed with the `0.2.1` semantics | six | not applicable |
 | `benchmark-product-public-bundle/5` | `@0.1` | none pinned | seven | not applicable |
@@ -911,10 +914,11 @@ Installing or running a Colophon package needs Node 22 or newer, with the npm th
 Prompted screening is why the format string is not sufficient for the first four rows. It is a
 fourth axis: the format is selected by anchoring, qualification, and disclosure only, so a
 prompted run emits `.../2` or `.../4` exactly as an unprompted one does while pinning a later
-reader. What distinguishes it is inside the claim package: its
-`method.parameters.promptedScreeningProfile` is `"prompted-codex-screening/v1"` on a prompted
-bundle and absent otherwise. That is the second reason to take the line from the claim package
-rather than from the format.
+reader. What distinguishes it is inside the bundle, not in `bundle.json`: its `run.json` has an
+`analysisPlan` entry whose `parameters.promptedScreeningProfile` is `"prompted-codex-screening/v1"`,
+and an unprompted run has none. A prompted `.../4` carries the same key in its claim package's
+`method.parameters`; a prompted `.../2` does not. That is the second reason to take the line from
+the claim package rather than from the format.
 
 Every row but `.../10` runs as `npx @colophon-claims/verify<line> <bundle-dir>`. The `.../10` row
 states its package in full and runs as `npx <line> <bundle-dir>`. Append the anchor flags where
@@ -967,10 +971,9 @@ installed, and how the product itself is obtained is stated in the product
 
 An explicitly pinned `@0.2.0` is the reader too old for a `@0.2.1`-pinned bundle, and a
 prompted /4 fails differently under it from a /7 or /8. `0.2.0` supports the /4 format and carries
-the prompted-screening branch, so it parses `bundle.json`; what it requires of claim-package/2 is
-the command `@0.2.0` exactly, so it accepts a prompted bundle materialized before `0.2.1` existed
-and refuses a newer one on the claim, with `binary claim package must pin verifier 0.2.0/@0.2`.
-That is a reader-too-old refusal, not a fact about the bundle. The reverse does not hold. From
+the prompted-screening branch, so it parses `bundle.json`; for a prompted claim-package/2 the only
+command it accepts is `@0.2.0`, so it refuses a prompted /4 that pins `@0.2.1`. That is a
+reader-too-old refusal, not a fact about the bundle. The reverse does not hold. From
 `0.2.1` on, a reader accepts both commands when it parses claim-package/2, but `claim-consistency`
 rebuilds the claim with the `@0.2.1` line and refuses one that names `@0.2.0`, under
 `record-integrity`, with `claim package verification.command is not the exact projection of verified
@@ -981,16 +984,16 @@ that line. It reads such a bundle only if the bundle was sealed with the binary 
 semantics `0.2.0` carries, which every reader from `0.2.1` on refuses earlier, at
 `report-verification`, with `binary-binding-mismatch`. A prompted /2 is
 not refused when its claim is parsed, because claim-package/1
-carries no reader requirement. `@0.1` refuses it later, at `claim-consistency`: the released
-`0.1.0` reader rebuilds the claim with its own `@0.1.0` line, which is not the line the claim names.
+carries no reader requirement, but `@0.1` refuses one all the same, and `@0.2.0` refuses one that
+pins `@0.2.1`.
 
 Claim-package/1, claim-package/2, and claim-package/4 — the claims of public-bundle/2,
 public-bundle/4, and public-bundle/6 — stamp the same first public line, `@0.1.0` / `@0.1`, with one
-exception: a claim-package/1 or claim-package/2 whose method parameters carry
-`promptedScreeningProfile` stamps `@0.2.1` / `@0.2` instead (`@0.2.0` / `@0.2` if it was
-materialized before `0.2.1` existed). Only claim-package/2 enforces that pin when the claim is
-parsed, so the `@0.1` line refuses a prompted public-bundle/4 there, and refuses a prompted
-public-bundle/2 at `claim-consistency`, where it rebuilds the claim with its own `@0.1.0` line.
+exception: a claim-package/1 or claim-package/2 from a run whose `run.json` carries
+`promptedScreeningProfile` in an `analysisPlan` entry stamps `@0.2.1` / `@0.2` instead (`@0.2.0` /
+`@0.2` if it was materialized before `0.2.1` existed). Only claim-package/2 enforces that pin when
+the claim is parsed. The `@0.1` line refuses a prompted public-bundle/2 and a prompted
+public-bundle/4 alike.
 Claim-package/3, the claim of public-bundle/5, reads on the same line but pins only `@0.1`,
 because it has a single `command` field and no compatible-line field. Claim-package/5 and
 claim-package/6, the claims of public-bundle/7 and public-bundle/8, are the ones the `@0.1` line
@@ -1063,14 +1066,13 @@ list, the refusal is a version mismatch and says nothing about the bundle: re-ru
 bundle's claim package pins, or the line the table above gives for that format.
 
 A listed format is not on its own a verdict either. A reader can support the format and still be
-too old for the claim inside it — a prompted-screening public-bundle/4 is a format both `0.1.0` and
-`0.2.0` support, while its claim pins `@0.2.1`, so each of those readers parses `bundle.json` and
-then refuses the claim: `binary claim package must pin verifier 0.1.0/@0.1` under `@0.1`, and
-`binary claim package must pin verifier 0.2.0/@0.2` under an explicitly pinned `@0.2.0`. The `@0.2`
-range is one of them only through `0.2.0`; from `0.2.1` on it accepts that claim. A refusal that
-names the pinned verifier is that mismatch, not a fact about the bytes. Before treating any
-refusal as a failing bundle, check that the line you ran is the one the claim package's
-`verification.command` names.
+too old for the bundle. A prompted-screening public-bundle/4 is a format both `0.1.0` and `0.2.0`
+support, while its claim pins `@0.2.1`, so each of those readers parses `bundle.json` and then
+refuses the bundle at a later step. Which step refuses, and with what message, varies with the
+reader and the bundle. The `@0.2` range is one of them only through `0.2.0`; from `0.2.1` on it
+accepts that claim. A refusal from a reader older than the line the claim names is that mismatch,
+not a fact about the bytes. Before treating any refusal as a failing bundle, check that the line
+you ran is the one the claim package's `verification.command` names.
 
 The reverse direction is safe. A newer reader keeps every earlier format in `supportedFormats`,
 so `0.2.1` reads a public-bundle/2 bundle exactly as `0.1.0` does; the line pinned inside the

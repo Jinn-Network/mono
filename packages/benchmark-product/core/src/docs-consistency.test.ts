@@ -20,6 +20,7 @@ import {
   LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
   PROMPTED_BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
   PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+  PROMPTED_SCREENING_PROFILE,
   PUBLIC_BUNDLE_VERIFICATION_CHECKS,
   PUBLIC_BUNDLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS,
@@ -678,6 +679,83 @@ describe("product documentation consistency", () => {
       expect(cells[2], cells[0]).toContain("`report-verification`");
     }
     for (const retired of ["reads either pin", "refuses neither", "reads a prompted v4 materialized before", "reads only on", "is the only published reader that can read it"]) {
+      expect(guide, retired).not.toContain(retired);
+    }
+  });
+
+  it("names the prompted marker a prompted /2 carries: run.json's analysis plan, not its claim (#5293)", () => {
+    // Issue #5293. The producer stamps the prompted line on a `/2` or `/4` exactly when an entry of
+    // the sealed Run's `analysisPlan` carries `promptedScreeningProfile` (`buildClaimPackage`'s
+    // `promptedScreening`: the same test since the prompted line first existed, and in core 0.1.0
+    // and 0.1.1 alike). Only the `binary-instrument` entry carries that key, and a `/2` reports one
+    // of the run's other analyses, so a prompted `/2`'s claim has none in `method.parameters`: the
+    // two prompted `/2` bundles of the judge rehearsal had none (#5276). The guide told a reader to
+    // look for it in the claim. Each place that says how to recognize a prompted bundle is pinned.
+    const blocks = read(bundleReadmePath)
+      .split(/\n\s*\n/u)
+      .map((block) => block.replace(/\s+/gu, " "));
+    const sites: ReadonlyArray<readonly [marker: string, statesValue: boolean]> = [
+      ["One kind of version 2 bundle names a later line.", true],
+      ["Prompted screening is why the format string is not sufficient", true],
+      ["Claim-package/1, claim-package/2, and claim-package/4", false],
+    ];
+    for (const [marker, statesValue] of sites) {
+      const matching = blocks.filter((block) => block.includes(marker));
+      expect(matching, marker).toHaveLength(1);
+      expect(matching[0], marker).toContain("`run.json`");
+      expect(matching[0], marker).toContain("`analysisPlan`");
+      expect(matching[0], marker).toContain("promptedScreeningProfile");
+      if (statesValue) expect(matching[0], marker).toContain(`\`"${PROMPTED_SCREENING_PROFILE}"\``);
+    }
+    const guide = blocks.join("\n\n");
+    for (const retired of [
+      "its claim carries `method.parameters.promptedScreeningProfile",
+      "What distinguishes it is inside the claim package",
+      "whose method parameters carry",
+    ]) {
+      expect(guide, retired).not.toContain(retired);
+    }
+  });
+
+  it("says a reader older than a prompted bundle's line refuses it, not at which step (#5293)", () => {
+    // Issue #5293. The guide said `@0.1` refuses a prompted `/2` at `claim-consistency`, and that
+    // `0.1.0` and `0.2.0` refuse a prompted `/4` on its claim with a schema message. Against the
+    // judge rehearsal's prompted bundles (#5276) they stopped earlier: `0.2.0` at
+    // `report-verification` on each `/2`, and `0.1.0` on a `/4`'s `evidence.json`, whose screening
+    // roles it predates. Neither reader prints the schema message; a failed parse refuses with
+    // `<file> does not satisfy its public bundle schema`. The step varies with the reader and the
+    // bundle, so the guide says only that they refuse. The refusal itself is certain: both rebuild
+    // the claim with their own line and byte-compare, so `claim-consistency` refuses a claim that
+    // names a later line if nothing stops the reader sooner.
+    const raw = read(bundleReadmePath);
+    const blocks = raw.split(/\n\s*\n/u).map((block) => block.replace(/\s+/gu, " "));
+    const sites: ReadonlyArray<readonly [marker: string, statement: string]> = [
+      ["One kind of version 2 bundle names a later line.", "`@colophon-claims/verify@0.1.0` refuses it:"],
+      ["The format string does not record that difference", "accepts the format and refuses the bundle at a later step"],
+      [`An explicitly pinned \`@0.2.0\``, "`@0.1` refuses one all the same"],
+      ["Claim-package/1, claim-package/2, and claim-package/4", "refuses a prompted public-bundle/2 and a prompted public-bundle/4 alike"],
+      ["A listed format is not on its own a verdict either.", "varies with the reader and the bundle"],
+    ];
+    for (const [marker, statement] of sites) {
+      const matching = blocks.filter((block) => block.includes(marker));
+      expect(matching, marker).toHaveLength(1);
+      expect(matching[0], marker).toContain(statement);
+    }
+    const rows = raw
+      .split("\n")
+      .filter((line) => line.startsWith("| `benchmark-product-public-bundle/") && line.includes(", prompted screening |"));
+    expect(rows, "prompted rows").toHaveLength(2);
+    for (const row of rows) expect(row, row).toContain("and `@0.1` refuses it;");
+    const guide = blocks.join("\n\n");
+    for (const retired of [
+      "refuses it at `claim-consistency`",
+      "refuses it later, at `claim-consistency`",
+      "public-bundle/2 at `claim-consistency`",
+      "is refused on the claim inside it",
+      "refuses a newer one on the claim",
+      "then refuses the claim:",
+      "binary claim package must pin verifier",
+    ]) {
       expect(guide, retired).not.toContain(retired);
     }
   });
