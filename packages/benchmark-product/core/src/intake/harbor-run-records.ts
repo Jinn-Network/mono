@@ -483,15 +483,40 @@ const CREDENTIAL_NAME = /key|secret|token|passw(?:or)?d|credential|auth|bearer/i
  * not the value. A placeholder with a default (`${NAME:-value}`) carries the default, so it is
  * not one of these. */
 const HARBOR_ENV_PLACEHOLDER = /^\$\{[^}:]+\}$/u;
+/**
+ * Whether `text` holds a URL parameter whose name is credential-shaped and whose value is not
+ * empty: after a `?`, `#`, `&` or `;`, a name made of anything but `=`, `&`, `#` and white space
+ * that holds a `CREDENTIAL_NAME`, then `=` and one more character that is not `&`, `#` or white
+ * space. Read a name at a time, so that a long run is read once (#5332): a pattern that tries
+ * every `?` and every place a name may begin takes time that grows with the square of the run.
+ */
+function credentialParameter(text: string): boolean {
+  for (const run of text.matchAll(/[^=&#\s]+/gu)) {
+    const end = run.index + run[0].length;
+    if (text[end] !== "=" || !/[^&#\s]/u.test(text.charAt(end + 1))) continue;
+    // A name follows the `&` or `#` just before the run, or the first `?` or `;` inside it.
+    let start = 0;
+    if (!/[&#]/u.test(text.charAt(run.index - 1))) {
+      const delimiter = run[0].search(/[?;]/u);
+      if (delimiter < 0) continue;
+      start = delimiter + 1;
+    }
+    if (CREDENTIAL_NAME.test(run[0].slice(start))) return true;
+  }
+  return false;
+}
+
 /** Credentials by their shape, wherever they appear. The first three are `prune.mjs`'s, with
  * `sk-` held to the start of a word so that a name ending in `task-` or `disk-` is not one. The
- * fourth is a credential-shaped parameter in a URL's query or fragment (`#access_token=`). */
-const CREDENTIAL_TEXT: readonly (readonly [RegExp, string])[] = [
-  [/(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{6,}/u, "a key-shaped string"],
-  [/bearer\s+\S/iu, "a bearer credential"],
-  [/[a-z][a-z0-9+.-]*:\/\/[^/\s?#@]*@/iu, "a URL carrying credentials"],
-  [new RegExp(`[?#&;][^=&#\\s]*(?:${CREDENTIAL_NAME.source})[^=&#\\s]*=[^&#\\s]`, "iu"), "a URL carrying credentials"],
-  [/\*{4}/u, "a credential Harbor redacted to its first four and last three characters"],
+ * fourth is a credential-shaped parameter in a URL's query or fragment (`#access_token=`). The
+ * URL scheme is read from the start of its run of scheme characters, so that a long run is read
+ * once and not from every letter of it (#5332). */
+const CREDENTIAL_TEXT: readonly (readonly [(text: string) => boolean, string])[] = [
+  [(text) => /(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{6}/u.test(text), "a key-shaped string"],
+  [(text) => /bearer\s+\S/iu.test(text), "a bearer credential"],
+  [(text) => /(?<![a-z0-9+.-])[0-9+.-]*[a-z][a-z0-9+.-]*:\/\/[^/\s?#@]*@/iu.test(text), "a URL carrying credentials"],
+  [credentialParameter, "a URL carrying credentials"],
+  [(text) => /\*{4}/u.test(text), "a credential Harbor redacted to its first four and last three characters"],
 ];
 
 const TOKEN_SHAPED = "holds a token-shaped string, which can be a credential";
@@ -501,7 +526,29 @@ const TOKEN_SHAPED = "holds a token-shaped string, which can be a credential";
  * (`Qwen/Qwen2.5-Coder-32B-Instruct`), so such an id inside `kwargs`, `env`, `mcp_servers` or
  * `headers` is refused. */
 function tokenShaped(text: string): boolean {
-  return (text.match(/[A-Za-z0-9_-]{20,}/gu) ?? []).some((run) => /[A-Z]/u.test(run) && /[a-z]/u.test(run) && /[0-9]/u.test(run));
+  // Read a character at a time: a regular expression over one run of millions of characters
+  // overflows the stack (#5332).
+  let length = 0;
+  let upper = false;
+  let lower = false;
+  let digit = false;
+  for (let index = 0; index <= text.length; index += 1) {
+    const code = index < text.length ? text.charCodeAt(index) : 0;
+    const isUpper = code >= 65 && code <= 90;
+    const isLower = code >= 97 && code <= 122;
+    const isDigit = code >= 48 && code <= 57;
+    if (isUpper || isLower || isDigit || code === 95 || code === 45) {
+      length += 1;
+      upper ||= isUpper;
+      lower ||= isLower;
+      digit ||= isDigit;
+    } else {
+      if (length >= 20 && upper && lower && digit) return true;
+      length = 0;
+      upper = lower = digit = false;
+    }
+  }
+  return false;
 }
 
 /** Whether a refusal may show `text` from a trial record: not when it holds a token-shaped run, a
@@ -592,8 +639,8 @@ function trialRecordStringFinding(
   shape: string | undefined,
   within: Within,
 ): string | undefined {
-  for (const [pattern, what] of CREDENTIAL_TEXT) {
-    if (pattern.test(text)) return `holds ${what}`;
+  for (const [holds, what] of CREDENTIAL_TEXT) {
+    if (holds(text)) return `holds ${what}`;
   }
   for (const { what, path } of thisMachine) {
     if (namesPath(text, path)) return `names ${what} (${path})`;
