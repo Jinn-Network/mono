@@ -16,6 +16,9 @@
     "dist/",
     "process-contract.json"
   ],
+  "engines": {
+    "node": ">=22"
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -38,7 +41,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^26.1.0",
+    "@types/node": "^22.0.0",
     "typescript": "^5.4.0",
     "vitest": "^4.1.8"
   }
