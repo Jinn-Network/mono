@@ -456,7 +456,8 @@ const BUILD_COMPILED_PRODUCTS = new Map([['@colophon-claims/cli', ['@colophon-cl
  * dependencies of each. A `cli` install brings in `core` and the checker, and the `cli` build
  * compiles the private web application from these directories through portals (#5045), so a `cli`
  * publish also takes every platform package web installs (#5214). Each carries the manifest fields
- * that decide what npm packs from it.
+ * that decide what npm packs from it, and the `.npmignore` and `.gitignore` files under it that npm
+ * also reads, from git (#5306).
  */
 export function platformSourceDirectories(repoRoot, manifest, packages = loadCatalogPackages(repoRoot)) {
   const catalog = new Map(packages.map((pkg) => [pkg.name, pkg]));
@@ -492,10 +493,26 @@ export function platformSourceDirectories(repoRoot, manifest, packages = loadCat
       }
     }
   }
-  return [...platform].sort().map((name) => {
-    const { files, main, browser, bin, directories } = catalog.get(name).manifest;
-    return { name, directory: catalog.get(name).directory, files, main, browser, bin, directories };
+  const names = [...platform].sort();
+  const ignoreFiles = gitIgnoreFiles(repoRoot, names.map((name) => catalog.get(name).directory));
+  return names.map((name) => {
+    const { directory, manifest: { files, main, browser, bin, directories } } = catalog.get(name);
+    const own = ignoreFiles.filter((path) => path.startsWith(`${directory}/`)).map((path) => path.slice(directory.length + 1));
+    return { name, directory, files, main, browser, bin, directories, ignoreFiles: own };
   });
+}
+
+/**
+ * The `.npmignore` and `.gitignore` files in git's tree at `HEAD` under `directories`. That is the
+ * tree the receipt's commit is compared with, so an ignore file that differs from the receipt's
+ * commit is itself a compared file and refuses. Fails closed: a tree git cannot list refuses.
+ */
+export function gitIgnoreFiles(repoRoot, directories) {
+  const listed = spawnSync('git', ['ls-tree', '-r', '-z', '--name-only', 'HEAD', '--', ...directories], { cwd: repoRoot, encoding: 'utf8' });
+  if (listed.status !== 0) {
+    throw new Error(`cannot list the platform source at HEAD: ${(listed.stderr ?? '').trim() || listed.error?.message || `exit ${listed.status}`}`);
+  }
+  return listed.stdout.split('\0').filter((path) => /(?:^|\/)\.(?:npm|git)ignore$/u.test(path));
 }
 
 /**
@@ -577,10 +594,14 @@ function alwaysPackedTargets({ main, browser, bin, directories }) {
 
 /**
  * A file no published platform package is built or packed from: a test, or its vitest config, that
- * no `files` entry of the package it sits in covers and that is none of its manifest's `main`,
- * `browser` or `bin` targets. Every package in a Colophon closure builds with a
+ * no `files` entry of the package it sits in covers, that is none of its manifest's `main`,
+ * `browser` or `bin` targets, and that has no `.npmignore` or `.gitignore` in any directory between
+ * the package root and the file. Every package in a Colophon closure builds with a
  * `tsconfig.build.json` that excludes each `*.test.ts` under `src` (#5045), but a test-named file
- * under a listed directory, such as a fixture repository, is packed and published (#5214).
+ * under a listed directory, such as a fixture repository, is packed and published (#5214). npm
+ * reads an ignore file in every directory it walks below the root, and where an inclusion rule
+ * matches that directory's own path, a negation in it puts back a file the rules above excluded.
+ * This check models none of that (#5306). npm drops a root ignore file when `files` is set.
  */
 function isUnshippedTestFile(path, sources) {
   if (!/\.test\.ts$/u.test(path) && !/(?:^|\/)vitest\.config\.ts$/u.test(path)) return false;
@@ -589,7 +610,8 @@ function isUnshippedTestFile(path, sources) {
     .sort((a, b) => b.directory.length - a.directory.length)[0];
   if (owner === undefined) return false;
   const relative = path.slice(owner.directory.length + 1);
-  if (!Array.isArray(owner.files) || ALWAYS_PACKED_ROOT_FILE.test(relative)) return false;
+  if (!Array.isArray(owner.files) || !Array.isArray(owner.ignoreFiles) || ALWAYS_PACKED_ROOT_FILE.test(relative)) return false;
+  if (owner.ignoreFiles.some((file) => file.includes('/') && relative.startsWith(file.slice(0, file.lastIndexOf('/') + 1)))) return false;
   const name = relative.toLowerCase();
   return !owner.files.some((entry) => filesEntryCovers(entry, name))
     && !alwaysPackedTargets(owner).some((target) => pathCovers(plainPath(target), name));

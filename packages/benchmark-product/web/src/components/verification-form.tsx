@@ -16,10 +16,34 @@ interface VerificationAnchor {
   readonly subject?: string;
 }
 
+type TimestampCoverageOutcome = "anchored" | "absent" | "declared-but-absent";
+
 interface VerificationSubject {
   readonly subject: string;
-  readonly outcome: string;
+  readonly outcome: TimestampCoverageOutcome;
   readonly declaredProfiles?: readonly string[];
+}
+
+/**
+ * The reader tool's names for the timestamp-proof block (reader-facing vocabulary spec section 4.2,
+ * v1.14; issue #5241): the claimant who reads this card next runs the reader on the same records.
+ * This package cannot import the reader, so these copy it, and `verification-form.test.tsx` fails
+ * when the reader's source stops printing them. The raw outcome values stay in the result.
+ */
+export const TIMESTAMP_PROOF_LABELS = {
+  heading: "Timestamps",
+  coverageHeading: "Timestamp coverage",
+  proof: "timestamp proof",
+  noneCarried: "no timestamp proofs carried",
+  outcomes: {
+    anchored: "timestamped",
+    absent: "none",
+    "declared-but-absent": "promised but missing",
+  } satisfies Record<TimestampCoverageOutcome, string>,
+} as const;
+
+function isTimestampCoverageOutcome(value: unknown): value is TimestampCoverageOutcome {
+  return typeof value === "string" && Object.hasOwn(TIMESTAMP_PROOF_LABELS.outcomes, value);
 }
 
 interface VerificationResult {
@@ -41,7 +65,11 @@ function isVerificationResult(value: unknown): value is VerificationResult {
     && typeof candidate.matrixSha256 === "string"
     && (candidate.reportEnvelopeSha256 === undefined || typeof candidate.reportEnvelopeSha256 === "string")
     && (candidate.readerChecksNotRun === undefined
-      || (Array.isArray(candidate.readerChecksNotRun) && candidate.readerChecksNotRun.every((check) => typeof check === "string")));
+      || (Array.isArray(candidate.readerChecksNotRun) && candidate.readerChecksNotRun.every((check) => typeof check === "string")))
+    // An outcome the card has no name for is an unreadable result, so no raw value is printed.
+    && (candidate.anchors === undefined
+      || (Array.isArray(candidate.anchors.anchors) && Array.isArray(candidate.anchors.subjects)
+        && candidate.anchors.subjects.every((subject) => isTimestampCoverageOutcome(subject?.outcome))));
 }
 
 export function VerificationForm({ action, draftId }: VerificationFormProps) {
@@ -74,19 +102,19 @@ export function VerificationForm({ action, draftId }: VerificationFormProps) {
           <ul className="list-disc pl-5">{result.readerChecksNotRun.map((check) => <li key={check}>{check}</li>)}</ul>
         </> : null}
         {result.anchors !== undefined ? <>
-          <p className="mt-3 font-medium">Anchors</p>
+          <p className="mt-3 font-medium">{TIMESTAMP_PROOF_LABELS.heading}</p>
           {result.anchors.anchors.length === 0
-            ? <p>no anchor records carried</p>
+            ? <p>{TIMESTAMP_PROOF_LABELS.noneCarried}</p>
             : <ul className="list-disc pl-5">{result.anchors.anchors.map((anchor) => (
-              <li key={anchor.recordSha256}>{anchor.subject ?? "unresolved"} · {anchor.status} · {anchor.recordSha256}</li>
+              <li key={anchor.recordSha256}>{anchor.subject ?? "unresolved"} {TIMESTAMP_PROOF_LABELS.proof} · {anchor.status} · {anchor.recordSha256}</li>
             ))}</ul>}
-          <p className="mt-3 font-medium">Anchor subjects</p>
+          <p className="mt-3 font-medium">{TIMESTAMP_PROOF_LABELS.coverageHeading}</p>
           <ul className="list-disc pl-5">{result.anchors.subjects.map((subject) => (
-            <li key={subject.subject}>{subject.subject}: {subject.outcome}{subject.declaredProfiles !== undefined ? ` (${subject.declaredProfiles.map(presentProtocolText).join(", ")})` : ""}</li>
+            <li key={subject.subject}>{subject.subject}: {TIMESTAMP_PROOF_LABELS.outcomes[subject.outcome]}{subject.declaredProfiles !== undefined ? ` (${subject.declaredProfiles.map(presentProtocolText).join(", ")})` : ""}</li>
           ))}</ul>
         </> : null}
         {result.anchoringWindow !== undefined
-          ? <p className="mt-3">unresolved pending anchor evidence exists and `report` closes the anchoring window.</p>
+          ? <p className="mt-3">a timestamp proof is still pending, and `report` closes the anchoring window.</p>
           : null}
       </div> : null}
     </div>

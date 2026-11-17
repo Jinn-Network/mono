@@ -39,7 +39,8 @@
  *   usage text lists is mapped to the rendering that covers its output (`CLI_FLAGS`).
  *
  * Not covered: `--json` output (contract, spec section 2), the product CLI and web app (outside the
- * spec's section 1 scope; #5241 asks for a ruling), docs prose, the older formats above, and section
+ * spec's section 1 scope; see the note on `REPORT_ASSETS` for section 4.2's v1.14 ruling on their
+ * timestamp-proof block), docs prose, the older formats above, and section
  * 4 renames whose reader-facing name is not a section 5 concept (`Unjudged` to *Not judged*, `Alpha`
  * to *Confidence level*): the glossary rules concepts, and those rows are held by each rename
  * unit's own gates.
@@ -386,8 +387,13 @@ const OTHER_SENSES: readonly { readonly phrase: RegExp; readonly surfaces: "all"
 // The surfaces, rendered
 // ---------------------------------------------------------------------------
 
-/** Every reader-facing surface in `check` under spec section 1; operator surfaces (`core/src/cli/verify-human.ts`,
- * `web/src/components/verification-form.tsx`) stay out until #5241 rules whether they follow section 5. */
+/** Every reader-facing surface in `check` under spec section 1. The product's workspace `verify` output
+ * (`core/src/cli/verify-human.ts`) and web verification card (`web/src/components/verification-form.tsx`)
+ * are not scanned (spec section 4.2, v1.14, #5241): this package cannot render either, and the ruling
+ * reaches only their timestamp-proof block, not the whole surface. The product prints that block's
+ * note and coverage lines with this package's `timestampProofEvaluationNote` and
+ * `renderTimestampCoverage`, which `READER_RENDERS` reaches; the web card's copy is held to this
+ * package's source by its own tests. */
 const REPORT_ASSETS = ["index.html", "README.md", "share.txt", "badge.svg", "social-card.svg"] as const;
 const READER_SURFACES = ["colophon-check usage", "colophon-check stdout", "colophon-check stderr"] as const;
 type Surface = (typeof REPORT_ASSETS)[number] | (typeof READER_SURFACES)[number];

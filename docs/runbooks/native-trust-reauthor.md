@@ -185,11 +185,9 @@ It has a different one, and it belongs on the defect list at the top of this run
 `authorCatalog` writes `revocations: []` (`packages/trust/authoring/src/catalog.ts:216`), so a
 wholesale re-author **un-revokes everything**. `appendOperator` does not have this problem — it
 rewrites around the loaded file and preserves `revocations` — so this is specific to the verb the
-ceremony command actually uses. Jinn cannot author a revocation yet (`revokeBinding`'s body is
-unimplemented, ceremony spec §3.2, §9), though a hand-written catalog entry resolves today because
-the schema carries `revocations` and the opener honors them. DR-2026-09-06 does not itself make
-revocations authorable; it unblocks the §9 rotation follow-up that will. Either way this procedure
-needs its own fix before the first revocation exists.
+ceremony command actually uses. Since #5236 `jinn ceremony rotate` authors revocations, so the
+hazard is live: re-authoring a catalog that carries revocations un-revokes every retired key. Do not
+run this procedure on such a catalog until it preserves `revocations`.
 
 ## Cost and sequencing
 

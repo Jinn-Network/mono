@@ -541,12 +541,21 @@ describe("runVerify — pre-report integrity anchors", () => {
       invalid: [],
     });
 
+    // The human lines name each outcome as the reader tool does (spec §4.2, v1.14; issue #5241).
     const human = await runCli(verifyArgs(), cliContext(clock));
     expect(human.exitCode, human.stderr).toBe(0);
-    expect(human.stdout).toContain("Anchor subjects");
-    expect(human.stdout).toContain("lock: declared-but-absent");
-    expect(human.stdout).toContain("rfc3161-tsa/v1");
-    expect(human.stdout).toContain("matrix: absent");
+    expect(human.stdout).toContain("Timestamp coverage");
+    expect(human.stdout).toContain(
+      "lock: promised but missing — this run promised rfc3161-tsa/v1 and the bundle carries no matching timestamp proof",
+    );
+    expect(human.stdout).toContain("matrix: none — no timestamp proof was carried and none was promised");
+    expect(human.stdout).not.toMatch(/Anchor subjects|declared-but-absent|: absent\b/u);
+
+    // `--json` is contract: the raw outcome values stay byte for byte.
+    const json = await runCli(verifyArgs(true), cliContext(clock));
+    expect(json.exitCode, json.stderr).toBe(0);
+    expect(json.stdout).toContain('"outcome":"declared-but-absent"');
+    expect(json.stdout).toContain('"outcome":"absent"');
   });
 
   test("refuses an anchor the shared evaluator marks invalid", async () => {
@@ -605,10 +614,11 @@ describe("runVerify — pre-report integrity anchors", () => {
     const human = await runCli(verifyArgs(), cliContext(clock));
     expect(human.exitCode, human.stderr).toBe(0);
     expect(human.stdout.split("\n")[0]).toBe("verified draft draft-1: matrix-rederivation, integrity-anchors");
-    expect(human.stdout).toContain(`anchor lock: ${OPENTIMESTAMPS_ANCHOR_PROFILE}, authority-time, pending, record ${recordSha256}`);
+    expect(human.stdout).toContain(`lock timestamp proof: ${OPENTIMESTAMPS_ANCHOR_PROFILE}, authority-time, pending, record ${recordSha256}`);
     expect(human.stdout).toContain("no Bitcoin attestation");
-    expect(human.stdout).toContain("Anchor subjects");
-    expect(human.stdout).toContain("unresolved pending anchor evidence exists and `report` closes the anchoring window.");
+    expect(human.stdout).toContain("Timestamp coverage\n  lock: timestamped\n  matrix: none");
+    expect(human.stdout).toContain("a timestamp proof is still pending, and `report` closes the anchoring window.");
+    expect(human.stdout).not.toMatch(/anchor lock|Anchor subjects|: anchored\b|anchor evidence/u);
 
     const json = await runCli(verifyArgs(true), cliContext(clock));
     expect(json.exitCode, json.stderr).toBe(0);

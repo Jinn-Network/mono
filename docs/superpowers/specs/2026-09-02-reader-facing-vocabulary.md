@@ -1,9 +1,10 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.13
+- **Version:** 1.14
 - **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-12; v1.4: 2026-09-16;
   v1.5: 2026-09-17; v1.6: 2026-09-18; v1.7: 2026-09-19; v1.8: 2026-09-24; v1.9: 2026-09-26;
-  v1.10: 2026-09-29; v1.11: 2026-11-14; v1.12: 2026-11-14; v1.13: 2026-11-17)
+  v1.10: 2026-09-29; v1.11: 2026-11-14; v1.12: 2026-11-14; v1.13: 2026-11-17;
+  v1.14: 2026-11-17)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
@@ -121,6 +122,15 @@
   the caveat's `the report` and `the disclosure specification` to *the result* and *what was
   pinned*, the names the check-name glosses beneath it already use. §7 records which refusals
   are reworded so far. No earlier disposition changes.
+- **v1.14** (#5241): rules the product's workspace `verify` output and the web app's verification
+  card, which no earlier version ruled. Both stay outside §1, but where they present a concept the
+  reader tool's output presents, which today is the timestamp-proof block, they follow §5: the
+  claimant who reads them next runs the reader on the same records, and one outcome under two names
+  reads as two outcomes. `--json` and the values the card receives keep the raw outcome values as
+  contract, the split v1.13 applied to refusals. The product prints the reader's own per-proof note
+  and coverage block, which `@colophon-claims/check` now exports; the card's labels are a copy its
+  tests hold to the reader's source. Neither surface joins §7 item 5's scan. No earlier disposition
+  changes.
 
 ## 1. Scope
 
@@ -417,6 +427,38 @@ and it has no column a gloss could sit in. The gloss map is also private to the 
 map" would wait on a reader export that does not exist, while a copy of the map in the product
 is exactly the drift `CHECK_SUBJECTS` exists to prevent (#3691). The glossed rendering is one
 command away: run the standalone reader on the same bundle, at the line its claim pins.
+
+**Workspace verification and the web verification card** (v1.14, #5241). The product prints the
+timestamp-proof block on two more surfaces before a bundle exists: the human output of its
+workspace `verify` (`renderWorkspaceVerifyHuman` in `core/src/cli/verify-human.ts`) and the web
+app's verification card (`VerificationForm` in `web/src/components/verification-form.tsx`). Both
+stay outside §1: they are the claimant's own surfaces, not a cold reader's. But both render the
+report the reader renders, built by the same function (`evaluateIntegrityAnchors`), and the
+claimant who reads them is the person who next runs the reader on the same records. One outcome
+under two names on those two screens, `lock: anchored` from the product and `lock: timestamped`
+from the reader, reads as two outcomes, which is what §5's rule of one concept, one name exists to
+stop. So wherever these two surfaces present a concept the reader tool's output presents, they
+follow §5 and this section: *Timestamps*, *Timestamp coverage*, *timestamp proof*, *time source*,
+*trust anchors you supply*, and *timestamped*, *none* and *promised but missing* for the three
+outcomes. The split v1.13 applied to refusals applies here: the human text follows §5, while
+`--json` and the result the web card receives are contract and keep `anchored`, `absent`,
+`declared-but-absent` and the check names byte for byte. No raw outcome value reaches either human
+surface; a proof's status (`present`, `verified`, `pending`, `invalid`) prints as written, as it
+does in the reader. What these surfaces print and the reader does not is the product's own
+vocabulary and is not ruled here, as #3918 left `colophon bundle verify`'s line: the operation line
+(`verified draft <id>: <checks>`), the record digests the card lists, and the anchoring window,
+which is named for the `anchor` and `anchoring configure` commands the claimant types. The product
+prints the per-proof note and the coverage block with the reader's own functions
+(`timestampProofEvaluationNote` and `renderTimestampCoverage`, exported by
+`@colophon-claims/check`) rather than a copy, so its words are those of the reader release it
+depends on, and its publish build fails against a reader release that does not export them. The
+web card cannot import the reader: it may import only `@colophon-claims/core`, and it renders in
+the browser. Its labels are therefore a copy, and its tests read the reader's source and fail when
+the two differ. Neither surface joins §7 item 5's scan. That test lives in the reader's package,
+which cannot render either surface, and it asserts §5 over a whole surface, while this ruling
+reaches only the timestamp-proof block. The product's notes and coverage lines are the reader's
+own functions, which the scan already reads through the reader's output; the product's per-proof
+line and the card's labels are pinned by their own packages' tests.
 
 ### 4.3 Docs
 

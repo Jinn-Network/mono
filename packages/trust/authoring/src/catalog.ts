@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Trust-catalog authoring (spec §3.2, §5, §6 law 3): genesis, late join, and policy succession for
- * the `jinn.native-trust-catalog/2` file `openNativeTrustCatalog` reads.
+ * Trust-catalog authoring (spec §3.2, §5, §6 law 3): genesis, late join, policy succession, and
+ * rotation (revocation and rebind) for the `jinn.native-trust-catalog/2` file
+ * `openNativeTrustCatalog` reads.
  *
  * Governance shape, restated where it is enforced: policies are signed by a DEDICATED catalog
  * authority key (never an operator role key), the genesis digest never changes after `authorCatalog`,
@@ -14,11 +15,21 @@ import { dirname } from "node:path";
 import { randomBytes } from "node:crypto";
 import {
   didPkh,
+  isCalendarStrictRfc3339,
   recordDigest,
+  recoverEip191Address,
+  sealRevocation,
   sealTrustPolicy,
+  toChecksumAddress,
+  TRUST_REVOCATION_FORMAT,
+  TRUST_REVOCATION_MEDIA_TYPE,
+  validateKeyBinding,
+  validateRevocation,
   validateTrustPolicy,
   type DidPkh,
   type DsseSigner,
+  type KeyBinding,
+  type Revocation,
   type Sha256Digest,
   type SignerSet,
   type TrustPolicy,
@@ -557,56 +568,391 @@ export async function sealPolicySuccessor(input: {
   });
 }
 
+
+// ── rotation: revocation and rebind (spec §3.2, §3.2b, §6 laws 1 and 6) ────────────────────────
+
+/** The domain of the `revocation-anchor/v1` preimage (spec §3.2b). */
+export const REVOCATION_ANCHOR_PROTOCOL = "https://spec.jinn.network/trust/revocation-anchor/v1" as const;
+
+const LOWERCASE_SHA256 = /^sha256:[0-9a-f]{64}$/u;
+/** Law 6: `effectiveFrom` is millisecond-ISO UTC, the form `submitAnchor` returns. */
+const MILLISECOND_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+
+/** Sorted ascending by UTF-16 code units, at least one, no duplicates, each a lowercase digest. */
+function canonicalTargets(targets: readonly `sha256:${string}`[]): readonly `sha256:${string}`[] {
+  if (targets.length === 0) throw new TrustAuthoringError("a revocation act names at least one target");
+  for (const target of targets) {
+    if (!LOWERCASE_SHA256.test(target)) {
+      throw new TrustAuthoringError(`revocation target "${target}" is not a lowercase sha256 digest`);
+    }
+  }
+  const sorted = [...targets].sort();
+  for (let index = 1; index < sorted.length; index += 1) {
+    if (sorted[index] === sorted[index - 1]) {
+      throw new TrustAuthoringError(`revocation target ${sorted[index]!} is named more than once`);
+    }
+  }
+  return sorted;
+}
+
+/**
+ * The anchor digest of one revocation act (spec §3.2b, `revocation-anchor/v1`): the sha256 of
+ * ECMA-262 `JSON.stringify` over `{protocol, targets, revokedBy}`, keys in that order, `targets`
+ * sorted. Every term is in the catalog, so a reader can recompute it, and its domain keeps it from
+ * ever equalling a binding's `ceremony-anchor/v1` digest. `effectiveFrom` is left out: the block
+ * time is the authority, and the preimage commits to what is revoked and by whom.
+ */
+export function revocationAnchorDigest(input: {
+  readonly targets: readonly `sha256:${string}`[];
+  readonly revokedBy: string;
+}): `sha256:${string}` {
+  const targets = canonicalTargets(input.targets);
+  if (!/^[\x00-\x7f]+$/u.test(input.revokedBy)) {
+    throw new TrustAuthoringError(`revokedBy "${input.revokedBy}" is not ASCII (spec §3.2b)`);
+  }
+  const preimage = JSON.stringify({ protocol: REVOCATION_ANCHOR_PROTOCOL, targets, revokedBy: input.revokedBy });
+  return recordDigest(new TextEncoder().encode(preimage));
+}
+
 /**
  * Key authority section 8, "An account's signature": the revocation signer for a binding's voucher
  * account. Its `keyId` is the account's `did:pkh`, spelled as `authorRoleBinding` spells the voucher,
  * and is the revocation's `revokedBy`. It signs the DSSE pre-authentication encoding with a 65-byte
- * EIP-191 `personal_sign` signature, and refuses any other length rather than seal a revocation no
- * verifier would count.
+ * EIP-191 `personal_sign` signature.
+ *
+ * It signs revocations and nothing else, the one record the text gives an account's signature, and
+ * refuses before asking the account for anything else. It refuses a signature that is not 65 bytes
+ * or does not recover to the voucher's address, because every reader would ignore such a
+ * revocation while its author took the key for retired.
  */
 export function voucherAccountSigner(voucher: CeremonySigner): {
   readonly keyId: DidPkh;
   readonly dsseSigner: DsseSigner;
 } {
   const keyId = didPkh(NATIVE_ANCHOR_CHAIN_ID, voucher.address);
+  const address = toChecksumAddress(voucher.address);
   return {
     keyId,
-    dsseSigner: async ({ preAuthEncoding }) => {
+    dsseSigner: async ({ payloadType, preAuthEncoding }) => {
+      if (payloadType !== TRUST_REVOCATION_MEDIA_TYPE) {
+        throw new TrustAuthoringError(`voucher account ${keyId} signs only revocations, not ${payloadType}`);
+      }
       const signature = await voucher.signMessage({ message: { raw: preAuthEncoding } });
       if (!/^0x[0-9a-fA-F]{130}$/u.test(signature)) {
         throw new TrustAuthoringError(`voucher account ${keyId} returned a signature that is not 65 bytes of hex`);
       }
-      return [{ keyid: keyId, signature: new Uint8Array(Buffer.from(signature.slice(2), "hex")) }];
+      const bytes = new Uint8Array(Buffer.from(signature.slice(2), "hex"));
+      let recovered: string | undefined;
+      try {
+        recovered = recoverEip191Address(preAuthEncoding, bytes);
+      } catch {
+        recovered = undefined;
+      }
+      if (recovered !== address) {
+        throw new TrustAuthoringError(
+          `voucher account ${keyId} returned a signature that does not recover to ${address}`
+            + (recovered === undefined ? "" : ` (it recovers to ${recovered})`),
+        );
+      }
+      return [{ keyid: keyId, signature: bytes }];
     },
   };
 }
 
+interface CatalogBinding {
+  readonly digest: string;
+  readonly binding: KeyBinding;
+}
+
+function catalogBindings(file: CatalogFile): readonly CatalogBinding[] {
+  return file.bindings.map((entry) => {
+    const digest = String(entry.digest);
+    if (typeof entry.envelope !== "string") {
+      throw new TrustAuthoringError(`trust catalog binding ${digest} carries no envelope`);
+    }
+    const bytes = new Uint8Array(Buffer.from(entry.envelope, "base64"));
+    if (recordDigest(bytes) !== digest) {
+      throw new TrustAuthoringError(`trust catalog binding ${digest} does not match its envelope`);
+    }
+    const report = validateKeyBinding(bytes);
+    if (!report.conforms || report.value === undefined) {
+      throw new TrustAuthoringError(`trust catalog binding ${digest} is not a conforming sealed KeyBinding`);
+    }
+    return { digest, binding: report.value };
+  });
+}
+
+function catalogRevocations(file: CatalogFile): readonly Revocation[] {
+  return file.revocations.map((entry) => {
+    const report = validateRevocation(new Uint8Array(Buffer.from(entry.envelope, "base64")));
+    if (!report.conforms || report.value === undefined) {
+      throw new TrustAuthoringError(`trust catalog revocation ${entry.digest} is not a conforming sealed Revocation`);
+    }
+    return report.value;
+  });
+}
+
+function accountVoucherDid(binding: KeyBinding): string | undefined {
+  return binding.voucher.kind === "account" ? binding.voucher.did : undefined;
+}
+
 /**
- * DESIGNED, IMPLEMENTATION DEFERRED (spec §3.3, §9 follow-up issue). The catalog schema and the
- * binding resolver already carry anchored, effective-time revocations, so rotation needs no schema
- * change when it ships — only this body, plus the rebind flow (revoke + `authorRoleBinding` for the
- * replacement key + a new anchor). The surface is fixed here so that stays true.
- *
- * The signer is the target binding's voucher account, through `voucherAccountSigner`, and never the
- * catalog authority. Key authority section 8 gives a revocation effect only from the voucher account,
- * from the bound key itself when its record holds `bindings` scope, or from a standing `bindings` key
- * of the Agent. No native role binding holds `bindings` scope (spec §3.2a), so neither the bound key
- * nor any other role key of the Agent can revoke one, and the voucher account is the one signer whose
- * revocation of a native role binding counts. The catalog authority's key holds no binding to any
- * Agent, so a revocation it signed would have no effect in any reader.
+ * Key authority section 8 rule 1, checked against the catalog before anything is signed or
+ * anchored: every target is a binding the catalog carries, vouched by this account, which is not a
+ * contract account, and not already revoked by it. No native role binding holds `bindings` scope
+ * (spec §3.2a), so rule 1 is the only rule under which a native role binding can be revoked.
+ */
+function revocableTargets(
+  file: CatalogFile,
+  voucher: CeremonySigner,
+  requested: readonly `sha256:${string}`[],
+): { readonly revokedBy: DidPkh; readonly targets: readonly `sha256:${string}`[] } {
+  const revokedBy = didPkh(NATIVE_ANCHOR_CHAIN_ID, voucher.address);
+  const targets = canonicalTargets(requested);
+  const bindings = catalogBindings(file);
+  const revocations = catalogRevocations(file);
+  for (const target of targets) {
+    const found = bindings.find(({ digest }) => digest === target);
+    if (found === undefined) throw new TrustAuthoringError(`trust catalog carries no binding ${target}`);
+    const bound = found.binding.voucher;
+    if (bound.kind !== "account" || bound.did !== revokedBy) {
+      throw new TrustAuthoringError(
+        `${revokedBy} is not the voucher of binding ${target} (vouched by ${JSON.stringify(bound)}); `
+          + "only that binding's voucher account can revoke it (key authority section 8)",
+      );
+    }
+    if (bound.contractAccount) {
+      throw new TrustAuthoringError(
+        `binding ${target} is vouched by a contract account, which cannot revoke (key authority section 8)`,
+      );
+    }
+    if (revocations.some((revocation) => revocation.target === target && revocation.revokedBy === revokedBy)) {
+      throw new TrustAuthoringError(`binding ${target} is already revoked by ${revokedBy}`);
+    }
+  }
+  return { revokedBy, targets };
+}
+
+export interface RevocationPlan {
+  readonly revokedBy: DidPkh;
+  /** Sorted, as the anchor preimage orders them. */
+  readonly targets: readonly `sha256:${string}`[];
+  /** The `revocation-anchor/v1` digest the act's one fresh anchor carries. */
+  readonly anchorDigest: `sha256:${string}`;
+}
+
+/**
+ * The first half of a revocation act, before any gas is spent: shows the voucher can revoke every
+ * target in the catalog and names the anchor digest to submit. Law 6 puts the anchor first, because
+ * the revocation's effective time is its block time; `revokeBinding` then seals and writes.
+ */
+export async function planRevocation(input: {
+  readonly catalogPath: string;
+  readonly voucher: CeremonySigner;
+  readonly targets: readonly `sha256:${string}`[];
+}): Promise<RevocationPlan> {
+  const loaded = await loadCatalog(input.catalogPath);
+  const { revokedBy, targets } = revocableTargets(loaded.file, input.voucher, input.targets);
+  return { revokedBy, targets, anchorDigest: revocationAnchorDigest({ targets, revokedBy }) };
+}
+
+/**
+ * The revocation half of rotation (spec §3.2): seals one revocation per target, signed by the
+ * target binding's voucher account through `voucherAccountSigner`, never by the catalog authority,
+ * whose key holds no binding to any Agent. No native role binding holds `bindings` scope (spec
+ * §3.2a), so the voucher account is the one signer whose revocation of one counts.
  */
 export interface RevokeBindingInput {
   readonly catalogPath: string;
-  /** The ceremony EOA `authorRoleBinding` named as the target binding's `did:pkh` voucher. */
+  /** The ceremony EOA `authorRoleBinding` named as each target binding's `did:pkh` voucher. */
   readonly voucher: CeremonySigner;
-  /** The `sha256:` digest of the sealed binding being revoked. */
-  readonly target: `sha256:${string}`;
+  /** The `sha256:` digests of the sealed bindings being revoked, all in one act. */
+  readonly targets: readonly `sha256:${string}`[];
+  /**
+   * The act's anchor block time, VERBATIM as `submitAnchor` returned it. Law 6 puts `effectiveFrom`
+   * at or before that time, in millisecond-ISO UTC; a later value would delay the revocation.
+   */
   readonly effectiveTime: string;
+  /** The act's one fresh anchor, whose digest is `planRevocation`'s `anchorDigest`. */
   readonly anchor: AnchorDeclaration;
 }
 
-export function revokeBinding(_input: RevokeBindingInput): Promise<never> {
-  return Promise.reject(new TrustAuthoringError(
-    "revokeBinding is designed but not implemented (spec §3.3); rotation ships as the §9 follow-up issue",
-  ));
+export interface RevokedBindings {
+  readonly revokedBy: DidPkh;
+  readonly effectiveTime: string;
+  readonly revocations: readonly { readonly target: `sha256:${string}`; readonly digest: `sha256:${string}` }[];
+}
+
+/**
+ * Seals the act's revocations and appends them, with their anchor, to the catalog. Refuses before
+ * signing when the voucher is not every target's voucher, when the anchor is not the act's
+ * `revocation-anchor/v1` digest (law 6: one anchor, newly submitted for this act, never a binding's),
+ * or when the effective time is not millisecond-ISO UTC; and writes nothing when the voucher's
+ * signature does not recover to its address. Revocations need no policy successor: the trust policy
+ * names Agent IRIs, which a revocation does not change.
+ */
+export async function revokeBinding(input: RevokeBindingInput): Promise<RevokedBindings> {
+  if (!MILLISECOND_UTC.test(input.effectiveTime) || !isCalendarStrictRfc3339(input.effectiveTime)) {
+    throw new TrustAuthoringError(
+      `revocation effectiveTime "${input.effectiveTime}" is not a millisecond ISO UTC time (spec §6 law 6); `
+        + "pass the revocation anchor's block time as submitAnchor returned it",
+    );
+  }
+  return withCatalogLock(input.catalogPath, async () => {
+    const loaded = await loadCatalog(input.catalogPath);
+    const { revokedBy, targets } = revocableTargets(loaded.file, input.voucher, input.targets);
+    const anchorDigest = revocationAnchorDigest({ targets, revokedBy });
+    if (input.anchor.digest !== anchorDigest) {
+      throw new TrustAuthoringError(
+        `revocation anchor ${input.anchor.digest} is not ${anchorDigest}, the revocation-anchor/v1 digest of `
+          + "these targets and this revoker (spec §3.2b, §6 law 6)",
+      );
+    }
+    const account = voucherAccountSigner(input.voucher);
+    const sealed: { target: `sha256:${string}`; digest: `sha256:${string}`; envelopeBytes: Uint8Array }[] = [];
+    for (const target of targets) {
+      // eslint-disable-next-line no-await-in-loop -- one signature per target, from one account.
+      const record = await sealRevocation({
+        protocol: TRUST_REVOCATION_FORMAT,
+        target,
+        revokedBy,
+        anchors: [{ digest: anchorDigest }],
+        effectiveFrom: input.effectiveTime,
+      }, account.dsseSigner);
+      sealed.push({ target, digest: record.recordDigest, envelopeBytes: record.envelopeBytes });
+    }
+    const anchors = loaded.file.anchors.some(({ digest }) => digest === anchorDigest)
+      ? loaded.file.anchors
+      : [...loaded.file.anchors, input.anchor];
+    const rewritten: CatalogFile = {
+      ...loaded.file,
+      anchors,
+      revocations: [
+        ...loaded.file.revocations,
+        ...sealed.map(({ digest, envelopeBytes }) => ({ digest, envelope: b64(envelopeBytes) })),
+      ],
+    };
+    await rewriteAtomically({
+      path: input.catalogPath,
+      contents: JSON.stringify(rewritten),
+      expectedDigest: loaded.digest,
+    });
+    return {
+      revokedBy,
+      effectiveTime: input.effectiveTime,
+      revocations: sealed.map(({ target, digest }) => ({ target, digest })),
+    };
+  });
+}
+
+function sameScope(left: readonly string[], right: readonly string[]): boolean {
+  const a = [...left].sort();
+  const b = [...right].sort();
+  return a.length === b.length && a.every((entry, index) => entry === b[index]);
+}
+
+/**
+ * The rebind half of rotation (spec §3.2): appends replacement role bindings, authored by
+ * `authorRoleBinding` for new keys, and their anchor. Run it BEFORE the revocation. A replacement
+ * draws its authority from a binding of its Agent under the same voucher that stands at its
+ * effective start (key authority section 7), and an Agent whose only binding is the one being
+ * retired, as an admission Agent is, has no other: revoked first, the replacement has no chain.
+ *
+ * Refuses an anchor the catalog already declares (a rebind's anchor is newly submitted, law 1), a
+ * key the Agent already holds (rotating to the same key is no rotation), a role the Agent does not
+ * hold under the replacement's voucher (a binding under another voucher needs consent, which this
+ * flow does not author), and an Agent with no binding under that voucher left unrevoked. Seals no
+ * policy successor: the trust policy names Agent IRIs, and a rebind keeps them.
+ */
+export async function rebindRoles(input: {
+  readonly catalogPath: string;
+  readonly replacements: readonly SealedBindingEntry[];
+  readonly anchor: AnchorDeclaration;
+}): Promise<{
+  readonly bindings: readonly {
+    readonly role: NativeRoleIdentityRole;
+    readonly agent: string;
+    readonly keyId: string;
+    readonly digest: `sha256:${string}`;
+  }[];
+}> {
+  const replacements = dedupeByDigest(input.replacements);
+  if (replacements.length === 0) throw new TrustAuthoringError("a rebind requires at least one replacement binding");
+  for (const replacement of replacements) {
+    if (replacement.anchorDigest !== input.anchor.digest) {
+      throw new TrustAuthoringError(
+        `replacement binding ${replacement.digest} references anchor ${replacement.anchorDigest}, `
+          + `not the rebind's ${input.anchor.digest}`,
+      );
+    }
+  }
+  return withCatalogLock(input.catalogPath, async () => {
+    const loaded = await loadCatalog(input.catalogPath);
+    if (loaded.file.anchors.some(({ digest }) => digest === input.anchor.digest)) {
+      throw new TrustAuthoringError(
+        `trust catalog already declares anchor ${input.anchor.digest}; a rebind's anchor is newly submitted `
+          + "for that act (spec §3.2b, §6 law 1)",
+      );
+    }
+    const existing = catalogBindings(loaded.file);
+    // A revocation reaches the record it names and that record's siblings: the same key, Agent and
+    // voucher (key authority section 8). Whether its signer had authority is not asked here, so this
+    // guard refuses more, never less, than a verifier would.
+    const revoked = new Set<string>();
+    for (const revocation of catalogRevocations(loaded.file)) {
+      const target = existing.find(({ digest }) => digest === revocation.target);
+      if (target === undefined) continue;
+      revoked.add(JSON.stringify([target.binding.agent, accountVoucherDid(target.binding), target.binding.key.didKey]));
+    }
+    for (const replacement of replacements) {
+      const report = validateKeyBinding(replacement.envelopeBytes);
+      if (!report.conforms || report.value === undefined) {
+        throw new TrustAuthoringError(`replacement binding ${replacement.digest} is not a conforming sealed KeyBinding`);
+      }
+      const binding = report.value;
+      const voucherDid = accountVoucherDid(binding);
+      if (existing.some((entry) => entry.binding.agent === binding.agent && entry.binding.key.didKey === binding.key.didKey)) {
+        throw new TrustAuthoringError(
+          `trust catalog already binds key ${binding.key.didKey} to ${binding.agent}; a rotation binds a new key`,
+        );
+      }
+      const underVoucher = existing.filter((entry) =>
+        entry.binding.agent === binding.agent
+        && voucherDid !== undefined
+        && accountVoucherDid(entry.binding) === voucherDid);
+      if (!underVoucher.some((entry) => sameScope(entry.binding.scope, binding.scope))) {
+        throw new TrustAuthoringError(
+          `replacement ${replacement.role} binding for ${binding.agent} replaces no binding the catalog holds under `
+            + `voucher ${voucherDid ?? "(not an account)"}; a binding under another voucher needs consent, which a `
+            + "rebind does not author",
+        );
+      }
+      const standing = underVoucher.some((entry) =>
+        entry.binding.relationship === "controls"
+        && !revoked.has(JSON.stringify([entry.binding.agent, voucherDid, entry.binding.key.didKey])));
+      if (!standing) {
+        throw new TrustAuthoringError(
+          `every binding of ${binding.agent} under ${voucherDid ?? "(not an account)"} is already revoked, so the `
+            + `replacement ${replacement.role} binding would have no authority (key authority section 7); `
+            + "rebind before revoking",
+        );
+      }
+    }
+    // No successor is sealed, so the newest policy must already accept every replacement's Agent.
+    assertPurposesCoverBindings(loaded.newest.value.purposes, replacements);
+
+    const rewritten: CatalogFile = {
+      ...loaded.file,
+      anchors: [...loaded.file.anchors, input.anchor],
+      bindings: [...loaded.file.bindings, ...replacements.map(bindingEntry)],
+    };
+    await rewriteAtomically({
+      path: input.catalogPath,
+      contents: JSON.stringify(rewritten),
+      expectedDigest: loaded.digest,
+    });
+    return {
+      bindings: replacements.map(({ role, agent, keyId, digest }) => ({ role, agent, keyId, digest })),
+    };
+  });
 }

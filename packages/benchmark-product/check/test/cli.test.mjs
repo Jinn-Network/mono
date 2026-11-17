@@ -1938,7 +1938,7 @@ test("no paragraph of the default human render carries a retired verdict word (i
   // of the same coverage. `renderAnchor` prints `entry.status` verbatim and `verified` is a
   // legitimate status there, so a `verified`-status entry added to this shared fixture would fail
   // this test on a correct render. A `present` entry does not, which is why one is carried above
-  // (issue #4269): it renders `renderAnchor`, `evaluationNote`, and `renderSubject` over both an
+  // (issue #4269): it renders `renderAnchor`, `timestampProofEvaluationNote`, and `renderSubject` over both an
   // anchored and an absent subject, none of which match the word list.
   for (const shape of [V8_SHAPE, V5_METADATA_FIRST]) {
     assert.doesNotMatch(renderVerifiedBundle(shape), /verified|certified|validated|audited/i, shape.format);

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { GuiActionState } from "@/lib/action-state";
@@ -9,7 +11,7 @@ vi.mock("react", async (importOriginal) => ({
   useActionState: () => [actionState.current, vi.fn(), false],
 }));
 
-import { VerificationForm } from "./verification-form";
+import { TIMESTAMP_PROOF_LABELS, VerificationForm } from "./verification-form";
 
 const action = vi.fn(async () => ({ status: "idle" as const }));
 
@@ -69,7 +71,9 @@ describe("verification action presentation", () => {
     expect(markup).toContain("unreadable result");
   });
 
-  test("renders per-anchor status and the pending-window warning", () => {
+  test("names each timestamp proof and outcome as the reader tool does, with the pending-window warning", () => {
+    // Reader-facing vocabulary spec section 4.2, v1.14 (issue #5241). The raw outcome values stay
+    // in the result; none reaches the card.
     actionState.current = {
       status: "success",
       result: {
@@ -85,7 +89,11 @@ describe("verification action presentation", () => {
           }],
           subjects: [
             { subject: "lock", outcome: "anchored" },
-            { subject: "matrix", outcome: "absent" },
+            {
+              subject: "matrix",
+              outcome: "declared-but-absent",
+              declaredProfiles: ["https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1"],
+            },
           ],
           invalid: [],
         },
@@ -93,10 +101,59 @@ describe("verification action presentation", () => {
       },
     };
     const markup = renderToStaticMarkup(<VerificationForm action={action} draftId="draft-1" />);
-    expect(markup).toContain("lock · pending");
-    expect(markup).toContain("lock: anchored");
-    expect(markup).toContain("matrix: absent");
-    expect(markup).toContain("unresolved pending anchor evidence exists and `report` closes the anchoring window.");
+    expect(markup).toContain(">Timestamps<");
+    expect(markup).toContain(`lock timestamp proof · pending · ${"c".repeat(64)}`);
+    expect(markup).toContain(">Timestamp coverage<");
+    expect(markup).toContain("lock: timestamped");
+    expect(markup).toContain("matrix: promised but missing (opentimestamps/v1)");
+    expect(markup).toContain("a timestamp proof is still pending, and `report` closes the anchoring window.");
+    expect(markup).not.toMatch(/>Anchors<|Anchor subjects|anchored|declared-but-absent|anchor evidence/u);
+  });
+
+  test("names an absent subject none and an empty proof list as the reader does", () => {
+    actionState.current = {
+      status: "success",
+      result: {
+        checks: ["matrix-rederivation", "integrity-anchors"],
+        matrixSha256: "a".repeat(64),
+        anchors: { anchors: [], subjects: [{ subject: "matrix", outcome: "absent" }], invalid: [] },
+      },
+    };
+    const markup = renderToStaticMarkup(<VerificationForm action={action} draftId="draft-1" />);
+    expect(markup).toContain("no timestamp proofs carried");
+    expect(markup).toContain("matrix: none");
+    expect(markup).not.toMatch(/absent|no anchor records carried/u);
+  });
+
+  test("treats an outcome the card has no name for as an unreadable result", () => {
+    actionState.current = {
+      status: "success",
+      result: {
+        checks: ["integrity-anchors"],
+        matrixSha256: "a".repeat(64),
+        anchors: { anchors: [], subjects: [{ subject: "lock", outcome: "anchored-twice" }], invalid: [] },
+      },
+    };
+    const markup = renderToStaticMarkup(<VerificationForm action={action} draftId="draft-1" />);
+    expect(markup).toContain("unreadable result");
+    expect(markup).not.toContain("anchored-twice");
+  });
+
+  test("its timestamp-proof labels are the ones the reader tool prints", () => {
+    // This package cannot import the reader (`@colophon-claims/check`), so it reads the source the
+    // labels copy, as `present-protocol-profile.test.ts` does for the identifier rule.
+    const reader = readFileSync(fileURLToPath(new URL("../../../check/src/cli.ts", import.meta.url)), "utf8");
+    const declaration = (name: string) =>
+      new RegExp(`^(?:export )?function ${name}\\b[\\s\\S]*?^\\}$`, "mu").exec(reader)?.[0] ?? "";
+    const subject = declaration("renderSubject");
+    for (const name of Object.values(TIMESTAMP_PROOF_LABELS.outcomes)) {
+      expect(subject, `the reader's renderSubject prints "${name}"`).toContain(`}: ${name}`);
+    }
+    expect(declaration("renderTimestampCoverage")).toContain(`\`${TIMESTAMP_PROOF_LABELS.coverageHeading}\\n`);
+    const report = declaration("renderAnchorReport");
+    expect(report).toContain(`\\n${TIMESTAMP_PROOF_LABELS.heading}\\n`);
+    expect(report).toContain(`"  ${TIMESTAMP_PROOF_LABELS.noneCarried}"`);
+    expect(declaration("renderAnchor")).toContain(` ${TIMESTAMP_PROOF_LABELS.proof}\``);
   });
 
   test("names declared anchor profiles, which the spec origin does not serve, without the origin", () => {
