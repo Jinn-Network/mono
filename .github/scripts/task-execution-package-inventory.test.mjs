@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 
@@ -23,33 +24,28 @@ const TASK_EXECUTION_PACKAGES = [
   ['oci-grader', '@jinn-network/task-execution-oci-grader'],
 ];
 
-// This guard owns only the declared range and the absence of resolution overrides; the decision
-// behind the range is recorded in packages/task-execution/profiles/README.md.
+// This guard scans every first-party manifest in the repository for the declared @noble/hashes
+// range and the absence of resolution overrides; the decision behind the range is recorded in
+// packages/task-execution/profiles/README.md.
+//
+// Boundary: the walk starts at the repository root and skips dot-prefixed directories (.git,
+// .yarn, .next, .github including .github/fixtures/*, .local, and transient dot-prefixed test
+// directories) plus SKIPPED_MANIFEST_DIRECTORIES (node_modules, build outputs, the read-only
+// legacy/ reference subtree, and test-fixture trees such as operator/test/fixtures/*).
 const NOBLE_HASHES_RANGE = '^2.2.0';
-const HASH_PRODUCERS = [
-  'packages/task-execution/profiles',
-  'packages/task-execution/protocol',
-  'packages/evidence/protocol',
-  'packages/evidence/trace',
-  'packages/evidence/derivation',
-  'packages/task-supply/derivation',
-  'packages/task-supply/chain-scenarios',
-];
-// Manifests outside the task-execution tree that must also select @noble/hashes through the
-// range above rather than a resolutions override (aligned from the exact pins and overrides
-// that remained after the task-execution portal chain).
-const OVERRIDE_FREE_MANIFESTS = [
-  'packages/benchmark-product/cli',
-  'packages/benchmark-product/web',
-  'packages/benchmarking/evaluation',
-  'packages/benchmarking/native-capture',
-];
-// One manifest still carries a @noble/hashes resolutions entry and is deliberately absent
-// from OVERRIDE_FREE_MANIFESTS: packages/benchmark-product/check ("2.2.0", published as
-// @colophon-claims/check). No manifest in its portal closure pins an exact version any more,
-// so its install does not need it. It stays because colophon-publish-manifest.test.mjs asserts
-// the published manifest keeps it. In check's lock it also forces viem, ox, @scure/bip32,
-// @scure/bip39 and @noble/curves 1.9.x onto 2.2.0. Retiring it is tracked in #5232.
+const NOBLE_HASHES_KEY = /(?:^|\/)@noble\/hashes(?:@|$)/u;
+const SKIPPED_MANIFEST_DIRECTORIES = new Set([
+  'node_modules', 'dist', 'build', 'coverage', 'legacy', 'fixtures', '__fixtures__',
+]);
+// One manifest still carries a @noble/hashes resolutions entry: packages/benchmark-product/check
+// ("2.2.0", published as @colophon-claims/check). No manifest in its portal closure pins an exact
+// version any more, so its install does not need it. It stays because
+// colophon-publish-manifest.test.mjs asserts the published manifest keeps it. In check's lock it
+// also forces viem, ox, @scure/bip32, @scure/bip39 and @noble/curves 1.9.x onto 2.2.0. Retiring
+// it is tracked in #5232.
+const NOBLE_HASHES_RESOLUTION_EXCEPTIONS = new Map([
+  ['packages/benchmark-product/check', '2.2.0'],
+]);
 
 // Packages OUTSIDE the task-execution tree that a task-execution package may legitimately
 // portal-resolve (backend plan program §7.7: the assembly consumes the evidence CONTRACT
@@ -207,15 +203,110 @@ function readPackage(directory) {
 }
 
 function packageManifests(directory) {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    if (!entry.isDirectory() || entry.name === 'node_modules') return [];
-    const child = join(directory, entry.name);
-    const packageJson = join(child, 'package.json');
-    return [
-      ...(existsSync(packageJson) ? [packageJson] : []),
-      ...packageManifests(child),
-    ];
+  let entries;
+  try {
+    entries = readdirSync(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
+  }
+  return entries
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .flatMap((entry) => {
+      if (
+        !entry.isDirectory()
+        || entry.name.startsWith('.')
+        || SKIPPED_MANIFEST_DIRECTORIES.has(entry.name)
+      ) {
+        return [];
+      }
+      const child = join(directory, entry.name);
+      const packageJson = join(child, 'package.json');
+      return [
+        ...(existsSync(packageJson) ? [packageJson] : []),
+        ...packageManifests(child),
+      ];
+    });
+}
+
+function firstPartyManifests(repoRoot = root) {
+  const rootManifest = join(repoRoot, 'package.json');
+  const paths = [
+    ...(existsSync(rootManifest) ? [rootManifest] : []),
+    ...packageManifests(repoRoot),
+  ];
+  return paths.map((manifestPath) => ({
+    directory: relative(repoRoot, dirname(manifestPath)).split('\\').join('/') || '.',
+    manifest: JSON.parse(readFileSync(manifestPath, 'utf8')),
+  }));
+}
+
+function auditNobleHashesRanges(manifests) {
+  const declarers = [];
+  const violations = [];
+  for (const { directory, manifest } of manifests) {
+    for (const section of DEPENDENCY_SECTIONS) {
+      const dependencies = manifest[section];
+      if (!dependencies || !Object.hasOwn(dependencies, '@noble/hashes')) continue;
+      const range = dependencies['@noble/hashes'];
+      declarers.push({ directory, section, range });
+      if (range !== NOBLE_HASHES_RANGE) {
+        violations.push(
+          `${directory} declares @noble/hashes as ${JSON.stringify(range)} in ${section}; expected ${NOBLE_HASHES_RANGE}`,
+        );
+      }
+    }
+  }
+  return { declarers, violations };
+}
+
+function collectNobleHashesEntries(table, prefix = '') {
+  if (!table || typeof table !== 'object' || Array.isArray(table)) return [];
+  return Object.entries(table).flatMap(([key, value]) => {
+    const path = prefix ? `${prefix}>${key}` : key;
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return [
+        ...(NOBLE_HASHES_KEY.test(key) ? [[path, JSON.stringify(value)]] : []),
+        ...collectNobleHashesEntries(value, path),
+      ];
+    }
+    return NOBLE_HASHES_KEY.test(key) ? [[path, value]] : [];
   });
+}
+
+function auditNobleHashesOverrides(manifests, exceptions = NOBLE_HASHES_RESOLUTION_EXCEPTIONS) {
+  const violations = [];
+  const matchedExceptions = new Set();
+  for (const { directory, manifest } of manifests) {
+    const expectedResolution = exceptions.get(directory);
+    for (const [key, value] of collectNobleHashesEntries(manifest.resolutions)) {
+      if (key === '@noble/hashes' && expectedResolution !== undefined && value === expectedResolution) {
+        matchedExceptions.add(directory);
+        continue;
+      }
+      violations.push(
+        `${directory} must not override @noble/hashes in resolutions (${key}: ${JSON.stringify(value)})`,
+      );
+    }
+    for (const [field, table] of [
+      ['overrides', manifest.overrides],
+      ['pnpm.overrides', manifest.pnpm?.overrides],
+    ]) {
+      for (const [key, value] of collectNobleHashesEntries(table)) {
+        violations.push(
+          `${directory} must not override @noble/hashes in ${field} (${key}: ${JSON.stringify(value)})`,
+        );
+      }
+    }
+  }
+  for (const [directory, expectedResolution] of exceptions) {
+    if (!matchedExceptions.has(directory)) {
+      violations.push(
+        `${directory} must carry resolutions["@noble/hashes"] = ${JSON.stringify(expectedResolution)} or retire its #5232 exception`,
+      );
+    }
+  }
+  return violations;
 }
 
 function jinnDependencyNames(manifest, section) {
@@ -279,35 +370,169 @@ test('task-execution package Jinn dependencies and portal resolutions match the 
   }
 });
 
-test('@noble/hashes uses one v2 compatibility range', () => {
-  for (const directory of HASH_PRODUCERS) {
-    const manifest = JSON.parse(readFileSync(join(root, directory, 'package.json'), 'utf8'));
-    assert.equal(
-      manifest.dependencies?.['@noble/hashes'],
-      NOBLE_HASHES_RANGE,
-      `${directory} must declare the shared @noble/hashes v2 compatibility range`,
-    );
-  }
+test('@noble/hashes uses one v2 compatibility range across every first-party declarer', () => {
+  const manifests = firstPartyManifests();
+  assert.ok(
+    manifests.some(({ directory }) => directory === 'operator'),
+    'first-party manifest scan must reach top-level workspaces outside packages/',
+  );
+  const { declarers, violations } = auditNobleHashesRanges(manifests);
+  assert.ok(
+    declarers.some(({ directory }) => directory === 'packages/task-execution/profiles')
+      && declarers.some(({ directory }) => !directory.startsWith('packages/task-execution/')),
+    'expected @noble/hashes declarer scan to find declarers both inside and outside packages/task-execution/',
+  );
+  assert.deepEqual(violations, []);
 });
 
-test('no manifest overrides the @noble/hashes resolution', () => {
-  const directories = [
-    ...TASK_EXECUTION_PACKAGES.map(([directory]) => join('packages', 'task-execution', directory)),
-    ...HASH_PRODUCERS,
-    ...OVERRIDE_FREE_MANIFESTS,
-  ];
-  for (const directory of new Set(directories)) {
-    const manifest = JSON.parse(readFileSync(join(root, directory, 'package.json'), 'utf8'));
-    assert.equal(
-      Object.hasOwn(manifest.resolutions ?? {}, '@noble/hashes'),
-      false,
-      `${directory} must select @noble/hashes through its dependency range and committed lock`,
-    );
-  }
+test('no first-party manifest overrides the @noble/hashes resolution outside #5232', () => {
+  const manifests = firstPartyManifests();
+  assert.ok(
+    manifests.length > TASK_EXECUTION_PACKAGES.length + EXTERNAL_JINN_PACKAGES.length
+      && manifests.some(({ directory }) => directory === 'operator'),
+    'first-party manifest scan must cover workspaces beyond the task-execution closure',
+  );
+  assert.deepEqual(auditNobleHashesOverrides(manifests), []);
 });
 
 test('the testing kit declares no Vitest peer', () => {
   const testing = readPackage('testing');
   assert.equal(testing.peerDependencies, undefined);
   assert.equal(testing.peerDependenciesMeta, undefined);
+});
+
+function writeFixtureManifest(repoDir, relativeDir, manifest) {
+  const targetDir = relativeDir === '.' ? repoDir : join(repoDir, relativeDir);
+  mkdirSync(targetDir, { recursive: true });
+  writeFileSync(join(targetDir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+test('self-test: first-party manifest scan skips dot-directories, node_modules, build outputs, legacy, and fixtures', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-noble-hashes-walk-'));
+  try {
+    writeFixtureManifest(fixture, 'operator', { name: '@jinn-network/operator' });
+    writeFixtureManifest(fixture, 'packages/alpha', { name: '@jinn-network/alpha' });
+    writeFixtureManifest(fixture, 'node_modules/dep', { name: 'dep' });
+    writeFixtureManifest(fixture, 'packages/alpha/node_modules/nested', { name: 'nested' });
+    writeFixtureManifest(fixture, 'packages/alpha/dist', { name: 'built' });
+    writeFixtureManifest(fixture, 'legacy/jinn-cli-agents-reference', { name: 'legacy-ref' });
+    writeFixtureManifest(fixture, '.github/fixtures/role', { name: 'role-fixture' });
+    writeFixtureManifest(fixture, 'operator/test/fixtures/app', { name: 'eval-fixture' });
+    writeFixtureManifest(fixture, 'packages/alpha/src/__fixtures__/bundle', { name: 'bundle-fixture' });
+    writeFixtureManifest(fixture, '.transient-test-dir', { name: 'transient' });
+    assert.deepEqual(
+      firstPartyManifests(fixture).map(({ directory }) => directory),
+      ['operator', 'packages/alpha'],
+    );
+    assert.deepEqual(packageManifests(join(fixture, 'vanished')), []);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test('self-test: range audit flags non-conforming @noble/hashes specs across all dependency sections and ignores near-misses', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-noble-hashes-ranges-'));
+  try {
+    writeFixtureManifest(fixture, 'packages/clean-dep', {
+      dependencies: { '@noble/hashes': '^2.2.0', '@noble/curves': '2.3.0' },
+    });
+    writeFixtureManifest(fixture, 'packages/clean-dev', {
+      devDependencies: { '@noble/hashes': '^2.2.0' },
+    });
+    writeFixtureManifest(fixture, 'packages/clean-peer', {
+      peerDependencies: { '@noble/hashes': '^2.2.0' },
+    });
+    writeFixtureManifest(fixture, 'packages/clean-opt', {
+      optionalDependencies: { '@noble/hashes': '^2.2.0' },
+    });
+    writeFixtureManifest(fixture, 'packages/unrelated', {
+      dependencies: { zod: '4.4.3' },
+    });
+    writeFixtureManifest(fixture, 'legacy/ignored', {
+      dependencies: { '@noble/hashes': '1.8.0' },
+    });
+    writeFixtureManifest(fixture, 'operator/test/fixtures/ignored', {
+      dependencies: { '@noble/hashes': '2.2.0' },
+    });
+    writeFixtureManifest(fixture, 'packages/exact-dep', {
+      dependencies: { '@noble/hashes': '2.2.0' },
+    });
+    writeFixtureManifest(fixture, 'packages/bad-dev', {
+      dependencies: { '@noble/hashes': '^2.2.0' },
+      devDependencies: { '@noble/hashes': '2.2.0' },
+    });
+    writeFixtureManifest(fixture, 'packages/bad-peer', {
+      peerDependencies: { '@noble/hashes': '>=2.0.0' },
+    });
+    writeFixtureManifest(fixture, 'packages/bad-opt', {
+      optionalDependencies: { '@noble/hashes': '~2.2.0' },
+    });
+
+    const { declarers, violations } = auditNobleHashesRanges(firstPartyManifests(fixture));
+    assert.equal(declarers.length, 9);
+    assert.deepEqual(violations, [
+      'packages/bad-dev declares @noble/hashes as "2.2.0" in devDependencies; expected ^2.2.0',
+      'packages/bad-opt declares @noble/hashes as "~2.2.0" in optionalDependencies; expected ^2.2.0',
+      'packages/bad-peer declares @noble/hashes as ">=2.0.0" in peerDependencies; expected ^2.2.0',
+      'packages/exact-dep declares @noble/hashes as "2.2.0" in dependencies; expected ^2.2.0',
+    ]);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test('self-test: override audit flags unapproved resolutions or overrides, rejects stale exceptions, and ignores near-misses', () => {
+  const compliant = [
+    {
+      directory: 'packages/benchmark-product/check',
+      manifest: {
+        resolutions: {
+          '@noble/hashes': '2.2.0',
+          '@jinn-network/trust-core': 'portal:../../trust/core',
+        },
+      },
+    },
+    {
+      directory: 'packages/near-miss',
+      manifest: {
+        resolutions: { '@noble/curves': '2.3.0', '@noble/hashes-extra': '1.0.0' },
+      },
+    },
+  ];
+  assert.deepEqual(auditNobleHashesOverrides(compliant), []);
+
+  assert.deepEqual(
+    auditNobleHashesOverrides([
+      ...compliant,
+      { directory: 'packages/other', manifest: { resolutions: { '@noble/hashes': '2.2.0' } } },
+      { directory: 'packages/scoped', manifest: { resolutions: { '@noble/curves/@noble/hashes': '2.2.0' } } },
+      { directory: 'packages/npm-override', manifest: { overrides: { '@noble/curves': { '@noble/hashes': '2.2.0' } } } },
+      { directory: 'packages/pnpm-override', manifest: { pnpm: { overrides: { '@noble/hashes': '2.2.0' } } } },
+    ]),
+    [
+      'packages/other must not override @noble/hashes in resolutions (@noble/hashes: "2.2.0")',
+      'packages/scoped must not override @noble/hashes in resolutions (@noble/curves/@noble/hashes: "2.2.0")',
+      'packages/npm-override must not override @noble/hashes in overrides (@noble/curves>@noble/hashes: "2.2.0")',
+      'packages/pnpm-override must not override @noble/hashes in pnpm.overrides (@noble/hashes: "2.2.0")',
+    ],
+  );
+
+  assert.deepEqual(
+    auditNobleHashesOverrides([
+      { directory: 'packages/benchmark-product/check', manifest: { resolutions: {} } },
+    ]),
+    [
+      'packages/benchmark-product/check must carry resolutions["@noble/hashes"] = "2.2.0" or retire its #5232 exception',
+    ],
+  );
+
+  assert.deepEqual(
+    auditNobleHashesOverrides([
+      { directory: 'packages/benchmark-product/check', manifest: { resolutions: { '@noble/hashes': '2.3.0' } } },
+    ]),
+    [
+      'packages/benchmark-product/check must not override @noble/hashes in resolutions (@noble/hashes: "2.3.0")',
+      'packages/benchmark-product/check must carry resolutions["@noble/hashes"] = "2.2.0" or retire its #5232 exception',
+    ],
+  );
 });
