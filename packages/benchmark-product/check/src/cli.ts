@@ -136,8 +136,11 @@ function aliasPublisherNames(text: string, prefix: string, suffixes: readonly st
  * byte, because the conformance kit's `expectedMessagePattern` pins it. So the words change here,
  * on the human line only, after publisher-chosen names are aliased. Every rule is anchored at the
  * start of the message, so it rewrites the refusing module's fixed wording and never text a
- * publisher chose. Paths, fingerprints, identifiers and check labels (`matrix-rederivation:`) are
- * printed as written. Applied in order: the timestamp-proof lead is renamed before its reasons.
+ * publisher chose. The two admission-reviewer rules start from the review path the admission replay
+ * prefixes (`resolutions.<n>.reviews.<n>: ` or `replacementLedger.entries.<n>.reviews.<n>: `,
+ * optionally after `binary admission replay failed: `). Paths, fingerprints, identifiers and check
+ * labels (`matrix-rederivation:`) are printed as written. Applied in order: the timestamp-proof lead
+ * is renamed before its reasons.
  */
 const READER_WORDING: readonly (readonly [RegExp, string])[] = [
   [/^Matrix v2 failed deterministic assembly-3\.0 replay$/u,
@@ -164,9 +167,9 @@ const READER_WORDING: readonly (readonly [RegExp, string])[] = [
     "the trusted judges must be exactly the judges the runs reference"],
   [/^evaluator <identifier: see --json> keyId is not derived from its SPKI$/u,
     "judge <identifier: see --json> keyId is not derived from its SPKI"],
-  [/^([\s\S]*: )?reviewer signature or evaluator\/key binding is invalid$/u,
+  [/^((?:binary admission replay failed: )?(?:resolutions|replacementLedger\.entries)\.\d+\.reviews\.\d+: )?reviewer signature or evaluator\/key binding is invalid$/u,
     "$1reviewer signature or judge/key binding is invalid"],
-  [/^([\s\S]*: )?review verdict must be one Result Evaluation envelope with one signature$/u,
+  [/^((?:binary admission replay failed: )?(?:resolutions|replacementLedger\.entries)\.\d+\.reviews\.\d+: )?review verdict must be one Result Evaluation envelope with one signature$/u,
     "$1review verdict must be one DSSE-signed Result Evaluation with one signature"],
   [/^report-envelope: invalid DSSE envelope: (?:TrustCoreError: )?(?:DSSE envelope )?/u,
     "report-envelope: the signed result is not valid DSSE: "],
