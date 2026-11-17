@@ -1240,11 +1240,16 @@ describe("createBindingResolver", () => {
 
     /** KEY_A revokes `named` at REVOKED: the target scope the resolver reports for that revocation, whether the
      * genuine record still stands at `at` as trust-core judges it with this package's witness verifier, and
-     * whether the host was asked about `named`. The host vouches for whatever it is asked about. */
-    async function revokingItsOwn(named: SealedKeyBindingRecord, options: Partial<CreateBindingResolverOptions> = {}) {
+     * whether the host was asked about `named`. The host vouches for each record `vouches` accepts, by default
+     * every record it is asked about. */
+    async function revokingItsOwn(
+      named: SealedKeyBindingRecord,
+      options: Partial<CreateBindingResolverOptions> = {},
+      vouches: (record: SealedKeyBindingRecord) => boolean = () => true,
+    ) {
       const revocation = revocationFields({ target: named.bindingDigest, revokedBy: KEY_A, anchors: [{ digest: DIGEST_R }], effectiveFrom: REVOKED });
       const revoked: SealedRevocationRecord = { revocation, envelopeBytes: sealedBy(revocation, TRUST_REVOCATION_MEDIA_TYPE, KEY_A) };
-      const verifyHostedCeremony = vi.fn(async (_record: SealedKeyBindingRecord) => true);
+      const verifyHostedCeremony = vi.fn(async (record: SealedKeyBindingRecord) => vouches(record));
       const resolver = createBindingResolver({
         bindings: {
           ...fakeStore([genuine, named]),
@@ -1286,6 +1291,16 @@ describe("createBindingResolver", () => {
       // Expired before the revocation's time: it holds the text when the record takes effect, and would fail it later.
       const current = sibling({ issuedAt: SIBLING, expirationTime: "2026-02-15T00:00:00.000Z" });
       expect(await revokingItsOwn(current, { ceremonyCurrency: {} }))
+        .toStrictEqual({ targetScopes: [["bindings"]], stands: false, hostAsked: true });
+    });
+
+    it("draws no scope from a record whose ceremony passes the offline check but the host refuses", async () => {
+      // The host is asked about the sibling, so its offline check holds, and the host's answer for it is all that
+      // differs between the two revocations. The host vouches for the genuine record either way.
+      const refused = sibling({});
+      expect(await revokingItsOwn(refused, {}, (asked) => asked !== refused))
+        .toStrictEqual({ targetScopes: [undefined], stands: true, hostAsked: true });
+      expect(await revokingItsOwn(refused, {}, () => true))
         .toStrictEqual({ targetScopes: [["bindings"]], stands: false, hostAsked: true });
     });
   });
