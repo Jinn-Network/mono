@@ -15,6 +15,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1191,6 +1192,18 @@ describe('ceremony rotate and its rotation receipt', () => {
     [...(await openRoleSigners({ storePath, password: PASSWORD, ownedRoles, create: false })).values()]
       .map(({ keyId }) => keyId)
       .sort();
+  /** Everything a run writes, for a run whose output is text (`--human`). */
+  const runHuman = async (h: Harness, argv: string[]): Promise<string> => {
+    const writes: string[] = [];
+    await createCeremonyCommand(h.deps).run({
+      argv,
+      stdoutIsTty: false,
+      writer: { write: (text: string) => { writes.push(text); return true; } },
+      exit: () => undefined,
+      env: { HOME: h.home, JINN_PASSWORD: PASSWORD } as NodeJS.ProcessEnv,
+    });
+    return writes.join('');
+  };
 
   it('finishes, from --retiring-store, a rotation whose receipt was lost after the repoint: the old keys are revoked and the new ones boot', async () => {
     const h = await stoppedAfterRepoint();
@@ -1269,6 +1282,66 @@ describe('ceremony rotate and its rotation receipt', () => {
     expect(refusal.details).toMatchObject({ state: 'retiring-store-mismatch', sideEffects: false });
     expect(String(refusal.message)).toContain('no earlier than');
     unchanged();
+  });
+
+  it('names the way forward when identityStores was pointed back at the store being retired, and following it finishes the rotation', async () => {
+    const h = await stoppedAfterRepoint();
+    const { retiring, stores } = storesOf(h);
+    rmSync(receiptPathOf(h));
+    const pointedBack = { ...config(h), identityStores: { ...config(h).identityStores, solver: retiring.solver } };
+    writeFileSync(h.configPath, JSON.stringify(pointedBack));
+    const unchanged = unchangedBy(h);
+
+    // Whichever store the flag names, the run refuses, and the hint says what to do.
+    for (const named of [stores.solver, retiring.solver]) {
+      // eslint-disable-next-line no-await-in-loop -- one refusal after the other.
+      const refusal = await run(h, rotateArgv(h, ['--execute', '--retiring-store', `solver=${named}`]));
+      expect(refusal.details).toMatchObject({ state: 'retiring-store-mismatch', sideEffects: false });
+      expect(String(refusal.hint)).toContain(`If identityStores.<family> in ${h.configPath} was pointed back at the store `
+        + 'being retired, point it at the store the lost rotation bound');
+      expect(String(refusal.hint)).toContain(join(h.dir, 'identity', '<family>.rotated-<stamp>.enc.json'));
+    }
+    unchanged();
+
+    writeFileSync(h.configPath, JSON.stringify({ ...pointedBack, identityStores: { ...pointedBack.identityStores, solver: stores.solver } }));
+    const result = await run(h, rotateArgv(h, ['--execute', '--retiring-store', `solver=${retiring.solver}`]));
+
+    expect(result.kind).toBe('ceremony_rotate_complete');
+    expect(keyIdsOf(result, 'retired')).toEqual(await keyIdsIn(retiring.solver!, SOLVER_ROLES));
+    const revokedAt = h.submitted[h.submitted.length - 1]!.anchorTime;
+    await expect(bootAt(h, retiring.solver!, revokedAt)).rejects.toThrow(/binding is revoked at boot/u);
+    await expect(bootAt(h, stores.solver!, revokedAt)).resolves.toBeDefined();
+  });
+
+  it('plans a run from --retiring-store as finishing the lost rotation: it mints no store and sends one anchor', async () => {
+    const h = await stoppedAfterRepoint();
+    const { retiring, stores } = storesOf(h);
+    rmSync(receiptPathOf(h));
+    aMinuteLater();
+    const way = ['--retiring-store', `solver=${retiring.solver}`];
+    const unchanged = unchangedBy(h);
+
+    const plan = await run(h, rotateArgv(h, way));
+    const text = await runHuman(h, rotateArgv(h, [...way, '--human']));
+
+    expect(plan).toMatchObject({ kind: 'ceremony_rotate_plan', resuming: false, recovering: true, newStores: { solver: stores.solver } });
+    expect(text).toContain('This run finishes a rotation whose rotation.json was lost after it repointed the config.');
+    expect(text).toContain('It mints no store');
+    expect(text).toContain('One anchor, one finality wait.');
+    expect(text).not.toContain('mint the new stores');
+    expect(text).not.toContain('Two anchors');
+    unchanged();
+
+    // It does what its plan says.
+    const result = await run(h, rotateArgv(h, ['--execute', ...way]));
+    expect(result.kind).toBe('ceremony_rotate_complete');
+    expect(result.storesCreated).toEqual([]);
+    expect(h.submitted).toHaveLength(4);
+
+    // A new rotation's plan is as it was.
+    const next = await run(h, rotateArgv(h));
+    expect(next).toMatchObject({ kind: 'ceremony_rotate_plan', resuming: false, recovering: false });
+    expect(await runHuman(h, rotateArgv(h, ['--human']))).toContain('mint the new stores');
   });
 
   it('refuses when the catalog revokes the keys of the store identityStores names, rather than revoke the only standing ones', async () => {
@@ -1373,6 +1446,60 @@ describe('ceremony rotate and its rotation receipt', () => {
 
     expect(refusal.code).toBe('invalid_invocation');
     expect(String(refusal.message)).toContain(expected);
+    unchanged();
+  });
+
+  it('refuses, before it opens any store, a family of --role-sets that --retiring-store leaves unnamed', async () => {
+    const h = await stoppedAfterRepoint();
+    const { retiring } = storesOf(h);
+    rmSync(receiptPathOf(h));
+    const unchanged = unchangedBy(h);
+    const opened = storesOpened.length;
+
+    const refusal = await run(h, [
+      'rotate', '--dir', h.dir, '--role-sets', 'requester,solver', '--execute', '--retiring-store', `solver=${retiring.solver}`,
+    ]);
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect(String(refusal.message)).toContain('--retiring-store names no store for requester');
+    expect(storesOpened).toHaveLength(opened);
+    unchanged();
+  });
+
+  it('refuses, before any anchor, a --retiring-store naming a store of another family', async () => {
+    const h = await stoppedAfterRepoint();
+    rmSync(receiptPathOf(h));
+    const requesterStore = config(h).identityStores.requester!;
+    const unchanged = unchangedBy(h);
+
+    const refusal = await run(h, rotateArgv(h, ['--execute', '--retiring-store', `solver=${requesterStore}`]));
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect(String(refusal.message)).toContain(`the solver store at ${requesterStore} could not be opened`);
+    expect(String(refusal.message)).toContain('owned role set does not match');
+    unchanged();
+  });
+
+  it.each([
+    ['through ..', (h: Harness, store: string) => `${h.dir}/identity/../identity/${basename(store)}`],
+    ['through a symbolic link', (h: Harness, store: string) => {
+      const link = join(h.home, 'solver-alias.enc.json');
+      symlinkSync(store, link);
+      return link;
+    }],
+  ])('refuses a --retiring-store path that reaches the store identityStores names %s, whose keys the lost rotation just bound', async (_case, alias) => {
+    const h = await stoppedAfterRepoint();
+    const { stores } = storesOf(h);
+    rmSync(receiptPathOf(h));
+    const named = alias(h, stores.solver!);
+    expect(named).not.toBe(stores.solver);
+    const unchanged = unchangedBy(h);
+
+    const refusal = await run(h, rotateArgv(h, ['--execute', '--retiring-store', `solver=${named}`]));
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect(refusal.details).toMatchObject({ state: 'retiring-store-mismatch', sideEffects: false });
+    expect(String(refusal.message)).toContain('no earlier than');
     unchanged();
   });
 
