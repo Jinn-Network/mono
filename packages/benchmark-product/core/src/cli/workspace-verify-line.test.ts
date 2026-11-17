@@ -37,3 +37,67 @@ describe("workspace verify human line", () => {
     expect(renderWorkspaceVerifyHuman(CLOSED)).toBe("verified draft draft-1: matrix-rederivation\n");
   });
 });
+
+/** Before `report`: two lock proofs, one still pending, and a promised matrix proof not carried. */
+const TIMESTAMPED: RunVerifyResult = {
+  draftId: "draft-1",
+  checks: ["matrix-rederivation", "integrity-anchors"],
+  matrixSha256: "a".repeat(64),
+  anchors: {
+    anchors: [{
+      recordSha256: "c".repeat(64),
+      status: "present",
+      provider: "https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1",
+      subject: "lock",
+      timeBasis: "authority-time",
+      trustMaterial: "none",
+    }, {
+      recordSha256: "d".repeat(64),
+      status: "pending",
+      provider: "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+      subject: "lock",
+      timeBasis: "chain-time",
+      trustMaterial: "none",
+    }],
+    subjects: [
+      { subject: "lock", outcome: "anchored" },
+      {
+        subject: "matrix",
+        outcome: "declared-but-absent",
+        declaredProfiles: ["https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1"],
+      },
+    ],
+    invalid: [],
+  },
+  anchoringWindow: { closingOperation: "report" },
+};
+
+describe("workspace verify timestamp proofs (issue #5241)", () => {
+  // Reader-facing vocabulary spec section 4.2, v1.14: the claimant reads this, then runs the reader
+  // on the same records, so each outcome carries the reader's name. The values stay raw in `--json`.
+  test("names each proof and outcome as the reader tool does", () => {
+    expect(renderWorkspaceVerifyHuman(TIMESTAMPED)).toBe([
+      "verified draft draft-1: matrix-rederivation, integrity-anchors",
+      `lock timestamp proof: https://spec.jinn.network/trust/anchor-profiles/rfc3161-tsa/v1, authority-time, present, record ${"c".repeat(64)}`,
+      "  time source not evaluated: no trust anchors supplied",
+      `lock timestamp proof: https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1, chain-time, pending, record ${"d".repeat(64)}`,
+      "  no chain attestation yet",
+      "Timestamp coverage",
+      "  lock: timestamped",
+      "  matrix: promised but missing — this run promised opentimestamps/v1 and the bundle carries no matching timestamp proof",
+      "a timestamp proof is still pending, and `report` closes the anchoring window.",
+      "",
+    ].join("\n"));
+  });
+
+  test("an absent subject reads none, and no raw outcome value or retired word reaches the line", () => {
+    const human = renderWorkspaceVerifyHuman({
+      ...TIMESTAMPED,
+      anchors: { anchors: [], subjects: [{ subject: "matrix", outcome: "absent" }], invalid: [] },
+    });
+    expect(human).toContain("  matrix: none — no timestamp proof was carried and none was promised");
+    for (const retired of [/\banchored\b/u, /\babsent\b/u, /declared-but-absent/u, /Anchor subjects/u, /time basis/u, /trust material/u, /anchor evidence/u]) {
+      expect(human).not.toMatch(retired);
+    }
+  });
+});

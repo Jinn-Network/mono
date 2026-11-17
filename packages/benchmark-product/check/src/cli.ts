@@ -260,8 +260,9 @@ function anchoredValue(entry: AnchorVerificationEntry): string | undefined {
 
 /** What THIS reader did about the time basis, stated separately from what the bytes say. §8: the
  * verifier's own report always adds its evaluation — whose material validated the time basis, or
- * that none was supplied. */
-function evaluationNote(entry: AnchorVerificationEntry): string {
+ * that none was supplied. Exported so the product's workspace `verify` prints the same note rather
+ * than a copy of it (issue #5241). */
+export function timestampProofEvaluationNote(entry: AnchorVerificationEntry): string {
   if (entry.status === "verified") {
     // The evaluated instant is reported only where it adds something the head line does not: for a
     // chain-time proof it is the block's own time, which the height alone never gives.
@@ -296,7 +297,7 @@ function renderAnchor(entry: AnchorVerificationEntry): string {
     entry.status,
     ...(value === undefined ? [] : [value]),
   ].join(" · ");
-  return `${head}\n    ${evaluationNote(entry)}\n    record ${entry.recordSha256}`;
+  return `${head}\n    ${timestampProofEvaluationNote(entry)}\n    record ${entry.recordSha256}`;
 }
 
 /** Keeps the declared provider's useful profile path while dropping its unresolvable host. */
@@ -313,11 +314,17 @@ function renderSubject(subject: AnchorSubjectReport): string {
   return `  ${subject.subject}: timestamped`;
 }
 
+/** The `Timestamp coverage` block: one line per subject, outcome named as §4.2 rules it. Exported
+ * so the product's workspace `verify` prints the same block rather than a copy of it (issue #5241). */
+export function renderTimestampCoverage(report: IntegrityAnchorsReport): string {
+  return `Timestamp coverage\n${report.subjects.map(renderSubject).join("\n")}`;
+}
+
 function renderAnchorReport(report: IntegrityAnchorsReport): string {
   const anchors = report.anchors.length === 0
     ? "  no timestamp proofs carried"
     : report.anchors.map(renderAnchor).join("\n");
-  return `\nTimestamps\n${anchors}\n\nTimestamp coverage\n${report.subjects.map(renderSubject).join("\n")}\n`;
+  return `\nTimestamps\n${anchors}\n\n${renderTimestampCoverage(report)}\n`;
 }
 
 const SIGNER_ROLE_NAMES: Record<PublicBundleSignerRole, string> = {

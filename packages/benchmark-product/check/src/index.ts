@@ -212,6 +212,9 @@ export type {
   VerificationOutcome,
 } from "./outcome.js";
 export { VERIFIER_VERSION, renderVerifiedBundle, runVerifierCli } from "./cli.js";
+// The reader's own timestamp-proof wording, shared with the product's workspace `verify` so one
+// claimant meets one name for each outcome on both surfaces (issue #5241).
+export { renderTimestampCoverage, timestampProofEvaluationNote } from "./cli.js";
 export type { VerifierCliDeps, VerifierCliResult } from "./cli.js";
 export {
   LEGACY_PROMPTED_BINARY_QUALIFICATION_VERIFICATION_COMMAND,
