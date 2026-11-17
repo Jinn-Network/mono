@@ -6,7 +6,7 @@
  * carries its EIP-191 signature and authoring refuses one that does not recover to it. What rotate
  * writes is then opened by the production catalog opener and role identities.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openRoleSigners, revocationAnchorDigest } from '@jinn-network/trust-authoring';
@@ -326,5 +326,55 @@ describe('ceremony rotate', () => {
     const refusal = await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver']);
     expect(refusal.code).toBe('invalid_invocation');
     expect(String(refusal.message)).toContain('there is nothing to rotate');
+  });
+});
+
+/**
+ * Re-authoring after a rotation (#5308): the catalog is moved aside and `init` runs again over the
+ * same directory. Sealed without the catalog it replaces, the new one held no revocations and every
+ * key the rotation retired bound again. `init` also opens the stores at their original paths, which
+ * after a rotation hold the retired keys.
+ */
+describe('ceremony init re-authoring a rotated operator', () => {
+  async function rotatedAndMovedAside() {
+    const h = await provisioned();
+    const rotation = await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
+    expect(rotation.kind).toBe('ceremony_rotate_complete');
+    const previousPath = join(h.home, 'trust.previous.json');
+    renameSync(h.catalogPath, previousPath);
+    const { revocations } = JSON.parse(readFileSync(previousPath, 'utf-8')) as { revocations: { digest: string }[] };
+    expect(revocations).toHaveLength(SOLVER_ROLES.length);
+    return { h, previousPath, revocations };
+  }
+
+  const reauthorArgv = (h: Harness, extra: readonly string[] = []) => [
+    'init', '--dir', h.dir, '--role-sets', 'requester,admission,solver', '--authority-store', h.authorityStore,
+    '--execute', ...extra,
+  ];
+
+  it('refuses to replace the catalog without --previous-catalog, which would drop its revocations', async () => {
+    const { h } = await rotatedAndMovedAside();
+    const sessions = h.calls.filter((call) => call === 'openAnchorSession').length;
+
+    const refusal = await run(h, reauthorArgv(h));
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect((refusal.details as { state: string }).state).toBe('previous-catalog-required');
+    expect(String(refusal.hint)).toContain('--previous-catalog');
+    expect(existsSync(h.catalogPath)).toBe(false);
+    expect(h.calls.filter((call) => call === 'openAnchorSession')).toHaveLength(sessions);
+  });
+
+  it('refuses, naming the revocation, to bind the retired keys again, before any anchor or write', async () => {
+    const { h, previousPath, revocations } = await rotatedAndMovedAside();
+    const sessions = h.calls.filter((call) => call === 'openAnchorSession').length;
+
+    const refusal = await run(h, reauthorArgv(h, ['--previous-catalog', previousPath]));
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect((refusal.details as { state: string }).state).toBe('retired-key-bound');
+    expect(revocations.some(({ digest }) => String(refusal.message).includes(`revocation ${digest} retired key`))).toBe(true);
+    expect(existsSync(h.catalogPath)).toBe(false);
+    expect(h.calls.filter((call) => call === 'openAnchorSession')).toHaveLength(sessions);
   });
 });
