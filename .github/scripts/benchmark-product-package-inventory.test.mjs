@@ -325,3 +325,15 @@ test('no package outside this Tier 4 product depends on Colophon', () => {
   });
   assert.deepEqual(offenders.sort(), [], 'a non-product package depends on a Tier 4 Colophon package');
 });
+
+test('Benchmark Product CI runs when the reader-facing vocabulary spec changes', () => {
+  const workflow = readFileSync(join(root, '.github', 'workflows', 'benchmark-product-ci.yml'), 'utf8');
+  const spec = '      - "docs/superpowers/specs/2026-09-02-reader-facing-vocabulary.md"';
+  const pushStart = workflow.indexOf('\n  push:');
+  assert.notEqual(pushStart, -1, 'workflow must declare a push trigger');
+  const concurrencyStart = workflow.indexOf('\nconcurrency:', pushStart);
+  const pullRequest = workflow.slice(workflow.indexOf('\n  pull_request:'), pushStart);
+  const push = workflow.slice(pushStart, concurrencyStart);
+  assert.ok(pullRequest.includes(spec), 'pull_request paths must include the reader-facing vocabulary spec');
+  assert.ok(push.includes(spec), 'push paths must include the reader-facing vocabulary spec');
+});
