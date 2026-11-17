@@ -3,7 +3,6 @@
 import { ceremonyEvidenceDigest, verifyEoaCeremony } from "./ceremony.js";
 import { canonicalJsonBytes } from "./canonical-json.js";
 import { dssePreAuthEncoding, sealDsseEnvelope } from "./dsse.js";
-import { recordDigest } from "./hashing.js";
 import { TRUST_KEY_BINDING_MEDIA_TYPE } from "./identifiers.js";
 import { compareCalendarStrictRfc3339Instants, isCalendarStrictRfc3339 } from "./rfc3339.js";
 import type { DsseChainVerifier } from "./policy.js";
@@ -257,6 +256,12 @@ function startWalk({ bindingResolver, witnessVerifier, dsseVerifier }: BindingAu
   return { bindingResolver, witnessVerifier, dsseVerifier, settled: new Map(), resolved: new Map() };
 }
 
+/** Writes a row's parts out with bytes and strings marked, so that neither can pass for the other. */
+function writeRowValue(_key: string, value: unknown): unknown {
+  if (value instanceof Uint8Array) return `b${Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+  return typeof value === "string" ? `s${value}` : value;
+}
+
 const rows = new WeakMap<ResolvedBinding, string | null>();
 
 /**
@@ -282,15 +287,41 @@ function rowOf(resolved: ResolvedBinding): string | undefined {
         "ceremonyEvidence" in resolved ? [resolved.ceremonyEvidence] : [],
         "witness" in resolved ? [resolved.witness] : [],
       ],
-      (_key, value: unknown) => {
-        if (value instanceof Uint8Array) return `b${Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
-        return typeof value === "string" ? `s${value}` : value;
-      },
+      writeRowValue,
     );
   } catch {
     // A row that cannot be written out cannot be told from another.
   }
   rows.set(resolved, row);
+  return row ?? undefined;
+}
+
+const revocationRows = new WeakMap<ResolvedRevocation, string | null>();
+
+/**
+ * Which revocation entry a resolver listed, as `isRevocationAuthorized` weighs it: its record, its
+ * envelope, the effective time the resolver read for it and the scope of the record it names. Two
+ * entries can share one envelope and differ in all the rest, so the envelope alone names no entry
+ * (key authority section 3). `undefined` for an entry that cannot be written out, as for `rowOf`.
+ */
+function revocationRowOf(entry: ResolvedRevocation): string | undefined {
+  const known = revocationRows.get(entry);
+  if (known !== undefined) return known ?? undefined;
+  let row: string | null = null;
+  try {
+    row = JSON.stringify(
+      [
+        entry.revocation,
+        entry.envelopeBytes,
+        entry.effectiveTime,
+        "targetScope" in entry ? [entry.targetScope] : [],
+      ],
+      writeRowValue,
+    );
+  } catch {
+    // An entry that cannot be written out cannot be told from another.
+  }
+  revocationRows.set(entry, row);
   return row ?? undefined;
 }
 
@@ -615,9 +646,13 @@ async function checkRevocation(
     // evidence's effective time attributes nothing before it.
     const comparison = compareCalendarStrictRfc3339Instants(entry.effectiveTime, atTime);
     if (comparison !== undefined && (comparison > 0 || (comparison === 0 && boundary === "before"))) continue;
-    const fact = `revocation\u001f${row}\u001f${recordDigest(entry.envelopeBytes)}`;
+    // Each entry is judged on its own (key authority section 3), so its answer is kept under its
+    // own row. One that cannot be written out cannot be told from another, so it is judged afresh.
+    const entryRow = revocationRowOf(entry);
+    const decide = () => isRevocationAuthorized(resolved, entry, walk);
     // eslint-disable-next-line no-await-in-loop -- revocations lists are small; sequential is fine.
-    if (!(await settle(walk, fact, () => isRevocationAuthorized(resolved, entry, walk)))) continue;
+    const authorized = await (entryRow === undefined ? decide() : settle(walk, `revocation\u001f${row}\u001f${entryRow}`, decide));
+    if (!authorized) continue;
     // Authority comes first: a time nobody can read refuses only when someone
     // with standing wrote it, or any record naming this binding would revoke it.
     return {
