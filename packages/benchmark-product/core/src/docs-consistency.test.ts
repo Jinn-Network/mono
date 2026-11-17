@@ -646,7 +646,7 @@ describe("product documentation consistency", () => {
     expect(current).not.toBe(historical);
     const refused = `no published reader from \`${current.slice(1)}\` on reads`;
     const onlyReader = new RegExp(
-      `\`${historical.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\`[^.;|]*is the only published reader that can read it`,
+      `\`${historical.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\`[^.;|]*is the only published reader whose rebuild names that line`,
       "u",
     );
     // Compared with the line wrapping collapsed, so a reflow of the prose cannot break the pin.
@@ -661,6 +661,7 @@ describe("product documentation consistency", () => {
       expect(matching[0], marker).toContain(refused);
       expect(matching[0], marker).toMatch(onlyReader);
       expect(matching[0], marker).toContain("`claim-consistency`");
+      expect(matching[0], marker).toContain("`report-verification`");
     }
     const rows = guide
       .split("\n")
@@ -674,8 +675,9 @@ describe("product documentation consistency", () => {
       expect(cells[2], cells[0]).toContain(refused);
       expect(cells[2], cells[0]).toMatch(onlyReader);
       expect(cells[2], cells[0]).toContain("`claim-consistency`");
+      expect(cells[2], cells[0]).toContain("`report-verification`");
     }
-    for (const retired of ["reads either pin", "refuses neither", "reads a prompted v4 materialized before", "reads only on"]) {
+    for (const retired of ["reads either pin", "refuses neither", "reads a prompted v4 materialized before", "reads only on", "is the only published reader that can read it"]) {
       expect(guide, retired).not.toContain(retired);
     }
   });
