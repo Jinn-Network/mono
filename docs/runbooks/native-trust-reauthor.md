@@ -205,17 +205,25 @@ revocations as `carriedRevocations`.
   which would move that record's time;
 - the re-author would bind a key a carried revocation retired, for the same Agent (the refusal names
   the revocation);
-- the config's `identityStores` names a different store than `<dir>/identity/<family>.enc.json` for a
-  family it would bind, or `<dir>/ceremony/rotation.json` records a rotation of that family, finished
-  or not: that family was rotated, whatever `--previous-catalog` names. A `rotation.json` that cannot
-  be read is refused as well, rather than taken for no rotation.
+- a rotation in `<dir>` replaced or is replacing a family it would bind, an earlier rotation
+  included, whatever `--previous-catalog` and `--config` name (`rotated-family`). It reads two
+  records: a store `jinn ceremony rotate` minted for that family,
+  `<dir>/identity/<family>.rotated-<stamp>.enc.json`, which every rotation leaves beside the
+  original store, and `<dir>/ceremony/rotation.json`, which records the latest rotation, finished or
+  not. A `rotation.json` that cannot be read is refused as well, rather than taken for no rotation
+  (`rotation-receipt-unreadable`);
+- neither record shows a rotation of a family it would bind, but the config's `identityStores` names
+  a store other than `<dir>/identity/<family>.enc.json` for it (`store-elsewhere`): `init` would
+  replace a store it did not provision.
 
-A re-author after `jinn ceremony rotate` meets the last two refusals: the retired-key one when
-`--previous-catalog` is the catalog holding the rotation's revocations, the rotated-family one for
-any other file. `init` opens the stores at
-`<dir>/identity/<family>.enc.json`, not the stores `identityStores` names, and after a rotation those
-hold the retired keys. So a rotated family cannot be re-authored with `init`. The refusal
-comes after the stores are opened and before any anchor is sent, so it spends no gas.
+A re-author after `jinn ceremony rotate` that names a rotated family meets the rotated-family
+refusal. `init` opens the stores at `<dir>/identity/<family>.enc.json`, not the stores
+`identityStores` names, and after a rotation those hold the retired keys. So a rotated family cannot
+be re-authored with `init`. The refusal comes before `init` opens any store or prints its plan, so it
+spends no gas. The retired-key refusal is the check behind it: when the rotated stores have been
+moved out of `<dir>/identity`, `rotation.json` no longer records the family, and the config names no
+other store for it, it still refuses if `--previous-catalog` is the catalog holding the rotation's
+revocations.
 
 ## Cost and sequencing
 
