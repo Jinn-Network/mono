@@ -207,7 +207,6 @@ describe('ceremony verbs refuse the flags they do not take (issue #5364)', () =>
     expect(flags.length).toBeGreaterThan(0);
     for (const flag of flags) {
       const takers: readonly string[] = CEREMONY_FLAG_VERBS[flag];
-      expect(takers.length, `--${flag} names no verb`).toBeGreaterThan(0);
       for (const verb of CEREMONY_VERBS) {
         const h = harness();
         const before = tree(h.home);
@@ -222,6 +221,23 @@ describe('ceremony verbs refuse the flags they do not take (issue #5364)', () =>
         }
       }
     }
+  });
+
+  /**
+   * No verb reads `--password-fd`: init, join and rotate take the password from JINN_PASSWORD, else a
+   * keystore-password file, and show --store from JINN_PASSWORD only. Accepting the flag would run the
+   * ceremony on another password than the one passed, and init and join mint stores before the
+   * keystore is decrypted.
+   */
+  it.each(CEREMONY_VERBS)('%s refuses --password-fd, naming where the ceremony takes its password', async (verb) => {
+    const h = harness();
+    const before = tree(h.home);
+    const result = await run(h, [...verbArgv(h, verb), '--password-fd', '0']);
+    expectRefused(h, before, result, verb, [{ flag: '--password-fd', takenBy: [] }]);
+    expect(String(result.last!.message)).toBe(`ceremony ${verb} does not take --password-fd (no ceremony verb takes it)`);
+    const hint = String(result.last!.hint);
+    expect(hint).toContain('JINN_PASSWORD');
+    expect(hint).toContain('keystore-password');
   });
 });
 
@@ -247,12 +263,19 @@ describe('ceremony help matches the flag table', () => {
     });
   }
 
-  it('describes each flag once, marked with exactly the verbs the table gives it (unmarked: every verb)', () => {
+  it('describes each flag a verb takes once, marked with exactly the verbs the table gives it (unmarked: every verb)', () => {
     const entries = optionEntries();
-    expect(entries.map(({ flag }) => flag).sort()).toEqual(Object.keys(CEREMONY_FLAG_VERBS).sort());
+    const taken = (Object.keys(CEREMONY_FLAG_VERBS) as Flag[]).filter((flag) => CEREMONY_FLAG_VERBS[flag].length > 0);
+    expect(entries.map(({ flag }) => flag).sort()).toEqual([...taken].sort());
     for (const { flag, verbs } of entries) {
       expect(verbs, `--${flag}`).toEqual([...CEREMONY_FLAG_VERBS[flag as Flag]]);
     }
+  });
+
+  it('says of each flag no verb takes that no verb takes it', () => {
+    const untaken = (Object.keys(CEREMONY_FLAG_VERBS) as Flag[]).filter((flag) => CEREMONY_FLAG_VERBS[flag].length === 0);
+    expect(untaken).toEqual(['password-fd']);
+    for (const flag of untaken) expect(help.replace(/\s+/gu, ' ')).toContain(`No verb takes --${flag}.`);
   });
 
   it('shows each verb only with flags it takes in its usage and example lines', () => {
