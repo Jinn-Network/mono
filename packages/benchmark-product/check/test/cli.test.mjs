@@ -1170,6 +1170,10 @@ test("a refusal's human line uses the reader's names while --json keeps the modu
       `${admission}reviewer signature or judge/key binding is invalid`,
     ],
     [
+      "binary admission replay failed: replacementLedger.entries.0.reviews.1: reviewer signature or evaluator/key binding is invalid",
+      "binary admission replay failed: replacementLedger.entries.0.reviews.1: reviewer signature or judge/key binding is invalid",
+    ],
+    [
       `${admission}review verdict must be one Result Evaluation envelope with one signature`,
       `${admission}review verdict must be one DSSE-signed Result Evaluation with one signature`,
     ],
@@ -1207,9 +1211,9 @@ test("a refusal's human line uses the reader's names while --json keeps the modu
   }
 });
 
-// Every rule but the two admission-reviewer rules is anchored at the message's start, so a rule's
-// own words after other text, as publisher-chosen text can carry them, print unchanged. Each body
-// is one rule's wording; removing any one rule's `^` changes its line.
+// Every rule is anchored at the message's start, the two admission-reviewer rules after an optional
+// review path, so a rule's own words after other text, as publisher-chosen text can carry them,
+// print unchanged. Each body is one rule's wording; removing any one rule's `^` changes its line.
 test("refusal wording is rewritten only where a rule matches from the message's start", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
   const hex = "3".repeat(64);
@@ -1234,6 +1238,8 @@ test("refusal wording is rewritten only where a rule matches from the message's 
     "Report author/keyId/didKey are not derived from the bundled Report SPKI",
     "report-recompute: recomputed results do not match the sealed Report results",
     "claim package anchors is not the exact projection of verified facts",
+    "reviewer signature or evaluator/key binding is invalid",
+    "review verdict must be one Result Evaluation envelope with one signature",
   ]) {
     const message = `unknown member: ${body}`;
     const result = await runVerifierCli(["bundle"], {
