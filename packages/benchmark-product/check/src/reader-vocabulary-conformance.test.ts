@@ -623,7 +623,7 @@ function metadataFirst(notFetched: number): PublicBundleVerificationResult {
 
 /** Every capability the registry carries, in registry order. Derived, never listed: a capability
  * added to the registry is declared here with no edit to this file. */
-const EVERY_CAPABILITY: readonly string[] = CAPABILITY_REGISTRY.map(({ token }) => token);
+const EVERY_CAPABILITY: readonly string[] = [...new Set(CAPABILITY_REGISTRY.map(({ token }) => token))].sort();
 const EVERY_CHECK: readonly string[] = expectedChecks(EVERY_CAPABILITY);
 
 /** One `/10` result declaring every registered capability, so the gloss line and the
