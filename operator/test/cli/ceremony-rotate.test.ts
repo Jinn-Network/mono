@@ -1026,6 +1026,74 @@ describe('ceremony join after a rotation', () => {
 });
 
 /**
+ * A key a rotation retired, bound again under a new Agent IRI (#5372). With every rotation record and
+ * the run receipt gone, the rotated-family refusal sees no rotation, and an init or join whose config
+ * carries no agentIri mints new Agent IRIs. The revocations in the catalog it names are what is left,
+ * and they retire the key whatever Agent it would be bound to.
+ */
+describe('ceremony init and join with no record of a rotation left', () => {
+  it.each([
+    ['a config with no agentIri', (_h: Harness) => undefined],
+    ['a config carrying the Agent IRIs', (h: Harness) => ({ agentIri: config(h).agentIri, admissionAgent: config(h).admissionAgent })],
+  ])('refuse, before any anchor, to bind a key a revocation in the catalog they name retired, with %s', async (_case, values) => {
+    const h = await provisioned();
+    const rotation = await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
+    expect(rotation.kind).toBe('ceremony_rotate_complete');
+    const retiredFor = config(h).agentIri;
+    // Every rotation record goes: the rotated store leaves <dir>/identity, and rotation.json and the run
+    // receipt are removed. The catalog holding the revocations is moved aside, as for a re-author.
+    const setAside = join(h.home, 'set-aside');
+    mkdirSync(setAside);
+    for (const name of readdirSync(join(h.dir, 'identity')).filter((entry) => entry.startsWith('solver.rotated-'))) {
+      renameSync(join(h.dir, 'identity', name), join(setAside, name));
+    }
+    rmSync(join(h.dir, 'ceremony', 'rotation.json'));
+    rmSync(join(h.dir, 'ceremony', 'receipt.json'));
+    const holding = join(h.home, 'trust.previous.json');
+    renameSync(h.catalogPath, holding);
+    const { policyGenesisDigest, revocations } = JSON.parse(readFileSync(holding, 'utf-8')) as {
+      policyGenesisDigest: string;
+      revocations: { digest: string }[];
+    };
+    expect(revocations).toHaveLength(SOLVER_ROLES.length);
+    const freshConfig = join(h.home, 'fresh-config.json');
+    const configValues = values(h);
+    if (configValues !== undefined) writeFileSync(freshConfig, JSON.stringify(configValues));
+    const configBefore = configValues === undefined ? undefined : readFileSync(freshConfig);
+    const catalogBefore = readFileSync(holding);
+    const common = [
+      '--dir', h.dir, '--config', freshConfig, '--role-sets', 'requester,admission,solver', '--authority-store', h.authorityStore,
+    ];
+
+    // Without the Agent IRIs, the plan shows init would bind the stores to a new Agent.
+    const plan = await run(h, ['init', ...common, '--previous-catalog', holding]);
+    expect(plan.kind).toBe('ceremony_init_plan');
+    expect(plan.agentIri === retiredFor).toBe(configValues !== undefined);
+
+    const sessions = h.calls.filter((call) => call === 'openAnchorSession').length;
+    const submissions = h.submitted.length;
+    const refusals = [
+      await run(h, ['init', ...common, '--execute', '--previous-catalog', holding]),
+      await run(h, ['join', ...common, '--execute', '--catalog', holding, '--genesis', policyGenesisDigest]),
+    ];
+
+    for (const refusal of refusals) {
+      expect(refusal.code).toBe('invalid_invocation');
+      expect(refusal.details).toMatchObject({ state: 'retired-key-bound', sideEffects: false });
+      expect(revocations.some(({ digest }) => String(refusal.message).includes(`revocation ${digest} retired key`))).toBe(true);
+      expect(String(refusal.message)).toContain(`for ${retiredFor}`);
+    }
+    expect(h.calls.filter((call) => call === 'openAnchorSession')).toHaveLength(sessions);
+    expect(h.submitted).toHaveLength(submissions);
+    expect(existsSync(h.catalogPath)).toBe(false);
+    expect(readFileSync(holding)).toEqual(catalogBefore);
+    if (configBefore === undefined) expect(existsSync(freshConfig)).toBe(false);
+    else expect(readFileSync(freshConfig)).toEqual(configBefore);
+    expect(createCeremonyCommand(h.deps).helpText).toContain('whatever Agent IRI it would bind the key to');
+  });
+});
+
+/**
  * A lost, unreadable or stale rotation receipt (#5329). From the config repoint on, `rotation.json`
  * is the only record of the store a rotation retires: the config names the store it just bound. A
  * receipt read as absent made the next run rotate those keys and leave the retiring ones bound.
