@@ -20,6 +20,7 @@ jobs:
   platform-architecture-control:
     name: platform-architecture-control
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
@@ -173,6 +174,7 @@ jobs:
   platform-release-surface:
     name: platform-release-surface
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
