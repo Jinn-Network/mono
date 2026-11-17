@@ -444,14 +444,21 @@ export async function assertReceiptRowsServed(receipts, fetchImpl = fetch) {
 }
 
 /**
+ * The in-tree products a product's build compiles although its manifest does not name them. The
+ * `cli` build compiles the private web application and copies its output into the tarball (#5214).
+ */
+const BUILD_COMPILED_PRODUCTS = new Map([['@colophon-claims/cli', ['@colophon-claims/web']]]);
+
+/**
  * The tree directory of every platform package a publish of `manifest` installs, sorted by name:
  * the `@jinn-network` dependencies the manifest names in any section, and those of each in-tree
- * `@colophon-claims` package it depends on, followed through the runtime dependencies of each.
- * A `cli` install brings in `core` and the checker, and the `cli` build compiles the private web
- * application from these directories through portals (#5045).
+ * `@colophon-claims` package it depends on or its build compiles, followed through the runtime
+ * dependencies of each. A `cli` install brings in `core` and the checker, and the `cli` build
+ * compiles the private web application from these directories through portals (#5045), so a `cli`
+ * publish also takes every platform package web installs (#5214).
  */
-export function platformSourceDirectories(repoRoot, manifest) {
-  const catalog = new Map(loadCatalogPackages(repoRoot).map((pkg) => [pkg.name, pkg]));
+export function platformSourceDirectories(repoRoot, manifest, packages = loadCatalogPackages(repoRoot)) {
+  const catalog = new Map(packages.map((pkg) => [pkg.name, pkg]));
   const platform = new Set();
   const products = new Set();
   const visitProduct = (product) => {
@@ -465,6 +472,11 @@ export function platformSourceDirectories(repoRoot, manifest) {
     }
   };
   visitProduct(manifest);
+  for (const compiled of BUILD_COMPILED_PRODUCTS.get(manifest.name) ?? []) {
+    const product = catalog.get(compiled);
+    if (product === undefined) throw new Error(`cannot find the source of ${compiled} in this tree`);
+    visitProduct(product.manifest);
+  }
   const pending = [...platform];
   while (pending.length > 0) {
     const name = pending.pop();
@@ -518,14 +530,16 @@ const ALWAYS_PACKED_ROOT_FILE = /^(?:readme|license|licence|copying)(?:\.[^/]*)?
 /**
  * Whether a `files` entry of a package may ship `relative`, a path inside the package, when npm
  * packs it. A plain path covers itself and everything under it, with or without a leading `./` or
- * `/`. This check does not evaluate globs, so an entry with glob syntax covers every path, and a file
- * it might ship is never exempt. A negated entry only removes files, so it covers nothing, and a
- * file it removes is still compared.
+ * `/`. This check does not evaluate globs or escapes, or resolve paths, so an entry with glob syntax,
+ * a backslash, or an empty, `.` or `..` segment covers every path, and a file it might ship is never
+ * exempt. A negated entry only removes files, so it covers nothing, and a file it removes is still
+ * compared.
  */
 function filesEntryCovers(entry, relative) {
   const normalized = String(entry).replace(/^\.\//u, '').replace(/^\/+|\/+$/gu, '');
   if (normalized.startsWith('!')) return false;
-  if (normalized === '' || /[*?[\]{}]/u.test(normalized)) return true;
+  if (normalized === '' || /[*?[\]{}\\]/u.test(normalized)) return true;
+  if (normalized.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')) return true;
   return relative === normalized || relative.startsWith(`${normalized}/`);
 }
 

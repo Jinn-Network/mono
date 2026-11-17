@@ -35,7 +35,7 @@ import {
   validateProductReleasePlatformPin,
   validateProductReleasePlatformPins,
 } from './colophon-publish-manifest.mjs';
-import { loadPlatformCatalog } from './platform-catalog.mjs';
+import { loadCatalogPackages, loadPlatformCatalog } from './platform-catalog.mjs';
 import { buildRegistrationList } from './stack-trusted-publishers.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
@@ -1626,7 +1626,22 @@ test('self-test: the exemption refuses every test file npm may ship and passes o
     [{ name: 'x', directory: 'packages/x', ...(files === undefined ? {} : { files }) }],
     () => changed,
   );
-  assert.throws(check(['/fixtures'], ['packages/x/fixtures/a.test.ts']), /fixtures\/a\.test\.ts/u);
+  // A leading `./` or `/` is ignored: the entry covers its directory, and only that.
+  for (const entry of ['./fixtures', '/fixtures']) {
+    assert.throws(check([entry], ['packages/x/fixtures/a.test.ts']), /fixtures\/a\.test\.ts/u, entry);
+    assert.doesNotThrow(check([entry], ['packages/x/src/a.test.ts']), entry);
+  }
+  // npm 11.19.0 ships the first three files: it resolves a `..` segment and a doubled slash, and packs
+  // `fixtures` for `\fixtures`. The check models none of these forms, so such an entry, and one with
+  // a `.` segment, covers every path.
+  for (const [entry, file] of [
+    ['dist/../fixtures', 'fixtures/a.test.ts'],
+    ['fixtures//x', 'fixtures/x/a.test.ts'],
+    ['\\fixtures', 'fixtures/a.test.ts'],
+    ['fixtures/./x', 'fixtures/x/a.test.ts'],
+  ]) {
+    assert.throws(check([entry], [`packages/x/${file}`]), new RegExp(escapeRegExp(file), 'u'), entry);
+  }
   assert.throws(check(['dist/**/*.ts'], ['packages/x/dist/a.test.ts']), /dist\/a\.test\.ts/u);
   assert.throws(check(undefined, ['packages/x/src/a.test.ts']), /src\/a\.test\.ts/u);
   assert.throws(check(['dist/'], ['packages/x/README.test.ts']), /README\.test\.ts/u);
@@ -1675,6 +1690,30 @@ test('the platform source compared is every platform package the dispatched pack
       dependencies: { '@jinn-network/not-in-this-tree': '0.1.0' },
     }),
     /cannot find the source of @jinn-network\/not-in-this-tree in this tree/u,
+  );
+});
+
+test('a cli dispatch also compares every platform package the web application its build compiles installs (issue #5214)', () => {
+  const packages = loadCatalogPackages(repoRoot);
+  const web = packages.find(({ name }) => name === '@colophon-claims/web');
+  // The cli build compiles this directory into its tarball, and the cli manifest does not name it.
+  assert.equal(web.directory, 'packages/benchmark-product/web');
+  assert.match(
+    readFileSync(join(repoRoot, 'packages/benchmark-product/cli/scripts/build.mjs'), 'utf8'),
+    /const webRoot = join\(root, "\.\.", "web"\);/u,
+  );
+  assert.ok(!Object.keys(productManifest('cli').dependencies).includes(web.name));
+  // A platform package added to web alone is compared, with what it installs, for cli and only cli.
+  const webOnly = { ...web.manifest, dependencies: { ...web.manifest.dependencies, '@jinn-network/policy-outcomes': '0.1.0' } };
+  const tree = packages.map((pkg) => (pkg === web ? { ...pkg, manifest: webOnly } : pkg));
+  const names = (product) => platformSourceDirectories(repoRoot, productManifest(product), tree).map(({ name }) => name);
+  const added = ['@jinn-network/policy-identity', '@jinn-network/policy-outcomes'];
+  assert.deepEqual(names('core').filter((name) => added.includes(name)), []);
+  assert.deepEqual(names('cli'), [...names('core'), ...added].sort());
+  // Fails closed when the compiled product's source is not in the tree.
+  assert.throws(
+    () => platformSourceDirectories(repoRoot, productManifest('cli'), packages.filter((pkg) => pkg !== web)),
+    /cannot find the source of @colophon-claims\/web in this tree/u,
   );
 });
 
