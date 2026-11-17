@@ -54,8 +54,10 @@ export interface ResolvedBinding {
   readonly witness?: Eip1271Witness;
   /** The deployment's ceremony currency profile, present when the resolver
    * applies `https://spec.jinn.network/profiles/ceremony-currency/v1`. `verify.ts`
-   * then checks an `eoa` ceremony against it at `effectiveStart`. It can only
-   * refuse more: absent, ceremonies are checked as they were before that text. */
+   * then checks an `eoa` ceremony against it at `effectiveStart`. Absent,
+   * ceremonies are checked as they were before that text. Present, a ceremony
+   * that fails it gives no authority, so it can also lose a key conflict to
+   * another record or stop a revocation it signed from counting. */
   readonly ceremonyCurrency?: CeremonyCurrencyProfile;
   /** True only for the founding binding of the Agent IRI -- no §7.4a
    * consent-chain check applies (design §7.4a: "the genesis binding of an

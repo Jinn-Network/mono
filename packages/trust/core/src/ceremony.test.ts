@@ -483,4 +483,41 @@ describe("ceremony currency (ceremony-currency/v1)", () => {
     const check = { profile: {}, effectiveStart: "2026-07-28T00:00:00Z" };
     expect(verifyEoaCeremony(eoaCeremony(), keyBindingFor(eoaFixture.agentIri), check).verified).toBe(true);
   });
+
+  // The structured message is tied to the signed bytes only by re-serialization, which writes each
+  // resource as one line. Each ceremony below keeps the account's bytes and signature and rewrites
+  // `resources` into a list that serializes to those same bytes, so the commitment must still bind.
+  const widerScope = ["deliveries", "verdicts", "bindings", "settlements"];
+  const currencyCheck = { profile: {}, effectiveStart: terms.validFrom };
+
+  test("a commitment folded into the resource before it still binds the record (§3)", () => {
+    const safe = "did:pkh:eip155:84532:0x1111111111111111111111111111111111111111";
+    const commitment = bindingTermsCommitment(terms);
+    const signed = signedEoaCeremony({ resources: [eoaFixture.agentIri, eoaFixture.didKey, safe, commitment] });
+    const folded: EoaCeremonyEvidence = {
+      ...signed,
+      message: { ...signed.message, resources: [eoaFixture.agentIri, eoaFixture.didKey, `${safe}\n- ${commitment}`] },
+    };
+    expect(serializeCeremonyMessage("eoa", folded.message)).toEqual(signed.messageBytes);
+    expect(verifyEoaCeremony(folded, { ...committedBinding(), scope: widerScope }, currencyCheck)).toEqual({
+      verified: false,
+      recoveredAddress: TEST_ADDRESS,
+      reason: expect.stringMatching(/not a single line of text/),
+    });
+  });
+
+  test("a commitment wrapped in an array still binds the record (§3)", () => {
+    const signed = committedCeremony();
+    const resources = [eoaFixture.agentIri, eoaFixture.didKey, [bindingTermsCommitment(terms)]];
+    const wrapped: EoaCeremonyEvidence = {
+      ...signed,
+      message: { ...signed.message, resources: resources as unknown as readonly string[] },
+    };
+    expect(serializeCeremonyMessage("eoa", wrapped.message)).toEqual(signed.messageBytes);
+    expect(verifyEoaCeremony(wrapped, { ...committedBinding(), scope: widerScope }, currencyCheck)).toEqual({
+      verified: false,
+      recoveredAddress: TEST_ADDRESS,
+      reason: expect.stringMatching(/not a single line of text/),
+    });
+  });
 });

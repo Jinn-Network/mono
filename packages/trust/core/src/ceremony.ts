@@ -411,10 +411,16 @@ export function ceremonyCurrencyFailure(
   terms: BindingTerms,
   check: CeremonyCurrencyCheck,
 ): string | undefined {
+  // The structured message is tied to the signed bytes only by re-serialization, which writes each
+  // resource as one line. An entry that is not a single-line string serializes to the same bytes as
+  // a different list, so it could hide a commitment the account signed; such a ceremony cannot be
+  // read under this text.
+  if (message.resources.some((resource) => typeof resource !== "string" || /[\r\n]/u.test(resource))) {
+    return "ceremony resources hold an entry that is not a single line of text, so its terms commitment "
+      + "cannot be read (ceremony currency §3).";
+  }
   // §3: a commitment, once present, must be the only one, the last entry, and these terms'.
-  const commitments = message.resources.filter(
-    (resource) => typeof resource === "string" && resource.startsWith(BINDING_TERMS_COMMITMENT_FAMILY),
-  );
+  const commitments = message.resources.filter((resource) => resource.startsWith(BINDING_TERMS_COMMITMENT_FAMILY));
   if (commitments.length > 1) {
     return `ceremony resources hold ${commitments.length} terms commitments; at most one is allowed `
       + "(ceremony currency §3).";
