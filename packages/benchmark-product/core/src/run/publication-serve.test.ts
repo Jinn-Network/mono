@@ -36,6 +36,7 @@ import { sha256Hex } from "../workspace/sealed-store.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
 import {
   createWorkspacePublicationSource,
+  refreshWorkspacePublicationHead,
   refreshWorkspacePublicationWellKnown,
   resolveWorkspacePublicationSourceName,
   withWorkspacePublicationSourceLock,
@@ -578,6 +579,42 @@ describe("idle source head heartbeat (#4187)", () => {
     } finally {
       await server.close();
     }
+  });
+
+  // The refresh checks the head and writes it in two steps; what keeps an announcement from landing
+  // between them is that it holds the same source lock every announcement holds (#5334).
+  test("a due refresh waits on a held source lock, says so, and writes nothing until release", async () => {
+    const workspaceDir = workspace("publication-serve-heartbeat-locked-");
+    await announce(workspaceDir, "first", "2026-08-13T12:00:00Z");
+    const before = headOnDisk(workspaceDir);
+
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    let holding!: () => void;
+    const held = new Promise<void>((resolve) => { holding = resolve; });
+    const holder = withWorkspacePublicationSourceLock(workspaceDir, async () => { holding(); await released; });
+    await held;
+
+    let contended!: () => void;
+    const reported = new Promise<"contended">((resolve) => { contended = () => resolve("contended"); });
+    let settled = false;
+    const refresh = refreshWorkspacePublicationHead(workspaceDir, SOURCE_NAME, contended)
+      .finally(() => { settled = true; });
+    try {
+      expect(await Promise.race([reported, refresh.then((outcome) => outcome.status)])).toBe("contended");
+      // Several of the acquire's 10ms polls later, it is still waiting and the head is untouched.
+      await new Promise<void>((resolve) => { setTimeout(resolve, 100); });
+      expect(settled).toBe(false);
+      expect(headOnDisk(workspaceDir).bytes).toEqual(before.bytes);
+    } finally {
+      release();
+      await holder;
+    }
+
+    expect((await refresh).status).toBe("refreshed");
+    const after = headOnDisk(workspaceDir);
+    expect(after.bytes).not.toEqual(before.bytes);
+    expect(after.head).toEqual({ ...before.head, issuedAt: after.head.issuedAt, refreshBy: after.head.refreshBy });
   });
 
   test("withholds the re-sign while a publication stage holds a frozen announcement time", async () => {

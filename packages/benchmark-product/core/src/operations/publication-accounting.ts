@@ -48,6 +48,7 @@ import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
+import { timestampAfter } from "./publication-report-timestamp.js";
 
 export interface PublicationAccountingInput { readonly draftId: string; }
 export interface PublicationAccountingDeps {
@@ -114,7 +115,11 @@ async function probePublishedInputs(input: {
 
 /** Store all non-record closure bytes and append every Submission before fixing the scope cutoff. */
 async function publishInputs(input: {
-  workspaceDir: string; draftId: string; at: string; sourceName: string; publicBaseUrl: string;
+  workspaceDir: string; draftId: string; sourceName: string; publicBaseUrl: string;
+  /** The stage's announcement time when an earlier attempt froze it; otherwise `freeze` sets it. */
+  frozenAt: string | undefined;
+  /** Freezes the stage time, given the `issuedAt` of the head served under this source lock. */
+  freeze: (headIssuedAt: string | undefined) => string;
   dispatches: readonly { cellKey: string; index: number; submissionSha256: string; supporting: readonly { digest: string; mediaType: string }[] }[];
   supportMembers: readonly PublicationMember[];
   verifyOrigin?: OriginVerificationPort;
@@ -123,12 +128,15 @@ async function publishInputs(input: {
   return withWorkspacePublicationSourceLock(input.workspaceDir, async () => {
     const source = createWorkspacePublicationSource(input.workspaceDir, input.sourceName);
     await source.writer.recover();
+    // Frozen here, in the same lock hold as the first input announcement, and after the head as it
+    // stands now (#5334). See `publicationAccounting` for why.
+    const at = input.frozenAt ?? input.freeze((await source.head.getExact())?.issuedAt);
     let ordinal = 0;
     if (input.supportMembers.length > 0) {
       const members = [...input.supportMembers]
         .sort((left, right) => compareCodeUnitStrings(left.id, right.id))
         .map((member) => "kind" in member && member.actions.includes("announce")
-          ? { ...member, announcementTimestamp: timestamp(input.at, ordinal++) }
+          ? { ...member, announcementTimestamp: timestamp(at, ordinal++) }
           : member);
       const plan: PublicationPlan = { id: `benchmark-accounting-input-authority:${input.draftId}`, stages: [{ stage: "accounting", members }] };
       // Registration has already sealed its independent receipt. Reusing the neutral executor
@@ -160,7 +168,7 @@ async function publishInputs(input: {
       const durable = await source.writer.readState();
       const existing = Object.values(durable?.announcements ?? {}).find((entry) => entry.receipt.record?.digest === digest);
       const receipt = existing?.receipt ?? await source.writer.append({
-          timestamp: timestamp(input.at, ordinal++),
+          timestamp: timestamp(at, ordinal++),
           announcement: {
             announcementId: `accounting-input:${input.draftId}:${dispatch.submissionSha256}`,
             action: "available",
@@ -353,16 +361,29 @@ export function publicationAccounting(
 
       // Phase one is replay-safe: source announcement ids are exact/deterministic.  Only after
       // every input is durable do we persist the immutable scope cutoff used to seal accounting.
-      if (publication.accounting.sourceCutoff === undefined && publication.accounting.state === "not-started") {
-        state = { ...state, publication: { ...publication, accounting: { ...publication.accounting, state: "in-progress", announcedAt: at } } };
-        writeRunState(context.workspaceDir, input.draftId, state);
-        publication = state.publication!;
-      }
-      const inputStageAt = publication.accounting.announcedAt ?? at;
+      //
+      // The stage time is frozen inside `publishInputs`, under the source lock and strictly after
+      // the head served then, not when this command started (#5334). The writer refuses an append
+      // that does not strictly advance the served head and a retry replays the frozen time, so a
+      // time read before the inputs phase, then passed by a head re-signed or another announcement
+      // during it, could never be announced. Under the lock the heartbeat either re-signed before
+      // the freeze, which the frozen time then passes, or sees this stage `in-progress` and withholds.
       const hadFrozenCutoff = publication.accounting.sourceCutoff !== undefined;
       const frozen = !hadFrozenCutoff
-        ? await publishInputs({ workspaceDir: context.workspaceDir, draftId: input.draftId, at: inputStageAt, sourceName: publication.source.name, publicBaseUrl, dispatches, supportMembers: [...supportMembers.values()], verifyOrigin: deps.verifyOrigin, owner: state.owner })
+        ? await publishInputs({
+          workspaceDir: context.workspaceDir, draftId: input.draftId, sourceName: publication.source.name, publicBaseUrl,
+          frozenAt: publication.accounting.state === "not-started" ? undefined : publication.accounting.announcedAt ?? at,
+          freeze: (headIssuedAt) => {
+            const announcedAt = timestampAfter(at, headIssuedAt, "publication.accounting.announcedAt");
+            state = { ...state, publication: { ...state.publication!, accounting: { ...state.publication!.accounting, state: "in-progress", announcedAt } } };
+            writeRunState(context.workspaceDir, input.draftId, state);
+            return announcedAt;
+          },
+          dispatches, supportMembers: [...supportMembers.values()], verifyOrigin: deps.verifyOrigin, owner: state.owner,
+        })
         : { source: createWorkspacePublicationSource(context.workspaceDir, publication.source.name).source, cutoff: { sequence: publication.accounting.sourceCutoff!.sourceSequence, entryDigest: `sha256:${publication.accounting.sourceCutoff!.entrySha256}` as const } };
+      publication = state.publication!;
+      const inputStageAt = publication.accounting.announcedAt ?? at;
       if (hadFrozenCutoff) {
         // A cutoff freezes membership, not availability. A retry re-probes every referenced
         // public input and remains in-progress if any byte has disappeared or changed.
