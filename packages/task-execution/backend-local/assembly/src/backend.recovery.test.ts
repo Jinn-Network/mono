@@ -1021,6 +1021,10 @@ describe("restart reconstruction and §6.4 actions", () => {
     const root = await stateRoot("heartbeat-malformed");
     const ready = join(root, "harness-ready");
     const release = join(root, "harness-release");
+    // afterEach drains before it removes the root, and draining waits for the worker, which waits
+    // for this harness. Release it however the test ends; the harness also exits once its ready
+    // file is gone or the test process is gone.
+    releaseBarriers.push(() => writeFileSync(release, "1"));
     // The harness's lifetime is causal on this test, so the malformed heartbeat is provably on
     // disk while waitForOutcome is still polling rather than racing the shim's outcome write.
     const backend = fixture(root, {
@@ -1030,8 +1034,10 @@ describe("restart reconstruction and §6.4 actions", () => {
           "-e",
           `const fs = require('node:fs');`
           + `fs.writeFileSync(${JSON.stringify(ready)}, '1');`
+          + `const owner = ${process.pid};`
           + `const timer = setInterval(() => {`
-          + ` if (fs.existsSync(${JSON.stringify(release)})) { clearInterval(timer); process.exit(0); }`
+          + ` let ownerAlive = true; try { process.kill(owner, 0); } catch { ownerAlive = false; }`
+          + ` if (!ownerAlive || fs.existsSync(${JSON.stringify(release)}) || !fs.existsSync(${JSON.stringify(ready)})) { clearInterval(timer); process.exit(0); }`
           + `}, 10);`,
         ],
         env: {},
