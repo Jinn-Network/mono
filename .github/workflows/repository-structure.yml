@@ -127,6 +127,11 @@ jobs:
       # this tree cannot install Chromium, and the move reached runners one at a time (#5173).
       - name: Every job that installs a Playwright browser runs on ubuntu-24.04
         run: node --test .github/scripts/workflow-playwright-runner.test.mjs
+      # Repository-wide as well: the scan reads every first-party package.json, so it must run on
+      # a change to any one of them. Behind the Task Execution path filter it never ran for a
+      # change confined to operator, core, policy or the benchmark-product packages (#5277).
+      - name: Every first-party manifest keeps one @noble/hashes range and no override
+        run: node --test .github/scripts/task-execution-package-inventory.test.mjs
   identifier-origin:
     name: Identifier origin tripwire
     needs: changes
