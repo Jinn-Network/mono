@@ -1,7 +1,10 @@
 # Native Identity Ceremony — production trust-artifact provisioning
 
-**Version:** 0.10 (a lost or unreadable rotation receipt no longer restarts a rotation, after issue
-#5329: §4.5 refuses a `rotation.json` that cannot be read, and a new rotation while another key for
+**Version:** 0.11 (a new rotation never takes an existing store as its new one, after issue #5345:
+§4.5 names the store a rotation mints, refuses (`new-store-exists`) when a file is already at that
+path, as one started in the same second as the last would find, and states that a new rotation
+never skips a family. v0.10 stopped a lost or unreadable rotation receipt from restarting a
+rotation, after issue #5329: §4.5 refuses a `rotation.json` that cannot be read, and a new rotation while another key for
 one of its roles is still bound and unrevoked; writes the receipt by temporary file and rename;
 takes each act's block time from the finality read; states that a resumed act also anchors afresh
 when the recorded digest differs; and adds `--resubmit-anchor` for a recorded anchor that never
@@ -1125,6 +1128,17 @@ edit. A run stopped after its last write and before the completion mark therefor
 nothing but the mark, rather than rotating the keys it just bound. A receipt written by v0.8's
 rotate records no retiring stores; it falls back to the config, which that version repointed last,
 so once the config names its new stores that rotation is complete.
+
+A new rotation mints each new store at `<dir>/identity/<family>.rotated-<stamp>.enc.json`, where
+`<stamp>` is the UTC second the run started, and never takes a store it finds there as a new one:
+when a file is already at that path it refuses (`new-store-exists`), before anything is minted or
+anchored, in the plan as well. The stamp is to the second, so a rotation started in the same second
+as the one whose store the config names, which a chain with instant finality allows, names the
+store it is about to retire; after the clock steps back it can name an earlier rotation's store.
+Taken as the new store, either would bind no new key, and the rotation would retire nothing, or
+revoke the keys the config names and point the config at keys a rotation retired. A new rotation
+also never skips a family the way a resumed v0.8 receipt does: it opens the store it retires and
+refuses unless the catalog binds each key there, so it never completes with nothing retired.
 
 From step 5 on, the receipt is the only record of the store being retired, so rotate never reads a
 receipt it cannot use as no rotation. A `rotation.json` that exists but does not parse, or lacks the

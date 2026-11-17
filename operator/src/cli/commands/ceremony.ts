@@ -1700,6 +1700,38 @@ function rotationStamp(now: Date): string {
 }
 
 /**
+ * Where a new rotation mints `family`'s store, `<dir>/identity/<family>.rotated-<stamp>.enc.json`,
+ * refusing (`new-store-exists`) when a file is already there. The stamp alone does not keep the store
+ * off an existing path. It is to the second, so a rotation started in the same second as an earlier
+ * one, or after the clock stepped back, names that rotation's store, which is the very store this
+ * rotation would retire when the config names it. Taken as the new store, it would bind no new key,
+ * and the rotation would either retire nothing or revoke the keys the config names while pointing
+ * the config at keys already bound. A new store is minted, never found.
+ */
+function newRotatedStorePath(ctx: CommandContext, input: {
+  readonly dir: string;
+  readonly family: RoleSetName;
+  readonly stamp: string;
+  readonly retiringStore: string | undefined;
+}): string {
+  const path = join(input.dir, 'identity', `${input.family}.rotated-${input.stamp}.enc.json`);
+  if (!existsSync(path)) return path;
+  const message = `ceremony rotate would mint the new ${input.family} store at ${path}, but a file is already there`
+    + `${path === input.retiringStore ? ', the store this rotation would retire' : ''}. A rotated store is named by `
+    + 'the second its rotation started, so a rotation started in the same second as an earlier one, or after the '
+    + 'clock stepped back, names the store that one minted. rotate never takes an existing store as a new one, and '
+    + 'refuses before anything is minted or anchored.';
+  emitEnvelope({
+    code: 'invalid_invocation',
+    message,
+    hint: 'Re-run once the clock has passed that second: the new store then gets a name of its own.',
+    exampleCli: EXAMPLE_CLI,
+    details: { feature: 'ceremony', state: 'new-store-exists', sideEffects: false, family: input.family, path },
+  }, { writer: ctx.writer, exit: ctx.exit });
+  throw new CeremonyRefusal(message);
+}
+
+/**
  * `jinn ceremony rotate` (spec §3.2 rotation, §6 laws 1 and 6): retires every key of the named role
  * families and binds new ones, for an operator `init` or `join` already provisioned.
  *
@@ -1820,7 +1852,7 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
     family,
     resuming && typeof prior.stores[family] === 'string'
       ? prior.stores[family]
-      : join(dir, 'identity', `${family}.rotated-${stamp}.enc.json`),
+      : newRotatedStorePath(ctx, { dir, family, stamp, retiringStore: retiringStores[family] }),
   ]));
 
   // The keys being retired: the ones the retiring stores hold, and their catalog bindings.
@@ -1829,8 +1861,10 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
   const retiring: RetiringRole[] = [];
   for (const family of roleSets) {
     // Equal only for such a receipt once its rotation wrote the config: that rotation finished, and
-    // this store holds the keys it bound, not the ones it retired.
-    if (retiringStores[family] === newStores[family]) continue;
+    // this store holds the keys it bound, not the ones it retired. A new rotation never skips a
+    // family: it opens the store it retires and refuses unless the catalog binds each key there, so
+    // it never completes with nothing retired.
+    if (resuming && retiringStores[family] === newStores[family]) continue;
     let current: ReadonlyMap<NativeRoleIdentityRole, RoleSigner>;
     try {
       // eslint-disable-next-line no-await-in-loop -- bounded (≤4 families).
@@ -2393,6 +2427,13 @@ Status:
   block time from the finality read, not from the receipt. Rotation cannot help when the agent EOA
   itself is compromised: that account is the voucher, so a binding under a new EOA needs consent,
   which rotate does not author.
+
+  A new rotation mints each new store at <dir>/identity/<family>.rotated-<stamp>.enc.json, <stamp>
+  being the UTC second the run started. It refuses (new-store-exists), before anything is minted or
+  anchored and in the plan as well, when a file is already at that path, as when a rotation started
+  in the same second as the last one would name the store it is about to retire: re-run once the
+  clock has passed that second. A new rotation never skips a family: it opens the store it retires
+  and refuses unless the catalog binds each key there, so it never completes with nothing retired.
 
   Keep rotation.json where rotate wrote it: once identityStores names the new store, it is the only
   record of the store being retired. rotate refuses a rotation.json it cannot read

@@ -882,9 +882,10 @@ describe('ceremony rotate and its rotation receipt', () => {
         code: 'invalid_invocation',
         details: { state: 'new-store-exists', sideEffects: false },
       });
-      expect(String(refusal.message)).toContain(firstStore);
+      expect(String(refusal.message)).toContain(`${firstStore}, but a file is already there, the store this rotation would retire`);
     }
     unchanged();
+    expect(createCeremonyCommand(h.deps).helpText).toContain('new-store-exists');
 
     // The first rotation's keys are still bound, and a rotation started in a later second retires them.
     await nextSecond();
@@ -914,7 +915,7 @@ describe('ceremony rotate and its rotation receipt', () => {
     });
 
     expect(refusal).toMatchObject({ code: 'invalid_invocation', details: { state: 'new-store-exists', sideEffects: false } });
-    expect(String(refusal.message)).toContain(target);
+    expect(String(refusal.message)).toContain(`${target}, but a file is already there.`);
     unchanged();
     await expect(bootAt(h, config(h).identityStores.solver!, h.submitted[h.submitted.length - 1]!.anchorTime))
       .resolves.toBeDefined();
