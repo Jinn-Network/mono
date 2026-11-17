@@ -20,6 +20,7 @@ import {
   completePolicyPurposes,
   isSettlementRole,
   performEoaCeremony,
+  roleBindingTerms,
   NATIVE_ANCHOR_CHAIN_ID,
   NATIVE_ANCHOR_PROFILE,
   type AnchorLocator as AuthoringAnchorLocator,
@@ -133,6 +134,7 @@ export async function authorNativeTrustCatalog(input: {
       agent,
       didKey: key.keyId,
       issuedAt: validFrom,
+      terms: roleBindingTerms(key.role, validFrom),
       ...(isSettlementRole(key.role) ? { settlementSafe } : {}),
     });
     // eslint-disable-next-line no-await-in-loop -- bounded, deterministic per-role authoring.

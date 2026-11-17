@@ -23,6 +23,7 @@ import {
   openCatalogAuthority,
   openRoleSigners,
   performEoaCeremony,
+  roleBindingTerms,
   submitAnchor,
   voucherAccountSigner,
   NATIVE_ROLE_IDENTITY_REQUIREMENTS,
@@ -149,6 +150,7 @@ async function authorOperator(input: {
       agent: input.agent,
       didKey: signer.keyId,
       issuedAt: input.validFrom,
+      terms: roleBindingTerms(role, input.validFrom),
       ...(isSettlementRole(role) ? { settlementSafe: input.settlementSafe } : {}),
     });
     bindings.push(await authorRoleBinding({
