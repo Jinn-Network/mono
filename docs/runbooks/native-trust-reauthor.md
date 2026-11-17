@@ -215,10 +215,12 @@ revocations as `carriedRevocations`.
     `rotation.json` that cannot be read is refused as well, rather than taken for no rotation
     (`rotation-receipt-unreadable`);
   - the revocations a finished rotation leaves in the catalog. The run receipt,
-    `<dir>/ceremony/receipt.json`, names the anchor under which `init` or `join` last bound the keys
-    in `<dir>/identity` and the catalog it bound them in. A revocation, in that catalog or in
-    `--previous-catalog`, of a binding under that anchor for a role only one family holds shows that
-    family rotated, wherever its rotated store now sits and whatever it is called;
+    `<dir>/ceremony/receipt.json`, names every anchor under which `init` or `join` bound the keys in
+    `<dir>/identity`, with the catalog each bound them in: the latest run's in its top-level fields,
+    and the earlier ones in `earlierAnchors`, which each run that replaces those fields carries
+    forward. A revocation, in one of those catalogs or in `--previous-catalog`, of a binding under
+    one of those anchors for a role only one family holds shows that family rotated, wherever its
+    rotated store now sits and whatever it is called;
 - no record shows a rotation of a family it would bind, but the config's `identityStores` names a
   store other than `<dir>/identity/<family>.enc.json` for it (`store-elsewhere`): `init` would
   replace a store it did not provision.
@@ -230,7 +232,9 @@ be re-authored with `init`. The refusal comes before `init` opens any store or p
 spends no gas. The retired-key refusal is the check behind it: when the rotated stores have been
 moved out of `<dir>/identity`, `rotation.json` no longer records the family, the run receipt is gone,
 and the config names no other store for it, it still refuses if `--previous-catalog` is the catalog
-holding the rotation's revocations.
+holding the rotation's revocations and the config `--config` names carries the operator's `agentIri`
+and `admissionAgent`. That check matches the Agent as well as the key, so with the run receipt gone
+and no Agent IRI in the config, `init` mints new Agent IRIs and binds the retired keys to them.
 
 ## Cost and sequencing
 
