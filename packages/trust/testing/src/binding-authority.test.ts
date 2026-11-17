@@ -18,6 +18,7 @@ import type {
   EoaCeremonyEvidence,
   KeyBinding,
   Relationship,
+  Revocation,
   Scope,
   Sha256Digest,
 } from "@jinn-network/trust-core";
@@ -984,6 +985,105 @@ describe.each([
       };
       expect(await w.verdict(GENESIS_KEY)).toMatchObject(revoked);
       expect(await w.notRevoked(GENESIS_KEY, NOW)).toBe(false);
+    });
+
+    // Each case files the published revocation's envelope a second time with other fields. Only
+    // the row whose fields match that envelope is anyone's word, so the verdict is that row's, in
+    // either listed order, for evidence, for the revocation check and for the settlement join.
+    describe("two revocation rows with one envelope give one verdict in either listed order", () => {
+      const LATE = "2026-07-01T00:00:00.000Z";
+
+      function anchoredAt(w: World, at: string): Sha256Digest {
+        const digest = testSha256Digest(`binding-authority-filed-again-${w.anchors.size}`);
+        w.anchors.set(digest, at);
+        return digest;
+      }
+
+      /** Files the last published revocation's envelope again with other fields. `alsoSignedBy`
+       * adds that key's signature to the one envelope both rows hold. */
+      function fileAgain(w: World, fields: (sealed: Revocation) => Revocation, alsoSignedBy?: string): void {
+        const published = w.revocations.at(-1)!;
+        const { payloadBytes, signatures } = parseDsseEnvelope(published.envelopeBytes);
+        const envelopeBytes = alsoSignedBy === undefined ? published.envelopeBytes : sealDsseEnvelope({
+          payloadBytes,
+          payloadType: TRUST_REVOCATION_MEDIA_TYPE,
+          signatures: [
+            { signature: Uint8Array.of(1), keyid: signatures[0]!.keyid! },
+            { signature: Uint8Array.of(1), keyid: alsoSignedBy },
+          ],
+        });
+        w.revocations[w.revocations.length - 1] = { ...published, envelopeBytes };
+        w.revocations.push({ revocation: fields(published.revocation), envelopeBytes });
+      }
+
+      test.each([
+        {
+          differsIn: "revokedBy",
+          published: "the genesis key's revocation, filed again as a stranger's",
+          revokes: true,
+          file: async (w: World, genesis: SealedKeyBindingRecord) => {
+            await w.revoke(genesis, GENESIS_KEY, T1);
+            fileAgain(w, (sealed) => ({ ...sealed, revokedBy: STRANGER_KEY }), STRANGER_KEY);
+          },
+        },
+        {
+          differsIn: "revokedBy",
+          published: "a stranger's revocation, filed again as the genesis key's",
+          revokes: false,
+          file: async (w: World, genesis: SealedKeyBindingRecord) => {
+            await w.revoke(genesis, STRANGER_KEY, T1);
+            fileAgain(w, (sealed) => ({ ...sealed, revokedBy: GENESIS_KEY }), GENESIS_KEY);
+          },
+        },
+        {
+          differsIn: "target",
+          published: "a revocation of the genesis binding, filed again against another record",
+          revokes: true,
+          file: async (w: World, genesis: SealedKeyBindingRecord) => {
+            const cold = await w.bind({ key: COLD_KEY, signer: OWNER, validFrom: T1 });
+            await w.revoke(genesis, GENESIS_KEY, T1);
+            fileAgain(w, (sealed) => ({ ...sealed, target: cold.bindingDigest }));
+          },
+        },
+        {
+          differsIn: "target",
+          published: "a revocation of another record, filed again against the genesis binding",
+          revokes: false,
+          file: async (w: World, genesis: SealedKeyBindingRecord) => {
+            const cold = await w.bind({ key: COLD_KEY, signer: OWNER, validFrom: T1 });
+            await w.revoke(cold, GENESIS_KEY, T1);
+            fileAgain(w, (sealed) => ({ ...sealed, target: genesis.bindingDigest }));
+          },
+        },
+        {
+          differsIn: "anchors",
+          published: "a revocation anchored before the evidence, filed again with an anchor after it",
+          revokes: true,
+          file: async (w: World, genesis: SealedKeyBindingRecord) => {
+            await w.revoke(genesis, GENESIS_KEY, T1);
+            fileAgain(w, (sealed) => ({ ...sealed, anchors: [{ digest: anchoredAt(w, LATE) }] }));
+          },
+        },
+        {
+          differsIn: "anchors",
+          published: "a revocation anchored after the evidence, filed again with an anchor before it",
+          revokes: false,
+          file: async (w: World, genesis: SealedKeyBindingRecord) => {
+            await w.revoke(genesis, GENESIS_KEY, LATE, T1);
+            fileAgain(w, (sealed) => ({ ...sealed, anchors: [{ digest: anchoredAt(w, T1) }] }));
+          },
+        },
+      ])("$differsIn: $published", async ({ revokes, file }) => {
+        const w = world();
+        const genesis = await bindGenesis(w, { scope: ["verdicts", "bindings", "settlements"] });
+        await file(w, genesis);
+        for (const _listed of ["as stored", "reversed"]) {
+          expect(await w.verdict(GENESIS_KEY)).toMatchObject(revokes ? revoked : stands);
+          expect(await w.notRevoked(GENESIS_KEY, NOW)).toBe(!revokes);
+          expect((await w.join(GENESIS_KEY, GENESIS_KEY, T2, T3)).ok).toBe(!revokes);
+          w.revocations.reverse();
+        }
+      });
     });
   });
 
