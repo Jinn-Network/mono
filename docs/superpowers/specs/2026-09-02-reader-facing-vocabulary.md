@@ -155,21 +155,22 @@
   for both kinds together, now names both (*Trust anchors and block headers are yours*), so the
   tool never uses *trust anchors* for the block headers its notes name apart. No earlier
   disposition changes.
-- **v1.17** (#5299): replaces §7's record of the refusals the characterization suite does not
-  reach with an inventory that reaches them. `refusalTemplateInventory`
+- **v1.17** (#5299): replaces §7's record of the refusals the characterization suite does not reach
+  with an inventory that reaches them. `refusalTemplateInventory`
   (`check/src/testing/refusal-templates.ts`) reads every refusal template the reader's own modules
   write, from their source, and the glossary conformance test (§7 item 5) sends each through the
   reader's human path. At this version it reads 721 templates in 59 modules: 538 use no word §5
-  hides or renames, 161 are reworded by the *Refusal lines* row's rules in `humanRefusalDetail`
-  (147 of them by rules this version adds), and 22 still carry such a word, each recorded in the
-  test with its reason. The reasons are six: a sealed field name printed as written (`arms`,
-  `conflicted`, `cellKey`, a Result Evaluation's `subject`), a pattern printed as written, *verify*
-  in the sense of a signature or proof check, a noun §5 hides without a reader name (*assurance
-  primitives*), the screening instrument, which screens items and decides no run's outcome, so §5's
-  *judge* does not name it, and a refusal its module marks unreachable. The notes the reader prints
-  for `--freeze-repo` and `--identity-binding` now word their refusal from its own start, so a rule
-  reaches it as it reaches a bundle refusal. `--json` and the errors a library caller catches do
-  not change. No disposition changes.
+  hides or renames, 161 are reworded by the *Refusal lines* row's rules in `humanRefusalDetail` (147
+  of them by the 77 rules this version adds, of 98 in all), and 22 still carry such a word, each
+  recorded in the test with its reason. The reasons are six: a sealed field name printed as written
+  (`arms`, `conflicted`, `cellKey`, a Result Evaluation's `subject`), a pattern printed as written,
+  *verify* in the sense of a signature or proof check, a noun §5 hides without a reader name
+  (*assurance primitives*), the screening instrument, which the line must tell apart from the run
+  judges (the reader refuses a bundle that reuses it as one, so calling it a *judge* would say a
+  judge was reused as a judge), and a refusal its module marks unreachable. The notes the reader
+  prints for `--freeze-repo` and `--identity-binding` now word their refusal from its own start, so
+  a rule reaches it as it reaches a bundle refusal. `--json` and the errors a library caller catches
+  do not change. No disposition changes.
 
 ## 1. Scope
 

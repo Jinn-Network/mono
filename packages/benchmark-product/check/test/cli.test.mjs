@@ -964,6 +964,13 @@ test("aliasing a hostile publisher name stays linear in its length", async () =>
       `claim package ${"x is not the exact projection of verified facts ".repeat(25_000)}y`,
       `claim package ${"x is not the exact projection of verified facts ".repeat(25_000)}y`,
     ],
+    // Two #5299 rules once read a publisher-sized middle with `[\s\S]+` twice, which took seconds on
+    // these inputs. Each now reads a single token there, so neither costs more than one scan.
+    [`a ${" bundle must carry ".repeat(50_000)}`, `a ${" bundle must carry ".repeat(50_000)}`],
+    [
+      `a ${" bundle's qualification document must keep its frozen ".repeat(16_000)}`,
+      `a ${" bundle's qualification document must keep its frozen ".repeat(16_000)}`,
+    ],
   ]) {
     const started = performance.now();
     const result = await runVerifierCli(["bundle"], {
@@ -1527,6 +1534,10 @@ const READER_WORDING_5299 = (() => {
     ],
     ["a benchmark-product-public-bundle/8 bundle must carry example-extension on its Report", "a benchmark-product-public-bundle/8 bundle must carry example-extension on its report.json"],
     [
+      'a benchmark-product-public-bundle/10 "disclosure-specification" bundle must carry example-extension on its Report',
+      'a benchmark-product-public-bundle/10 "disclosure-specification" bundle must carry example-extension on its report.json',
+    ],
+    [
       "the bundle does not carry the disclosure-specification record its Report names",
       "the bundle does not carry the disclosure-specification record its report.json names",
     ],
@@ -1558,14 +1569,14 @@ const READER_WORDING_5299 = (() => {
     ["the bundle's evidence catalog does not match the pinned v4 grammar", "the bundle's evidence.json does not match the pinned v4 grammar"],
     ["the bundle's evidence catalog assigns no freeze-artifact role", "the bundle's evidence.json assigns no freeze-artifact role"],
     ["evidence catalog contains missing or unreachable records", "evidence.json lists missing or unreachable records"],
-    [`EvaluationSpec ${hex} is not in the catalog`, `EvaluationSpec ${hex} is not one the runs' Tasks reference`],
+    [`EvaluationSpec ${hex} is not in the catalog`, `EvaluationSpec ${hex} is not among the EvaluationSpecs read for the runs' Tasks`],
     ["static bundle is not the exact platform metadata projection", "static-bundle.json is not exactly the platform metadata derived from matrix.json and report.json"],
     ["qualification admission projection differs from portable replay", "qualification.json's admission fields differ from the portable replay"],
     [
       "a benchmark-product-public-bundle/7 bundle's qualification document must keep its frozen benchmark-product.claim-package/2 projection literal",
       "a benchmark-product-public-bundle/7 bundle's qualification.json must keep claimSchema at its frozen benchmark-product.claim-package/2 value",
     ],
-    ["index.html is not the exact projection of verified public facts", "index.html does not agree with the verified public facts"],
+    ["index.html is not the exact projection of verified public facts", "index.html is not exactly the file rebuilt from the verified public facts"],
     ["claim externalImport section is not the exact projection of the authenticated marker", "the claim's externalImport section does not agree with the authenticated marker"],
     ["Inspect summary measurement count differs from the sealed projections", "Inspect summary measurement count differs from the sealed scoring.projections"],
     ["Inspect summary measurement differs from its sealed projection", "Inspect summary measurement differs from its sealed scoring.projections entry"],

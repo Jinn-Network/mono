@@ -2078,8 +2078,9 @@ const REFUSAL_REASONS = {
   "no reader name":
     "Section 5 hides the noun and gives it no reader-facing name, and the line cannot say what failed without it.",
   "screening instrument":
-    "It names the screening instrument, which screens candidate items before admission. Section 5's judge decides a"
-    + " run's outcome, which the screening instrument never does, and section 5 has no other name for it.",
+    "It names the screening instrument, which the line must tell apart from the run judges: the reader refuses a"
+    + " bundle that reuses it as one (`the screening instrument is reused as a run judge configuration`), and calling"
+    + " it a judge would make that line say a judge was reused as a judge. Section 5 has no other name for it.",
   unreachable:
     "The refusing module states that an earlier check keeps every bundle from reaching it (a backstop or a type"
     + " narrowing), so no reader meets the line.",
