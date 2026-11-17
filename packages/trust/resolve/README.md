@@ -16,9 +16,12 @@ expected here (they are banned everywhere else in `packages/trust/`).
 verified: `@jinn-network/trust-core` takes a resolved binding as the resolver's
 word for the ceremony legs that need I/O. It verifies `eoa` offline and runs the
 `agentId` composition leg itself. `safe`, `oidc-machine` and `github-human`
-bindings resolve only when the host passes `verifyHostedCeremony`. A record
-that does not resolve still counts when deciding which binding came first: it
-may be the true genesis.
+bindings resolve only when the host passes `verifyHostedCeremony`. The host is
+asked about a `safe` record only once its message and witness statement hold as
+`@jinn-network/trust-core`'s `matchSafeCeremony` checks them, under the ceremony
+currency text at the record's effective start when the deployment applies it. A
+record that does not resolve still counts when deciding which binding came first:
+it may be the true genesis.
 
 The `agentId` composition leg composes only with a binding of the registry
 owner's account to the same Agent that stands at the instant asked about (key
