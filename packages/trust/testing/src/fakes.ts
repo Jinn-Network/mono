@@ -23,13 +23,13 @@ import type {
 //
 // Finding: the `dsseVerifier` fake trusts every `keyid` an envelope
 // declares as a valid signer -- it does not check cryptographic
-// signatures. This is consistent with the T7 finding recorded on
-// `trust-core`'s `policy.ts`/`verify.ts`: real DSSE-signature
-// verification is multicodec-aware `did:key` decode work deferred
-// everywhere in this tree. Adversarial cases that need "envelope accepted
-// on signature alone MUST fail" (§16) exercise it by constructing an
-// envelope whose declared keyid does NOT match the claimed signer, not by
-// forging cryptographic bytes.
+// signatures. `trust-core` leaves DSSE-signature verification to an
+// injected port (the T7 finding on its `policy.ts`/`verify.ts`); a real
+// port such as `createDidKeyDsseVerifier` (`@jinn-network/verify`)
+// refuses the kit's placeholder signatures. Adversarial cases that need
+// "envelope accepted on signature alone MUST fail" (§16) exercise it by
+// constructing an envelope whose declared keyid does NOT match the claimed
+// signer, not by forging cryptographic bytes.
 // ---------------------------------------------------------------------------
 
 export interface RegisteredBinding {

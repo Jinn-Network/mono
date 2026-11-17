@@ -57,11 +57,14 @@ import { sampleInit } from "./sample.js";
 
 let workspaceDir: string;
 let server: Server | undefined;
+/** When set and true for an archive path, the loopback mirror answers that request with 503. */
+let refusePublicRead: ((archivePath: string) => boolean) | undefined;
 
 beforeEach(() => { workspaceDir = mkdtempSync(join(tmpdir(), "pub13-accounting-")); });
 afterEach(async () => {
   if (server !== undefined) await new Promise<void>((resolve) => server!.close(() => resolve()));
   server = undefined;
+  refusePublicRead = undefined;
   rmSync(workspaceDir, { recursive: true, force: true });
 });
 
@@ -85,6 +88,7 @@ async function serveWorkspace(): Promise<string> {
     const externalPath = request.url ?? "/";
     if (externalPath !== "/publication" && !externalPath.startsWith("/publication/")) { response.writeHead(404).end(); return; }
     const archivePath = externalPath.slice("/publication".length) || "/";
+    if (refusePublicRead?.(archivePath) === true) { response.writeHead(503).end(); return; }
     const result = await handler(new Request(`http://127.0.0.1${archivePath}`, { method: request.method }));
     response.writeHead(result.status, Object.fromEntries(result.headers));
     response.end(Buffer.from(await result.arrayBuffer()));
@@ -236,6 +240,30 @@ async function announceAnotherRecord(): Promise<{ readonly sequence: string }> {
       record: { bytes, contentType: "text/plain" },
     });
   });
+}
+
+/** Two Submissions for one cell: its first dispatch, and the dispatch that replaced it. */
+function captureReplacedDispatch(fixture: { runSha256: string; cells: readonly { cellKey: string; armId: string; replicate: number; taskDigest: string }[] }): [string, string] {
+  const cell = fixture.cells[0]!;
+  const first = capture(fixture.runSha256, cell, 1);
+  appendRunJournalEntry(workspaceDir, "draft-1", { kind: "cell-event", at: "2026-08-13T13:00:02Z", event: { cellKey: cell.cellKey, armId: cell.armId, replicate: cell.replicate, dispatch: 1, kind: "error", replaceable: true, replaceableReason: "expired" } });
+  return [first, capture(fixture.runSha256, cell, 2)];
+}
+
+/** Refuses the first public read of one record, as a mirror that has not synced it yet would. */
+function refuseFirstPublicRead(digest: `sha256:${string}`): void {
+  let refused = false;
+  refusePublicRead = (archivePath) => {
+    if (refused || archivePath.replace(/^\/+/u, "") !== recordPath(digest).replace(/^\/+/u, "")) return false;
+    refused = true;
+    return true;
+  };
+}
+
+/** The source's receipt for the announcement of one record, if it has one. */
+async function announcedReceipt(digestHex: string) {
+  const state = await createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks").writer.readState();
+  return Object.values(state?.announcements ?? {}).find((entry) => entry.receipt.record?.digest === `sha256:${digestHex}`)?.receipt;
 }
 
 describe("publication.accounting operation", () => {
@@ -473,6 +501,105 @@ describe("publication.accounting operation", () => {
     expect(state.publication!.accounting.receipt).toEqual({ sourceSequence: accounting[0]!.sequence, entrySha256: accounting[0]!.entryDigest.slice(7) });
     expect(state.publication!.matrixV2.state).toBe("complete");
     expect(state.publication!.matrixV2.receipt!.sourceSequence > moved).toBe(true);
+  });
+
+  // #5349. Each input has its own slot after accounting's frozen time. A retry after a failure
+  // between two input appends finds the first input announced and must announce the second in its
+  // own slot, not in the first input's, which the head already holds.
+  test("a retry after a failed probe between two input appends announces the second input in its own slot (#5349)", async () => {
+    const now = clock();
+    const fixture = await registeredClosed(now);
+    const [first, second] = captureReplacedDispatch(fixture);
+    refuseFirstPublicRead(`sha256:${first}`);
+    const failed = await publicationAccounting(context(now), { draftId: "draft-1" });
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) expect(failed.error.detail).toMatch(/probe returned 503/);
+    const announced = await announcedReceipt(first);
+    expect(announced).toBeDefined();
+    expect(await announcedReceipt(second)).toBeUndefined();
+
+    const source = createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks");
+    let inputsHead: SourceHead | undefined;
+    const retried = await publicationAccounting(context(now), { draftId: "draft-1" }, { afterInputsBeforeCutoff: async () => {
+      inputsHead = await source.head.getExact();
+    } });
+    expect(retried.ok, JSON.stringify(retried)).toBe(true);
+    expect(await announcedReceipt(first)).toEqual(announced);
+    const state = readRunState(workspaceDir, "draft-1")!;
+    const frozenAt = Date.parse(state.publication!.accounting.announcedAt!);
+    // The second input took its own slot, one millisecond after the first and below the records'.
+    expect(inputsHead!.sequence).toBe((await announcedReceipt(second))!.sequence);
+    expect(Date.parse(inputsHead!.issuedAt)).toBe(frozenAt + 1);
+    // The Accounting and Matrix v2 records then took the slots planned for them: two inputs, plus 1 and plus 2.
+    const head = (await source.head.getExact())!;
+    expect(head.sequence).toBe(state.publication!.matrixV2.receipt!.sourceSequence);
+    expect(Date.parse(head.issuedAt)).toBe(frozenAt + 2 + 2);
+  });
+
+  // #5349. Between the failed attempt and its retry the head can move past the second input's slot:
+  // the heartbeat's withheld check releases the source lock, which announces the pending anchor over
+  // the first input's entry in exactly that millisecond, or another draft announces.
+  test.each([
+    "a pending entry anchor is announced",
+    "another announcement lands on the source",
+  ] as const)("a retry after a failed probe between two input appends finishes when %s first (#5349)", async (move) => {
+    const now = clock();
+    const fixture = await registeredClosed(now);
+    const [first, second] = captureReplacedDispatch(fixture);
+    if (move === "a pending entry anchor is announced") configureEntryAnchoring();
+    refuseFirstPublicRead(`sha256:${first}`);
+    expect((await publicationAccounting(context(now), { draftId: "draft-1" })).ok).toBe(false);
+    const announced = (await announcedReceipt(first))!;
+    expect(announced).toBeDefined();
+
+    let moved: string;
+    if (move === "a pending entry anchor is announced") {
+      expect((await refreshWorkspacePublicationHead(workspaceDir, "colophon-benchmarks")).status).toBe("withheld");
+      const source = createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks");
+      const anchorId = readEntryAnchorLedger(workspaceDir, source.source.agent, "colophon-benchmarks").rows
+        .find((row) => row.sequence === announced.sequence)?.announcedAnnouncementId;
+      expect(anchorId).toBeDefined();
+      moved = (await source.writer.readState())!.announcements[anchorId!]!.receipt.sequence;
+    } else {
+      moved = (await announceAnotherRecord()).sequence;
+    }
+
+    const retried = await publicationAccounting(context(now), { draftId: "draft-1" });
+    expect(retried.ok, JSON.stringify(retried)).toBe(true);
+    expect(await announcedReceipt(first)).toEqual(announced);
+    expect((await announcedReceipt(second))!.sequence > moved).toBe(true);
+    expect(readRunState(workspaceDir, "draft-1")!.publication!.matrixV2.state).toBe("complete");
+  });
+
+  // #5349. The input plan announces this workspace's own Deliveries before the Submissions. A retry
+  // after it stops before or after announcing one, with another announcement in between, keeps
+  // what was announced as it was and announces the rest after the head.
+  test.each([
+    ["before", "store"],
+    ["after", "announce"],
+  ] as const)("a retry after the input plan stops %s announcing an owned Delivery finishes after another announcement (#5349)", async (_when, action) => {
+    const now = clock();
+    const fixture = await registeredClosed(now);
+    const cell = fixture.cells[0]!;
+    const submission = capture(fixture.runSha256, cell);
+    const delivery = addDelivery(cell.cellKey, "urn:uuid:00000000-0000-4000-8000-000000000444", "owned");
+    let faulted = false;
+    const failed = await publicationAccounting(context(now), { draftId: "draft-1" }, { inputPlanFaults: { async at(point) {
+      if (point.action === action && !faulted) { faulted = true; throw new Error(`fixture crash after the first input plan ${action}`); }
+    } } });
+    expect(failed.ok).toBe(false);
+    expect(faulted).toBe(true);
+    const announced = await announcedReceipt(delivery);
+    expect(announced === undefined).toBe(action === "store");
+    expect(await announcedReceipt(submission)).toBeUndefined();
+
+    const other = await announceAnotherRecord();
+    const retried = await publicationAccounting(context(now), { draftId: "draft-1" });
+    expect(retried.ok, JSON.stringify(retried)).toBe(true);
+    if (announced !== undefined) expect(await announcedReceipt(delivery)).toEqual(announced);
+    else expect((await announcedReceipt(delivery))!.sequence > other.sequence).toBe(true);
+    expect((await announcedReceipt(submission))!.sequence > other.sequence).toBe(true);
+    expect(readRunState(workspaceDir, "draft-1")!.publication!.matrixV2.state).toBe("complete");
   });
 
   test("keeps Matrix v2 resumable when a writer-owned scope record becomes unavailable", async () => {
