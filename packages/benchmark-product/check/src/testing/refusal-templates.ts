@@ -141,11 +141,13 @@ function templateText(template: Template): string {
 
 /**
  * A value of the shape a hole's source names, so a wording rule that captures a fingerprint or an
- * index sees one: 64 hex digits for a digest, `0` for an index or a count, a word otherwise. A
- * caught error's message is `inner`.
+ * index sees one: a run's `<task fingerprint>/<configuration>/<repeat>` for a `cellKey`, 64 hex
+ * digits for a digest, `0` for an index or a count, a word otherwise. A caught error's message is
+ * `inner`.
  */
 function holeValue(source: string, caught: boolean, inner: string): string {
   if (caught) return inner;
+  if (/cellKey/u.test(source)) return `${"a".repeat(64)}/x/1`;
   if (/sha256|digest|hex\b|identity\b/iu.test(source)) return "a".repeat(64);
   if (/index|Index|count|Count|length|height|\b[ijn]\b/u.test(source)) return "0";
   return "x";

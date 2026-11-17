@@ -153,11 +153,12 @@ function admissionRefusal(tail: string, wording: string): readonly [RegExp, stri
  * is renamed before its reasons, and a label (`sealed Report: `, `claim package: `) before the
  * rules that read what follows it.
  *
- * The rules after the first block rule the refusal templates the characterization suite does not
- * reach (#5299). The glossary conformance test reads every template the reader's modules write,
+ * The rules below the `Issue #5299` comment rule the refusal templates the characterization suite
+ * does not reach. The glossary conformance test reads every template the reader's modules write,
  * from their source, and fails on one whose human line still carries a word section 5 hides or
  * renames unless a rule here rewords it or the test records why it stays. The admission replay's
- * rules (`admissionRefusal`) start from the field paths the replay prefixes, which hold no space.
+ * rules (`admissionRefusal`) start from the field paths the replay prefixes, which hold no space,
+ * and a rule that leads with a run's `cellKey` starts from the fingerprint that opens it.
  */
 const READER_WORDING: readonly (readonly [RegExp, string])[] = [
   [/^Matrix v2 failed deterministic assembly-3\.0 replay$/u,
@@ -233,8 +234,8 @@ const READER_WORDING: readonly (readonly [RegExp, string])[] = [
 
   // Fingerprints.
   [/^(Task|solve output) has an invalid digest$/u, "$1 has an invalid fingerprint"],
-  [/^((?:binary|\S+) Task has no EvaluationSpec )digest$/u, "$1fingerprint"],
-  [/^(\S+ final solve Submission )digest disagrees$/u, "$1fingerprint disagrees"],
+  [/^((?:binary|[0-9a-f]{64}\/[\s\S]+\/\d+) Task has no EvaluationSpec )digest$/u, "$1fingerprint"],
+  [/^([0-9a-f]{64}\/[\s\S]+\/\d+ final solve Submission )digest disagrees$/u, "$1fingerprint disagrees"],
 
   // Runs (a Matrix cell).
   [/^comparison cell ([\s\S]+) (is absent from the verified assembly|names an unknown Task)$/u, "comparison run $1 $2"],
