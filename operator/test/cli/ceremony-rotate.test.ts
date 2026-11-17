@@ -829,6 +829,7 @@ describe('ceremony join after a rotation', () => {
     expect(refusal.details).toMatchObject({ state: 'store-elsewhere', sideEffects: false, families: ['requester'] });
     expect(String(refusal.message)).toContain(`${elsewhere} for requester`);
     expect(String(refusal.message)).not.toContain('retired');
+    expect(String(refusal.hint)).toContain('since moved or renamed, that family was rotated');
     unchanged();
   });
 

@@ -532,8 +532,11 @@ function refuseRotatedFamilies(ctx: CommandContext, input: {
   emitEnvelope({
     code: 'invalid_invocation',
     message,
-    hint: `${input.verb} binds no store but ${identityDir}/<family>.enc.json. If those are the keys to bind for `
-      + `${named.join(', ')}, name those paths in identityStores in ${input.configPath} and re-run.`,
+    hint: `${input.verb} binds no store but ${identityDir}/<family>.enc.json. If a store ${input.configPath} names `
+      + 'is one `jinn ceremony rotate` minted, since moved or renamed, that family was rotated: '
+      + `${identityDir}/<family>.enc.json holds the keys the rotation retired, and ${input.verb} cannot bind them. `
+      + `Otherwise, if the keys in ${identityDir}/<family>.enc.json are the ones to bind for ${named.join(', ')}, `
+      + `name those paths in identityStores in ${input.configPath} and re-run.`,
     exampleCli: EXAMPLE_CLI,
     details: { feature: 'ceremony', state: 'store-elsewhere', sideEffects: input.sideEffects, families: named },
   }, { writer: ctx.writer, exit: ctx.exit });
