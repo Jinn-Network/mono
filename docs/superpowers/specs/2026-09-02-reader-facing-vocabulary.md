@@ -1,10 +1,10 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.16
+- **Version:** 1.17
 - **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-12; v1.4: 2026-09-16;
   v1.5: 2026-09-17; v1.6: 2026-09-18; v1.7: 2026-09-19; v1.8: 2026-09-24; v1.9: 2026-09-26;
   v1.10: 2026-09-29; v1.11: 2026-11-14; v1.12: 2026-11-14; v1.13: 2026-11-17;
-  v1.14: 2026-11-17; v1.15: 2026-11-17; v1.16: 2026-11-17)
+  v1.14: 2026-11-17; v1.15: 2026-11-17; v1.16: 2026-11-17; v1.17: 2026-11-17)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
@@ -155,6 +155,21 @@
   for both kinds together, now names both (*Trust anchors and block headers are yours*), so the
   tool never uses *trust anchors* for the block headers its notes name apart. No earlier
   disposition changes.
+- **v1.17** (#5299): replaces §7's record of the refusals the characterization suite does not
+  reach with an inventory that reaches them. `refusalTemplateInventory`
+  (`check/src/testing/refusal-templates.ts`) reads every refusal template the reader's own modules
+  write, from their source, and the glossary conformance test (§7 item 5) sends each through the
+  reader's human path. At this version it reads 721 templates in 59 modules: 538 use no word §5
+  hides or renames, 161 are reworded by the *Refusal lines* row's rules in `humanRefusalDetail`
+  (147 of them by rules this version adds), and 22 still carry such a word, each recorded in the
+  test with its reason. The reasons are six: a sealed field name printed as written (`arms`,
+  `conflicted`, `cellKey`, a Result Evaluation's `subject`), a pattern printed as written, *verify*
+  in the sense of a signature or proof check, a noun §5 hides without a reader name (*assurance
+  primitives*), the screening instrument, which screens items and decides no run's outcome, so §5's
+  *judge* does not name it, and a refusal its module marks unreachable. The notes the reader prints
+  for `--freeze-repo` and `--identity-binding` now word their refusal from its own start, so a rule
+  reaches it as it reaches a bundle refusal. `--json` and the errors a library caller catches do
+  not change. No disposition changes.
 
 ## 1. Scope
 
@@ -440,7 +455,7 @@ rows that needed it, not retrofitted across the document.
 | `the disclosure specification` | rename | what was pinned | The `disclosure-specification` subject in the same list. §5 hides *disclosure specification*; what the check covers is what was pinned, the name its gloss already uses (*what was pinned is recorded and matches*). The check name itself is contract and stays, glossed. |
 | `Checks run against the exact platform bytes installed from npm.` | keep | — | `PLATFORM_BYTES_SENTENCE`. The reserved noun this row deferred on is already gone: #2982 replaced the verdict-surface *Verification uses …* with the verb-family it ruled, and #3675 then replaced the shortened `usage()` copy — which had kept the pre-#2982 wording — with the same `const`. There is no separate shortened form any more either: de-duplicating the sentence was the other half of #3675's fix, the two copies having drifted apart while both were hand-maintained, and one `const` has fed the verdict surface and `usage()` alike ever since. The wrapper that carries it to both today, `IDENTIFIER_DISCLOSURE`, arrived later, with #2981's origin-free rewrite of the row below. |
 | `Protocol identifiers the protocol spec release serves resolve to their documents; the rest are names, not addresses. This verifier fetches nothing from them.` | keep | — | `IDENTIFIER_DISCLOSURE`. Reworded twice, never re-ruled. The first string named the `https://spec.jinn.network/…` origin and disclosed that it was not hosted; the second declined to hand a reader an unresolvable origin and called every protocol identifier a name, not an address; the current one (#4894) tells the identifiers the spec release serves, which resolve, from the rest, which are names, still without naming the origin. Ruling unchanged — keep; both halves load-bearing. This constant also carries the platform-bytes sentence in the row above, so those two rows now describe one merged string. |
-| Refusal lines (`colophon-check: …` on stderr) | rename where §5 renames or hides, human line only | — | One line per refusal, worded in `humanRefusalDetail` (`cli.ts`). The line follows §5: it is the reader tool's human output, and a reader who runs the tool on a refused bundle meets nothing else. The same refusal's `--json` `message` value keeps the refusing module's words byte for byte, and so does the error a library caller catches: the conformance kit's `expectedMessagePattern` pins that value, and tests in the product and the platform packages assert it, so it is contract (§2). This is the `declared-but-absent` split applied to every refusal. A field path, member path, fingerprint, identifier or check label (`matrix-rederivation:`) is printed as written (§3: shown, not named), so a claim field named by a contract spelling still prints that spelling, as in *the claim's field anchors does not agree with the records here*. §7 records which refusals are reworded so far. |
+| Refusal lines (`colophon-check: …` on stderr) | rename where §5 renames or hides, human line only | — | One line per refusal, worded in `humanRefusalDetail` (`cli.ts`). The line follows §5: it is the reader tool's human output, and a reader who runs the tool on a refused bundle meets nothing else. The same refusal's `--json` `message` value keeps the refusing module's words byte for byte, and so does the error a library caller catches: the conformance kit's `expectedMessagePattern` pins that value, and tests in the product and the platform packages assert it, so it is contract (§2). This is the `declared-but-absent` split applied to every refusal. A field path, member path, fingerprint, identifier or check label (`matrix-rederivation:`) is printed as written (§3: shown, not named), so a claim field named by a contract spelling still prints that spelling, as in *the claim's field anchors does not agree with the records here*. §7 says how every refusal template is held to this row. |
 | Usage text | rename where §4.1 renames | — | Follows the same glossary. Reaches the usage and error text in full, `usage()` included; the three closing-paragraph rows above are ruled explicitly so that reach is not left to inference. |
 
 The gloss column stops at `colophon-verify`. The product CLI's `colophon bundle verify` line
@@ -606,15 +621,23 @@ No external condition gates any of the five — (2)'s only one, #2985, has close
 above is the whole of their sequencing. All five adopt **`recompute`**, the verb #2982 ruled,
 rather than minting one.
 
-**Refusal lines the characterization suite does not reach.** §4.2's *Refusal lines* row (v1.13)
-reaches every refusal the reader prints, but #5251 reworded two sets only. One is every refusal
-the characterization suite pins (`check/src/characterization/testing/checker-outputs.expected.json`)
-that used a word §5 hides or renames, since those are the refusals the conformance test (5)
-reads. The other is the rest of the timestamp-proof refusal: its lead, the reasons
-`anchor/check.ts` words, and `evaluateAnchors`'s missing-verifier reason. Any other refusal that
-uses such a word still prints as the refusing module wrote it. A characterization case that
-reaches one puts its line in front of the conformance test, which then fails until the line is
-reworded in `humanRefusalDetail` or recorded with an owner.
+**Refusal lines** (#5299). §4.2's *Refusal lines* row (v1.13) reaches every refusal the reader
+prints, and the conformance test (5) holds every refusal template the reader's own modules write
+to it, not only the ones a characterization case reaches. `refusalTemplateInventory`
+(`check/src/testing/refusal-templates.ts`) walks from `runVerifierCli` through every function,
+class and constant the reachable code in `check/src` names, and collects each message a module
+throws (`refuse`, `new Error`, the package's error classes, and functions that forward their
+parameters into one), bare and behind each wrapper whose `try` block reaches it. The test sends
+every one through the reader's human path and scans the line as it scans any stderr line. A
+template whose line still carries a word §5 hides or renames fails the test until a rule in
+`humanRefusalDetail` rewords it or the test records it with its reason, and every probe's `--json`
+`message` must equal the module's message byte for byte. To print the inventory, each template
+with its status and human line, run in `check`:
+`REFUSAL_INVENTORY_PRINT=1 yarn vitest run src/reader-vocabulary-conformance.test.ts -t "refusal templates" --reporter=verbose`.
+Three kinds of text reach a refusal line only inside a template's hole, so the inventory sees the
+template that carries them and not their words: messages the platform packages
+(`@jinn-network/*`) write, text a module returns as data before a caller interpolates it (the
+reasons `anchor/check.ts` words, which #5251 reworded), and a schema library's issue text.
 
 **Contract renames — queued to a bundle-format revision, not scheduled here.** Nothing in §4
 requires one; every ruling above is reachable through presentation. The queue exists so the
