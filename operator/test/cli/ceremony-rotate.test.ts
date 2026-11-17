@@ -6,7 +6,7 @@
  * carries its EIP-191 signature and authoring refuses one that does not recover to it. What rotate
  * writes is then opened by the production catalog opener and role identities.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openRoleSigners, revocationAnchorDigest } from '@jinn-network/trust-authoring';
@@ -374,6 +374,23 @@ describe('ceremony init re-authoring a rotated operator', () => {
     expect(refusal.code).toBe('invalid_invocation');
     expect((refusal.details as { state: string }).state).toBe('retired-key-bound');
     expect(revocations.some(({ digest }) => String(refusal.message).includes(`revocation ${digest} retired key`))).toBe(true);
+    expect(existsSync(h.catalogPath)).toBe(false);
+    expect(h.calls.filter((call) => call === 'openAnchorSession')).toHaveLength(sessions);
+  });
+
+  it('refuses a --previous-catalog copy taken before the rotation, which holds none of its revocations', async () => {
+    const h = await provisioned();
+    const stale = join(h.home, 'trust.before-rotation.json');
+    copyFileSync(h.catalogPath, stale);
+    const rotation = await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
+    expect(rotation.kind).toBe('ceremony_rotate_complete');
+    renameSync(h.catalogPath, join(h.home, 'trust.previous.json'));
+    const sessions = h.calls.filter((call) => call === 'openAnchorSession').length;
+
+    const refusal = await run(h, reauthorArgv(h, ['--previous-catalog', stale]));
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect((refusal.details as { state: string }).state).toBe('rotated-family');
     expect(existsSync(h.catalogPath)).toBe(false);
     expect(h.calls.filter((call) => call === 'openAnchorSession')).toHaveLength(sessions);
   });

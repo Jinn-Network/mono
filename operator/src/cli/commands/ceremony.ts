@@ -1037,8 +1037,8 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
       code: 'invalid_invocation',
       message: `this init would replace a catalog: ${replaced}. Sealed without it, the new catalog would drop every `
         + 'revocation the replaced one holds, and each key they retired would bind again.',
-      hint: 'Pass the replaced catalog as --previous-catalog <path>, from where it was moved aside or from any operator\'s '
-        + 'copy, and init carries its revocations into the new one.',
+      hint: 'Pass the replaced catalog as --previous-catalog <path>, the file as it was when moved aside, and init '
+        + 'carries its revocations into the new one.',
       exampleCli: EXAMPLE_CLI,
       details: { feature: 'ceremony', state: 'previous-catalog-required', sideEffects: false },
     }, { writer: ctx.writer, exit: ctx.exit });
@@ -1064,6 +1064,28 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
         details: { feature: 'ceremony', state: 'retired-key-bound', sideEffects: created.length > 0 },
       }, { writer: ctx.writer, exit: ctx.exit });
     }
+  }
+
+  // After `jinn ceremony rotate`, identityStores names the rotated store, while the store init opens
+  // still holds the keys that rotation retired. Refused whatever --previous-catalog names: a copy
+  // older than the rotation holds none of its revocations, so nothing later would catch it.
+  const configured = readConfigObject(plan.configPath).identityStores;
+  const rotatedFamilies = plan.roleSets.filter((family) => {
+    const named = configured !== null && typeof configured === 'object'
+      ? (configured as Record<string, unknown>)[family]
+      : undefined;
+    return typeof named === 'string' && named !== storePathFor(plan.dir, family);
+  });
+  if (rotatedFamilies.length > 0) {
+    return emitEnvelope({
+      code: 'invalid_invocation',
+      message: `${plan.configPath} names a different store than init would open for ${rotatedFamilies.join(', ')}: `
+        + `after \`jinn ceremony rotate\`, ${join(plan.dir, 'identity')}/<family>.enc.json holds the keys it retired, `
+        + 'and init would bind them again.',
+      hint: 'A rotated family cannot be re-authored by init.',
+      exampleCli: EXAMPLE_CLI,
+      details: { feature: 'ceremony', state: 'rotated-family', sideEffects: created.length > 0 },
+    }, { writer: ctx.writer, exit: ctx.exit });
   }
 
   // §6 law 1 — the anchor goes first, and its block time is the only correct `validFrom`.

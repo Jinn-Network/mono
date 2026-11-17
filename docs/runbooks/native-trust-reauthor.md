@@ -204,11 +204,15 @@ revocations as `carriedRevocations`.
 - the re-author declares an anchor a carried record relies on differently from the replaced catalog,
   which would move that record's time;
 - the re-author would bind a key a carried revocation retired, for the same Agent (the refusal names
-  the revocation).
+  the revocation);
+- the config's `identityStores` names a different store than `<dir>/identity/<family>.enc.json` for a
+  family it would bind: that family was rotated, whatever `--previous-catalog` names.
 
-The last refusal is the one a re-author after `jinn ceremony rotate` meets. `init` opens the stores
-at `<dir>/identity/<family>.enc.json`, not the stores `identityStores` names, and after a rotation
-those hold the retired keys. So a rotated family cannot be re-authored with `init`. The refusal
+A re-author after `jinn ceremony rotate` meets the last two refusals: the retired-key one when
+`--previous-catalog` is the catalog holding the rotation's revocations, the rotated-family one for
+any other file. `init` opens the stores at
+`<dir>/identity/<family>.enc.json`, not the stores `identityStores` names, and after a rotation those
+hold the retired keys. So a rotated family cannot be re-authored with `init`. The refusal
 comes after the stores are opened and before any anchor is sent, so it spends no gas.
 
 ## Cost and sequencing
