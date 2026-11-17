@@ -694,6 +694,151 @@ describe("harborCarriedEvidence — what a Harbor import carries of a trial's ow
     expect(kept).toBe(text);
     expect(elapsed).toBeLessThan(1_000);
   });
+
+  // #5332: the answer for each string below was taken from the patterns as they stood before they
+  // were rewritten to read a long run once, so a rewrite that changes what the import refuses or
+  // carries fails here. `agent.kwargs.note` is an ordinary name, so only the string's own shape counts.
+  test.each([
+    ["a user and password", "https://user:pw@example.com/x"],
+    ["a user alone", "ssh://git@host/repo"],
+    ["an empty user", "a://@h"],
+    ["a port before the @", "a://host:8080@x"],
+    ["a scheme after other words", "see https://u@h now"],
+    ["a scheme in capitals", "HTTP://U@H"],
+    ["a scheme that follows a digit", "1http://u@h"],
+    ["a scheme that follows signs", "+.-a://u@h"],
+    ["a scheme with every kind of character", "x-y.z+w1://u@h"],
+    ["a second URL after a clean one", "https://example.com/a and ftp://bob@example.com"],
+  ])("a string holding %s is refused as a URL carrying credentials", (_what, note) => {
+    for (const [name, text, at] of trialRecords("agent.kwargs.note", note)) {
+      const error = refusalOf(name, text);
+      expect(error.message).toContain(`at ${at}, holds a URL carrying credentials`);
+    }
+  });
+
+  test.each([
+    ["a query parameter", "https://h/p?api_key=abc"],
+    ["a second query parameter", "https://h/p?x=1&token=abc"],
+    ["a fragment parameter", "https://h/p#access_token=abc"],
+    ["a parameter after a fragment", "https://h/p?x=1#key=2"],
+    ["a parameter after a semicolon", "https://h/p;passwd=x"],
+    ["a parameter after an ampersand alone", "a&secret=1"],
+    ["a name in capitals", "?Password=x"],
+    ["a name that holds auth", "?my_authz=1"],
+    ["a name that holds credential", "?credential=x"],
+    ["a name that holds bearer", "?bearer=x"],
+    ["a second question mark", "a?b?key=v"],
+    ["a question mark and a semicolon", "?;key=v"],
+    ["a value that is an equals sign", "?key=="],
+    ["a name that ends at the equals sign of the value before it", "?x=1&Key=2"],
+    ["a parameter inside text", "see https://h/p?token=abc, then"],
+  ])("a string holding %s is refused as a URL carrying credentials", (_what, note) => {
+    for (const [name, text, at] of trialRecords("agent.kwargs.note", note)) {
+      const error = refusalOf(name, text);
+      expect(error.message).toContain(`at ${at}, holds a URL carrying credentials`);
+    }
+  });
+
+  test.each([
+    ["a path with an @ after a slash", "https://example.com/path@x"],
+    ["an @ after a question mark", "https://example.com?x=y@z"],
+    ["an @ after a fragment", "https://example.com#frag@x"],
+    ["an @ with no scheme", "://u@h"],
+    ["a scheme of digits only", "123://u@h"],
+    ["a scheme of signs only", "-+.://u@h"],
+    ["a scheme with one slash", "a:/u@h"],
+    ["a mailto address", "mailto:u@h"],
+    ["white space after the slashes", "a:// u@h"],
+    ["a credential name without a value", "?key"],
+    ["a credential name with an empty value", "?key="],
+    ["a credential name whose value is an ampersand", "?key=&x"],
+    ["a credential name whose value is a fragment", "?key=#x"],
+    ["a credential name whose value is white space", "?key= x"],
+    ["a credential name split by white space", "?ke y=1"],
+    ["a credential name split by a semicolon", "?k;ey=1"],
+    ["a credential name with no question mark before it", "key=abc"],
+    ["a credential name before the semicolon that starts the parameter", "key;x=1"],
+    ["a credential name that is a value", "?a=key&b=1"],
+    ["a credential name in a value that holds another equals sign", "?x=key=1"],
+    ["a credential name in an ordinary parameter name", "?a=1&b=key"],
+    ["a parameter with an ordinary name", "https://h/p?page=2&size=10#top"],
+    ["three asterisks", "***"],
+  ])("a string holding %s is carried as written", (_what, note) => {
+    const text = JSON.stringify({ trial_name: "hello-world__55xttAM", agent: { kwargs: { note } } });
+    expect(carried("trial-config.json", text)).toBe(text);
+  });
+
+  test.each([
+    ["twenty characters of all three kinds", "Abcdefghij0123456789"],
+    ["a run joined by a hyphen and an underscore", "abcdefghij-ABCDEFGH_12"],
+    ["a run inside a sentence", "the token Abcdefghij0123456789 is here"],
+    ["a run of a hundred", "aB3".repeat(34)],
+  ])("a string holding %s is refused as token-shaped", (_what, note) => {
+    for (const [name, text] of trialRecords("agent.kwargs.note", note)) {
+      expect(refusalOf(name, text).message).toContain("holds a token-shaped string");
+    }
+  });
+
+  test.each([
+    ["nineteen characters", "Abcdefghij012345678"],
+    ["twenty characters with no digit", "Abcdefghijklmnopqrst"],
+    ["twenty characters with no upper case", "abcdefghij0123456789"],
+    ["twenty characters with no lower case", "ABCDEFGHIJ0123456789"],
+    ["runs of ten and thirteen split by a space", "Abcdefghij 0123456789abc"],
+    ["runs split by a dot", "Abcdefghij.0123456789abc"],
+    ["three kinds spread over two runs", "ABCDEFGHIJKLMNOP abcdefghijklmnop0123456789"],
+  ])("a string holding %s is carried as written", (_what, note) => {
+    const text = JSON.stringify({ trial_name: "hello-world__55xttAM", agent: { kwargs: { note } } });
+    expect(carried("trial-config.json", text)).toBe(text);
+  });
+
+  // #5332: each check below took time that grew with the square of the run, or threw. An evidence
+  // file may be 8 MiB. Before the fix the first took about 160 seconds on a 1,000,000-letter run
+  // (7 seconds on 100,000, as measured in the issue) and the third about 3 minutes; the 8 MiB run
+  // threw a RangeError. Read once, each takes well under a second; the budget leaves a loaded
+  // runner room.
+  const EVIDENCE_CAP = 8 * 1024 * 1024;
+  function timedCarry(note: string): { readonly text: string; readonly kept: string; readonly milliseconds: number } {
+    const text = JSON.stringify({ trial_name: "hello-world__55xttAM", agent: { kwargs: { note } } });
+    const started = performance.now();
+    const kept = carried("trial-config.json", text);
+    return { text, kept, milliseconds: performance.now() - started };
+  }
+
+  test("a run of a million letters is read in linear time", () => {
+    const { text, kept, milliseconds } = timedCarry("a".repeat(1_000_000));
+    expect(kept).toBe(text);
+    expect(milliseconds).toBeLessThan(2_000);
+  });
+
+  test("a question mark followed by a million characters that repeat a credential-shaped name is read in linear time", () => {
+    for (const note of ["?" + "key".repeat(333_334), "#" + "token".repeat(200_000), "&" + "k;ey".repeat(250_000)]) {
+      const { text, kept, milliseconds } = timedCarry(note);
+      expect(kept).toBe(text);
+      expect(milliseconds).toBeLessThan(2_000);
+    }
+  });
+
+  test("a run of millions of question marks or scheme characters is read in linear time", () => {
+    for (const note of ["?".repeat(2_000_000), "a:".repeat(1_000_000), "1".repeat(2_000_000) + "a", "a://".repeat(500_000)]) {
+      const { text, kept, milliseconds } = timedCarry(note);
+      expect(kept).toBe(text);
+      expect(milliseconds).toBeLessThan(2_000);
+    }
+  });
+
+  test("a single run of letters up to the evidence cap is carried, not an internal error", () => {
+    const { text, kept, milliseconds } = timedCarry("a".repeat(EVIDENCE_CAP - 200));
+    expect(kept).toBe(text);
+    expect(milliseconds).toBeLessThan(5_000);
+  });
+
+  test("a single token-shaped run up to the evidence cap is refused as token-shaped, not an internal error", () => {
+    const note = "aB3".repeat(Math.floor((EVIDENCE_CAP - 200) / 3));
+    const error = refusalOf("trial-config.json", JSON.stringify({ trial_name: "hello-world__55xttAM", agent: { kwargs: { note } } }));
+    expect(error.code).toBe("validation");
+    expect(error.message).toContain("at agent.kwargs.note, holds a token-shaped string");
+  });
 });
 
 /**
