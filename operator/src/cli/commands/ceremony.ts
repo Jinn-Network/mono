@@ -50,6 +50,7 @@ import {
   revocationsToCarry,
   revokeBinding,
   roleBindingTerms,
+  scopeForRole,
   type AnchorLocator,
   type CarriedRevocations,
   type CatalogAuthoritySigner,
@@ -79,6 +80,7 @@ import {
   writeNativeIdentityConfig,
   type NativeIdentityStorePaths,
 } from '../../config/write-native-identity.js';
+import { writeConfigFileAtomic } from '../../config/atomic-write.js';
 import { ROLE_SETS, orderedRolesForSet, type RoleSetName } from './native-requester.js';
 import { resolveDefaultStateDir } from '../../state-dir.js';
 import {
@@ -100,6 +102,7 @@ const OPTIONS = {
   genesis: { type: 'string' as const },
   store: { type: 'string' as const },
   'finality-timeout-ms': { type: 'string' as const },
+  'resubmit-anchor': { type: 'boolean' as const, default: false },
   'dry-run': { type: 'boolean' as const, default: false },
   execute: { type: 'boolean' as const, default: false },
 };
@@ -445,19 +448,7 @@ function refuseRotatedFamilies(ctx: CommandContext, input: {
 }): void {
   const receiptPath = rotationReceiptPath(input.dir);
   const receiptExists = existsSync(receiptPath);
-  const receipt = readRotationReceipt(input.dir);
-  if (receiptExists && receipt === undefined) {
-    const message = `${receiptPath} exists but cannot be read as a rotation receipt, so ${input.verb} cannot tell `
-      + 'which keys a rotation retired, and refuses rather than guess.';
-    emitEnvelope({
-      code: 'invalid_invocation',
-      message,
-      hint: `Restore ${receiptPath} as \`jinn ceremony rotate\` wrote it: it names the stores a rotation retires.`,
-      exampleCli: EXAMPLE_CLI,
-      details: { feature: 'ceremony', state: 'rotation-receipt-unreadable', sideEffects: input.sideEffects },
-    }, { writer: ctx.writer, exit: ctx.exit });
-    throw new CeremonyRefusal(message);
-  }
+  const receipt = readRotationReceiptOrRefuse(ctx, input);
   const configured = readConfigObject(input.configPath).identityStores;
   const byConfig = input.families.filter((family) => {
     const named = configured !== null && typeof configured === 'object'
@@ -1582,23 +1573,70 @@ interface RecordedRotationAnchor {
   readonly locator: AnchorLocator;
 }
 
+/** The receipt's shape, checked field by field: every field rotate reads is one it can rely on. */
+function isRotationReceipt(value: unknown): value is RotationReceipt {
+  const isObject = (field: unknown): field is Record<string, unknown> =>
+    field !== null && typeof field === 'object' && !Array.isArray(field);
+  const isFamily = (family: unknown): boolean => typeof family === 'string' && Object.hasOwn(ROLE_SETS, family);
+  const isStorePaths = (field: unknown): boolean => isObject(field)
+    && Object.entries(field).every(([family, path]) => isFamily(family) && typeof path === 'string' && path.length > 0);
+  const isRecordedAnchor = (field: unknown): boolean => field === undefined
+    || (isObject(field) && typeof field.digest === 'string');
+  return isObject(value)
+    && value.schemaVersion === 1
+    && Array.isArray(value.roleSets) && value.roleSets.length > 0 && value.roleSets.every(isFamily)
+    && isStorePaths(value.stores)
+    && (value.retiring === undefined || isStorePaths(value.retiring))
+    && isRecordedAnchor(value.rebindAnchor)
+    && isRecordedAnchor(value.revocationAnchor)
+    && (value.completedAt === undefined || typeof value.completedAt === 'string');
+}
+
+/** The receipt, or `undefined` when there is none or it cannot be read. */
 function readRotationReceipt(dir: string): RotationReceipt | undefined {
   const path = rotationReceiptPath(dir);
   if (!existsSync(path)) return undefined;
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as RotationReceipt;
-    return parsed.schemaVersion === 1 && Array.isArray(parsed.roleSets) && typeof parsed.stores === 'object'
-      ? parsed
-      : undefined;
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
+    return isRotationReceipt(parsed) ? parsed : undefined;
   } catch {
     return undefined;
   }
 }
 
+/**
+ * The receipt, `undefined` when none exists, and a refusal when one exists but cannot be read.
+ * From the config repoint on, the receipt is the only record of the stores a rotation retires, so
+ * reading an unreadable one as no rotation would take the keys it just bound for the ones to retire.
+ */
+function readRotationReceiptOrRefuse(ctx: CommandContext, input: {
+  readonly verb: 'init' | 'join' | 'rotate';
+  readonly dir: string;
+  readonly sideEffects: boolean;
+}): RotationReceipt | undefined {
+  const path = rotationReceiptPath(input.dir);
+  const receipt = readRotationReceipt(input.dir);
+  if (receipt !== undefined || !existsSync(path)) return receipt;
+  const message = `${path} exists but cannot be read as a rotation receipt, so ${input.verb} cannot tell `
+    + 'which keys a rotation retired, and refuses rather than guess.';
+  emitEnvelope({
+    code: 'invalid_invocation',
+    message,
+    hint: `Restore ${path} as \`jinn ceremony rotate\` wrote it: it names the stores a rotation retires.`,
+    exampleCli: EXAMPLE_CLI,
+    details: { feature: 'ceremony', state: 'rotation-receipt-unreadable', sideEffects: input.sideEffects },
+  }, { writer: ctx.writer, exit: ctx.exit });
+  throw new CeremonyRefusal(message);
+}
+
+/**
+ * Written to a temporary file beside the receipt, flushed, then renamed over it, so a write that
+ * fails or is interrupted leaves the previous receipt whole rather than truncated.
+ */
 function writeRotationReceipt(dir: string, receipt: RotationReceipt): void {
   const path = rotationReceiptPath(dir);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  writeFileSync(path, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
+  writeConfigFileAtomic(path, receipt);
 }
 
 /** One retiring role: its current key and the catalog binding of that key the rotation revokes. */
@@ -1628,6 +1666,32 @@ function catalogRecords(file: CatalogFileShape): {
     return report.conforms && report.value !== undefined ? [report.value] : [];
   });
   return { bindings, revocations };
+}
+
+/**
+ * The catalog's bindings, unrevoked under `voucherDid`, of a key for one of the retiring roles that
+ * is not in `held` (`<agent> <did:key>`). A binding names no role, so a role is matched by its Agent
+ * and exact scope.
+ */
+function unaccountedBindings(input: {
+  readonly catalog: ReturnType<typeof catalogRecords>;
+  readonly retiring: readonly RetiringRole[];
+  readonly voucherDid: string;
+  readonly revokedByVoucher: ReadonlySet<string>;
+  readonly held: ReadonlySet<string>;
+}): readonly { readonly role: NativeRoleIdentityRole; readonly keyId: string; readonly bindingDigest: `sha256:${string}` }[] {
+  const scopeOf = (scope: readonly string[]): string => [...scope].sort().join(' ');
+  const found = new Map<string, { readonly role: NativeRoleIdentityRole; readonly keyId: string; readonly bindingDigest: `sha256:${string}` }>();
+  for (const { role, agent } of input.retiring) {
+    const scope = scopeOf(scopeForRole(role));
+    for (const { digest, binding } of input.catalog.bindings) {
+      if (binding.agent !== agent || scopeOf(binding.scope) !== scope) continue;
+      if (binding.voucher.kind !== 'account' || binding.voucher.did !== input.voucherDid) continue;
+      if (input.revokedByVoucher.has(digest) || input.held.has(`${binding.agent} ${binding.key.didKey}`)) continue;
+      if (!found.has(digest)) found.set(digest, { role, keyId: binding.key.didKey, bindingDigest: digest });
+    }
+  }
+  return [...found.values()];
 }
 
 /** A UTC stamp safe in a file name, so a rotated store never lands on an existing path. */
@@ -1726,14 +1790,23 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
   }
 
   // An unfinished receipt is resumed whatever the config names: the config is repointed between
-  // the two acts, so after the rebind only the receipt names the stores being retired.
-  const prior = readRotationReceipt(dir);
+  // the two acts, so after the rebind only the receipt names the stores being retired. A receipt that
+  // exists but cannot be read refuses here, before anything is minted or anchored, in the plan too.
+  const prior = readRotationReceiptOrRefuse(ctx, { verb: 'rotate', dir, sideEffects: false });
   const resuming = prior !== undefined && prior.completedAt === undefined;
   if (resuming && JSON.stringify([...prior.roleSets].sort()) !== JSON.stringify([...roleSets].sort())) {
     invalid(
       ctx,
       `a rotation of ${prior.roleSets.join(',')} is in progress (${rotationReceiptPath(dir)})`,
       `Re-run it with --role-sets ${prior.roleSets.join(',')} to finish it.`,
+    );
+  }
+  const resubmitAnchor = parsed.values['resubmit-anchor'] === true;
+  if (resubmitAnchor && !resuming) {
+    invalid(
+      ctx,
+      `--resubmit-anchor applies only to an unfinished rotation, and ${rotationReceiptPath(dir)} names none`,
+      'Without an unfinished rotation, rotate starts a new one, which retires the keys the config names. Drop the flag to do that.',
     );
   }
   const retiringStores: Partial<Record<RoleSetName, string>> = Object.fromEntries(roleSets.map((family) => [
@@ -1784,6 +1857,55 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
   const revokedByVoucher = new Set(catalog.revocations
     .filter(({ revokedBy }) => revokedBy === voucherDid)
     .map(({ target }) => target));
+
+  // A rotation stopped after its config repoint, whose receipt is then lost, leaves the config naming
+  // the store it just bound while the keys it was retiring stay bound. A new rotation from the config
+  // would revoke the newer keys and leave those. So a new rotation refuses while the catalog binds,
+  // unrevoked under this voucher, another key for one of its roles that no store the config names
+  // holds. Roles of different families can share an Agent and scope (the discovery roles, the
+  // settlement roles), so the keys of the config's other stores are set aside first. A resumed
+  // rotation is exempt: its receipt names both stores, and its replacement keys are its own rebind.
+  if (!resuming) {
+    const held = new Set(retiring.map(({ agent, keyId }) => `${agent} ${keyId}`));
+    const unaccounted = () => unaccountedBindings({ catalog, retiring, voucherDid, revokedByVoucher, held });
+    if (unaccounted().length > 0) {
+      for (const family of Object.keys(ROLE_SETS) as RoleSetName[]) {
+        const storePath = configuredStores[family];
+        if (roleSets.includes(family) || typeof storePath !== 'string') continue;
+        let keys: ReadonlyMap<NativeRoleIdentityRole, RoleSigner>;
+        try {
+          // eslint-disable-next-line no-await-in-loop -- bounded (≤4 families).
+          keys = await openRoleSigners({
+            storePath,
+            password: password.password,
+            ownedRoles: orderedRolesForSet(family),
+            create: false,
+          });
+        } catch (cause) {
+          return invalid(ctx, `the ${family} store at ${storePath} could not be opened: ${cause instanceof Error ? cause.message : String(cause)}`);
+        }
+        for (const [role, signer] of keys) held.add(`${agentForRole(plan, role)} ${signer.keyId}`);
+      }
+    }
+    const remaining = unaccounted();
+    if (remaining.length > 0) {
+      const roles = [...new Set(remaining.map(({ role }) => role))];
+      const message = `${catalogPath} still binds, unrevoked under the agent EOA ${custody.agentEoa}, another key for `
+        + `${roles.join(', ')} that no store ${configPath} names holds: ${remaining.map(({ keyId }) => keyId).join(', ')}. `
+        + 'A rotation that stopped after it repointed the config leaves exactly this: the config names the keys it bound, '
+        + 'and the keys it was retiring are still bound. Rotating from the config would revoke the newer keys and leave '
+        + 'these bound, so rotate refuses before anything is minted or anchored.';
+      emitEnvelope({
+        code: 'invalid_invocation',
+        message,
+        hint: `If ${rotationReceiptPath(dir)} was moved or deleted, restore it as rotate wrote it and re-run with the same `
+          + '--role-sets: rotate resumes that rotation. If its recorded anchor never reads back finalized, add --resubmit-anchor.',
+        exampleCli: EXAMPLE_CLI,
+        details: { feature: 'ceremony', state: 'another-key-bound', sideEffects: false, bindings: remaining },
+      }, { writer: ctx.writer, exit: ctx.exit });
+      throw new CeremonyRefusal(message);
+    }
+  }
   const allTargets = retiring.flatMap(({ bindingDigests }) => bindingDigests);
   const pendingTargets = allTargets.filter((digest) => !revokedByVoucher.has(digest));
 
@@ -1890,10 +2012,12 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
   const anchorAndWait = async (digest: `sha256:${string}`, act: 'rebind' | 'revocation'): Promise<AnchorLocator> => {
     // Each act's anchor is fresh for that act (§6): submitted by this rotation, never another act's.
     // An interrupted run recorded it the moment it existed, and a re-run of the same act, which
-    // recomputes the same digest, waits on it again rather than sending a second one (§4.5).
+    // recomputes the same digest, waits on it again rather than sending a second one (§4.5). A fresh
+    // one replaces the record when the recorded digest differs, and when the operator asks for one
+    // because the recorded anchor never reads back finalized (--resubmit-anchor).
     const field = act === 'rebind' ? 'rebindAnchor' : 'revocationAnchor';
     const recorded = receipt[field];
-    const reused = recorded?.digest === digest ? recordedLocator(recorded.locator) : undefined;
+    const reused = !resubmitAnchor && recorded?.digest === digest ? recordedLocator(recorded.locator) : undefined;
     const locator = reused ?? await session.submit(digest);
     if (reused === undefined) {
       receipt = { ...receipt, [field]: { digest, locator } };
@@ -1909,7 +2033,7 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
       note: 'waiting for the finalized tag (Base Sepolia trails head by roughly 10-20 minutes)',
     }, `${act} anchor ${reused === undefined ? 'submitted' : 'reused'} ${locator.transactionHash} at ${locator.anchorTime}\n`
       + '  waiting for the finalized tag (Base Sepolia trails head by roughly 10-20 minutes)');
-    await session.waitForFinalized({
+    const finalized = await session.waitForFinalized({
       digest,
       locator,
       timeoutMs: finalityTimeoutMs,
@@ -1919,7 +2043,10 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
           `  still waiting for finality, ${Math.round(elapsedMs / 1000)}s elapsed`);
       },
     });
-    return locator;
+    // §6 law 2: the anchor's block time is the act's validFrom or effectiveTime. The finality read
+    // is the chain's record of it; a resumed locator's copy came from the receipt, a file anyone with
+    // the operator's access can edit. So the act takes the block time the finality read returns.
+    return { ...locator, anchorTime: finalized.anchorTime };
   };
   try {
     const ceremonySigner = { address: custody.agentEoa, signMessage: (m: { readonly message: { readonly raw: Uint8Array } }) => session.signMessage(m) };
@@ -2262,9 +2389,19 @@ Status:
   verifies. No catalog authority is needed: the trust policy names Agent IRIs, and a rotation keeps
   them. An interrupted rotate is re-run with the same command: <dir>/ceremony/rotation.json names
   the stores it minted and retires and each anchor it submitted, so the re-run waits on that anchor
-  rather than sending a second one, and the catalog shows which half landed. Rotation cannot help
-  when the agent EOA itself is compromised: that account is the voucher, so a binding under a new
-  EOA needs consent, which rotate does not author.
+  rather than sending a second one, and the catalog shows which half landed. Each act takes its
+  block time from the finality read, not from the receipt. Rotation cannot help when the agent EOA
+  itself is compromised: that account is the voucher, so a binding under a new EOA needs consent,
+  which rotate does not author.
+
+  Keep rotation.json where rotate wrote it: once identityStores names the new store, it is the only
+  record of the store being retired. rotate refuses a rotation.json it cannot read
+  (rotation-receipt-unreadable), and refuses to start a new rotation while the catalog binds,
+  unrevoked under the agent EOA, another key for one of its roles that no configured store holds
+  (another-key-bound), which is what a lost receipt leaves. If a recorded anchor never reads back
+  finalized (a transaction dropped after it mined), each re-run waits on it until the finality
+  timeout: re-run with --resubmit-anchor, which sends a fresh anchor for the act being resumed and
+  records it in place of the old one, leaving the rest of the receipt as it was.
 
 Options (init, join, and rotate; rotate takes no --authority-store or --genesis):
   --dir <path>               Operator home (default ~/.jinn-client). The keystore, identity stores,
@@ -2283,6 +2420,8 @@ Options (init, join, and rotate; rotate takes no --authority-store or --genesis)
   --anchor-target <address>  Address the anchor calldata is sent to (default: this operator's own EOA)
   --service-index <n>        Which earning service supplies the EOA and Safe (default: the primary)
   --finality-timeout-ms <n>  How long to wait for the finalized tag (default 2700000, i.e. 45 min)
+  --resubmit-anchor          rotate only: send a fresh anchor for the act an unfinished rotation
+                             resumes, in place of a recorded one that never reads back finalized
   --execute                  Perform the ceremony. Without it, nothing is minted, sent, or written.
   --dry-run                  Force the read-only plan. Refuses if combined with --execute.
   --human                    Human-readable output, including the anchor and finality progress lines.
