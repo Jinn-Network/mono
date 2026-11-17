@@ -362,6 +362,197 @@ describe("harborCarriedEvidence — what a Harbor import carries of a trial's ow
     const text = '{\n    "task": {\n        "path": null,\n        "name": "terminal-bench/hello-world"\n    },\n    "trials_dir": "jobs/job"\n}';
     expect(carried("trial-config.json", text)).toBe(text);
   });
+
+  /** The refusal `harborCarriedEvidence` gives a trial record, which must name the file. */
+  function refusalOf(name: string, text: string): BenchmarkProductError {
+    try {
+      carried(name, text);
+    } catch (cause) {
+      if (cause instanceof BenchmarkProductError) return cause;
+      throw cause;
+    }
+    throw new Error(`expected ${name} to be refused: ${text}`);
+  }
+
+  /** `value` at `field` of a trial `config.json`, and the same config as the `config` of a trial `result.json`. */
+  function trialRecords(field: string, value: unknown): readonly (readonly [string, string, string])[] {
+    const config: Record<string, unknown> = { trial_name: "hello-world__55xttAM" };
+    let at = config;
+    const keys = field.split(".");
+    for (const key of keys.slice(0, -1)) at = (at[key] ??= {}) as Record<string, unknown>;
+    at[keys.at(-1)!] = value;
+    return [
+      ["trial-config.json", JSON.stringify(config, null, 4), field],
+      ["trial-result.json", JSON.stringify({ id: "x", config }, null, 4), `config.${field}`],
+    ];
+  }
+
+  // #5289: Harbor wrote these on another machine (a CI runner, a cloud VM), so they are under
+  // neither the jobs directory nor the home directory of the machine that imports them.
+  test.each([
+    ["a bind mount under /home", "environment.mounts", [{ type: "bind", source: "/home/runner-7/datasets", target: "/data" }], "environment.mounts[0].source", "/home/runner-7"],
+    ["an instruction file under /Users", "extra_instruction_paths", ["/Users/bob/notes/instructions.md"], "extra_instruction_paths[0]", "/Users/bob"],
+    ["a skill directory under /root", "agent.skills", ["/root/.cache/harbor/skills/web"], "agent.skills[0]", "/root"],
+    ["a trajectory under a Windows user directory", "agent.load_trajectory", "C:\\Users\\carol\\runs\\trajectory.json", "agent.load_trajectory", "\\Users\\carol"],
+    ["a compose file under a Windows user directory written with forward slashes", "environment.extra_docker_compose", ["C:/Users/carol/compose.yaml"], "environment.extra_docker_compose[0]", "/Users/carol"],
+    ["a file: URI of a home directory", "task.git_url", "file:///home/dave/tasks.git", "task.git_url", "/home/dave"],
+    ["a percent-encoded file: URI of a home directory", "agent.kwargs.prompt_template", "file:///Users/%C3%A9mile/prompt.j2", "agent.kwargs.prompt_template", "/Users/%C3%A9mile"],
+    ["a file: URI of a directory that is not a home directory", "agent.kwargs.prompt_template", "file:///Volumes/erin-data/prompt.j2", "agent.kwargs.prompt_template", "file:"],
+    ["a home directory inside an agent setting", "agent.kwargs.cache", "--cache-dir=/home/erin/.cache", "agent.kwargs.cache", "/home/erin"],
+  ])("a trial record naming %s of another machine is refused, naming the file and the field", (_what, field, value, named, shown) => {
+    for (const [name, text, at] of trialRecords(field, value)) {
+      const error = refusalOf(name, text);
+      expect(error.code).toBe("validation");
+      expect(error.issues!.map((issue) => issue.path)).toEqual([`job/trial-1/${name}`]);
+      expect(error.message).toContain(`Harbor trial file job/trial-1/${name}`);
+      expect(error.message).toContain(at.replace(field, named));
+      expect(error.message).toContain(shown);
+    }
+  });
+
+  // Python prints a Windows path in an OSError message with its backslashes doubled.
+  test.each([
+    ["on Linux", "[Errno 2] No such file or directory: '/home/ci-builder/.docker/config.json'", "/home/ci-builder"],
+    ["on Windows", "[Errno 2] No such file or directory: 'C:\\\\Users\\\\carol\\\\.docker\\\\config.json'", "\\\\Users\\\\carol"],
+  ])("a home directory of another machine %s in an exception message is refused, naming the field", (_where, message, shown) => {
+    const text = JSON.stringify({
+      id: "x",
+      exception_info: { exception_type: "FileNotFoundError", exception_message: message },
+    }, null, 4);
+    const error = refusalOf("trial-result.json", text);
+    expect(error.message).toContain("exception_info.exception_message");
+    expect(error.message).toContain(shown);
+  });
+
+  // This machine's jobs and home directories are matched as paths, not as text: on a runner whose
+  // home is /home/runner, /home/runner-7 is another machine's home, not under this one.
+  test("a home directory whose path begins with your home directory's is not read as yours", () => {
+    const other = `${homedir()}-7`;
+    for (const [name, text] of trialRecords("environment.mounts", [{ type: "bind", source: `${other}/datasets`, target: "/data" }])) {
+      const { message } = refusalOf(name, text);
+      expect(message).toContain(other);
+      expect(message).not.toContain("your home directory");
+    }
+  });
+
+  test("your home directory at the end of a sentence is still read as yours", () => {
+    const text = JSON.stringify({
+      id: "x",
+      exception_info: { exception_type: "PermissionError", exception_message: `cannot write to ${homedir()}.` },
+    }, null, 4);
+    expect(refusalOf("trial-result.json", text).message).toContain(`names your home directory (${homedir()})`);
+  });
+
+  test.each([
+    ["a bind mount", "environment.mounts", [{ type: "bind", source: "/srv/datasets", target: "/data" }], "environment.mounts[0].source"],
+    ["an instruction file", "extra_instruction_paths", ["/srv/notes/instructions.md"], "extra_instruction_paths[0]"],
+    ["a skill directory", "agent.skills", ["/var/cache/harbor/skills/web"], "agent.skills[0]"],
+    ["a compose file", "environment.extra_docker_compose", ["D:\\harbor\\compose.yaml"], "environment.extra_docker_compose[0]"],
+    ["a trajectory", "agent.load_trajectory", "/srv/runs/trajectory.json", "agent.load_trajectory"],
+    ["a download directory", "task.download_dir", "/mnt/tasks", "task.download_dir"],
+    ["a regrade source", "source_trial", { action: "regrade", type: "local", path: "/srv/jobs/oracle/t__x" }, "source_trial.path"],
+  ])("an absolute path in a Harbor setting that names a path on the machine that ran it (%s) is refused", (_what, field, value, named) => {
+    for (const [name, text, at] of trialRecords(field, value)) {
+      expect(refusalOf(name, text).message).toContain(at.replace(field, named));
+    }
+  });
+
+  test("a container path, a volume name and a relative path are carried as Harbor wrote them", () => {
+    const config = {
+      trial_name: "hello-world__55xttAM",
+      agent: { skills: ["skills/web", "harbor/web-skill@1"] },
+      environment: { mounts: [{ type: "volume", source: "pip-cache", target: "/opt/pip-cache" }, { type: "bind", source: "data", target: "/app/data" }] },
+      artifacts: ["/app/output.txt", { source: "/workspace/out", destination: "out" }],
+      extra_instruction_paths: ["notes/instructions.md"],
+    };
+    const text = JSON.stringify(config, null, 4);
+    expect(carried("trial-config.json", text)).toBe(text);
+  });
+
+  test.each([
+    ["an API key in agent kwargs", "agent.kwargs", { api_key: "0123456789abcdef0123456789abcdef" }, "agent.kwargs.api_key", "0123456789abcdef0123456789abcdef"],
+    ["a key-shaped string under an ordinary name", "agent.kwargs", { llm: { route: "sk-proj-AbCdEf0123456789" } }, "agent.kwargs.llm.route", "sk-proj-AbCdEf0123456789"],
+    ["a token-shaped string in agent kwargs", "agent.kwargs", { github: "ghp_R8x2Kq9LmN4pT7vW1yZ3aB5cD6eF0gH2iJ4k" }, "agent.kwargs.github", "ghp_R8x2Kq9LmN4pT7vW1yZ3aB5cD6eF0gH2iJ4k"],
+    ["a bearer header in verifier kwargs", "verifier.kwargs", { headers: { "X-Upstream": "Bearer abc.def.ghi" } }, "verifier.kwargs.headers.X-Upstream", "abc.def.ghi"],
+    ["a value Harbor redacted", "agent.env", { OPENROUTER_API_KEY: "sk-o****xyz" }, "agent.env.OPENROUTER_API_KEY", "sk-o****xyz"],
+    ["a value Harbor redacted, outside env", "agent.kwargs", { upstream: "sk-o****xyz" }, "agent.kwargs.upstream", "sk-o****xyz"],
+    ["a secret Harbor did not recognize by its name", "environment.env", { HF_HUB_PAT: "hf_mysecretvalue" }, "environment.env.HF_HUB_PAT", "hf_mysecretvalue"],
+    ["an env placeholder with a default", "verifier.env", { GRADER_TOKEN: "${GRADER_TOKEN:-plain-default-value}" }, "verifier.env.GRADER_TOKEN", "plain-default-value"],
+    ["an MCP server URL with a user and password", "agent.mcp_servers", [{ name: "docs", transport: "sse", url: "https://ci:hunter2@mcp.example.com/sse" }], "agent.mcp_servers[0].url", "hunter2"],
+    ["an MCP server URL with a token in its query", "agent.mcp_servers", [{ name: "docs", transport: "sse", url: "https://mcp.example.com/sse?access_token=qwerty123" }], "agent.mcp_servers[0].url", "qwerty123"],
+    ["an MCP server argument that is a token", "agent.mcp_servers", [{ name: "gh", transport: "stdio", command: "github-mcp", args: ["--pat", "github_pat_11ABCDEFG0123456789abcdefXYZ"] }], "agent.mcp_servers[0].args[1]", "github_pat_11ABCDEFG0123456789abcdefXYZ"],
+    ["a task git URL with a token", "task.git_url", "https://x-access-token:gho_Secret0123@github.com/org/tasks.git", "task.git_url", "gho_Secret0123"],
+    ["a REST URL under /users/ with a key in its query", "agent.kwargs", { endpoint: "https://api.example.com/users/me?api_key=S3cretValueXYZ" }, "agent.kwargs.endpoint", "S3cretValueXYZ"],
+    ["an MCP server URL under /home/ with a token in its query", "agent.mcp_servers", [{ name: "docs", transport: "sse", url: "https://mcp.example.com/home/sse?access_token=qwerty123" }], "agent.mcp_servers[0].url", "qwerty123"],
+    ["a credential used as a member name", "agent.kwargs", { headers: { "sk-proj-AbCdEf0123456789": "x" } }, "agent.kwargs.headers", "sk-proj-AbCdEf0123456789"],
+  ])("a trial record holding %s is refused, naming the file and the field and not the value", (_what, field, value, named, secret) => {
+    for (const [name, text, at] of trialRecords(field, value)) {
+      const error = refusalOf(name, text);
+      expect(error.code).toBe("validation");
+      expect(error.issues!.map((issue) => issue.path)).toEqual([`job/trial-1/${name}`]);
+      expect(error.message).toContain(`Harbor trial file job/trial-1/${name}`);
+      expect(error.message).toContain(at.replace(field, named));
+      expect(`${error.message}\n${JSON.stringify(error.issues)}`).not.toContain(secret);
+    }
+  });
+
+  // `run import` prints the refusal, which a claimant may run in a public CI log: a string or key
+  // that holds a credential and also meets a rule that shows text is reported without the credential.
+  test("no refusal shows the credential it refuses, whichever other rule the string or key meets", () => {
+    const probes: readonly (readonly [string, unknown, string])[] = [
+      ["agent.kwargs.endpoint", "https://api.example.com/users/me?api_key=S3cretValueXYZ", "S3cretValueXYZ"],
+      ["agent.kwargs.endpoint", "https://api.github.com/users/octocat?access_token=gho_Secret0123", "gho_Secret0123"],
+      ["agent.mcp_servers", [{ name: "docs", transport: "sse", url: "https://mcp.example.com/home/sse?access_token=qwerty123" }], "qwerty123"],
+      ["agent.kwargs.remote", "/home/bob:pw123@x", "pw123"],
+      ["agent.skills", ["/srv/skills/web?token=hunter2hunter2"], "hunter2hunter2"],
+      ["agent.kwargs.headers", { "sk-proj-AbCdEf0123456789": "x" }, "sk-proj-AbCdEf0123456789"],
+      ["sk-proj-AbCdEf0123456789", "x", "sk-proj-AbCdEf0123456789"],
+    ];
+    for (const [field, value, secret] of probes) {
+      for (const [name, text] of trialRecords(field, value)) {
+        const error = refusalOf(name, text);
+        expect(`${error.message}\n${JSON.stringify(error.issues)}`, `${name} at ${field}`).not.toContain(secret);
+      }
+    }
+  });
+
+  test("ordinary agent settings and Harbor's env placeholder are carried as Harbor wrote them", () => {
+    const config = {
+      trial_name: "hello-world__55xttAM",
+      agent: {
+        name: "terminus-2",
+        model_name: "openrouter/deepseek/deepseek-v4.1-flash",
+        kwargs: {
+          temperature: 0.7,
+          max_thinking_tokens: 2048,
+          parser_name: "xml",
+          api_base: "https://openrouter.ai/api/v1",
+          summarizer_model: "claude-sonnet-4-5-20250929",
+        },
+        env: { OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}" },
+        mcp_servers: [{ name: "docs", transport: "streamable-http", url: "https://mcp.example.com/mcp", args: [] }],
+      },
+    };
+    const text = JSON.stringify(config, null, 4);
+    expect(carried("trial-config.json", text)).toBe(text);
+  });
+
+  test.each([
+    ["No reward file found at ", "/home/ci/jobs/oracle/t__x/verifier/reward.txt or /home/ci/jobs/oracle/t__x/verifier/reward.json"],
+    ["Reward file is empty at ", "/srv/jobs/oracle/t__x/verifier/reward.txt"],
+    ["Failed to parse rewards from text file ", "C:\\jobs\\oracle\\t__x\\verifier\\reward.txt"],
+    ["Failed to parse rewards from JSON file ", "/srv/jobs/oracle/t__x/verifier/reward.json"],
+  ])("Harbor's reward-file message %s<absolute path> is removed, and the exception type is kept", (message, path) => {
+    const text = `{\n    "id": "x",\n    "exception_info": {\n        "exception_type": "RewardFileNotFoundError",\n        "exception_message": ${JSON.stringify(`${message}${path}`)},\n        "occurred_at": "2026-10-01T13:29:04.493781Z"\n    }\n}`;
+    expect(carried("trial-result.json", text)).toBe(
+      '{\n    "id": "x",\n    "exception_info": {\n        "exception_type": "RewardFileNotFoundError",\n        "occurred_at": "2026-10-01T13:29:04.493781Z"\n    }\n}',
+    );
+  });
+
+  test("Harbor's reward-file message with a relative path is carried as Harbor wrote it", () => {
+    const text = '{\n    "exception_info": {\n        "exception_type": "RewardFileNotFoundError",\n        "exception_message": "No reward file found at jobs/oracle/t__x/verifier/reward.txt or jobs/oracle/t__x/verifier/reward.json"\n    }\n}';
+    expect(carried("trial-result.json", text)).toBe(text);
+  });
 });
 
 /**
@@ -1210,6 +1401,103 @@ describe("readHarborRunImport — the official Terminal-Bench 2.1 slate", () => 
       expect(imported.error.detail).toContain("trial-result.json");
       expect(imported.error.detail).toContain(what);
       expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+    });
+
+    // #5289: a record Harbor wrote on another machine is checked against more than this
+    // machine's jobs and home directories.
+    test.each([
+      [
+        "a home directory of another machine",
+        ['"mounts": null,', `"mounts": ${JSON.stringify([{ type: "bind", source: "/home/runner-7/datasets", target: "/data" }])},`],
+        "config.environment.mounts[0].source",
+        "/home/runner-7",
+        undefined,
+      ],
+      [
+        "a credential",
+        ['"kwargs": {},', '"kwargs": {"api_key": "0123456789abcdef0123456789abcdef"},'],
+        "config.agent.kwargs.api_key",
+        "a value under a credential-shaped name",
+        "0123456789abcdef0123456789abcdef",
+      ],
+    ] as const)("a trial record holding %s is refused at import, naming the file and the field, and the draft stays locked", async (_what, [from, to], field, shown, secret) => {
+      await lockedOfficialSlate();
+      const jobs = jobsAsHarborWroteThem();
+      const path = join(jobs, TIMED_OUT_TRIAL, "result.json");
+      const text = readFileSync(path, "utf8");
+      expect(text).toContain(from);
+      writeFileSync(path, text.replace(from, to));
+      const { imported } = await importJobs(jobs);
+      expect(imported.ok).toBe(false);
+      if (imported.ok) throw new Error("expected the import to be refused");
+      expect(imported.error.code).toBe("validation");
+      expect(imported.error.issues!.map((issue) => issue.path)).toEqual(["terminus-2/chess-best-move__gs92yNg/result.json"]);
+      expect(imported.error.detail).toContain("terminus-2/chess-best-move__gs92yNg/result.json");
+      expect(imported.error.detail).toContain(field);
+      expect(imported.error.detail).toContain(shown);
+      if (secret !== undefined) expect(JSON.stringify(imported.error)).not.toContain(secret);
+      expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+    });
+
+    test.each([
+      ["on this machine", (jobs: string) => realpathSync(jobs)],
+      ["on another machine", () => "/home/ci-runner/work/jobs"],
+    ])("an ungradeable trial of a run Harbor was given an absolute -o %s imports, and its reward path is not published", async (_where, root) => {
+      await lockedOfficialSlate();
+      const jobs = jobsAsHarborWroteThem();
+      const trial = join("oracle", "chess-best-move__5FuHvzp");
+      const trialsDir = `${root(jobs)}/oracle`;
+      const verifierDir = `${trialsDir}/chess-best-move__5FuHvzp/verifier`;
+      // What Harbor 0.21.0 writes given `-o <absolute>` for a trial whose verifier wrote no reward
+      // file: the absolute trials_dir in both records, and a RewardFileNotFoundError whose message
+      // names the reward file paths under it (`harbor/verifier/verifier.py`).
+      rewriteJson(join(jobs, trial, "config.json"), (config) => {
+        config["trials_dir"] = trialsDir;
+      });
+      rewriteJson(join(jobs, trial, "result.json"), (result) => {
+        result["config"].trials_dir = trialsDir;
+        result["verifier_result"] = null;
+        result["exception_info"] = {
+          exception_type: "RewardFileNotFoundError",
+          exception_message: `No reward file found at ${verifierDir}/reward.txt or ${verifierDir}/reward.json`,
+          occurred_at: "2026-10-01T13:39:25.828481Z",
+        };
+      });
+      rmSync(join(jobs, trial, "verifier", "reward.txt"));
+
+      const { dump, imported } = await importJobs(jobs);
+      expect(imported.ok, JSON.stringify(imported)).toBe(true);
+      if (!imported.ok) return;
+      expect(recordOf(dump, "oracle: chess-best-move #1")).toMatchObject({
+        outcome: "ungradeable",
+        reason: "RewardFileNotFoundError",
+      });
+      const carried = carriedFiles(dump, imported.result.declarationSha256);
+      const carriedResult = new TextDecoder().decode(carried.get("oracle/chess-best-move__5FuHvzp/result.json")!);
+      expect(JSON.parse(carriedResult).exception_info).toEqual({
+        exception_type: "RewardFileNotFoundError",
+        occurred_at: "2026-10-01T13:39:25.828481Z",
+      });
+      for (const bytes of carried.values()) expect(new TextDecoder().decode(bytes)).not.toContain(root(jobs));
+
+      const collected = await runCollect(context("2026-10-01T14:05:00.000Z"), { draftId: "draft-1" });
+      expect(collected.ok, JSON.stringify(collected)).toBe(true);
+      const reported = await runReport(context("2026-10-01T14:10:00.000Z"), { draftId: "draft-1" });
+      expect(reported.ok, JSON.stringify(reported)).toBe(true);
+      if (!reported.ok) return;
+      const bundle = materializePublicBundle({
+        workspaceDir,
+        draftId: "draft-1",
+        benchmarkSha256: reported.result.claimPackage.records.benchmarkSha256,
+        runState: readRunState(workspaceDir, "draft-1")!,
+      });
+      await expect(verifyPublicBundle(bundle.bundleDir)).resolves.toMatchObject({ identity: bundle.identity });
+      const published = readdirSync(bundle.bundleDir, { recursive: true, withFileTypes: true })
+        .filter((entry) => entry.isFile())
+        .map((entry) => readFileSync(join(entry.parentPath, entry.name), "utf8"))
+        .join("\n");
+      expect(published).toContain("RewardFileNotFoundError");
+      expect(published).not.toContain(root(jobs));
     });
   });
 
