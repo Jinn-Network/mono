@@ -1849,6 +1849,104 @@ describe("checkBindingRevocation (§7.5 step 4, §7.4b)", () => {
       expect(await checkBindingRevocation(unwritten([]), "2026-03-01T00:00:00Z", deps)).toMatchObject({ ok: false });
     });
   });
+
+  // Each listed entry is judged on its own, whichever entries sit beside it. The answers below are
+  // read through all three entry points, with the entry that carries the authority listed first
+  // and last, so an answer kept for one entry and reused for another shows in one of the orders.
+  describe("revocation entries listed together", () => {
+    const VERDICT = "did:key:z6MkfMEMOVERDICT1111111111111111111111111";
+    const SETTLEMENT = "did:key:z6MkfMEMOSETTLE11111111111111111111111111";
+    const STRANGER = "did:key:z6MkfMEMOSTRANGER111111111111111111111111";
+    const keys = signingKeys(VERDICT, SETTLEMENT, VOUCHER_DID, OTHER_VOUCHER_DID, STRANGER);
+    const verdict = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: VERDICT, algorithm: "ed25519", didKey: VERDICT },
+      voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+      scope: ["verdicts"],
+    });
+    const settlement = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: SETTLEMENT, algorithm: "ed25519", didKey: SETTLEMENT },
+      voucher: { kind: "account", did: OTHER_VOUCHER_DID, contractAccount: false },
+      scope: ["settlements"],
+    });
+    const base = revocationEntry(VOUCHER_DID, "2026-02-01T00:00:00Z");
+    const sealedBy = (signedBy: string): Uint8Array =>
+      keys.seal(base.revocation, TRUST_REVOCATION_MEDIA_TYPE, VOUCHER_DID, signedBy);
+
+    async function verdicts(revocations: readonly ResolvedRevocation[]) {
+      const resolved = resolvedBinding({
+        binding: verdict,
+        envelopeBytes: keys.seal(verdict, TRUST_KEY_BINDING_MEDIA_TYPE, VERDICT),
+        revocations,
+      });
+      const deps = {
+        bindingResolver: new FakeBindingResolver()
+          .register({ key: VERDICT, agent: AGENT, resolved })
+          .register({
+            key: SETTLEMENT,
+            agent: AGENT,
+            resolved: authorityBinding(settlement, { envelopeBytes: keys.seal(settlement, TRUST_KEY_BINDING_MEDIA_TYPE, SETTLEMENT) }),
+          }),
+        witnessVerifier: fakeWitnessVerifier,
+        dsseVerifier: keys.verifier,
+      };
+      return {
+        revocation: await checkBindingRevocation(resolved, "2026-03-01T00:00:00Z", deps),
+        envelope: await verifyEnvelopeBinding(
+          {
+            envelopeBytes: keys.seal({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, VERDICT),
+            key: VERDICT,
+            agent: AGENT,
+            family: "verdicts",
+            atTime: "2026-03-01T00:00:00Z",
+          },
+          deps,
+        ),
+        join: await settlementJoinCheck(
+          {
+            verdictKey: VERDICT,
+            settlementDeclarationKey: SETTLEMENT,
+            claimedEvaluatorAgent: AGENT,
+            family: "verdicts",
+            envelopeEffectiveTime: "2026-03-01T00:00:00Z",
+            claimTime: "2026-03-05T00:00:00Z",
+          },
+          deps,
+        ),
+      };
+    }
+
+    const revokedBoth = async (listed: readonly ResolvedRevocation[]) => {
+      const outcome = await verdicts(listed);
+      expect(outcome.revocation).toMatchObject({ ok: false });
+      expect(outcome.envelope).toMatchObject({ ok: false, reason: "revoked" });
+      expect(outcome.join).toMatchObject({ ok: false, reason: expect.stringMatching(/verdict leg is revoked/) });
+    };
+
+    test("alike in all but the envelope, the one the voucher signed revokes whichever is listed first", async () => {
+      const forged = { ...base, envelopeBytes: sealedBy(STRANGER) };
+      const genuine = { ...base, envelopeBytes: sealedBy(VOUCHER_DID) };
+      await revokedBoth([forged, genuine]);
+      await revokedBoth([genuine, forged]);
+    });
+
+    test("unwritable entries, one with authority and one without, revoke whichever is listed first", async () => {
+      // A bigint cannot be written out, so neither entry has a row of its own.
+      const unwritable = (envelopeBytes: Uint8Array, revokedBy: string): ResolvedRevocation => ({
+        ...base,
+        revocation: { ...base.revocation, revokedBy, nonce: 1n } as never,
+        envelopeBytes,
+      });
+      const withoutAuthority = unwritable(
+        keys.seal({ ...base.revocation, revokedBy: OTHER_VOUCHER_DID }, TRUST_REVOCATION_MEDIA_TYPE, OTHER_VOUCHER_DID),
+        OTHER_VOUCHER_DID,
+      );
+      const withAuthority = unwritable(sealedBy(VOUCHER_DID), VOUCHER_DID);
+      await revokedBoth([withoutAuthority, withAuthority]);
+      await revokedBoth([withAuthority, withoutAuthority]);
+    });
+  });
 });
 
 describe("authenticateRequester (§7.5b)", () => {
