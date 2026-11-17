@@ -429,7 +429,7 @@ function replacedCatalogEvidence(dir: string, catalogPath: string): string | und
 /**
  * The stores `jinn ceremony rotate` minted for `family` in `<dir>/identity`. Every rotation mints its
  * replacement store there, `<family>.rotated-<stamp>.enc.json`, beside the store init and join open,
- * before it sends any anchor, and the newest one holds the family's current keys. So one is there for
+ * before it sends any anchor, and points identityStores at the newest one. So one is there for
  * every rotation of the family in `<dir>`, including one before the latest, whatever the config or the
  * rotation receipt says. Listing the directory opens no store.
  */
