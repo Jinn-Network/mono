@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CeremonyCurrencyProfile, EoaCeremonyEvidence } from "./ceremony.js";
+import type { CeremonyCurrencyProfile, KeyBindingCeremonyEvidence } from "./ceremony.js";
 import type { KeyBinding } from "./key-binding.js";
 import type { Revocation } from "./revocation.js";
 import type { Sha256Digest } from "./types.js";
@@ -46,15 +46,20 @@ export interface ResolvedBinding {
   readonly bindingDigest: Sha256Digest;
   /** `max(binding.validFrom, anchorTime)` -- §7.3's effective-start rule. */
   readonly effectiveStart: string;
-  /** Present when `binding.ceremony.type === "eoa"` -- the raw ceremony
-   * evidence for `core`'s own offline EIP-191 leg (`ceremony.ts`). */
-  readonly ceremonyEvidence?: EoaCeremonyEvidence;
+  /** Present when `binding.ceremony.type` is `"eoa"` or `"safe"` -- the raw
+   * ceremony evidence, of that type, for `core`'s own offline leg
+   * (`ceremony.ts`): the signed SIWE message, which `binding.ceremony.digest`
+   * commits to and which must match the record, and for an `eoa` ceremony the
+   * EIP-191 signature that names its signer. */
+  readonly ceremonyEvidence?: KeyBindingCeremonyEvidence;
   /** Present when `binding.ceremony.type === "safe"` -- the 1271 witness
-   * statement for the injected `WitnessVerifier` leg (§7.2a). */
+   * statement for the injected `WitnessVerifier` leg (§7.2a). `core` first
+   * requires the statement to name the voucher's chain and Safe, and the
+   * EIP-191 hash of `ceremonyEvidence.messageBytes`. */
   readonly witness?: Eip1271Witness;
   /** The deployment's ceremony currency profile, present when the resolver
    * applies `https://spec.jinn.network/profiles/ceremony-currency/v1`. `verify.ts`
-   * then checks an `eoa` ceremony against it at `effectiveStart`. Absent,
+   * then checks an `eoa` or `safe` ceremony against it at `effectiveStart`. Absent,
    * ceremonies are checked as they were before that text. Present, a ceremony
    * that fails it gives no authority, so it can also lose a key conflict to
    * another record or stop a revocation it signed from counting. */
@@ -121,7 +126,10 @@ export interface AnchorResolver {
  * -- `{chainId, blockNumber, blockHash, isValidSignature result, verifier}`
  * -- carried here as its sealed envelope bytes plus the declared fields
  * `verify1271Witness` needs to locate and check it (witness-author
- * acceptability is a §9 policy purpose, applied by the caller). */
+ * acceptability is a §9 policy purpose, applied by the caller). The
+ * statement's payload also names the `safe` it asked and the `hash` it asked
+ * about, which `verify.ts` reads, with its `chainId`, to tie the witness to a
+ * ceremony. */
 export interface Eip1271Witness {
   readonly chainId: number;
   readonly blockNumber: number;

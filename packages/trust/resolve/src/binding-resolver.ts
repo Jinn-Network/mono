@@ -26,9 +26,9 @@ import type {
   CeremonyCurrencyProfile,
   ChainFactResolver,
   Eip1271Witness,
-  EoaCeremonyEvidence,
   IncumbentControl,
   KeyBinding,
+  KeyBindingCeremonyEvidence,
   Revocation,
   ResolvedBinding,
   ResolvedRevocation,
@@ -68,12 +68,13 @@ import { TrustResolveError, invalidInput, resolutionFailed } from "./errors.js";
 /** A sealed key-binding record as the injected `BindingStore` supplies it
  * -- the parsed record alongside its raw envelope bytes and digest, plus
  * (when the ceremony type calls for it) the raw ceremony evidence
- * `trust-core`'s own offline leg needs (§7.5 step 3). */
+ * `trust-core`'s own offline leg needs (§7.5 step 3): for an `eoa` or `safe`
+ * ceremony the signed message, and for a `safe` ceremony its 1271 witness. */
 export interface SealedKeyBindingRecord {
   readonly binding: KeyBinding;
   readonly envelopeBytes: Uint8Array;
   readonly bindingDigest: Sha256Digest;
-  readonly ceremonyEvidence?: EoaCeremonyEvidence;
+  readonly ceremonyEvidence?: KeyBindingCeremonyEvidence;
   readonly witness?: Eip1271Witness;
 }
 
@@ -130,8 +131,9 @@ export interface CreateBindingResolverOptions {
    * question more than 64 times ends as an outage (`TrustResolveError`, `RESOLUTION_FAILED`). */
   readonly compositionAuthority?: Pick<BindingAuthorityDeps, "dsseVerifier" | "witnessVerifier">;
   /** §7.5 step 3 for the ceremonies nothing in this package can verify:
-   * `safe` (the witness leg in `verify.ts` does not tie a witness to this
-   * record), `oidc-machine` (anchored JWKS) and `github-human`. A host that
+   * `safe` (this resolver holds no witness verifier; `verify.ts` checks the
+   * record's message and witness again, with the verifier its caller injects),
+   * `oidc-machine` (anchored JWKS) and `github-human`. A host that
    * can verify them says so here, record by record. Omit it and those
    * bindings simply fail to resolve: `verify.ts` takes a resolved binding as
    * this resolver's word that its ceremony was checked. A record the leg cannot
@@ -154,9 +156,9 @@ export interface CreateBindingResolverOptions {
    * an `eoa` ceremony must also hold under the text at its record's effective
    * start, here and, because each resolved binding carries this profile, in
    * `verify.ts`. A `termsCutover` must be readable and needs `requireAnchors`,
-   * since only an anchor fixes the effective start. `safe` ceremonies are the
-   * host's leg: a host that verifies them in `verifyHostedCeremony` applies the
-   * text there. */
+   * since only an anchor fixes the effective start. Here a `safe` ceremony is
+   * the host's leg: a host that verifies one in `verifyHostedCeremony` applies
+   * the text there, and `verify.ts` applies it to the record's message again. */
   readonly ceremonyCurrency?: CeremonyCurrencyProfile;
   /** Observability seam for §7.3's "the conflict is surfaced to policy" --
    * `trust-resolve` has no policy layer of its own. */
@@ -369,7 +371,7 @@ function eoaSignatureAndContentVerified(record: SealedKeyBindingRecord): boolean
   if (known !== undefined) return known;
   let verified = false;
   try {
-    verified = record.ceremonyEvidence !== undefined
+    verified = record.ceremonyEvidence?.type === "eoa"
       && ceremonyEvidenceDigest(record.ceremonyEvidence) === record.binding.ceremony.digest
       && verifyEoaCeremony(record.ceremonyEvidence, record.binding).verified;
   } catch {

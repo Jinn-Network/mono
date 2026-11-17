@@ -25,7 +25,6 @@ import {
   buildRevocationFixture,
   createEoaTestSigner,
   resolvedRevocation,
-  stubWitness,
   testAgentIri,
   testDidKey,
   testSha256Digest,
@@ -33,8 +32,10 @@ import {
 
 // ---------------------------------------------------------------------------
 // The §16 conformance battery: schema validation for the four record
-// families, the ceremony goldens (EOA SIWE genuinely re-verified; Safe/
-// agentId/OIDC-machine/GitHub-human resolver-trusted per §7.2's design),
+// families, the ceremony goldens (EOA SIWE genuinely re-verified; a Safe
+// ceremony's message checked as an EOA's is, with its witness left to the
+// injected verifier; agentId/OIDC-machine/GitHub-human resolver-trusted per
+// §7.2's design),
 // at-time resolution window checks, consent chains, and revocation.
 //
 // §7.5a's settlement-join check and §7.5b's requester authentication are
@@ -215,7 +216,7 @@ export function describeTrustVerificationContract(createContext: TrustVerificati
           workingKeyDidKey: key,
           ceremonyType: "safe",
           voucher: accountVoucher(84532, "0x5555555555555555555555555555555555555555" as `0x${string}`, true),
-          witness: stubWitness(witnessIri),
+          safeCeremony: { witnessAuthor: witnessIri },
         });
         context.seedWitnessResult(witnessIri, { verified: true });
         context.seedBinding({ key, agent, resolved: fixture.resolved, validFrom: fixture.binding.validFrom });
@@ -238,7 +239,7 @@ export function describeTrustVerificationContract(createContext: TrustVerificati
           workingKeyDidKey: key,
           ceremonyType: "safe",
           voucher: accountVoucher(84532, "0x6666666666666666666666666666666666666666" as `0x${string}`, true),
-          witness: stubWitness(witnessIri),
+          safeCeremony: { witnessAuthor: witnessIri },
         });
         context.seedWitnessResult(witnessIri, { verified: false, reason: "witness author not policy-accepted" });
         context.seedBinding({ key, agent, resolved: fixture.resolved, validFrom: fixture.binding.validFrom });

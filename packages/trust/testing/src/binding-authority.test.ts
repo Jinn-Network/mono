@@ -149,7 +149,7 @@ class World {
         : { ceremonyEvidence: fixture.ceremonyEvidence }),
       ...(options.evidence === undefined || fixture.ceremonyEvidence === undefined
         ? {}
-        : { ceremonyEvidence: options.evidence(fixture.ceremonyEvidence) as EoaCeremonyEvidence }),
+        : { ceremonyEvidence: options.evidence(fixture.ceremonyEvidence as EoaCeremonyEvidence) as EoaCeremonyEvidence }),
     };
     this.records.push(record);
     return record;

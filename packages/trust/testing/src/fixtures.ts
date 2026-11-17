@@ -7,10 +7,13 @@ import {
   TRUST_KEY_BINDING_FORMAT,
   TRUST_POLICY_FORMAT,
   TRUST_REVOCATION_FORMAT,
+  canonicalJsonBytes,
   ceremonyEvidenceDigest,
   deriveStrength,
   didPkh,
+  eip191MessageHash,
   sealAuthorization,
+  sealDsseEnvelope,
   sealKeyBinding,
   sealRevocation,
   sealTrustPolicy,
@@ -24,11 +27,13 @@ import type {
   EoaCeremonyEvidence,
   IncumbentControl,
   KeyBinding,
+  KeyBindingCeremonyEvidence,
   PolicyPurposeEntry,
   Relationship,
   ResolvedBinding,
   ResolvedRevocation,
   Revocation,
+  SafeCeremonyEvidence,
   Scope,
   Sha256Digest,
   SiweCeremonyMessage,
@@ -61,7 +66,9 @@ export type { EoaTestSigner };
 // the T7 finding: real DSSE verification is deferred everywhere in this
 // tree). The one EXCEPTION is the EOA ceremony leg, which `verify.ts`
 // independently, genuinely recovers -- `crypto.ts`'s `EoaTestSigner`
-// signs for real there.
+// signs for real there. A Safe ceremony's message and witness statement
+// are built for real too, since `verify.ts` reads both; only the Safe's own
+// signature, which nothing checks offline, is a placeholder.
 // ---------------------------------------------------------------------------
 
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -146,6 +153,63 @@ function buildEoaCeremonyEvidence(
   return { type: "eoa", message, messageBytes, signature };
 }
 
+export interface SafeCeremonyOptions {
+  /** The Agent IRI of the 1271 witness's author, which the kit's fake
+   * `WitnessVerifier` looks its result up by (`registerWitnessResult`). */
+  readonly witnessAuthor: string;
+}
+
+/** A Safe ceremony (§7.2) by the voucher's Safe, and a 1271 witness statement
+ * (§7.2a) that the Safe accepted the EIP-191 hash of its signed bytes. */
+function buildSafeCeremony(
+  agentIri: string,
+  workingKeyDidKey: string,
+  voucher: VoucherIdentity,
+  options: SafeCeremonyOptions,
+): { readonly ceremonyEvidence: SafeCeremonyEvidence; readonly witness: Eip1271Witness } {
+  const account = voucher.kind === "account" ? /^did:pkh:eip155:([0-9]+):(0x[0-9a-fA-F]{40})$/.exec(voucher.did) : null;
+  if (account === null) {
+    throw new Error("buildKeyBindingFixture: a safe ceremony needs an account voucher.");
+  }
+  const chainId = Number(account[1]);
+  const safe = account[2] as `0x${string}`;
+  const message: SiweCeremonyMessage = {
+    domain: "trust.jinn.network",
+    address: safe,
+    uri: "https://trust.jinn.network/ceremony/key-binding",
+    version: "1",
+    chainId,
+    nonce: "fixture-nonce",
+    issuedAt: "2026-01-01T00:00:00.000Z",
+    resources: [agentIri, workingKeyDidKey],
+  };
+  const messageBytes = serializeCeremonyMessage("safe", message);
+  const blockHash = `0x${"cc".repeat(32)}`;
+  const statement = {
+    chainId,
+    blockNumber: 1,
+    blockHash,
+    verifier: options.witnessAuthor,
+    safe,
+    hash: eip191MessageHash(messageBytes),
+    signature: "0x5a",
+    result: "0x1626ba7e",
+  };
+  return {
+    ceremonyEvidence: { type: "safe", message, messageBytes, signature: Uint8Array.of(0x5a) },
+    witness: {
+      chainId,
+      blockNumber: 1,
+      blockHash,
+      verifier: options.witnessAuthor,
+      envelopeBytes: sealDsseEnvelope({
+        payloadBytes: canonicalJsonBytes(statement),
+        signatures: [{ signature: Uint8Array.of(1), keyid: testDidKey(`${options.witnessAuthor}-witness`) }],
+      }),
+    },
+  };
+}
+
 export interface BuildKeyBindingFixtureOptions {
   readonly agent: string;
   readonly workingKeyDidKey: string;
@@ -161,19 +225,25 @@ export interface BuildKeyBindingFixtureOptions {
   readonly strengthOverride?: Strength;
   /** Required when `ceremonyType === "eoa"`. */
   readonly eoaCeremony?: EoaCeremonyOptions;
+  /** With `ceremonyType === "safe"`, builds the ceremony and its witness.
+   * Without it a Safe record carries neither, so its ceremony verifies nothing. */
+  readonly safeCeremony?: SafeCeremonyOptions;
 }
 
 export interface KeyBindingFixture {
   readonly binding: KeyBinding;
   readonly envelopeBytes: Uint8Array;
   readonly bindingDigest: Sha256Digest;
-  readonly ceremonyEvidence?: EoaCeremonyEvidence;
+  readonly ceremonyEvidence?: KeyBindingCeremonyEvidence;
+  /** A Safe ceremony's 1271 witness, when `safeCeremony` built one. */
+  readonly witness?: Eip1271Witness;
 }
 
 const DEFAULT_SCOPE: readonly Scope[] = ["bindings", "verdicts", "deliveries", "observations", "authorizations"];
 
 export async function buildKeyBindingFixture(options: BuildKeyBindingFixtureOptions): Promise<KeyBindingFixture> {
-  let ceremonyEvidence: EoaCeremonyEvidence | undefined;
+  let ceremonyEvidence: KeyBindingCeremonyEvidence | undefined;
+  let witness: Eip1271Witness | undefined;
   let ceremonyDigest: Sha256Digest;
 
   if (options.ceremonyType === "eoa") {
@@ -185,6 +255,14 @@ export async function buildKeyBindingFixture(options: BuildKeyBindingFixtureOpti
     // `ceremony.digest` must commit to the SAME evidence blob `verify.ts`'s
     // ceremony leg is handed (major finding) -- computed the same way
     // `ceremonyEvidenceDigest` computes it in core, over the full evidence.
+    ceremonyDigest = ceremonyEvidenceDigest(ceremonyEvidence);
+  } else if (options.ceremonyType === "safe" && options.safeCeremony !== undefined) {
+    ({ ceremonyEvidence, witness } = buildSafeCeremony(
+      options.agent,
+      options.workingKeyDidKey,
+      options.voucher,
+      options.safeCeremony,
+    ));
     ceremonyDigest = ceremonyEvidenceDigest(ceremonyEvidence);
   } else {
     ceremonyDigest = testSha256Digest(`${options.ceremonyType}-ceremony-${options.agent}-${options.workingKeyDidKey}`);
@@ -217,6 +295,7 @@ export async function buildKeyBindingFixture(options: BuildKeyBindingFixtureOpti
     envelopeBytes: sealed.envelopeBytes,
     bindingDigest: sealed.recordDigest,
     ...(ceremonyEvidence === undefined ? {} : { ceremonyEvidence }),
+    ...(witness === undefined ? {} : { witness }),
   };
 }
 
@@ -239,6 +318,7 @@ export async function buildResolvedBindingFixture(
   options: ResolvedBindingFixtureOptions,
 ): Promise<ResolvedBindingFixture> {
   const built = await buildKeyBindingFixture(options);
+  const witness = options.witness ?? built.witness;
   const resolved: ResolvedBinding = {
     binding: built.binding,
     envelopeBytes: built.envelopeBytes,
@@ -247,16 +327,17 @@ export async function buildResolvedBindingFixture(
     isGenesis: options.isGenesis ?? true,
     revocations: options.revocations ?? [],
     ...(built.ceremonyEvidence === undefined ? {} : { ceremonyEvidence: built.ceremonyEvidence }),
-    ...(options.witness === undefined ? {} : { witness: options.witness }),
+    ...(witness === undefined ? {} : { witness }),
     ...(options.incumbentControls === undefined ? {} : { incumbentControls: options.incumbentControls }),
   };
   return { ...built, resolved };
 }
 
 /** A stub 1271 witness for the kit's fake `WitnessVerifier` -- pair with
- * `fakes.ts`'s `registerWitnessResult(verifierIri, result)`. The real
- * witness envelope shape is exercised by `trust-resolve`'s own
- * `witness.test.ts` (T12); the kit only needs the lookup key. */
+ * `fakes.ts`'s `registerWitnessResult(verifierIri, result)`. Its statement
+ * cannot be read, so it attests nothing: `verify.ts` refuses a Safe ceremony
+ * that relies on it before any verifier is asked. For a witness that speaks
+ * for a fixture's own Safe ceremony, build the binding with `safeCeremony`. */
 export function stubWitness(verifier: string): Eip1271Witness {
   return {
     chainId: 84532,

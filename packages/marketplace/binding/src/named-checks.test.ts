@@ -19,12 +19,18 @@ import {
   TRUST_KEY_BINDING_FORMAT,
   TRUST_REVOCATION_FORMAT,
   TRUST_REVOCATION_MEDIA_TYPE,
+  ceremonyEvidenceDigest,
+  didPkh,
+  eip191MessageHash,
   parseDsseEnvelope,
   sealDsseEnvelope,
+  serializeCeremonyMessage,
   type BindingResolver,
   type DsseChainVerifier,
   type ResolvedBinding,
   type ResolvedRevocation,
+  type SafeCeremonyEvidence,
+  type SiweCeremonyMessage,
   type WitnessVerifier,
 } from "@jinn-network/trust-core";
 import { describe, expect, test } from "vitest";
@@ -120,6 +126,53 @@ function resolvedBinding(
       ceremony: { type: "oidc-machine", digest: `sha256:${"7".repeat(64)}` },
       strength: "strong",
       anchors: [],
+    },
+  };
+}
+
+/** `resolved`, vouched instead by a Safe, through a genuine ceremony and a 1271 witness statement
+ * that the Safe accepted it. */
+function safeVouched(resolved: ResolvedBinding): ResolvedBinding {
+  const safe = "0x4444444444444444444444444444444444444444";
+  const message: SiweCeremonyMessage = {
+    domain: "trust.jinn.network",
+    address: safe,
+    uri: "https://trust.jinn.network/ceremony/key-binding",
+    version: "1",
+    chainId: 84532,
+    nonce: "n-safe-1",
+    issuedAt: "2026-01-01T00:00:00Z",
+    resources: [resolved.binding.agent, resolved.binding.key.didKey],
+  };
+  const messageBytes = serializeCeremonyMessage("safe", message);
+  const ceremonyEvidence: SafeCeremonyEvidence = { type: "safe", message, messageBytes, signature: Uint8Array.of(1) };
+  const statement = {
+    chainId: 84532,
+    blockNumber: 1,
+    blockHash: `0x${"c".repeat(64)}`,
+    verifier: EVALUATOR_AGENT,
+    safe,
+    hash: eip191MessageHash(messageBytes),
+    signature: "0x01",
+    result: "0x1626ba7e",
+  };
+  return {
+    ...resolved,
+    binding: {
+      ...resolved.binding,
+      voucher: { kind: "account", did: didPkh(84532, safe), contractAccount: true },
+      ceremony: { type: "safe", digest: ceremonyEvidenceDigest(ceremonyEvidence) },
+    },
+    ceremonyEvidence,
+    witness: {
+      chainId: statement.chainId,
+      blockNumber: statement.blockNumber,
+      blockHash: statement.blockHash,
+      verifier: statement.verifier,
+      envelopeBytes: sealDsseEnvelope({
+        payloadBytes: new TextEncoder().encode(JSON.stringify(statement)),
+        signatures: [{ signature: Uint8Array.of(1), keyid: "did:key:zWitness" }],
+      }),
     },
   };
 }
@@ -654,16 +707,11 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
     }
 
     test("counts a revocation by a revoker whose ceremony only the witness leg verifies", async () => {
-      const cold = resolvedBinding(COLD_KEY, EVALUATOR_AGENT, ["bindings"]);
+      const cold = safeVouched(resolvedBinding(COLD_KEY, EVALUATOR_AGENT, ["bindings"]));
       const ports = withBinding(
         makePorts(undefined, SOLVER_AGENT, [], [revocationEntry(COLD_KEY, CLAIM_BLOCK_TIME)]),
         COLD_KEY,
-        {
-          ...cold,
-          bindingDigest: `sha256:${"9".repeat(64)}`,
-          binding: { ...cold.binding, ceremony: { type: "safe", digest: `sha256:${"7".repeat(64)}` } },
-          witness: { chainId: 84532, blockNumber: 1, blockHash: `0x${"c".repeat(64)}`, verifier: EVALUATOR_AGENT, envelopeBytes: Uint8Array.of(1) },
-        },
+        { ...cold, bindingDigest: `sha256:${"9".repeat(64)}` },
       );
       expect(await gateVerdictObservation(makeFixture().input, ports)).toEqual({
         decisionGrade: false,

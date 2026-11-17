@@ -4,12 +4,14 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 
 import { canonicalJsonBytes } from "./canonical-json.js";
+import { parseDsseEnvelope } from "./dsse.js";
 import { compareCodeUnitStrings } from "./order.js";
 import { invalidInput } from "./errors.js";
 import { recordDigest, sha256Hex } from "./hashing.js";
 import { compareCalendarStrictRfc3339Instants, isCalendarStrictRfc3339 } from "./rfc3339.js";
 import { toChecksumAddress } from "./spellings.js";
 import type { AuthorizationStatement } from "./authorization.js";
+import type { Eip1271Witness } from "./interfaces.js";
 import type { KeyBinding } from "./key-binding.js";
 import type { Sha256Digest } from "./types.js";
 
@@ -47,6 +49,12 @@ const EIP191_SIGNATURE_LENGTH = 65;
 
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/** The EIP-191 `personal_sign` digest of `messageBytes`, as `0x` and 64 lowercase hexadecimal
+ * digits: the hash a Safe's EIP-1271 `isValidSignature` is asked about for a signed message. */
+export function eip191MessageHash(messageBytes: Uint8Array): `0x${string}` {
+  return `0x${bytesToHex(personalSignDigest(messageBytes))}`;
 }
 
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
@@ -117,7 +125,7 @@ export interface SiweCeremonyMessage {
   readonly issuedAt: string;
   readonly expirationTime?: string;
   /**
-   * §7.2's mandatory content-match payload: for an EOA key-binding
+   * §7.2's mandatory content-match payload: for an EOA or Safe key-binding
    * ceremony, `[Agent IRI, did:key URI]`; for a ReCap authorization
    * ceremony (§8.1), the transcribed capability strings.
    */
@@ -126,9 +134,11 @@ export interface SiweCeremonyMessage {
 
 interface CeremonyEvidenceBase {
   readonly message: SiweCeremonyMessage;
-  /** The exact bytes that were EIP-191-signed. */
+  /** The exact bytes that were signed. */
   readonly messageBytes: Uint8Array;
-  /** 65-byte `r || s || v` EIP-191 signature. */
+  /** For an EOA or ReCap ceremony, the 65-byte `r || s || v` EIP-191
+   * signature; for a Safe ceremony, the EIP-1271 signature the Safe was
+   * asked to accept, which only its 1271 witness (§7.2a) can check. */
   readonly signature: Uint8Array;
 }
 
@@ -136,9 +146,18 @@ export interface EoaCeremonyEvidence extends CeremonyEvidenceBase {
   readonly type: "eoa";
 }
 
+/** A Safe ceremony (§7.2): the same profiled SIWE message an EOA signs,
+ * signed by the Safe under EIP-1271. */
+export interface SafeCeremonyEvidence extends CeremonyEvidenceBase {
+  readonly type: "safe";
+}
+
 export interface ReCapCeremonyEvidence extends CeremonyEvidenceBase {
   readonly type: "recap";
 }
+
+/** The evidence of a key-binding ceremony that carries a SIWE message. */
+export type KeyBindingCeremonyEvidence = EoaCeremonyEvidence | SafeCeremonyEvidence;
 
 export interface CeremonyResult {
   readonly verified: boolean;
@@ -168,8 +187,12 @@ export interface CeremonyContentMatchResult {
 const EOA_CEREMONY_STATEMENT = "Bind this working key to the named Agent IRI.";
 const RECAP_CEREMONY_STATEMENT = "Authorize the listed capabilities.";
 
-function ceremonyStatement(type: "eoa" | "recap"): string {
-  return type === "eoa" ? EOA_CEREMONY_STATEMENT : RECAP_CEREMONY_STATEMENT;
+/** The ceremony types whose evidence is a profiled SIWE message. A Safe signs
+ * the same message an EOA does (§7.2), so the two share one profile. */
+type SiweCeremonyType = KeyBindingCeremonyEvidence["type"] | ReCapCeremonyEvidence["type"];
+
+function ceremonyStatement(type: SiweCeremonyType): string {
+  return type === "recap" ? RECAP_CEREMONY_STATEMENT : EOA_CEREMONY_STATEMENT;
 }
 
 // §7.2 pins a dedicated ceremony `domain` and `uri`, so that a signature asked
@@ -185,13 +208,13 @@ const AUTHORIZATION_CEREMONY_URI = "https://trust.jinn.network/ceremony/authoriz
 
 /** Why `message` is not the profile's for a ceremony of `type`, compared exactly;
  * `undefined` when its domain and URI are the profile's. */
-function profileMismatch(type: "eoa" | "recap", message: SiweCeremonyMessage): string | undefined {
+function profileMismatch(type: SiweCeremonyType, message: SiweCeremonyMessage): string | undefined {
   if (message.domain !== CEREMONY_DOMAIN) {
     return `ceremony domain "${message.domain}" is not the profile's "${CEREMONY_DOMAIN}" (§7.2).`;
   }
-  const [uri, purpose] = type === "eoa"
-    ? [KEY_BINDING_CEREMONY_URI, "a key-binding"]
-    : [AUTHORIZATION_CEREMONY_URI, "an authorization"];
+  const [uri, purpose] = type === "recap"
+    ? [AUTHORIZATION_CEREMONY_URI, "an authorization"]
+    : [KEY_BINDING_CEREMONY_URI, "a key-binding"];
   if (message.uri !== uri) {
     return `ceremony URI "${message.uri}" is not the profile's "${uri}" for ${purpose} ceremony (§7.2).`;
   }
@@ -207,7 +230,7 @@ function profileMismatch(type: "eoa" | "recap", message: SiweCeremonyMessage): s
  * than a check with wiggle room.
  */
 export function serializeCeremonyMessage(
-  type: "eoa" | "recap",
+  type: SiweCeremonyType,
   message: SiweCeremonyMessage,
 ): Uint8Array {
   const lines = [
@@ -241,7 +264,7 @@ export function serializeCeremonyMessage(
  * content.
  */
 export function ceremonyEvidenceDigest(
-  ceremony: EoaCeremonyEvidence | ReCapCeremonyEvidence,
+  ceremony: KeyBindingCeremonyEvidence | ReCapCeremonyEvidence,
 ): Sha256Digest {
   return recordDigest(canonicalJsonBytes({
     type: ceremony.type,
@@ -275,7 +298,7 @@ export function ceremonyEvidenceDigest(
  * another purpose binds nothing either.
  */
 export function matchCeremonyContent(
-  ceremony: EoaCeremonyEvidence,
+  ceremony: KeyBindingCeremonyEvidence,
   record: KeyBinding,
 ): CeremonyContentMatchResult;
 export function matchCeremonyContent(
@@ -283,7 +306,7 @@ export function matchCeremonyContent(
   record: AuthorizationStatement,
 ): CeremonyContentMatchResult;
 export function matchCeremonyContent(
-  ceremony: EoaCeremonyEvidence | ReCapCeremonyEvidence,
+  ceremony: KeyBindingCeremonyEvidence | ReCapCeremonyEvidence,
   record: KeyBinding | AuthorizationStatement,
 ): CeremonyContentMatchResult {
   const reserialized = serializeCeremonyMessage(ceremony.type, ceremony.message);
@@ -466,10 +489,10 @@ export function ceremonyCurrencyFailure(
   return undefined;
 }
 
-function accountAddressFromVoucher(binding: KeyBinding): `0x${string}` | undefined {
+function voucherAccount(binding: KeyBinding): { readonly chainId: string; readonly address: `0x${string}` } | undefined {
   if (binding.voucher.kind !== "account") return undefined;
-  const match = /^did:pkh:eip155:[0-9]+:(0x[0-9a-fA-F]{40})$/.exec(binding.voucher.did);
-  return match ? (match[1] as `0x${string}`) : undefined;
+  const match = /^did:pkh:eip155:([0-9]+):(0x[0-9a-fA-F]{40})$/.exec(binding.voucher.did);
+  return match ? { chainId: match[1]!, address: match[2] as `0x${string}` } : undefined;
 }
 
 function describeError(cause: unknown): string {
@@ -494,7 +517,7 @@ export function verifyEoaCeremony(
   binding: KeyBinding,
   currency?: CeremonyCurrencyCheck,
 ): CeremonyResult {
-  const voucherAddress = accountAddressFromVoucher(binding);
+  const voucherAddress = voucherAccount(binding)?.address;
   if (voucherAddress === undefined) {
     return { verified: false, reason: "binding voucher is not an EOA account identity." };
   }
@@ -526,6 +549,89 @@ export function verifyEoaCeremony(
   }
 
   return { verified: true, recoveredAddress };
+}
+
+/** What a 1271 witness statement (§7.2a) says it checked: on which chain, which
+ * Safe, and the hash `isValidSignature` was asked about. This reads only the
+ * claim; whether it is believed is the injected `WitnessVerifier`'s call.
+ * `undefined` for a statement that cannot be read. */
+function witnessClaim(
+  witness: Eip1271Witness,
+): { readonly chainId: unknown; readonly safe: unknown; readonly hash: unknown } | undefined {
+  try {
+    const { payloadBytes } = parseDsseEnvelope(witness.envelopeBytes);
+    const statement: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(payloadBytes));
+    if (typeof statement !== "object" || statement === null) return undefined;
+    const { chainId, safe, hash } = statement as Record<string, unknown>;
+    return { chainId, safe, hash };
+  } catch {
+    return undefined;
+  }
+}
+
+const ADDRESS_TEXT = /^0x[0-9a-fA-F]{40}$/u;
+const HASH_TEXT = /^0x[0-9a-fA-F]{64}$/u;
+
+/**
+ * §7.5 step 3's offline part of a Safe leg: what `verifyEoaCeremony`
+ * establishes for an EOA, for the same message signed by a Safe under
+ * EIP-1271 (§7.2). A Safe's signature cannot be checked offline, so who signed
+ * is what its 1271 witness (§7.2a) states: the witness must say it checked the
+ * binding's voucher Safe, on the voucher's chain, for the EIP-191 hash of the
+ * exact signed bytes. Those bytes must then match the record as an EOA
+ * ceremony's do (`matchCeremonyContent`, which also requires the profile's
+ * domain and URI), and, with a `currency` check, hold under the ceremony
+ * currency text (`ceremonyCurrencyFailure`).
+ *
+ * This does not decide whether the witness is believed: that is the injected
+ * `WitnessVerifier`'s call (§7.2a), and a Safe ceremony verifies only when
+ * both hold.
+ */
+export function matchSafeCeremony(
+  ceremony: SafeCeremonyEvidence,
+  witness: Eip1271Witness,
+  binding: KeyBinding,
+  currency?: CeremonyCurrencyCheck,
+): CeremonyContentMatchResult {
+  const account = voucherAccount(binding);
+  if (account === undefined) {
+    return { matches: false, mismatch: "binding voucher is not an account identity." };
+  }
+  const claim = witnessClaim(witness);
+  if (claim === undefined) {
+    return { matches: false, mismatch: "1271 witness statement cannot be read (§7.2a)." };
+  }
+  if (typeof claim.chainId !== "number" || String(claim.chainId) !== account.chainId) {
+    return {
+      matches: false,
+      mismatch: `1271 witness checked chain "${String(claim.chainId)}", not the voucher's chain "${account.chainId}" (§7.2a).`,
+    };
+  }
+  if (typeof claim.safe !== "string" || !ADDRESS_TEXT.test(claim.safe)
+    || claim.safe.toLowerCase() !== account.address.toLowerCase()) {
+    return {
+      matches: false,
+      mismatch: `1271 witness checked Safe "${String(claim.safe)}", not the voucher's "${account.address}" (§7.2a).`,
+    };
+  }
+  const hash = eip191MessageHash(ceremony.messageBytes);
+  if (typeof claim.hash !== "string" || !HASH_TEXT.test(claim.hash) || claim.hash.toLowerCase() !== hash) {
+    return {
+      matches: false,
+      mismatch: `1271 witness checked hash "${String(claim.hash)}", not "${hash}", the hash of the signed `
+        + "message bytes (§7.2a).",
+    };
+  }
+
+  const content = matchCeremonyContent(ceremony, binding);
+  if (!content.matches) return content;
+
+  if (currency !== undefined) {
+    const failure = ceremonyCurrencyFailure(ceremony.message, binding, currency);
+    if (failure !== undefined) return { matches: false, mismatch: failure };
+  }
+
+  return { matches: true };
 }
 
 /**

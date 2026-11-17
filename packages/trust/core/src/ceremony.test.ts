@@ -8,16 +8,26 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { describe, expect, test } from "vitest";
 
 import type { AuthorizationStatement } from "./authorization.js";
+import { canonicalJsonBytes } from "./canonical-json.js";
 import {
   bindingTermsCommitment,
   bindingTermsDigest,
+  eip191MessageHash,
   matchCeremonyContent,
+  matchSafeCeremony,
   recoverEip191Address,
   serializeCeremonyMessage,
   verifyEoaCeremony,
   verifyReCapCeremony,
 } from "./ceremony.js";
-import type { EoaCeremonyEvidence, ReCapCeremonyEvidence, SiweCeremonyMessage } from "./ceremony.js";
+import type {
+  EoaCeremonyEvidence,
+  ReCapCeremonyEvidence,
+  SafeCeremonyEvidence,
+  SiweCeremonyMessage,
+} from "./ceremony.js";
+import { sealDsseEnvelope } from "./dsse.js";
+import type { Eip1271Witness } from "./interfaces.js";
 import type { KeyBinding } from "./key-binding.js";
 import { didPkh } from "./spellings.js";
 
@@ -265,6 +275,85 @@ describe("verifyEoaCeremony (§7.5 step 3 offline EOA leg)", () => {
     const forged = { ...ceremony, signature: new Uint8Array(65) };
     const result = verifyEoaCeremony(forged, keyBindingFor(eoaFixture.agentIri));
     expect(result.verified).toBe(false);
+  });
+});
+
+describe("matchSafeCeremony (§7.2, §7.2a: the offline part of a Safe leg)", () => {
+  // A Safe signs the same message an EOA does, so the sealed EOA ceremony's message serves here,
+  // with the voucher's account standing in for the Safe.
+  const safeCeremony = (): SafeCeremonyEvidence => ({ ...eoaCeremony(), type: "safe" });
+  const messageBytes = hexToBytes(eoaFixture.messageBytesHex);
+  const statement = {
+    chainId: eoaFixture.voucherChainId,
+    safe: eoaFixture.message.address,
+    hash: eip191MessageHash(messageBytes),
+  };
+  const witnessSaying = (says: Record<string, unknown>): Eip1271Witness => ({
+    chainId: eoaFixture.voucherChainId,
+    blockNumber: 1,
+    blockHash: `0x${"c".repeat(64)}`,
+    verifier: "https://spec.jinn.network/agents/witness-fixture",
+    envelopeBytes: sealDsseEnvelope({
+      // A field `says` sets to `undefined` is left out of the statement.
+      payloadBytes: canonicalJsonBytes(Object.fromEntries(
+        Object.entries({ ...statement, result: "0x1626ba7e", ...says }).filter(([, value]) => value !== undefined),
+      )),
+      signatures: [{ signature: Uint8Array.of(1), keyid: "did:key:zWitnessFixture" }],
+    }),
+  });
+
+  test("a Safe signs the bytes an EOA signs for the same message", () => {
+    expect(serializeCeremonyMessage("safe", eoaFixture.message)).toEqual(messageBytes);
+  });
+
+  test("the hash a witness must attest is the EIP-191 digest of the signed bytes", () => {
+    const prefix = new TextEncoder().encode(`\x19Ethereum Signed Message:\n${messageBytes.length}`);
+    const digest = Buffer.from(keccak_256(Uint8Array.of(...prefix, ...messageBytes))).toString("hex");
+    expect(eip191MessageHash(messageBytes)).toBe(`0x${digest}`);
+  });
+
+  test("a message witnessed for the voucher's Safe and chain matches its record", () => {
+    expect(matchSafeCeremony(safeCeremony(), witnessSaying({}), keyBindingFor(eoaFixture.agentIri)))
+      .toEqual({ matches: true });
+  });
+
+  test("the witness's Safe and hash are compared as hexadecimal, whatever their case", () => {
+    const says = { safe: statement.safe.toLowerCase(), hash: statement.hash.toUpperCase().replace("0X", "0x") };
+    expect(matchSafeCeremony(safeCeremony(), witnessSaying(says), keyBindingFor(eoaFixture.agentIri)))
+      .toEqual({ matches: true });
+  });
+
+  test("the same message lifted onto a binding for another Agent IRI fails", () => {
+    expect(matchSafeCeremony(safeCeremony(), witnessSaying({}), keyBindingFor(eoaFixture.otherAgentIri)))
+      .toMatchObject({ matches: false, mismatch: expect.stringMatching(/Agent IRI/) });
+  });
+
+  test("a binding whose voucher is not an account identity fails", () => {
+    const binding = {
+      ...keyBindingFor(eoaFixture.agentIri),
+      voucher: { kind: "github-human" as const, profile: "https://github.com/octocat", id: 1 },
+    };
+    expect(matchSafeCeremony(safeCeremony(), witnessSaying({}), binding))
+      .toMatchObject({ matches: false, mismatch: expect.stringMatching(/not an account identity/) });
+  });
+
+  test.each([
+    ["another chain", { chainId: 1 }],
+    ["a chain written as text", { chainId: String(eoaFixture.voucherChainId) }],
+    ["another Safe", { safe: "0x6666666666666666666666666666666666666666" }],
+    ["no Safe", { safe: undefined }],
+    ["another hash", { hash: `0x${"ab".repeat(32)}` }],
+    ["a hash with no 0x", { hash: statement.hash.slice(2) }],
+    ["no hash", { hash: undefined }],
+  ])("a witness naming %s fails", (_names, says) => {
+    expect(matchSafeCeremony(safeCeremony(), witnessSaying(says), keyBindingFor(eoaFixture.agentIri)))
+      .toMatchObject({ matches: false });
+  });
+
+  test("a witness statement that cannot be read fails", () => {
+    const unreadable = { ...witnessSaying({}), envelopeBytes: new TextEncoder().encode("not a statement") };
+    expect(matchSafeCeremony(safeCeremony(), unreadable, keyBindingFor(eoaFixture.agentIri)))
+      .toMatchObject({ matches: false, mismatch: expect.stringMatching(/cannot be read/) });
   });
 });
 
