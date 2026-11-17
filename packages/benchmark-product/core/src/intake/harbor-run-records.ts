@@ -500,10 +500,11 @@ interface HostPath {
   readonly path: string;
 }
 
-/** Where a string sits in a trial record: the settings and the credential-shaped name it is under. */
+/** Where a string sits in a trial record: the settings, the `env` and the credential-shaped name
+ * it is under. */
 interface Within {
   readonly settings: boolean;
-  readonly env: boolean;
+  readonly inEnv: boolean;
   readonly credentialName: boolean;
 }
 
@@ -533,7 +534,7 @@ function trialRecordStringFinding(
     if (pattern.test(text)) return `holds ${what}`;
   }
   if (shape === undefined || HARBOR_ENV_PLACEHOLDER.test(text)) return undefined;
-  if (within.env) return "holds an env value other than Harbor's ${NAME} placeholder, which can be a credential";
+  if (within.inEnv) return "holds an env value other than Harbor's ${NAME} placeholder, which can be a credential";
   if (within.credentialName && text !== "") return "holds a value under a credential-shaped name";
   if (within.settings && tokenShaped(text)) return "holds a token-shaped string, which can be a credential";
   return undefined;
@@ -545,7 +546,7 @@ function trialRecordFinding(
   thisMachine: readonly HostPath[],
   field = "",
   shape = "",
-  within: Within = { settings: false, env: false, credentialName: false },
+  within: Within = { settings: false, inEnv: false, credentialName: false },
 ): { readonly field: string; readonly reason: string } | undefined {
   if (typeof value === "string") {
     const reason = trialRecordStringFinding(value, thisMachine, shape, within);
@@ -565,7 +566,7 @@ function trialRecordFinding(
     if (reason !== undefined) return { field: `the name of ${memberField}`, reason };
     const found = trialRecordFinding(entry, thisMachine, memberField, shape === "" ? key : `${shape}.${key}`, {
       settings: within.settings || HARBOR_SETTINGS.has(key),
-      env: within.env || key === "env",
+      inEnv: within.inEnv || key === "env",
       credentialName: within.credentialName || CREDENTIAL_NAME.test(key),
     });
     if (found !== undefined) return found;
