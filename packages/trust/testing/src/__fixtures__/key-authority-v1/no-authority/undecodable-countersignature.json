@@ -1,0 +1,37 @@
+{
+  "name": "undecodable-countersignature",
+  "description": "A countersignature that cannot be read is no signature. An honest key's verification still ends in a verdict.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "x",
+      "key": "K5",
+      "voucher": "C",
+      "from": "02-01",
+      "consentBy": "K1",
+      "consentSig": "undecodable"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "g",
+      "by": "K5",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "accepted"
+    },
+    {
+      "key": "K5",
+      "expect": "consent-chain-violation"
+    }
+  ]
+}

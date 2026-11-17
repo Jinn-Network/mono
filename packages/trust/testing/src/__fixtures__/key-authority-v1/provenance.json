@@ -1,0 +1,475 @@
+{
+  "repository": "https://github.com/Jinn-Network/spec",
+  "commit": "6a216c5edd0578085b638158c6ecd4f8db2e92b1",
+  "root": "documents/@jinn-network/trust-testing/fixtures",
+  "entries": [
+    {
+      "id": "key-authority-v1/README.md",
+      "sha256": "2daebe0758be9084bf479fee15d0f1e9ba9f92c90b6966aa07e3444927352b97"
+    },
+    {
+      "id": "key-authority-v1/chain/authority-revoked-later.json",
+      "sha256": "7386397afa01d10b42dc91eb65d4b291e50758a80e881ef2980a3bcbd089cc0c"
+    },
+    {
+      "id": "key-authority-v1/chain/consent-attaches-an-account.json",
+      "sha256": "93cdb6dc7054043b2f8bff64e375d8f2013934ed74623a3dfb5717d2c6e5a47f"
+    },
+    {
+      "id": "key-authority-v1/chain/consented-account-extends.json",
+      "sha256": "2800e25f1bce0f46b5921c0826d60d8fe8250884c1bbd81ab0c63699e849bf9b"
+    },
+    {
+      "id": "key-authority-v1/chain/consenter-expiring-later.json",
+      "sha256": "0ffcb5b70ab225e63c47ffe0ae6916b5cbfaeb6a7eb89c998c1c75761d120f7e"
+    },
+    {
+      "id": "key-authority-v1/chain/genesis-stands-alone.json",
+      "sha256": "18aed6440650d760617ccd16ba356150b619b12ab427dcdc4047490b981a34ee"
+    },
+    {
+      "id": "key-authority-v1/chain/incumbent-expiring-at-the-mint.json",
+      "sha256": "98837784cd7e54d446a89c2273ea9bd3acddee985b6c60ab4ae250bab2c79960"
+    },
+    {
+      "id": "key-authority-v1/chain/self-extension.json",
+      "sha256": "32404bfa7d0660a55b00098c215f324410f30078be30b226d22bb7873057a272"
+    },
+    {
+      "id": "key-authority-v1/envelope/binding-sealed-as-another-type.json",
+      "sha256": "db5d7ea2dbb95e8bf82221ec0e854f8546d4f2c972cd44e1aebb391fa7d01f95"
+    },
+    {
+      "id": "key-authority-v1/envelope/relationship-its-envelope-does-not-carry.json",
+      "sha256": "0ddbaa5569cb90d1bb63fd7352db391967c34bdc55b7138cce0b70e6dfd9679c"
+    },
+    {
+      "id": "key-authority-v1/envelope/revocation-of-another-record.json",
+      "sha256": "6f6ac17c6c91d42ade4b3c44aa43abb52e10e515bf7964164320070bf501af9a"
+    },
+    {
+      "id": "key-authority-v1/envelope/revocation-sealed-as-another-type.json",
+      "sha256": "4c592e85027f887517e9a2ac66c8793fe47a546d1ff219cb94f8d0836dee9cc1"
+    },
+    {
+      "id": "key-authority-v1/envelope/scope-its-envelope-does-not-carry.json",
+      "sha256": "26a0014412090f58d010bd4d84003ab14d601fb7f90a16f174c0c4a263603dea"
+    },
+    {
+      "id": "key-authority-v1/envelope/settlement-scope-its-envelope-does-not-carry.json",
+      "sha256": "8fe83d9c7e618fc6781736d094eb7bbe9359103e199c0030296f8c454908f9f0"
+    },
+    {
+      "id": "key-authority-v1/envelope/window-its-envelope-does-not-carry.json",
+      "sha256": "7627b41ccfea910d1ecbf64a7d23f96e3ab3803191effcbbc1b46ced19473a11"
+    },
+    {
+      "id": "key-authority-v1/first-and-conflict/ceremony-the-verifier-cannot-check.json",
+      "sha256": "d5e79da225a20078d982e59d6a1a3ceac8278ccebb9c5f214cd68c2024fd61c5"
+    },
+    {
+      "id": "key-authority-v1/first-and-conflict/failed-ceremony-does-not-win-a-key.json",
+      "sha256": "41f591b226f5af7478646cc602536a5cd130c45c803f0b64e82767f9373037ef"
+    },
+    {
+      "id": "key-authority-v1/first-and-conflict/founding-tie-between-two-claims-other-digest-order.json",
+      "sha256": "365c42a147d75a90e767f9fb4f1a7ecc9277e19c79ed0e392dae53f56b317f53"
+    },
+    {
+      "id": "key-authority-v1/first-and-conflict/founding-tie-between-two-claims.json",
+      "sha256": "9c0f4bf730c99477f625b28ff004f75a322aaca42626dc9873b676cc78d5e30a"
+    },
+    {
+      "id": "key-authority-v1/first-and-conflict/key-tie-goes-to-the-lowest-digest.json",
+      "sha256": "af27d320a615d95009ca80ef434b4f8259f83657d20bb4e32e9d04de5173148f"
+    },
+    {
+      "id": "key-authority-v1/first-and-conflict/lone-record-whose-ceremony-fails.json",
+      "sha256": "f6603c847711275496be01956edff70d6e8d64bdd292f3b47cf98f669b73da52"
+    },
+    {
+      "id": "key-authority-v1/first-and-conflict/record-its-key-never-signed-does-not-win.json",
+      "sha256": "1abdeed70f35529e08ecc343898479c34c9f880579a74082852edc7eee8b86d3"
+    },
+    {
+      "id": "key-authority-v1/first-and-conflict/record-its-key-never-signed.json",
+      "sha256": "e15e6e1dc8d8e08674c03a671e37f2edd9cd557f65941b068ec3e1abb1e869be"
+    },
+    {
+      "id": "key-authority-v1/first-and-conflict/unsigned-record-counts-for-what-came-first.json",
+      "sha256": "97de69d59a3aedf900549f87f77c2db60ecb95f75ed08abb627ac8b4422d9906"
+    },
+    {
+      "id": "key-authority-v1/founding-account/all-revoked-corner.json",
+      "sha256": "a54f2f1c044f31da6e41dafcb92b92a00eea5c512f272fbe02397a8e66f11e5f"
+    },
+    {
+      "id": "key-authority-v1/founding-account/founding-account-ends-its-own-incumbency.json",
+      "sha256": "50300238561314033d066f5f2f1f57828c5dcdf8c618095bead2fdea730c51b5"
+    },
+    {
+      "id": "key-authority-v1/founding-account/founding-account-through-a-later-record.json",
+      "sha256": "5c041f79db55b1e78f87068425ca2688233f0745ef35213fd0d2828a0596a263"
+    },
+    {
+      "id": "key-authority-v1/founding-account/owner-revokes-only-key-and-recovers.json",
+      "sha256": "c6de266919cad820ae7ec2ae77712315594a8aa2c5f2c12ffc338ff14e55c3c7"
+    },
+    {
+      "id": "key-authority-v1/founding-account/recovery-needs-that-account.json",
+      "sha256": "b1edac9ea4d64326d90fb25fdd589da50e87cb36cd7baa303a8fbcc3d95ed13d"
+    },
+    {
+      "id": "key-authority-v1/founding-account/recovery-reaches-other-accounts.json",
+      "sha256": "c2c338c663ae799d45ff08ed144e4f9731e137276e60667cdacc51bde2fbcaa4"
+    },
+    {
+      "id": "key-authority-v1/founding-account/revoked-founding-key-cannot-consent.json",
+      "sha256": "f5b4b437253cdd42d8942a38e0259104948320ba89d61c30b2b0406a9039a2c1"
+    },
+    {
+      "id": "key-authority-v1/founding-account/revoked-founding-key-cannot-revoke.json",
+      "sha256": "6c334f977f014f017b2946a90ec7348fb289380569e95500dfb51063659b01fa"
+    },
+    {
+      "id": "key-authority-v1/no-authority/back-dated-past-a-revocation.json",
+      "sha256": "9a27a1c995d775329bf8aaa1562892480b34ede7fe02bf681e0709886e19c15e"
+    },
+    {
+      "id": "key-authority-v1/no-authority/back-dated-past-an-ended-authority.json",
+      "sha256": "68c2ed0cab60ac68d18bf42db9c1a6af25cc7032796910f6f38e98fdf11780d0"
+    },
+    {
+      "id": "key-authority-v1/no-authority/conflict-loser-gives-nothing.json",
+      "sha256": "87885cd32462be313f533dd21d70085ea0aa5d4c2eaec0b927c7a16254f3eb70"
+    },
+    {
+      "id": "key-authority-v1/no-authority/consenter-expired-first.json",
+      "sha256": "0a9edeee33e2ea5a3c80ce4692274e404017febd3462d9e426cc57c846a0792a"
+    },
+    {
+      "id": "key-authority-v1/no-authority/consenter-revoked-first.json",
+      "sha256": "f24f6262ebec4399ca7af2dd4c8db7ce2814def65e3906e29b26c6c7d3caa4b9"
+    },
+    {
+      "id": "key-authority-v1/no-authority/consenter-whose-ceremony-fails.json",
+      "sha256": "727a956555815e42213fe17cd01b2edad5a59ca590ac7f9b6eee0c5c20eca244"
+    },
+    {
+      "id": "key-authority-v1/no-authority/consenter-with-no-chain.json",
+      "sha256": "59c1a7ab736f3b1517797e20b8b84a647a99b388716741d328c8b9213b75a51f"
+    },
+    {
+      "id": "key-authority-v1/no-authority/consenter-without-bindings-scope.json",
+      "sha256": "e8f8a37ef9487563f96620a1f504c3ec518331abcca6e88360cc8557ad892017"
+    },
+    {
+      "id": "key-authority-v1/no-authority/incumbent-expired-first.json",
+      "sha256": "54d3191997e962f63952ef34991c686fbbe9684033f9f83d95e571868a5763fe"
+    },
+    {
+      "id": "key-authority-v1/no-authority/incumbent-revoked-first.json",
+      "sha256": "945f211eb75a0a457ce6f4a46431dfdcf9a1ecc06fae0281a439509d3760ae6b"
+    },
+    {
+      "id": "key-authority-v1/no-authority/incumbent-with-no-chain.json",
+      "sha256": "cf1ce7d8ac9d2199d069990fcc5b58262d78446ef388b00c2141745d1b74fa64"
+    },
+    {
+      "id": "key-authority-v1/no-authority/key-held-only-as-operates.json",
+      "sha256": "494453867f8136046d21f2005c17b9cb39b4498bd93584a01fac9cf2cb5d65b2"
+    },
+    {
+      "id": "key-authority-v1/no-authority/ring-of-consent.json",
+      "sha256": "b4a31466a0faa86409d178c19728d2bb7633743f8ad53de7a0ff8f588484bd51"
+    },
+    {
+      "id": "key-authority-v1/no-authority/self-countersignature.json",
+      "sha256": "598d2c0a3f97365e091cb6d18ace9d278636857df511e92001e53383e113d78d"
+    },
+    {
+      "id": "key-authority-v1/no-authority/undecodable-countersignature.json",
+      "sha256": "ae70e130f8f66bd7eda041ca5aeea227365a9140a974576d53a22fb430d36e91"
+    },
+    {
+      "id": "key-authority-v1/one-digest/entry-without-a-chain-under-a-standing-digest.json",
+      "sha256": "2968b0c97932697b3c7b98c2279d5b8026122360be7de2ef4195cd296ba85ed0"
+    },
+    {
+      "id": "key-authority-v1/one-digest/failed-entry-beside-the-genesis.json",
+      "sha256": "fd0e7e1c9561ae3fec46e74d5d375746a00854fcceef7d24cff6fd5689b3fa71"
+    },
+    {
+      "id": "key-authority-v1/one-digest/stranger-entry-under-the-genesis-digest-does-not-revoke-it.json",
+      "sha256": "8c7e9776ef7eed3d798c8acc8f6e2112d3f97d854b86e5754733715b7cf498eb"
+    },
+    {
+      "id": "key-authority-v1/one-digest/stranger-verdict-leg-under-the-genesis-digest.json",
+      "sha256": "0bc8391b12c06bf1f474192cec679a31dff4eaadfb161b1701606f38e84ea64c"
+    },
+    {
+      "id": "key-authority-v1/reach/bound-again-after-the-reach-has-ended.json",
+      "sha256": "d11a460539e4ad3d6c674210fd9a6bce4ba74c1b5e065bef46fb192bb5b8ffd9"
+    },
+    {
+      "id": "key-authority-v1/reach/entitled-revoker-of-a-sibling-with-a-failed-ceremony.json",
+      "sha256": "6a79116b1cd2d26d53830a755b6723ecf17c40b7cf66524b1712c74448a68f8e"
+    },
+    {
+      "id": "key-authority-v1/reach/own-key-revoking-through-a-standing-sibling.json",
+      "sha256": "28054ec72953944015560b2ad9e55ebf0c7d74d9b73288462ec1d68f7755933c"
+    },
+    {
+      "id": "key-authority-v1/reach/own-revocation-and-a-replacement-under-another-voucher.json",
+      "sha256": "5623eafe5f3820af1132c4a7fc3c124d8b22dc6dda025b2bea8e738886f58842"
+    },
+    {
+      "id": "key-authority-v1/reach/own-revocation-before-the-record-took-effect.json",
+      "sha256": "6407db97e55415573ae0c7390bd63469936658e195339b9e10dcb3d112b0fbaa"
+    },
+    {
+      "id": "key-authority-v1/reach/own-revocation-draws-on-the-record-it-names.json",
+      "sha256": "3e303fc53e738863c770da12ca2d2e69cd752cfd2d56110eac547291cf344754"
+    },
+    {
+      "id": "key-authority-v1/reach/own-revocation-naming-a-record-whose-ceremony-fails.json",
+      "sha256": "4e6fa422143d1ea1a9975d487a9aab97c72ffd4a6921e33bf8dd5b5879b4b358"
+    },
+    {
+      "id": "key-authority-v1/reach/own-revocation-of-a-record-without-bindings-scope.json",
+      "sha256": "ba60e40aafed6149e6ea243efbf5a655206ebfd4339a6ad308615eef060e2762"
+    },
+    {
+      "id": "key-authority-v1/reach/own-revocation-through-a-record-of-another-voucher.json",
+      "sha256": "8ff62fb35ec742a22161c58ecd938e857b1bfc2d5e4226140b30d339df878be0"
+    },
+    {
+      "id": "key-authority-v1/reach/reach-is-read-at-the-revocation-time.json",
+      "sha256": "d20dde1a60487fcb671151e639c964cddda95290fb0d8ab86b1f24c7c4cb6d44"
+    },
+    {
+      "id": "key-authority-v1/reach/reach-stops-at-the-voucher.json",
+      "sha256": "f3f05138ecde41ea6426b673beb61a29bd227d2af93cc31b1fa956c31447fd06"
+    },
+    {
+      "id": "key-authority-v1/reach/replacement-does-not-leave-a-revocation-behind.json",
+      "sha256": "6028a7229df0269e071ecf436fb7a2d67a6c037324e26dd462ce9dcb1c2727ac"
+    },
+    {
+      "id": "key-authority-v1/reach/revoking-an-ended-record-reaches-nothing-else.json",
+      "sha256": "e0ca14fc48c4bd45ae88b56e24a4521d9e6205bea61aed319c869ab7fa928e6b"
+    },
+    {
+      "id": "key-authority-v1/reach/revoking-the-later-record-ends-the-earlier.json",
+      "sha256": "940f920ef54b62c685c2ea13694aae7b9a2819e8a5b479b7f0505efad41e6e5c"
+    },
+    {
+      "id": "key-authority-v1/reach/standing-given-up-through-either-record.json",
+      "sha256": "51dbd776ac1c9eda7886d07c7dd75163d66b2448e2d1598d40410d284e8995a7"
+    },
+    {
+      "id": "key-authority-v1/reading/stored-entry-that-cannot-be-placed.json",
+      "sha256": "3a3b0cfcc71e6f7c3e743f5d7bc7efa2f06beeeb884a76d34921b71483f5e89b"
+    },
+    {
+      "id": "key-authority-v1/reading/stored-entry-that-does-not-parse-comes-first.json",
+      "sha256": "058d38954ec23b6db0da0af70d6318cf07f88b2d5651ac5f7f05a9c5c2f62ebd"
+    },
+    {
+      "id": "key-authority-v1/reading/stored-entry-that-does-not-parse-comes-later.json",
+      "sha256": "6eb496cb169169a14da0c4f933d3b01171fb7449221ef77d2e0cf3d58518d64e"
+    },
+    {
+      "id": "key-authority-v1/reading/stored-entry-that-does-not-parse-loses-a-tie.json",
+      "sha256": "79490f701c3485cff888a4e6456359183ad004b8892e440058eb0973912e742e"
+    },
+    {
+      "id": "key-authority-v1/reading/unanchored-binding-under-an-anchor-requiring-profile.json",
+      "sha256": "b19ef6ba04e98fa24397d1c0d5a220ebda5294b228eef56d45daa7eee0eda4a9"
+    },
+    {
+      "id": "key-authority-v1/reading/unreadable-expiry.json",
+      "sha256": "84f45f375e69d488ab880cb5d0af9fdcd6e5ea818da6569151d5a07c2aa7ab70"
+    },
+    {
+      "id": "key-authority-v1/reading/unreadable-start-sorts-last.json",
+      "sha256": "0f84b8857f19d9bf234233cb096f85d812fcbc00ac2b478fe8ca5c00b7be2230"
+    },
+    {
+      "id": "key-authority-v1/reading/unreadable-stated-time-of-a-binding.json",
+      "sha256": "583c8e9c1d4d1daa4e0dc58b35c30af10615949d9c2cb5b6ab0423e3597272ce"
+    },
+    {
+      "id": "key-authority-v1/reading/unreadable-stated-time-of-a-revocation.json",
+      "sha256": "bca930474513c330a4f3afd419eb57c434c25d04c7985b75383acd134df00d17"
+    },
+    {
+      "id": "key-authority-v1/revocation/consent-at-the-revocation-instant.json",
+      "sha256": "0fbc371b5d67a7a33fc988b18a3297d732db02967c9c74c5143ddaca4bc235ce"
+    },
+    {
+      "id": "key-authority-v1/revocation/consent-one-millisecond-after-the-revocation.json",
+      "sha256": "b235174cb064c9c58e558edd7569d0afb6edecfd8150eb92a3c2f9d9f9d536ab"
+    },
+    {
+      "id": "key-authority-v1/revocation/evidence-at-the-revocation-instant.json",
+      "sha256": "c5e181d188f32a7aad12e8513c81d78f8862f7a95aad1256d1c612b9b84ba048"
+    },
+    {
+      "id": "key-authority-v1/revocation/mutual-revocation-at-one-instant.json",
+      "sha256": "908d1d3754333dbb69d73a1d156c34706a31947860dce7de9f9a1b40586eb9ec"
+    },
+    {
+      "id": "key-authority-v1/revocation/own-key-without-bindings-scope.json",
+      "sha256": "5be81b0eca7e9eeefc84988dd943256ccf2150ad8f2050a33ca0b4225db221cf"
+    },
+    {
+      "id": "key-authority-v1/revocation/own-revocation.json",
+      "sha256": "bc513b38e43c983f3fa8aa6618a4e69d5be0b83a788718babaece21a4b3f87e5"
+    },
+    {
+      "id": "key-authority-v1/revocation/revocation-before-the-record-it-names-took-effect.json",
+      "sha256": "a3c9b9b825883dcb66d9ff375c14a281005042924ad4c95e52274081b30511c2"
+    },
+    {
+      "id": "key-authority-v1/revocation/revocation-stated-earlier-than-its-anchor.json",
+      "sha256": "2b5f902fd247bd6d53c88af210678a28f5ccf80c79bb3902d3ef3b078d0d1cd5"
+    },
+    {
+      "id": "key-authority-v1/revocation/revocation-stated-later-than-its-anchor.json",
+      "sha256": "59fa8bcdd90095d7961f857446ce11cfc5c9e063bbffe930c34007c73f3ea8f8"
+    },
+    {
+      "id": "key-authority-v1/revocation/revocation-with-no-authority.json",
+      "sha256": "9c093464e10f474d11e91b40aee1ce8c35c4f6c8ff9d7f2e1486ba2033926b28"
+    },
+    {
+      "id": "key-authority-v1/revocation/revoker-revoked-first.json",
+      "sha256": "73e87661009764ced769e5b267697a91f1f7fee3e355c40b8b006a83ce6d114d"
+    },
+    {
+      "id": "key-authority-v1/revocation/revoker-that-does-not-stand.json",
+      "sha256": "7e5abd4cbf87c0be9a8aba9dbc8c43f06c36c92f1e5c81070ec08944672edd8e"
+    },
+    {
+      "id": "key-authority-v1/revocation/revoker-without-bindings-scope.json",
+      "sha256": "17627167357e6ee15deea10db447162c8ca96b93b4df959e13a673b20debd818"
+    },
+    {
+      "id": "key-authority-v1/revocation/self-extension-at-the-revocation-instant.json",
+      "sha256": "c6456016bcb0249d8698aa83e09a1226829a979de3c95b953b4d3a3aee948311"
+    },
+    {
+      "id": "key-authority-v1/revocation/successor-revokes-its-ancestor.json",
+      "sha256": "d6ef832193c63dfe9d2fd7d4be207979f08122fc1e593b2f573223f0d0f2a241"
+    },
+    {
+      "id": "key-authority-v1/revocation/unanchored-revocation.json",
+      "sha256": "168f7dafd5a847ca453546bf50073b8eca4160638375d0d80c75c47339f67186"
+    },
+    {
+      "id": "key-authority-v1/revocation/unauthorized-does-not-mask-authorized.json",
+      "sha256": "961d838597642ee04877da8a6bc54239c2a19d5faeddb9dd109f0d59c009a0af"
+    },
+    {
+      "id": "key-authority-v1/same-instant/authority-through-a-batch.json",
+      "sha256": "ba3bed2d130b67b08e5deb863943161732baa090630706ee9143e8ca9861df6d"
+    },
+    {
+      "id": "key-authority-v1/same-instant/batch-after-founding.json",
+      "sha256": "485dd5f5b46310325748d573e65da9e731f6dc7b51878c185cf3416c6fe39ba1"
+    },
+    {
+      "id": "key-authority-v1/same-instant/batch-by-one-account.json",
+      "sha256": "0c8c181d0afe05cc4b34dd5e23befbd6f45380ecf7ffde74eea8c2a1b16329af"
+    },
+    {
+      "id": "key-authority-v1/same-instant/batch-with-a-delegate-sorting-first.json",
+      "sha256": "0d4657fe00a309f00956cfd058308019b374749d0d78790fa55af1dbacba9a88"
+    },
+    {
+      "id": "key-authority-v1/same-instant/consent-at-one-instant-digest-above.json",
+      "sha256": "9e24a0871342dabbea096f25c16a10d35a596413bb1d2b0c6a19630297afc5a3"
+    },
+    {
+      "id": "key-authority-v1/same-instant/consent-at-one-instant-digest-below.json",
+      "sha256": "db566830ac661aea813a7119f4b3f83ebb79081b23a10e8b97600a9ce215eb17"
+    },
+    {
+      "id": "key-authority-v1/same-instant/consent-by-genesis-at-the-founding-instant-digest-above.json",
+      "sha256": "62ef245069010572c1e380817e366140115c8f3cb1aabe48f94de6aefd2fd075"
+    },
+    {
+      "id": "key-authority-v1/same-instant/consent-by-genesis-at-the-founding-instant-digest-below.json",
+      "sha256": "a8415320373854735194cb134c4f814f681e44b4e62c2ea1a4107e52f84a6864"
+    },
+    {
+      "id": "key-authority-v1/same-instant/same-instant-consenter-already-revoked.json",
+      "sha256": "fc8594a9d75adf827bcf6cc49c23e9760d04db732d33095351e346683e7aeb8f"
+    },
+    {
+      "id": "key-authority-v1/same-instant/same-instant-consenter-whose-ceremony-fails.json",
+      "sha256": "8f712b19d5b480ddd39d2d1108775f5daf2af24d6cc2ebd1ac9080d83b47e49b"
+    },
+    {
+      "id": "key-authority-v1/same-instant/same-instant-peers-with-no-root.json",
+      "sha256": "df5a71daf1283b84ad0330fd83dbfa996896958480b7a56c9415f19700d66c90"
+    },
+    {
+      "id": "key-authority-v1/settlement-join/join-baseline.json",
+      "sha256": "836831902640c7b649e433c342a3d355b2a9cd3bc9a8b34af14323c533e73353"
+    },
+    {
+      "id": "key-authority-v1/settlement-join/join-later-record-does-not-lift.json",
+      "sha256": "5706cbfc0f0cfe49012de48cae076ad35ea13c3684942a4ef32d55078fb7b634"
+    },
+    {
+      "id": "key-authority-v1/settlement-join/join-later-record-with-no-revocation.json",
+      "sha256": "3522eb8b64d667bc21b9b45e5d13a74ab61acd6e6d8724c7ec323eeab6167ac7"
+    },
+    {
+      "id": "key-authority-v1/settlement-join/join-settlement-leg-after-founding-recovery.json",
+      "sha256": "60764dc2b56f0429c6f00f9a96039e8a2acbc46b34f6efcbcf27b753ab033e86"
+    },
+    {
+      "id": "key-authority-v1/settlement-join/join-settlement-leg-after-the-founding-account-revoked-its-genesis.json",
+      "sha256": "f494d6972dabedee844ddb9172ac19fd86a1a141c7a7a98d0283b35e828c6f4e"
+    },
+    {
+      "id": "key-authority-v1/settlement-join/join-settlement-leg-revoked-after-the-claim.json",
+      "sha256": "9ba972c232a444b35d71048d2cedf722d2f223ac4132705b29a5accd13dea642"
+    },
+    {
+      "id": "key-authority-v1/settlement-join/join-settlement-leg-revoked-at-the-claim-instant.json",
+      "sha256": "a2774c9b84be5cf95cd4e462e27951a85fd5bb05e16299cdb421d53f87f786fd"
+    },
+    {
+      "id": "key-authority-v1/settlement-join/join-settlement-leg-revoked-before-the-claim.json",
+      "sha256": "120a84014d93d296549dc193ceb205b89d7f86b0d5612d16065ab7141dce49a5"
+    },
+    {
+      "id": "key-authority-v1/settlement-join/join-settlement-leg-revoked-by-its-account.json",
+      "sha256": "f883d057689f63eefd91f716a662f9fe1d69f8e3496f26a8d5f0d5a072f03a9a"
+    },
+    {
+      "id": "key-authority-v1/settlement-join/join-settlement-leg-whose-ceremony-fails.json",
+      "sha256": "7b10b1385b15871714de25b5cd7171a1f81af800ad5f410f89ef6cac97bede03"
+    },
+    {
+      "id": "key-authority-v1/settlement-join/join-settlement-leg-with-no-chain.json",
+      "sha256": "cc995b7912e9f10f9bbdcc9c847de2e71e0053cddd70bf2a36b3589cb3e99391"
+    },
+    {
+      "id": "key-authority-v1/settlement-join/join-unauthorized-revocation.json",
+      "sha256": "356626f02441622e652ca6b439f630b0056cbfc2a125790b756bbfbc0ddf7fd6"
+    },
+    {
+      "id": "key-authority-v1/settlement-join/join-verdict-leg-revoked-after-the-envelope.json",
+      "sha256": "9680eca223524dfbe16ef66a47781feafa1058cad22366a33da55bee043f3c75"
+    },
+    {
+      "id": "key-authority-v1/settlement-join/join-verdict-leg-revoked-by-the-envelope.json",
+      "sha256": "d8d2d39029d1cc0390e071c892677842a0e20aea8ed9ff964d0e8b71cc69d025"
+    }
+  ]
+}

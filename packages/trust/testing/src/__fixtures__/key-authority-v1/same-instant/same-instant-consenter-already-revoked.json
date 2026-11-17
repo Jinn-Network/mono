@@ -1,0 +1,38 @@
+{
+  "name": "same-instant-consenter-already-revoked",
+  "description": "A same-instant authority revoked strictly earlier gives nothing, even revoked before it took effect.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "c",
+      "key": "K4",
+      "voucher": "A",
+      "from": "02-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "B",
+      "from": "02-01",
+      "consentBy": "K4"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "c",
+      "by": "K1",
+      "at": "01-15"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "consent-chain-violation"
+    }
+  ]
+}

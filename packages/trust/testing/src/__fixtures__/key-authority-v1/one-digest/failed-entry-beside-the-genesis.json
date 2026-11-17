@@ -1,0 +1,40 @@
+{
+  "name": "failed-entry-beside-the-genesis",
+  "description": "An entry of the founding account at the founding instant, filed under the genesis binding's digest, whose ceremony fails. Both hold the first place. The failed entry gives nothing, and takes nothing from the genesis binding: a later binding of that account still extends from it.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "x",
+      "key": "K2",
+      "voucher": "A",
+      "from": "01-01",
+      "ceremony": "absent",
+      "filed": "g"
+    },
+    {
+      "id": "n",
+      "key": "K3",
+      "voucher": "A",
+      "from": "02-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "accepted"
+    },
+    {
+      "key": "K2",
+      "expect": "ceremony-verification-failed"
+    },
+    {
+      "key": "K3",
+      "expect": "accepted"
+    }
+  ]
+}

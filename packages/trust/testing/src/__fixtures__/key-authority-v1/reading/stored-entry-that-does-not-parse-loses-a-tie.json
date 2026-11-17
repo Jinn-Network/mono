@@ -1,0 +1,26 @@
+{
+  "name": "stored-entry-that-does-not-parse-loses-a-tie",
+  "description": "At a founding tie it loses to a founding claim, whatever its digest.",
+  "profile": "anchors-required",
+  "entries": [
+    {
+      "id": "m",
+      "anchor": "01-01",
+      "digest": "low"
+    }
+  ],
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "accepted"
+    }
+  ]
+}

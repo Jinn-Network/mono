@@ -1,0 +1,37 @@
+{
+  "name": "revoking-the-later-record-ends-the-earlier",
+  "description": "A revocation reaches every record of the standing in window at its effective time.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "a",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01"
+    },
+    {
+      "id": "b",
+      "key": "K2",
+      "voucher": "A",
+      "from": "03-01"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "b",
+      "by": "K1",
+      "at": "04-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "revoked"
+    }
+  ]
+}

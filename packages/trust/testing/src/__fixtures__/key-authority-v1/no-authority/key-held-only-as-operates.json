@@ -1,0 +1,38 @@
+{
+  "name": "key-held-only-as-operates",
+  "description": "Authority comes from what resolves for the key at that instant, not from any record that names it.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01",
+      "until": "03-01"
+    },
+    {
+      "id": "c",
+      "key": "K4",
+      "voucher": "A",
+      "from": "02-01",
+      "rel": "operates"
+    },
+    {
+      "id": "d",
+      "key": "K4",
+      "voucher": "A",
+      "from": "2026-02-01T00:00:01.000Z"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "A",
+      "from": "04-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "consent-chain-violation"
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "name": "batch-by-one-account",
+  "description": "Records sealed at one instant by one account all stand, founding instant included.",
+  "bindings": [
+    {
+      "id": "a",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "b",
+      "key": "K2",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "c",
+      "key": "K3",
+      "voucher": "A",
+      "from": "01-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "accepted"
+    },
+    {
+      "key": "K2",
+      "expect": "accepted"
+    },
+    {
+      "key": "K3",
+      "expect": "accepted"
+    }
+  ]
+}

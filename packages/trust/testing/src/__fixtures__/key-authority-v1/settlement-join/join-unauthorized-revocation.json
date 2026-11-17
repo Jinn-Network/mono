@@ -1,0 +1,39 @@
+{
+  "name": "join-unauthorized-revocation",
+  "description": "A revocation with no authority has no effect on a join.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "s",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "scope": [
+        "settlements"
+      ]
+    }
+  ],
+  "revocations": [
+    {
+      "target": "s",
+      "by": "K5",
+      "at": "04-01"
+    }
+  ],
+  "checks": [
+    {
+      "join": {
+        "verdict": "K1",
+        "settlement": "K2",
+        "envelope": "03-01",
+        "claim": "05-01"
+      },
+      "expect": "joined"
+    }
+  ]
+}

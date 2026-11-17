@@ -1,0 +1,31 @@
+{
+  "name": "evidence-at-the-revocation-instant",
+  "description": "For evidence the boundary is inclusive.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "g",
+      "by": "K1",
+      "at": "02-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "at": "02-01",
+      "expect": "revoked"
+    },
+    {
+      "key": "K1",
+      "at": "2026-01-31T23:59:59.999Z",
+      "expect": "accepted"
+    }
+  ]
+}

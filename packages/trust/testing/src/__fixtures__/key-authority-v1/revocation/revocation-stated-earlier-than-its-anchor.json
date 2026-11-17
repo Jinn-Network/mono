@@ -1,0 +1,32 @@
+{
+  "name": "revocation-stated-earlier-than-its-anchor",
+  "description": "A back-dated revocation takes effect at its anchor.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "g",
+      "by": "K1",
+      "at": "03-01",
+      "stated": "02-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "at": "02-15",
+      "expect": "accepted"
+    },
+    {
+      "key": "K1",
+      "at": "03-01",
+      "expect": "revoked"
+    }
+  ]
+}

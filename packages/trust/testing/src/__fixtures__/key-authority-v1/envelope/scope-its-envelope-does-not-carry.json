@@ -1,0 +1,55 @@
+{
+  "name": "scope-its-envelope-does-not-carry",
+  "description": "A binding entry holds bindings scope, and its envelope carries verdicts scope alone. Its fields do not match its envelope, so it is no readable binding: it does not resolve, its key consents no one, and its key's revocation of the genesis binding has no effect.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "scope": [
+        "verdicts",
+        "bindings"
+      ],
+      "envelope": {
+        "scope": [
+          "verdicts"
+        ]
+      }
+    },
+    {
+      "id": "c",
+      "key": "K3",
+      "voucher": "B",
+      "from": "03-01",
+      "consentBy": "K2"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "g",
+      "by": "K2",
+      "at": "04-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "binding-not-resolved"
+    },
+    {
+      "key": "K3",
+      "expect": "consent-chain-violation"
+    },
+    {
+      "key": "K1",
+      "expect": "accepted"
+    }
+  ]
+}

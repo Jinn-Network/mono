@@ -1,0 +1,36 @@
+{
+  "name": "key-tie-goes-to-the-lowest-digest",
+  "description": "Two records of one key at one instant: the lower digest answers for the key.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "a",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01"
+    },
+    {
+      "id": "b",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "scope": [
+        "bindings"
+      ],
+      "below": [
+        "a"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "scope-violation"
+    }
+  ]
+}

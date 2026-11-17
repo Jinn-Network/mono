@@ -1,0 +1,32 @@
+{
+  "name": "unreadable-stated-time-of-a-binding",
+  "description": "A stated time that cannot be read claims nothing, so the anchor stands alone.",
+  "profile": "anchors-required",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "A",
+      "from": "2026-02-01T00:00Z",
+      "anchor": "02-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "at": "02-01",
+      "expect": "accepted"
+    },
+    {
+      "key": "K2",
+      "at": "2026-01-31T23:59:59.999Z",
+      "expect": "binding-not-resolved"
+    }
+  ]
+}

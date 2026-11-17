@@ -1,0 +1,31 @@
+{
+  "name": "unreadable-stated-time-of-a-revocation",
+  "description": "An authorized revocation with an unreadable stated time takes effect at its anchor.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "g",
+      "by": "K1",
+      "at": "02-01",
+      "stated": "2026-02-01T00:00Z"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "revoked"
+    },
+    {
+      "key": "K1",
+      "at": "01-01",
+      "expect": "accepted"
+    }
+  ]
+}

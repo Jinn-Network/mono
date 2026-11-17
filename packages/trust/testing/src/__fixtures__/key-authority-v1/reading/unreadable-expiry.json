@@ -1,0 +1,36 @@
+{
+  "name": "unreadable-expiry",
+  "description": "An end that cannot be read is out of window: no evidence and no authority.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "B",
+      "from": "02-01",
+      "consentBy": "K1",
+      "until": "2026-12-01T00:00Z"
+    },
+    {
+      "id": "t",
+      "key": "K3",
+      "voucher": "B",
+      "from": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "window-violation"
+    },
+    {
+      "key": "K3",
+      "expect": "consent-chain-violation"
+    }
+  ]
+}

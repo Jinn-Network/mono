@@ -1,0 +1,30 @@
+{
+  "name": "unanchored-binding-under-an-anchor-requiring-profile",
+  "description": "An unanchored binding has no place: it does not resolve and does not count for what came first.",
+  "profile": "anchors-required",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01",
+      "anchor": null
+    },
+    {
+      "id": "x",
+      "key": "K5",
+      "voucher": "C",
+      "from": "02-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "binding-not-resolved"
+    },
+    {
+      "key": "K5",
+      "expect": "accepted"
+    }
+  ]
+}
