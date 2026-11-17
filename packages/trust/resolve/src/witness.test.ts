@@ -1,6 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { sealDsseEnvelope } from "@jinn-network/trust-core";
+import { generateKeyPairSync, sign, verify } from "node:crypto";
+import type { KeyObject } from "node:crypto";
+
+import {
+  DSSE_PAYLOAD_TYPE,
+  canonicalJsonBytes,
+  dssePreAuthEncoding,
+  parseExactDsseEnvelope,
+  sealDsseEnvelope,
+  sealSignedPayload,
+} from "@jinn-network/trust-core";
+import type { DsseChainVerifier } from "@jinn-network/trust-core";
 import {
   ContractFunctionExecutionError,
   ContractFunctionRevertedError,
@@ -16,10 +27,57 @@ const SAFE = "0x4444444444444444444444444444444444444444";
 const HASH = `0x${"aa".repeat(32)}`;
 const SIGNATURE = `0x${"bb".repeat(65)}`;
 const BLOCK_HASH = `0x${"cc".repeat(32)}`;
+const CHAIN_ID = 84532;
+
+interface TestKey {
+  readonly keyid: string;
+  readonly publicKey: KeyObject;
+  sign(bytes: Uint8Array): Uint8Array;
+}
+
+function ed25519Key(keyid: string): TestKey {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  return { keyid, publicKey, sign: (bytes) => new Uint8Array(sign(null, bytes, privateKey)) };
+}
+
+/** The key that stands for VERIFIER_IRI, a key that stands for no one, and another accepted
+ * verifier's key. */
+const AUTHOR_KEY = ed25519Key("did:key:z6MkWitnessAuthor");
+const STRANGER_KEY = ed25519Key("did:key:z6MkStranger");
+const OTHER_VERIFIER_IRI = "https://spec.jinn.network/agents/verifier-2";
+const OTHER_VERIFIER_KEY = ed25519Key("did:key:z6MkOtherVerifier");
+
+/** trust-core's DSSE verifier port over the keys above: which of them signed the exact envelope's
+ * pre-authentication encoding. What it cannot read, it throws on, as a port may. */
+const dsseVerifier: DsseChainVerifier = (envelopeBytes) => {
+  const envelope = parseExactDsseEnvelope(envelopeBytes);
+  const preAuthEncoding = dssePreAuthEncoding(envelope.payloadType, envelope.payloadBytes);
+  const keys = new Map([AUTHOR_KEY, STRANGER_KEY, OTHER_VERIFIER_KEY].map((key) => [key.keyid, key.publicKey]));
+  return {
+    validSignerKeyids: envelope.signatures.flatMap(({ keyid, sig }) => {
+      const publicKey = keyid === undefined ? undefined : keys.get(keyid);
+      return publicKey !== undefined && verify(null, preAuthEncoding, publicKey, Buffer.from(sig, "base64"))
+        ? [keyid!]
+        : [];
+    }),
+  };
+};
+
+/** A policy accepting VERIFIER_IRI and OTHER_VERIFIER_IRI, each spoken for by its own key. */
+const ACCEPTING = {
+  acceptedVerifiers: [VERIFIER_IRI, OTHER_VERIFIER_IRI],
+  verifierKeys: new Map([[VERIFIER_IRI, [AUTHOR_KEY.keyid]], [OTHER_VERIFIER_IRI, [OTHER_VERIFIER_KEY.keyid]]]),
+  dsseVerifier,
+};
+
+/** An archive client serving CHAIN_ID. */
+function archive(readContract: (...args: never[]) => Promise<unknown>) {
+  return { getChainId: async () => CHAIN_ID, readContract };
+}
 
 function witnessPayload(overrides: Partial<Record<string, unknown>> = {}) {
   return {
-    chainId: 84532,
+    chainId: CHAIN_ID,
     blockNumber: 12345,
     blockHash: BLOCK_HASH,
     verifier: VERIFIER_IRI,
@@ -31,11 +89,37 @@ function witnessPayload(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+/** A statement's bytes: its RFC 8785 form, or as written when it has none (a number no canonical
+ * form holds), as a store could still hold it. */
+function statementBytes(payload: Record<string, unknown>): Uint8Array {
+  try {
+    return canonicalJsonBytes(payload);
+  } catch {
+    return new TextEncoder().encode(JSON.stringify(payload));
+  }
+}
+
+/** A statement under a signature that is no key's: enough for the archive, which believes no author. */
 function sealWitnessPayload(payload: Record<string, unknown>): Uint8Array {
   return sealDsseEnvelope({
-    payloadBytes: new TextEncoder().encode(JSON.stringify(payload)),
+    payloadBytes: statementBytes(payload),
     signatures: [{ signature: new Uint8Array([1, 2, 3]), keyid: "did:key:zTestVerifierKey" }],
   });
+}
+
+/** `payloadBytes` sealed as a DSSE envelope that `key` signed. */
+async function signedEnvelope(payloadBytes: Uint8Array, key: TestKey = AUTHOR_KEY): Promise<Uint8Array> {
+  const { envelopeBytes } = await sealSignedPayload({
+    payloadBytes,
+    payloadType: DSSE_PAYLOAD_TYPE,
+    signer: async ({ preAuthEncoding }) => [{ signature: key.sign(preAuthEncoding), keyid: key.keyid }],
+  });
+  return envelopeBytes;
+}
+
+/** A statement sealed in its RFC 8785 form and signed by `key`. */
+function signWitnessPayload(payload: Record<string, unknown>, key: TestKey = AUTHOR_KEY): Promise<Uint8Array> {
+  return signedEnvelope(canonicalJsonBytes(payload), key);
 }
 
 function outerWitness(payload: ReturnType<typeof witnessPayload>, envelopeBytes: Uint8Array) {
@@ -49,10 +133,10 @@ function outerWitness(payload: ReturnType<typeof witnessPayload>, envelopeBytes:
 }
 
 describe("createWitnessVerifier", () => {
-  it("verifies a witness statement from a policy-accepted verifier", async () => {
+  it("verifies a witness statement a policy-accepted verifier's key signed", async () => {
     const payload = witnessPayload();
-    const envelopeBytes = sealWitnessPayload(payload);
-    const verifier = createWitnessVerifier({ acceptedVerifiers: [VERIFIER_IRI] });
+    const envelopeBytes = await signWitnessPayload(payload);
+    const verifier = createWitnessVerifier(ACCEPTING);
 
     await expect(
       verifier.verify1271Witness(outerWitness(payload, envelopeBytes)),
@@ -110,7 +194,7 @@ describe("createWitnessVerifier", () => {
     const readContract = vi.fn(async () => ERC1271_MAGIC_VALUE);
     const verifier = createWitnessVerifier({
       acceptedVerifiers: [],
-      archiveClient: { readContract },
+      archiveClient: archive(readContract),
     });
 
     await expect(
@@ -141,7 +225,7 @@ describe("createWitnessVerifier", () => {
     const readContract = vi.fn(async () => "0xdeadbeef");
     const verifier = createWitnessVerifier({
       acceptedVerifiers: [],
-      archiveClient: { readContract },
+      archiveClient: archive(readContract),
     });
 
     const result = await verifier.verify1271Witness(outerWitness(payload, envelopeBytes));
@@ -154,11 +238,9 @@ describe("createWitnessVerifier", () => {
     const witness = outerWitness(payload, sealWitnessPayload(payload));
     const verifierFailingWith = (cause: unknown) => createWitnessVerifier({
       acceptedVerifiers: [],
-      archiveClient: {
-        readContract: async () => {
-          throw cause;
-        },
-      },
+      archiveClient: archive(async () => {
+        throw cause;
+      }),
     });
     /** A viem client's failure of the shape it wraps every contract read in, naming what went wrong. */
     const failedRead = (...causes: readonly string[]): Error => {
@@ -220,7 +302,7 @@ describe("createWitnessVerifier", () => {
     const readContract = vi.fn(async () => {
       throw new Error("not read");
     });
-    const verifier = createWitnessVerifier({ acceptedVerifiers: [], archiveClient: { readContract } });
+    const verifier = createWitnessVerifier({ acceptedVerifiers: [], archiveClient: archive(readContract) });
     const result = await verifier.verify1271Witness(outerWitness(payload, sealWitnessPayload(payload)));
     expect(result.verified).toBe(false);
     expect(readContract).not.toHaveBeenCalled();
@@ -234,18 +316,136 @@ describe("createWitnessVerifier", () => {
   ])("puts a statement naming %s to the archive", async (_label, overrides) => {
     const payload = witnessPayload(overrides);
     const readContract = vi.fn(async () => ERC1271_MAGIC_VALUE);
-    const verifier = createWitnessVerifier({ acceptedVerifiers: [], archiveClient: { readContract } });
+    const verifier = createWitnessVerifier({ acceptedVerifiers: [], archiveClient: archive(readContract) });
     await expect(verifier.verify1271Witness(outerWitness(payload, sealWitnessPayload(payload)))).resolves.toEqual({ verified: true });
     expect(readContract).toHaveBeenCalledOnce();
   });
 
   it("fails when the witness-attested result itself is not the magic value (even if policy-accepted)", async () => {
     const payload = witnessPayload({ result: "0xdeadbeef" });
-    const envelopeBytes = sealWitnessPayload(payload);
-    const verifier = createWitnessVerifier({ acceptedVerifiers: [VERIFIER_IRI] });
+    const envelopeBytes = await signWitnessPayload(payload);
+    const verifier = createWitnessVerifier(ACCEPTING);
 
     const result = await verifier.verify1271Witness(outerWitness(payload, envelopeBytes));
     expect(result.verified).toBe(false);
     expect(result.reason).toMatch(/magic value/);
+  });
+});
+
+// A statement naming a policy-accepted author is that author's word only when a key that stands
+// for the author signed it. Anyone who can place a record can write the rest.
+describe("a statement naming a policy-accepted author (§7.2a)", () => {
+  const payload = witnessPayload();
+  const otherHash = `0x${"dd".repeat(32)}`;
+
+  it.each([
+    ["a signature that does not verify", async () => sealDsseEnvelope({
+      payloadBytes: canonicalJsonBytes(payload),
+      signatures: [{ signature: new Uint8Array([1, 2, 3]), keyid: AUTHOR_KEY.keyid }],
+    })],
+    ["a key that stands for no one", () => signWitnessPayload(payload, STRANGER_KEY)],
+    ["the key of another accepted author", () => signWitnessPayload(payload, OTHER_VERIFIER_KEY)],
+    ["its author's signature over another statement", async () => sealDsseEnvelope({
+      payloadBytes: canonicalJsonBytes(payload),
+      signatures: [{
+        signature: AUTHOR_KEY.sign(dssePreAuthEncoding(DSSE_PAYLOAD_TYPE, canonicalJsonBytes(witnessPayload({ hash: otherHash })))),
+        keyid: AUTHOR_KEY.keyid,
+      }],
+    })],
+  ])("is refused under %s", async (_label, seal) => {
+    const result = await createWitnessVerifier(ACCEPTING).verify1271Witness(outerWitness(payload, await seal()));
+    expect(result).toEqual({
+      verified: false,
+      reason: `witness statement is not signed by a key that stands for its author "${VERIFIER_IRI}", and no `
+        + "archive client is configured for re-execution.",
+    });
+  });
+
+  it("is refused when no key is known to stand for its author", async () => {
+    const verifier = createWitnessVerifier({ acceptedVerifiers: [VERIFIER_IRI], dsseVerifier });
+    const result = await verifier.verify1271Witness(outerWitness(payload, await signWitnessPayload(payload)));
+    expect(result.verified).toBe(false);
+  });
+
+  it("is refused when nothing can check its signature", async () => {
+    const verifier = createWitnessVerifier({ acceptedVerifiers: [VERIFIER_IRI], verifierKeys: ACCEPTING.verifierKeys });
+    const result = await verifier.verify1271Witness(outerWitness(payload, await signWitnessPayload(payload)));
+    expect(result.verified).toBe(false);
+  });
+
+  it("is refused, not thrown, when the signature check throws", async () => {
+    const verifier = createWitnessVerifier({
+      ...ACCEPTING,
+      dsseVerifier: () => {
+        throw new Error("unreadable");
+      },
+    });
+    await expect(verifier.verify1271Witness(outerWitness(payload, await signWitnessPayload(payload))))
+      .resolves.toMatchObject({ verified: false });
+  });
+
+  it("goes to the archive when its author's key did not sign it, and the chain's answer stands", async () => {
+    const readContract = vi.fn(async () => "0xffffffff");
+    const verifier = createWitnessVerifier({ ...ACCEPTING, archiveClient: archive(readContract) });
+    const result = await verifier.verify1271Witness(outerWitness(payload, await signWitnessPayload(payload, STRANGER_KEY)));
+    expect(result.verified).toBe(false);
+    expect(readContract).toHaveBeenCalledOnce();
+  });
+
+  it("is refused when it repeats a member, though its author signed those bytes", async () => {
+    const canonical = new TextDecoder().decode(canonicalJsonBytes(payload));
+    const repeated = canonical.replace(`"hash":`, `"hash":"${otherHash}","hash":`);
+    expect(repeated).not.toBe(canonical);
+    const envelopeBytes = await signedEnvelope(new TextEncoder().encode(repeated));
+    const result = await createWitnessVerifier(ACCEPTING).verify1271Witness(outerWitness(payload, envelopeBytes));
+    expect(result.verified).toBe(false);
+  });
+
+  it("is refused when it is not its RFC 8785 form, though its author signed those bytes", async () => {
+    const envelopeBytes = await signedEnvelope(new TextEncoder().encode(JSON.stringify(payload)));
+    const result = await createWitnessVerifier(ACCEPTING).verify1271Witness(outerWitness(payload, envelopeBytes));
+    expect(result.verified).toBe(false);
+  });
+
+  it("is refused when its envelope carries a second payload beside the one its author signed", async () => {
+    const signed = new TextDecoder().decode(await signWitnessPayload(witnessPayload({ hash: otherHash })));
+    const claimed = Buffer.from(canonicalJsonBytes(payload)).toString("base64");
+    const respelled = signed.replace(`","payloadType"`, `","payload":"${claimed}","payloadType"`);
+    expect(respelled).not.toBe(signed);
+    const result = await createWitnessVerifier(ACCEPTING)
+      .verify1271Witness(outerWitness(payload, new TextEncoder().encode(respelled)));
+    expect(result.verified).toBe(false);
+  });
+});
+
+describe("a statement put to the archive", () => {
+  const payload = witnessPayload();
+
+  it("is refused, before any read, by a client serving another chain than the statement's", async () => {
+    const readContract = vi.fn(async () => ERC1271_MAGIC_VALUE);
+    const verifier = createWitnessVerifier({
+      archiveClient: { getChainId: async () => 8453, readContract },
+    });
+    const result = await verifier.verify1271Witness(outerWitness(payload, sealWitnessPayload(payload)));
+    expect(result).toEqual({
+      verified: false,
+      reason: `archive client serves chain 8453, not the statement's chain ${CHAIN_ID}.`,
+    });
+    expect(readContract).not.toHaveBeenCalled();
+  });
+
+  it("lets a client that cannot say which chain it serves out as an outage", async () => {
+    const cause = new Error("no route to host");
+    const readContract = vi.fn(async () => ERC1271_MAGIC_VALUE);
+    const verifier = createWitnessVerifier({
+      archiveClient: {
+        getChainId: async () => {
+          throw cause;
+        },
+        readContract,
+      },
+    });
+    await expect(verifier.verify1271Witness(outerWitness(payload, sealWitnessPayload(payload)))).rejects.toBe(cause);
+    expect(readContract).not.toHaveBeenCalled();
   });
 });
