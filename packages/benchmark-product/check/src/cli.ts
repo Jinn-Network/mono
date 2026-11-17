@@ -224,8 +224,9 @@ function usage(): string {
     + "                 signing keys to a domain. Checked offline as far as the bytes allow;\n"
     + "                 the lookup at the domain itself stays yours.\n"
     + "  --help, -h     Print this usage and exit 0.\n"
-    + "Trust anchors are yours, not the bundle's: with none supplied a well-formed\n"
-    + "timestamp proof reports present rather than verified, and none ships with this tool.\n"
+    + "Trust anchors and block headers are yours, not the bundle's: with none supplied\n"
+    + "for its time source, a well-formed timestamp proof reports present rather than\n"
+    + "verified, and none ships with this tool.\n"
     + "Exit 0: valid bundle; 1: invalid bundle, or a freeze repository that drifted from it;\n"
     + "     2: usage or operational failure, including a freeze repository that could not be\n"
     + "     rendered from the bundle — the bundle's own verdict is still reported.\n"
@@ -262,6 +263,24 @@ function anchoredValue(entry: AnchorVerificationEntry): string | undefined {
   return undefined;
 }
 
+/** What a reader supplies to evaluate each time source, in the usage text's words for the flag that
+ * carries it: trust anchors (`--tsa-root`) for an authority-time proof, block headers
+ * (`--ots-headers`) for a chain-time one. Whether material was supplied is decided per profile
+ * (`evaluateAnchors`), and on a `verified` or `present` proof the time basis names the profile, so
+ * a note naming the other material would tell a reader who supplied a root that none was supplied,
+ * and point a chain-time proof at the wrong flag (spec §4.2, v1.16; issue #5253). Keyed by the
+ * time-basis union, so a new basis fails to compile here rather than inheriting a name. */
+const TIME_SOURCE_MATERIAL: Readonly<Record<NonNullable<AnchorVerificationEntry["timeBasis"]>, string>> = {
+  "authority-time": "trust anchors",
+  "chain-time": "block headers",
+};
+
+function timeSourceMaterial(entry: AnchorVerificationEntry): string {
+  // `evaluateAnchors` gives every `verified` and `present` entry a time basis. Without one, the note
+  // keeps the usage text's general word.
+  return entry.timeBasis === undefined ? "trust anchors" : TIME_SOURCE_MATERIAL[entry.timeBasis];
+}
+
 /** What THIS reader did about the time basis, stated separately from what the bytes say. §8: the
  * verifier's own report always adds its evaluation — whose material validated the time basis, or
  * that none was supplied. Exported so the product's workspace `verify` prints the same note rather
@@ -273,7 +292,7 @@ export function timestampProofEvaluationNote(entry: AnchorVerificationEntry): st
     const evaluated = entry.time !== undefined && entry.time !== anchoredValue(entry)
       ? ` — ${entry.time}`
       : "";
-    return `time source evaluated against trust anchors you supplied${evaluated}`;
+    return `time source evaluated against ${timeSourceMaterial(entry)} you supplied${evaluated}`;
   }
   // A provider's free-form reason is authenticated report data, not CLI prose. Keep the exact value
   // in `--json`, but alias raw identifiers before this untrusted text enters the human report.
@@ -289,8 +308,8 @@ export function timestampProofEvaluationNote(entry: AnchorVerificationEntry): st
   // `present` with material supplied is a different disclosure from `present` with none: this
   // reader did have material for the profile, and it did not carry this anchor to `verified`.
   return entry.trustMaterial === "supplied"
-    ? "time source not evaluated: the trust anchors you supplied do not verify this timestamp proof"
-    : "time source not evaluated: no trust anchors supplied";
+    ? `time source not evaluated: the ${timeSourceMaterial(entry)} you supplied do not verify this timestamp proof`
+    : `time source not evaluated: no ${timeSourceMaterial(entry)} supplied`;
 }
 
 /** What each record a timestamp proof covers is called in the human lines (spec §4.2, v1.15; issue

@@ -94,9 +94,11 @@ test("usage exits 2 and states the exit contract", async () => {
   assert.match(result.stderr, /Protocol identifiers the protocol spec release serves resolve to their\ndocuments; the rest are names, not addresses/);
   assert.doesNotMatch(result.stderr, /Protocol identifiers are names/);
   assert.match(result.stderr, /platform bytes installed from npm/);
-  // The reader's words for what the caller supplies and what it checks: trust anchors and
-  // timestamp proofs, not "trust material" or a bare "anchor" (reader-facing vocabulary §4.2).
-  assert.match(result.stderr, /Trust anchors are yours, not the bundle's: with none supplied a well-formed\ntimestamp proof reports present rather than verified/);
+  // The reader's words for what the caller supplies and what it checks: trust anchors, block
+  // headers and timestamp proofs, not "trust material" or a bare "anchor" (reader-facing
+  // vocabulary §4.2, v1.16: the notes name block headers apart from trust anchors, so the usage
+  // text names both).
+  assert.match(result.stderr, /Trust anchors and block headers are yours, not the bundle's: with none supplied\nfor its time source, a well-formed timestamp proof reports present rather than\nverified, and none ships with this tool\./);
   assert.doesNotMatch(result.stderr, /[Tt]rust material/);
   assert.doesNotMatch(result.stderr, /well-formed anchor/);
   assert.doesNotMatch(result.stderr, /jinn\.network/);
@@ -342,7 +344,7 @@ test("the default human surface discloses every carried anchor and every subject
   assert.match(output, /lock timestamp proof · authority-time · present · 2026-02-02T12:00:00Z/);
   assert.match(output, /time source not evaluated: the trust anchors you supplied do not verify this timestamp proof/);
   assert.match(output, /the runs timestamp proof · chain-time · verified · block 880017/);
-  assert.match(output, /time source evaluated against trust anchors you supplied — 2026-08-17T12:00:00Z/);
+  assert.match(output, /time source evaluated against block headers you supplied — 2026-08-17T12:00:00Z/);
   // An authority-time proof whose evaluated instant is the genTime already on the head line does
   // not repeat it.
   assert.doesNotMatch(output, /supplied — 2026-01-01T12:00:00Z/);
@@ -484,6 +486,124 @@ test("the timestamp blocks name the matrix subject the runs while --json keeps m
   const anchors = JSON.parse(machine.stdout).anchors;
   assert.equal(anchors.anchors[0].subject, "matrix");
   assert.deepEqual(anchors.subjects.map((/** @type {{ subject: string }} */ entry) => entry.subject), ["lock", "matrix"]);
+});
+
+// Spec section 4.2, v1.16 (issue #5253): whether this reader supplied material is decided per
+// profile, so each proof's note names the material its own time source needs: trust anchors
+// (`--tsa-root`) for an authority-time proof, block headers (`--ots-headers`) for a chain-time one.
+// The proofs are real and so is the evaluation: `verify` runs `evaluateIntegrityAnchors` over the
+// material the flags built, as `verifyPublicBundleSnapshot` does, so no case states a
+// `trustMaterial` the evaluator would not report.
+test("each timestamp proof's note names the material its own time source needs (issue #5253)", async () => {
+  const { evaluateIntegrityAnchors, runVerifierCli } = await import("../dist/index.js");
+  const { MATRIX_RECORD_KIND, RUN_RECORD_KIND } = await import("@jinn-network/benchmarking-records");
+  const {
+    buildOpenTimestampsAnchorEvidenceRecord,
+    buildRfc3161AnchorEvidenceRecord,
+    createFixtureAuthority,
+    createOpenTimestampsKitFixtures,
+  } = await import("@jinn-network/trust-testing");
+  const runSha256 = "1".repeat(64);
+  const matrixSha256 = "2".repeat(64);
+  const authority = createFixtureAuthority("issue-5253");
+  const ots = createOpenTimestampsKitFixtures(Buffer.from(matrixSha256, "hex"));
+  /** @param {{ readonly bytes: Uint8Array, readonly recordDigest: string }} built */
+  const carried = (built) => ({ recordSha256: built.recordDigest.slice("sha256:".length), bytes: built.bytes });
+  const lock = carried(buildRfc3161AnchorEvidenceRecord({
+    subjectKind: RUN_RECORD_KIND,
+    subjectSha256: runSha256,
+    proofBytes: authority.mintTimeStampToken({ subjectSha256: runSha256, genTime: "20260501120000Z" }).tokenDer,
+  }));
+  /** @param {Uint8Array} proofBytes */
+  const runs = (proofBytes) => carried(buildOpenTimestampsAnchorEvidenceRecord({
+    subjectKind: MATRIX_RECORD_KIND,
+    subjectSha256: matrixSha256,
+    proofBytes,
+  }));
+  const headers = ots.blockHeaders.map(({ height, header }) => `${height}:${Buffer.from(header).toString("hex")}\n`).join("");
+  const files = new Map([
+    ["root.der", authority.certificateDer],
+    ["headers.txt", new TextEncoder().encode(headers)],
+  ]);
+  /**
+   * @param {readonly string[]} flags
+   * @param {readonly { recordSha256: string, bytes: Uint8Array }[]} records
+   */
+  const check = (flags, records) => runVerifierCli(["bundle", ...flags], {
+    readFile: (path) => readFixture(files, path),
+    verify: async (_dir, options) => verified({
+      format: "benchmark-product-public-bundle/6",
+      identity: "a".repeat(64),
+      checks: V6_CHECKS,
+      ...V6_IDENTITIES,
+      anchors: evaluateIntegrityAnchors({
+        records,
+        runSha256,
+        matrixSha256,
+        closeAt: "2026-06-01T00:00:00Z",
+        ...(options?.anchorTrust === undefined ? {} : { trust: options.anchorTrust }),
+      }),
+    }),
+  });
+  /**
+   * The note printed under the one proof whose head line starts with `head`.
+   * @param {string} stdout
+   * @param {string} head
+   */
+  const noteUnder = (stdout, head) => {
+    const lines = stdout.split("\n");
+    const at = lines.findIndex((line) => line.startsWith(`  ${head} · `));
+    assert.ok(at >= 0, `no proof line for ${head} in:\n${stdout}`);
+    return lines[at + 1];
+  };
+  const lockHead = "lock timestamp proof · authority-time";
+  const runsHead = "the runs timestamp proof · chain-time";
+
+  // No material at all: the chain-time proof points at block headers, the authority-time one at
+  // trust anchors.
+  const bare = await check([], [lock, runs(ots.completeProof)]);
+  assert.equal(bare.exitCode, 0, bare.stderr);
+  assert.equal(noteUnder(bare.stdout, runsHead), "    time source not evaluated: no block headers supplied");
+  assert.equal(noteUnder(bare.stdout, lockHead), "    time source not evaluated: no trust anchors supplied");
+
+  // Only a root: it verifies the authority-time proof and was never material for the chain-time
+  // one, so that proof is not told that no trust anchors were supplied.
+  const rootOnly = await check(["--tsa-root", "root.der"], [lock, runs(ots.completeProof)]);
+  assert.equal(rootOnly.exitCode, 0, rootOnly.stderr);
+  assert.match(rootOnly.stdout, /^ {2}the runs timestamp proof · chain-time · present · block 880017$/m);
+  assert.equal(noteUnder(rootOnly.stdout, runsHead), "    time source not evaluated: no block headers supplied");
+  assert.match(rootOnly.stdout, /^ {2}lock timestamp proof · authority-time · verified · 2026-05-01T12:00:00Z$/m);
+  assert.equal(noteUnder(rootOnly.stdout, lockHead), "    time source evaluated against trust anchors you supplied");
+  assert.doesNotMatch(rootOnly.stdout, /no trust anchors supplied/);
+
+  // Only block headers: the mirror case.
+  const headersOnly = await check(["--ots-headers", "headers.txt"], [lock, runs(ots.completeProof)]);
+  assert.equal(headersOnly.exitCode, 0, headersOnly.stderr);
+  assert.match(headersOnly.stdout, /^ {2}the runs timestamp proof · chain-time · verified · block 880017$/m);
+  assert.equal(
+    noteUnder(headersOnly.stdout, runsHead),
+    "    time source evaluated against block headers you supplied — 2026-08-17T12:00:00Z",
+  );
+  assert.equal(noteUnder(headersOnly.stdout, lockHead), "    time source not evaluated: no trust anchors supplied");
+
+  // Block headers that do not include the attested block: supplied, and still not `verified`.
+  const otherBlock = await check(["--ots-headers", "headers.txt"], [runs(ots.unknownHeightCompleteProof)]);
+  assert.equal(otherBlock.exitCode, 0, otherBlock.stderr);
+  assert.equal(
+    noteUnder(otherBlock.stdout, runsHead),
+    "    time source not evaluated: the block headers you supplied do not verify this timestamp proof",
+  );
+
+  // `--json` carries the evaluator's raw entry and none of this prose.
+  const machine = await check(["--json", "--tsa-root", "root.der"], [lock, runs(ots.completeProof)]);
+  assert.equal(machine.exitCode, 0, machine.stderr);
+  const entries = JSON.parse(machine.stdout).anchors.anchors;
+  assert.deepEqual(
+    entries.map((/** @type {{ subject: string, status: string, trustMaterial: string }} */ entry) =>
+      [entry.subject, entry.status, entry.trustMaterial]).sort(),
+    [["lock", "verified", "supplied"], ["matrix", "present", "none"]],
+  );
+  assert.doesNotMatch(machine.stdout, /time source|block headers|trust anchors/);
 });
 
 test("an unanchored bundle's human surface is unchanged — no anchor section at all", async () => {

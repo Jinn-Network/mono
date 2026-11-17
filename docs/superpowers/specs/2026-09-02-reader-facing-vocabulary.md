@@ -1,10 +1,10 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.15
+- **Version:** 1.16
 - **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-12; v1.4: 2026-09-16;
   v1.5: 2026-09-17; v1.6: 2026-09-18; v1.7: 2026-09-19; v1.8: 2026-09-24; v1.9: 2026-09-26;
   v1.10: 2026-09-29; v1.11: 2026-11-14; v1.12: 2026-11-14; v1.13: 2026-11-17;
-  v1.14: 2026-11-17; v1.15: 2026-11-17)
+  v1.14: 2026-11-17; v1.15: 2026-11-17; v1.16: 2026-11-17)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
@@ -141,6 +141,20 @@
   the other label, names no §5 concept and is not reached. Workspace verification and the web card
   follow, as v1.14 requires of any concept they share with the reader. No earlier disposition
   changes.
+- **v1.16** (#5253): rules what the reader's per-proof note calls the material a reader supplies,
+  which it had called *trust anchors* under every proof. Whether material was supplied is decided
+  per profile (`evaluateAnchors`): RFC 3161 roots (`--tsa-root`, which the usage text calls an
+  RFC 3161 trust anchor) for an `authority-time` proof, Bitcoin block headers (`--ots-headers`) for
+  a `chain-time` one. So a reader who supplied only a root was told of a chain-time proof that no
+  trust anchors were supplied, and a reader who supplied nothing was pointed at trust anchors when
+  that proof needs block headers. The *Trust material* row now has the note name the material for
+  the proof's own time source: *trust anchors* for an authority-time proof, *block headers* for a
+  chain-time one, in each of the three notes that name material. The authority-time notes and
+  `--json` do not change. Workspace verification prints the reader's own note (v1.14), so it
+  follows with no change of its own. The usage text's closing paragraph, which used *trust anchors*
+  for both kinds together, now names both (*Trust anchors and block headers are yours*), so the
+  tool never uses *trust anchors* for the block headers its notes name apart. No earlier
+  disposition changes.
 
 ## 1. Scope
 
@@ -416,7 +430,7 @@ rows that needed it, not retrofitted across the document.
 | Time basis | rename | Time source | Where a proof's time comes from (`authority-time`, `chain-time`). Not *what the timestamp covers*, which is the lock or matrix bytes the reader recomputes for a `present` proof. |
 | anchored / absent / `declared-but-absent` | rename | timestamped / none / promised but missing | The `declared-but-absent` **string in `--json` is contract**; only the human line changes. |
 | `matrix` (the label of a covered record) | rename | the runs | The label the *Timestamps* and *Timestamp coverage* lines print for the record a proof covers (`TIMESTAMP_SUBJECT_NAMES` in `cli.ts`, v1.15): *the runs timestamp proof*, *the runs: timestamped*, *the runs: none*, *the runs: promised but missing*. The proof covers `matrix.json`, the record §5 names **the runs**, so the label takes that name whole; it opens a line rather than heading one, so no shortened form applies. The raw value `matrix` is **contract**: the sealed claim's `anchors` carry it as `subject`, and `--json` prints it, so only the human line changes, as in the row above. The other label, `lock`, names no §5 concept; this row does not reach it. |
-| Trust material | rename | Trust anchors you supply | |
+| Trust material | rename | Trust anchors you supply | The note under each timestamp proof (`timestampProofEvaluationNote` in `cli.ts`, v1.16) names the material for that proof's own time source, because whether material was supplied is decided per profile (`evaluateAnchors`): *trust anchors* (RFC 3161 roots, `--tsa-root`) for an `authority-time` proof, *block headers* (`--ots-headers`) for a `chain-time` one. A reader who supplied only a root is not told of a chain-time proof that no trust anchors were supplied, and a reader who supplied nothing is pointed at block headers for it. The usage text's closing paragraph names both kinds together: *trust anchors and block headers*. |
 | Artifact content … not fetched | keep | — | Already reader-shaped, and the caveat under it is exemplary. |
 | freeze repository | keep | — | |
 | No files were uploaded. | keep | — | |
@@ -450,7 +464,7 @@ under two names on those two screens, `lock: anchored` from the product and `loc
 from the reader, reads as two outcomes, which is what §5's rule of one concept, one name exists to
 stop. So wherever these two surfaces present a concept the reader tool's output presents, they
 follow §5 and this section: *Timestamps*, *Timestamp coverage*, *timestamp proof*, *time source*,
-*trust anchors you supply*, *timestamped*, *none* and *promised but missing* for the three
+*trust anchors you supply* and *block headers*, *timestamped*, *none* and *promised but missing* for the three
 outcomes, and *the runs* for the record labeled `matrix` (v1.15). The split v1.13 applied to
 refusals applies here: the human text follows §5, while `--json` and the result the web card
 receives are contract and keep `anchored`, `absent`, `declared-but-absent`, the raw record labels
