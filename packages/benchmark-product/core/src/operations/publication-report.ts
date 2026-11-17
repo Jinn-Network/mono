@@ -432,11 +432,24 @@ export function publicationReport(
             }
             requireWorkspaceAuthorship({ workspaceDir: context.workspaceDir, recordSha256, recordKind: REPORT_V2_RECORD_KIND, author: state.owner });
           } },
-          announce: { async announce(value) { return source.writer.append({
-            timestamp: value.record.announcementTimestamp!,
-            announcement: { announcementId: `benchmark-report-v2:${input.draftId}:${recordSha256}`, action: "available", record: { kind: value.record.kind, digest: value.record.digest, mediaType: value.record.mediaType } },
-            record: { bytes: value.record.bytes, contentType: value.record.mediaType },
-          }); } },
+          announce: { async announce(value) {
+            // The frozen time is the earliest the envelope is announced, not the exact time (#5369).
+            // A retry replays it, and another draft, or a pending entry anchor announced when another
+            // holder releases the source lock, can move the head past it between attempts. An
+            // envelope the source already holds is reused without a new append, so it replays
+            // exactly as it was.
+            const announcementId = `benchmark-report-v2:${input.draftId}:${recordSha256}`;
+            const announced = (await source.writer.readState())?.announcements[announcementId];
+            if (announced !== undefined) {
+              if (announced.receipt.record?.digest !== value.record.digest) throw new Error(`source announcement ${announcementId} names a different record than ${value.record.id}`);
+              return announced.receipt;
+            }
+            return source.writer.append({
+              timestamp: timestampAfter(value.record.announcementTimestamp!, (await source.head.getExact())?.issuedAt),
+              announcement: { announcementId, action: "available", record: { kind: value.record.kind, digest: value.record.digest, mediaType: value.record.mediaType } },
+              record: { bytes: value.record.bytes, contentType: value.record.mediaType },
+            });
+          } },
           faults: deps.planFaults,
       });
       await probeRecord(publicBaseUrl, recordSha256, produced.envelope, "signed Report v2");
