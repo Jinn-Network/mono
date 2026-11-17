@@ -288,6 +288,27 @@ async function rotateRequesterThenSolver(h: Harness): Promise<void> {
   expect(rotationReceipt(h).roleSets).toEqual(['solver']);
 }
 
+/**
+ * Rotates the requester family, moves its live rotated store out of `<dir>/identity` to the path `to`
+ * gives (which may rename it) and points the config at it, then rotates the solver family (#5362).
+ * No store in `<dir>/identity` then shows the requester rotation, and the rotation receipt records only
+ * the solver one. Returns where the requester store went.
+ */
+async function rotateRequesterMovedThenSolver(h: Harness, to: (rotated: string) => string): Promise<string> {
+  const first = await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'requester', '--execute']);
+  expect(first.kind).toBe('ceremony_rotate_complete');
+  const rotatedStore = config(h).identityStores.requester!;
+  const moved = to(rotatedStore);
+  mkdirSync(dirname(moved), { recursive: true });
+  renameSync(rotatedStore, moved);
+  writeFileSync(h.configPath, JSON.stringify({ ...config(h), identityStores: { ...config(h).identityStores, requester: moved } }));
+  const later = await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
+  expect(later.kind).toBe('ceremony_rotate_complete');
+  expect(readdirSync(join(h.dir, 'identity')).filter((name) => name.startsWith('requester.rotated-'))).toEqual([]);
+  expect(rotationReceipt(h).roleSets).toEqual(['solver']);
+  return moved;
+}
+
 describe('ceremony rotate', () => {
   it('plans without side effects: the retiring keys, the new stores, and the revocation anchor', async () => {
     const h = await provisioned();
@@ -546,19 +567,21 @@ describe('ceremony init re-authoring a rotated operator', () => {
   it('refuses, naming the revocation, to bind the retired keys again when no rotation record is left, before any anchor or write', async () => {
     const { h, previousPath, revocations } = await rotatedAndMovedAside();
     // Every record the rotated-family refusal reads is gone: the rotated store is moved out of
-    // <dir>/identity, rotation.json is removed, and --config names a new file. The carried revocations
-    // are what is left to catch the retired keys.
+    // <dir>/identity, rotation.json and the run receipt are removed, and --config names a new file
+    // that carries only the Agent IRIs, so init binds for the same Agents. The carried revocations are
+    // what is left to catch the retired keys.
     const setAside = join(h.home, 'set-aside');
     mkdirSync(setAside);
     for (const name of readdirSync(join(h.dir, 'identity')).filter((entry) => entry.startsWith('solver.rotated-'))) {
       renameSync(join(h.dir, 'identity', name), join(setAside, name));
     }
     rmSync(join(h.dir, 'ceremony', 'rotation.json'));
+    rmSync(join(h.dir, 'ceremony', 'receipt.json'));
+    const freshConfig = join(h.home, 'fresh-config.json');
+    writeFileSync(freshConfig, JSON.stringify({ agentIri: config(h).agentIri, admissionAgent: config(h).admissionAgent }));
     const sessions = h.calls.filter((call) => call === 'openAnchorSession').length;
 
-    const refusal = await run(h, reauthorArgv(h, [
-      '--previous-catalog', previousPath, '--config', join(h.home, 'fresh-config.json'),
-    ]));
+    const refusal = await run(h, reauthorArgv(h, ['--previous-catalog', previousPath, '--config', freshConfig]));
 
     expect(refusal.code).toBe('invalid_invocation');
     expect((refusal.details as { state: string }).state).toBe('retired-key-bound');
@@ -635,6 +658,44 @@ describe('ceremony init re-authoring a rotated operator', () => {
     expect(h.submitted).toHaveLength(submissions);
     expect(existsSync(freshConfig)).toBe(false);
     expect(existsSync(freshCatalog)).toBe(false);
+  });
+
+  it('refuses, before it opens any store or prints its plan, a family whose rotated store was moved and renamed out of <dir>/identity, from the catalog revocations (#5362)', async () => {
+    const h = await provisioned();
+    await rotateRequesterMovedThenSolver(h, () => join(h.home, 'vault', 'requester.enc.json'));
+    rmSync(join(h.dir, 'ceremony', 'rotation.json'));
+    const freshConfig = join(h.home, 'fresh-config.json');
+    const freshCatalog = join(h.home, 'fresh-trust.json');
+    const argv = [
+      'init', '--dir', h.dir, '--config', freshConfig, '--role-sets', 'requester', '--authority-store', h.authorityStore,
+    ];
+    const sessions = h.calls.filter((call) => call === 'openAnchorSession').length;
+    const submissions = h.submitted.length;
+    const opened = storesOpened.length;
+    const refusedFrom = (refusal: Record<string, unknown>, catalogPath: string) => {
+      expect(refusal.code).toBe('invalid_invocation');
+      expect(refusal.details).toMatchObject({ state: 'rotated-family', sideEffects: false, families: ['requester'] });
+      expect(String(refusal.message)).toContain(`${catalogPath} revokes`);
+      expect(String(refusal.message)).toContain(join(h.dir, 'ceremony', 'receipt.json'));
+    };
+
+    // The plan, then --execute, into a catalog at another path: the catalog the run receipt names, where
+    // init bound the keys and the rotation revoked them, shows it.
+    for (const extra of [[], ['--execute']]) {
+      // eslint-disable-next-line no-await-in-loop -- each run is checked before the next.
+      refusedFrom(await run(h, [...argv, '--catalog', freshCatalog, ...extra]), h.catalogPath);
+    }
+    // A re-author at the catalog's own path, with the catalog moved aside: --previous-catalog shows it.
+    const previousPath = join(h.home, 'trust.previous.json');
+    renameSync(h.catalogPath, previousPath);
+    refusedFrom(await run(h, [...argv, '--execute', '--previous-catalog', previousPath]), previousPath);
+
+    expect(storesOpened).toHaveLength(opened);
+    expect(h.calls.filter((call) => call === 'openAnchorSession')).toHaveLength(sessions);
+    expect(h.submitted).toHaveLength(submissions);
+    expect(existsSync(freshConfig)).toBe(false);
+    expect(existsSync(freshCatalog)).toBe(false);
+    expect(existsSync(h.catalogPath)).toBe(false);
   });
 
   it('says a config names a store outside <dir>/identity, not that a rotation retired it, when no rotation did', async () => {
@@ -856,6 +917,72 @@ describe('ceremony join after a rotation', () => {
     expect(refusal.details).toMatchObject({ state: 'rotated-family', sideEffects: false, families: ['requester'] });
     expect(String(refusal.message)).toContain(moved);
     unchanged();
+  });
+
+  it.each([
+    ['rotation.json records only the later rotation', (_h: Harness) => undefined],
+    ['rotation.json is gone', (h: Harness) => rmSync(join(h.dir, 'ceremony', 'rotation.json'))],
+  ])('refuses, before any store or anchor, a family whose rotated store was moved out of <dir>/identity, with --config naming a new file (#5362, %s)', async (_case, receipt) => {
+    const h = await provisioned();
+    await rotateRequesterMovedThenSolver(h, (rotated) => join(h.home, 'moved', basename(rotated)));
+    receipt(h);
+    const second = await secondCatalog(h);
+    const unchanged = snapshot(h, second.path);
+    const freshConfig = join(h.home, 'fresh-config.json');
+
+    const refusal = await run(h, [...joinArgv(h, second, 'requester'), '--config', freshConfig]);
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect(refusal.details).toMatchObject({ state: 'rotated-family', sideEffects: false, families: ['requester'] });
+    // The catalog the run receipt names, where the keys were bound and the rotation revoked them.
+    expect(String(refusal.message)).toContain(`${h.catalogPath} revokes`);
+    expect(String(refusal.message)).toContain(join(h.dir, 'ceremony', 'receipt.json'));
+    expect(existsSync(freshConfig)).toBe(false);
+    unchanged();
+  });
+
+  it('refuses as rotated-family, not store-elsewhere, a family whose rotated store was renamed when moved and the config names (#5362)', async () => {
+    const h = await provisioned();
+    const renamed = await rotateRequesterMovedThenSolver(h, () => join(h.home, 'vault', 'requester.enc.json'));
+    expect(config(h).identityStores.requester).toBe(renamed);
+    const second = await secondCatalog(h);
+    const unchanged = snapshot(h, second.path);
+
+    const refusal = await run(h, joinArgv(h, second, 'requester'));
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect(refusal.details).toMatchObject({ state: 'rotated-family', sideEffects: false, families: ['requester'] });
+    expect(String(refusal.message)).toContain(`${h.catalogPath} revokes`);
+    unchanged();
+    expect(createCeremonyCommand(h.deps).helpText).toContain('the run receipt, <dir>/ceremony/receipt.json, names the anchor');
+  });
+
+  it('refuses from the catalog it joins when that is the one the rotation revoked in, moved to another path (#5362)', async () => {
+    const h = await provisioned();
+    await rotateRequesterMovedThenSolver(h, (rotated) => join(h.home, 'moved', basename(rotated)));
+    const genesis = config(h).trustPolicyGenesisDigest;
+    const shared = { path: join(h.home, 'shared', 'trust.json'), genesis };
+    mkdirSync(dirname(shared.path));
+    renameSync(h.catalogPath, shared.path);
+    const unchanged = snapshot(h, shared.path);
+
+    const refusal = await run(h, [...joinArgv(h, shared, 'requester'), '--config', join(h.home, 'fresh-config.json')]);
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect(refusal.details).toMatchObject({ state: 'rotated-family', sideEffects: false, families: ['requester'] });
+    expect(String(refusal.message)).toContain(`${shared.path} revokes`);
+    unchanged();
+  });
+
+  it('still joins a family whose keys no catalog revokes, into a catalog that revokes another operator\'s keys for it (#5362)', async () => {
+    const h = await provisioned();
+    const second = await secondCatalog(h);
+    const rotation = await run(h, ['rotate', '--dir', dirname(second.path), '--role-sets', 'requester', '--execute']);
+    expect(rotation.kind).toBe('ceremony_rotate_complete');
+
+    const result = await run(h, joinArgv(h, second, 'requester'));
+
+    expect(result.kind).toBe('ceremony_join_complete');
   });
 });
 
