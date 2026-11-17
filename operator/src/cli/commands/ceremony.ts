@@ -2050,12 +2050,23 @@ function refuseRotationLocked(ctx: CommandContext, input: {
  * short-lived file created exclusively (`rotate.lock.takeover`), so of two runs that find it gone only
  * one takes it: that one re-reads the lock, removes it only if it is still the gone run's, and links
  * its own. The other finds the takeover file, or then a live holder, and refuses.
+ *
+ * A refusal exits through `ctx.exit`, which is `process.exit` in production and runs no `finally`, so
+ * it first removes this run's record and the takeover file when this run created it.
  */
 function acquireRotationLock(ctx: CommandContext, dir: string): () => void {
   const path = rotationLockPath(dir);
+  const takeover = `${path}.takeover`;
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const own: RotationLockHolder = { pid: process.pid, host: hostname(), startedAt: new Date().toISOString(), token: randomUUID() };
   const record = `${path}.${own.token}`;
+  let ownsTakeover = false;
+  const cleanUp = (): void => {
+    rmSync(record, { force: true });
+    if (ownsTakeover) rmSync(takeover, { force: true });
+    ownsTakeover = false;
+  };
+  const refusing: CommandContext = { ...ctx, exit: (code) => { cleanUp(); ctx.exit(code); } };
   writeFileSync(record, `${JSON.stringify(own)}\n`, { mode: 0o600, flag: 'wx' });
   const link = (): boolean => {
     try {
@@ -2069,23 +2080,19 @@ function acquireRotationLock(ctx: CommandContext, dir: string): () => void {
   try {
     if (!link()) {
       const holder = readRotationLockHolder(path);
-      if (holder === undefined || !rotationLockHolderGone(holder)) refuseRotationLocked(ctx, { dir, path, holder });
-      const takeover = `${path}.takeover`;
+      if (holder === undefined || !rotationLockHolderGone(holder)) refuseRotationLocked(refusing, { dir, path, holder });
       try {
         writeFileSync(takeover, `${JSON.stringify(own)}\n`, { mode: 0o600, flag: 'wx' });
+        ownsTakeover = true;
       } catch (cause) {
         if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') throw cause;
-        refuseRotationLocked(ctx, { dir, path, holder, takeover });
+        refuseRotationLocked(refusing, { dir, path, holder, takeover });
       }
-      try {
-        if (readRotationLockHolder(path)?.token === holder.token) rmSync(path, { force: true });
-        if (!link()) refuseRotationLocked(ctx, { dir, path, holder: readRotationLockHolder(path) });
-      } finally {
-        rmSync(takeover, { force: true });
-      }
+      if (readRotationLockHolder(path)?.token === holder.token) rmSync(path, { force: true });
+      if (!link()) refuseRotationLocked(refusing, { dir, path, holder: readRotationLockHolder(path) });
     }
   } finally {
-    rmSync(record, { force: true });
+    cleanUp();
   }
   return () => {
     if (readRotationLockHolder(path)?.token === own.token) rmSync(path, { force: true });
