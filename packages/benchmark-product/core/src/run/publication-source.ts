@@ -429,13 +429,24 @@ export type WorkspacePublicationHeadRefresh =
 /**
  * Drafts whose publication stage may still announce at a time it froze earlier.
  *
- * Registration, accounting, Matrix v2 and Report each freeze `announcedAt` when they start, so a
- * retry replays the identical plan, and then announce at that instant or just after it. The
- * writer refuses any append that does not strictly advance the served head. A head re-signed
- * while such a stage is `in-progress` therefore carries an `issuedAt` its retry can never pass,
- * and the stage could no longer finish. The heartbeat design does not cover this; it is the
- * Colophon form of the floor coupling that design states for the operator's requester leg
- * (its §5.4).
+ * Each stage freezes `announcedAt` once, when it marks itself `in-progress`, so a retry replays the
+ * identical plan and announces at that instant or just after it. The writer refuses any append
+ * that does not strictly advance the served head. A head re-signed after a stage froze its time
+ * and before it announced would therefore carry an `issuedAt` the stage could never pass, and the
+ * stage could no longer finish. Each stage freezes where this check cannot miss it:
+ *
+ * - Registration (#5347), accounting (#5334) and Report freeze under the source lock this
+ *   heartbeat also holds, strictly after the `issuedAt` of the head served then. A re-sign
+ *   therefore lands before the freeze, which the frozen time passes, or finds the stage
+ *   `in-progress` here. Registration and Report make every announcement in that same hold.
+ *   Accounting announces its inputs in that hold and its own records in a later one.
+ * - Matrix v2 takes accounting's frozen time and marks itself `in-progress` while accounting
+ *   already is.
+ *
+ * A stage that froze its time and then failed before it announced stays `in-progress` and its
+ * retry reuses that time, so the check holds the head back until the stage has finished. The
+ * heartbeat design does not cover this; it is the Colophon form of the floor coupling that design
+ * states for the operator's requester leg (its §5.4).
  *
  * Conservative by construction: a run naming another source is skipped, but a run document that
  * cannot be read is reported, because it may hold exactly such a stage. Withholding leaves the
