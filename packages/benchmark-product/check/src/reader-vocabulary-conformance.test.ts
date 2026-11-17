@@ -644,6 +644,27 @@ function unrenderedChecks(render: string, expected: readonly string[]): string[]
   return expected.filter((check) => !lines.some((line) => line.startsWith(`${check} `)));
 }
 
+/** The checks, from `expected`, whose row in `render` carries no gloss: the row's third column
+ * (name, state, gloss) is missing, empty, or "undefined". */
+function unglossedChecks(render: string, expected: readonly string[]): string[] {
+  const lines = render.split("\n");
+  return expected.filter((check) => {
+    const gloss = lines.find((line) => line.startsWith(`${check} `))?.trimEnd().split(/ {2,}/u)[2];
+    return gloss === undefined || gloss === "" || gloss === "undefined";
+  });
+}
+
+/** The caveat's list of what was recomputed: the text between "What is recomputed is" and
+ * "against the bytes", read as one line. Nothing outside that sentence can stand in for it. */
+function recomputedSubjects(render: string): string {
+  const flat = render.replace(/\s+/gu, " ");
+  const opening = "What is recomputed is";
+  const start = flat.indexOf(opening);
+  const end = start < 0 ? -1 : flat.indexOf("against the bytes", start);
+  if (end < 0) throw new Error("the render carries no recomputed-checks sentence");
+  return flat.slice(start + opening.length, end);
+}
+
 /** The surfaces, among `texts`, no render of which yields reader text. A single render may print
  * nothing on a surface (a refusal prints to stderr and nothing to stdout), so the floor is one
  * non-empty render per surface, not one per render. */
@@ -1974,12 +1995,13 @@ describe("reader-facing strings", () => {
     const render = renderEveryCheck();
     expect(EVERY_CHECK.length).toBeGreaterThan(expectedChecks([]).length);
     expect(unrenderedChecks(render, EVERY_CHECK)).toEqual([]);
-    // The caveat names what was recomputed, one subject per check that passed. It wraps, so the
-    // render is read as one line.
-    const flat = render.replace(/\s+/gu, " ");
+    expect(unglossedChecks(render, EVERY_CHECK)).toEqual([]);
+    // The caveat names what was recomputed, one subject per check that passed. It is read from its
+    // own sentence, so a gloss row that shares a subject's words cannot stand in for it.
+    const caveat = recomputedSubjects(render);
     for (const check of EVERY_CHECK) {
       const subject = describeRecomputedChecks({ outcomes: [{ check, state: "passed" }] } as unknown as VerificationOutcome);
-      expect(flat, check).toContain(subject);
+      expect(caveat, check).toContain(subject);
     }
   });
 
@@ -1988,6 +2010,18 @@ describe("reader-facing strings", () => {
     const partial = EVERY_CHECK.slice(1).map((check) => `${check} passed`).join("\n");
     expect(unrenderedChecks(partial, EVERY_CHECK)).toEqual([first]);
     expect(rest.length).toBeGreaterThan(0);
+  });
+
+  test("a check row with an empty or undefined gloss is reported unglossed", () => {
+    const [empty, undefinedGloss, ...rest] = EVERY_CHECK;
+    const rows = [`${empty}  passed  `, `${undefinedGloss}  passed  undefined`, ...rest.map((check) => `${check}  passed  a gloss`)];
+    expect(unglossedChecks(rows.join("\n"), EVERY_CHECK)).toEqual([empty, undefinedGloss]);
+  });
+
+  test("a subject printed outside the caveat sentence is not read as recomputed", () => {
+    const render = "What is recomputed is calculations — against the bytes.\nreport-verification  passed  the result follows";
+    expect(recomputedSubjects(render)).toContain("calculations");
+    expect(recomputedSubjects(render)).not.toContain("the result");
   });
 
   test("every scanned surface renders reader text", async () => {
