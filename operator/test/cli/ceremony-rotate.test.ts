@@ -1084,16 +1084,19 @@ describe('ceremony join after a rotation', () => {
     };
   }
 
-  it.each([
-    ['cannot be parsed', (receipt: Record<string, unknown>) => JSON.stringify(receipt).slice(0, 40)],
-    ['has no agentIri', (receipt: Record<string, unknown>) => JSON.stringify({ ...receipt, agentIri: undefined })],
-    ['has an earlierAnchors that is not a list', (receipt: Record<string, unknown>) =>
+  /** Each way a run receipt can be damaged: what the file then holds, from the receipt it was. */
+  const receiptDamage: readonly (readonly [string, (receipt: Record<string, unknown>) => string])[] = [
+    ['cannot be parsed', (receipt) => JSON.stringify(receipt).slice(0, 40)],
+    ['has no agentIri', (receipt) => JSON.stringify({ ...receipt, agentIri: undefined })],
+    ['has an earlierAnchors that is not a list', (receipt) =>
       JSON.stringify({ ...receipt, earlierAnchors: earlierAnchorOf(receipt) })],
-    ['has an earlierAnchors entry whose anchorDigest is not a string', (receipt: Record<string, unknown>) =>
+    ['has an earlierAnchors entry whose anchorDigest is not a string', (receipt) =>
       JSON.stringify({ ...receipt, earlierAnchors: [{ ...earlierAnchorOf(receipt), anchorDigest: 7 }] })],
-    ['has an earlierAnchors entry whose catalogPath is not a string', (receipt: Record<string, unknown>) =>
+    ['has an earlierAnchors entry whose catalogPath is not a string', (receipt) =>
       JSON.stringify({ ...receipt, earlierAnchors: [{ ...earlierAnchorOf(receipt), catalogPath: [String(earlierAnchorOf(receipt).catalogPath)] }] })],
-  ].flatMap(([damage, write]) => (['join', 'init'] as const).map((verb) => [verb, damage, write] as const)))(
+  ];
+
+  it.each(receiptDamage.flatMap(([damage, write]) => (['join', 'init'] as const).map((verb) => [verb, damage, write] as const)))(
     '%s refuses, naming the file, before any store or anchor, a run receipt that %s (#5377)',
     async (verb, _damage, write) => {
       const { h, receipt } = await rotatedThenJoinedElsewhere();
