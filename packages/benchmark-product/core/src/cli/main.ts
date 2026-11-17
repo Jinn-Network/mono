@@ -110,6 +110,7 @@ import { formatSampleSizeAdvisory } from "../run/sample-size-advisory.js";
 import { requireRunState } from "../run/state.js";
 import { resolveWorkspacePublicationSourceName } from "../run/publication-source.js";
 import { DEFAULT_PUBLICATION_SERVE_PORT, startPublicationArchiveServer, type PublicationWellKnownOutcome } from "../run/publication-serve.js";
+import type { WorkspacePublicationHeadRefresh } from "../run/publication-source.js";
 import { readDraftDocument } from "../operations/drafts.js";
 import { listMethodCatalog } from "../operations/method-catalog.js";
 import { PRODUCIBLE_ANCHOR_PROFILES } from "../anchor/profiles.js";
@@ -1393,10 +1394,34 @@ const WELL_KNOWN_SUMMARY: Readonly<Record<PublicationWellKnownOutcome, string>> 
 };
 
 /**
+ * One line for each change in what the head heartbeat did (#4187). `WARNING` marks the outcomes
+ * that leave the head to lapse `refreshBy`, after which every cold reader refuses it.
+ */
+function headRefreshLine(outcome: WorkspacePublicationHeadRefresh): string {
+  switch (outcome.status) {
+    case "refreshed":
+      return `source head re-signed at its current position; refreshBy ${outcome.current.refreshBy}`;
+    case "not-due":
+      return `source head is current; refreshBy ${outcome.current.refreshBy}`;
+    case "no-position":
+      return "no announcement yet; no source head to re-sign";
+    case "append-in-flight":
+      return "an announcement is in flight; the source head is checked again on the next tick";
+    case "refused":
+      return `WARNING: the source head was not re-signed (${outcome.reason}); check this host's clock. It lapses at ${outcome.current.refreshBy}`;
+    case "withheld":
+      return `WARNING: the source head is not re-signed while runs ${outcome.drafts.join(", ")} may still announce at a time they froze earlier, which the source would refuse once its head is re-signed past it; the head lapses unless those publication stages finish`;
+    case "faulted":
+      return `WARNING: the source head could not be re-signed (${outcome.error instanceof Error ? outcome.error.message : String(outcome.error)}); it lapses unless a later tick succeeds`;
+  }
+}
+
+/**
  * Serves this workspace's announcement source over plain HTTP until `context.shutdownSignal`
- * aborts. Read-only: the archive is append-only and digest-addressed, and this verb publishes no
- * new announcement -- it only refreshes the derived well-known document so a cold consumer can
- * find the newest archive page.
+ * aborts. The archive is append-only and digest-addressed, and this verb publishes no new
+ * announcement: it refreshes the derived well-known document so a cold consumer can find the
+ * newest archive page, and while it serves it re-signs the source head at its current position
+ * once no more than half of the head's window remains (#4187).
  *
  * The signal is required rather than defaulted, because a verb that runs until interrupted needs
  * a process that can interrupt it: `bin.ts` supplies one from SIGINT/SIGTERM, and an embedder
@@ -1429,6 +1454,7 @@ async function handlePublicationServe(args: ParsedArgs, context: CliContext, jso
     ...(context.progress === undefined ? {} : {
       onError: (cause: unknown) => context.progress?.(`server error: ${cause instanceof Error ? cause.message : String(cause)}`),
       onProgress: (line: string) => context.progress?.(line),
+      onHeadRefresh: (outcome: WorkspacePublicationHeadRefresh) => context.progress?.(headRefreshLine(outcome)),
     }),
   });
   try {

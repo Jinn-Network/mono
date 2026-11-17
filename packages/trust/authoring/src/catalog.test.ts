@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,6 +8,7 @@ import {
   dssePreAuthEncoding,
   parseExactDsseEnvelope,
   recordDigest,
+  sealKeyBinding,
   sealRevocation,
   sealTrustPolicy,
   TRUST_KEY_BINDING_MEDIA_TYPE,
@@ -49,6 +50,7 @@ const ANCHOR_B = "sha256:2222222222222222222222222222222222222222222222222222222
 const ANCHOR_C = "sha256:3333333333333333333333333333333333333333333333333333333333333333" as const;
 const TIME_A = "2026-08-07T12:00:00.000Z";
 const TIME_B = "2026-08-08T12:00:00.000Z";
+const TIME_C = "2026-08-09T12:00:00.000Z";
 const REFRESH_BY = "2027-02-07T00:00:00.000Z";
 
 const signer = {
@@ -677,6 +679,50 @@ describe("planRevocation", () => {
     await expect(planRevocation({ catalogPath: path, voucher: other, targets: [bindings[0]!.digest] }))
       .rejects.toThrow(/is not the voucher of binding/u);
   });
+
+  it("refuses a target vouched by a contract account, and asks the account to sign nothing", async () => {
+    const { path, bindings } = await genesis();
+    const catalog = JSON.parse(await readFile(path, "utf8")) as { bindings: Record<string, unknown>[] };
+    // authorRoleBinding always writes `contractAccount: false`, so only a hand-made catalog reaches
+    // this: the same binding, re-sealed with its voucher marked a contract account.
+    const original = validateKeyBinding(bindings[0]!.envelopeBytes).value!;
+    const sealed = await sealKeyBinding(
+      { ...original, voucher: { kind: "account", did: didPkh(84532, EOA), contractAccount: true } },
+      async () => [{ keyid: original.key.keyid, signature: new Uint8Array(64) }],
+    );
+    catalog.bindings[0] = {
+      ...catalog.bindings[0],
+      digest: sealed.recordDigest,
+      envelope: Buffer.from(sealed.envelopeBytes).toString("base64"),
+    };
+    await writeFile(path, JSON.stringify(catalog));
+    const { asked, voucher } = recordingVoucher(EOA, FIXTURE_SIGNATURE);
+
+    await expect(planRevocation({ catalogPath: path, voucher, targets: [sealed.recordDigest] }))
+      .rejects.toThrow(/is vouched by a contract account, which cannot revoke/u);
+    expect(asked).toEqual([]);
+  });
+
+  it("refuses a target this voucher has already revoked", async () => {
+    const { path, bindings } = await genesis();
+    const catalog = JSON.parse(await readFile(path, "utf8")) as { revocations: Record<string, unknown>[] };
+    const revokedBy = didPkh(84532, EOA);
+    const revocation = await sealRevocation({
+      protocol: TRUST_REVOCATION_FORMAT,
+      target: bindings[0]!.digest,
+      revokedBy,
+      anchors: [{ digest: ANCHOR_B }],
+      effectiveFrom: TIME_B,
+    }, async () => [{ keyid: revokedBy, signature: new Uint8Array(65) }]);
+    catalog.revocations.push({
+      digest: revocation.recordDigest,
+      envelope: Buffer.from(revocation.envelopeBytes).toString("base64"),
+    });
+    await writeFile(path, JSON.stringify(catalog));
+
+    await expect(planRevocation({ catalogPath: path, voucher: signer, targets: [bindings[0]!.digest] }))
+      .rejects.toThrow(new RegExp(`binding ${bindings[0]!.digest} is already revoked by ${revokedBy}`, "u"));
+  });
 });
 
 describe("revokeBinding", () => {
@@ -814,5 +860,169 @@ describe("rebindRoles", () => {
     });
     await expect(rebindRoles({ catalogPath: path, replacements, anchor: declaration(ANCHOR_C, "ef") }))
       .rejects.toThrow(/rebind before revoking/u);
+  });
+});
+
+/**
+ * Re-authoring (the operator's re-author runbook): the catalog is moved aside and `jinn ceremony init`
+ * seals a new one through `authorCatalog`. Before #5308 that wrote `revocations: []`, so every key a
+ * rotation had retired bound again. The catalog the rotation leaves is built as `jinn ceremony rotate`
+ * builds it: `rebindRoles`, then one revocation per retired binding under the act's
+ * `revocation-anchor/v1` anchor, sealed as `revokeBinding` seals it. This package carries no
+ * secp256k1 signer and nothing here reads the signature, so the voucher's is a placeholder.
+ */
+describe("authorCatalog re-authoring a catalog that holds revocations", () => {
+  const SOLVER_ROLES = ["solver-delivery", "solver-settlement", "solver-discovery"] as const;
+  const REQUESTER_ROLES = ["requester-submission", "requester-discovery"] as const;
+
+  /** Agent A's solver and requester families on one anchor, then its solver keys rotated. */
+  async function rotated() {
+    const root = await mkdtemp(join(tmpdir(), "trust-authoring-reauthor-"));
+    const authority = await openCatalogAuthority({ storePath: join(root, "authority.enc.json"), password: PASSWORD, create: true });
+    const family = (label: string, roles: readonly NativeRoleIdentityRole[]) => bindingsFor({
+      root, label, agent: AGENT_A, roles, anchorDigest: ANCHOR_A, validFrom: TIME_A,
+    });
+    const solver = await family("a-solver", SOLVER_ROLES);
+    const requester = await family("a-requester", REQUESTER_ROLES);
+    const path = join(root, "trust.json");
+    await authorCatalog({
+      path,
+      authority,
+      purposes: completePolicyPurposes({ roleAgents: [...solver, ...requester].map(({ role, agent }) => ({ role, agent })) }),
+      refreshBy: REFRESH_BY,
+      bindings: [...solver, ...requester],
+      anchors: [declaration(ANCHOR_A, "ab")],
+    });
+
+    const replacements = await bindingsFor({
+      root, label: "a-solver-rotated", agent: AGENT_A, roles: SOLVER_ROLES, anchorDigest: ANCHOR_B, validFrom: TIME_B,
+    });
+    await rebindRoles({ catalogPath: path, replacements, anchor: declaration(ANCHOR_B, "cd") });
+    const revokedBy = didPkh(84532, EOA);
+    const targets = solver.map(({ digest }) => digest);
+    const revocationAnchor = declaration(revocationAnchorDigest({ targets, revokedBy }), "ef");
+    const catalog = await readCatalog(path);
+    for (const target of [...targets].sort()) {
+      const revocation = await sealRevocation({
+        protocol: TRUST_REVOCATION_FORMAT,
+        target,
+        revokedBy,
+        anchors: [{ digest: revocationAnchor.digest }],
+        effectiveFrom: TIME_C,
+      }, async () => [{ keyid: revokedBy, signature: new Uint8Array(65) }]);
+      catalog.revocations.push({
+        digest: revocation.recordDigest,
+        envelope: Buffer.from(revocation.envelopeBytes).toString("base64"),
+      });
+    }
+    catalog.anchors.push(revocationAnchor);
+    await writeFile(path, JSON.stringify(catalog));
+
+    const previousPath = join(root, "trust.previous.json");
+    await rename(path, previousPath);
+    const previous = await readCatalog(previousPath);
+    return {
+      root,
+      path,
+      authority,
+      solver,
+      previousPath,
+      previous,
+      revocations: previous.revocations as { digest: string; envelope: string }[],
+      revocationAnchor,
+    };
+  }
+
+  /** What `jinn ceremony init` re-authors over the same directory: the named stores' keys, again. */
+  async function reauthor(
+    operator: Awaited<ReturnType<typeof rotated>>,
+    options: { readonly labels?: readonly string[]; readonly anchor?: AnchorDeclaration; readonly previous?: boolean } = {},
+  ) {
+    const anchor = options.anchor ?? declaration(ANCHOR_A, "ab");
+    const bindings: SealedBindingEntry[] = [];
+    for (const label of options.labels ?? ["a-requester"]) {
+      bindings.push(...await bindingsFor({
+        root: operator.root,
+        label,
+        agent: AGENT_A,
+        roles: label === "a-solver" ? SOLVER_ROLES : REQUESTER_ROLES,
+        anchorDigest: anchor.digest,
+        validFrom: TIME_A,
+      }));
+    }
+    return authorCatalog({
+      path: operator.path,
+      authority: operator.authority,
+      purposes: completePolicyPurposes({ roleAgents: bindings.map(({ role, agent }) => ({ role, agent })) }),
+      refreshBy: REFRESH_BY,
+      bindings,
+      anchors: [anchor],
+      ...(options.previous === false ? {} : { previousCatalogPath: operator.previousPath }),
+    });
+  }
+
+  it("carries every revocation, its anchor and the binding it names, byte for byte, so the retired keys stay revoked", async () => {
+    const operator = await rotated();
+    expect(operator.revocations).toHaveLength(SOLVER_ROLES.length);
+
+    const result = await reauthor(operator);
+
+    const after = await readCatalog(operator.path);
+    // Not re-signed: the same records, so the same signatures and the same effective time.
+    expect(after.revocations).toEqual(operator.revocations);
+    expect(result.carriedRevocations).toEqual(operator.revocations.map(({ digest }) => digest));
+    expect(after.anchors).toContainEqual(operator.revocationAnchor);
+    for (const { digest } of operator.solver) {
+      const entry = operator.previous.bindings.find((binding) => binding.digest === digest);
+      expect(entry).toBeDefined();
+      expect(after.bindings).toContainEqual(entry);
+    }
+    // Read back the way rotation reads it: every retired binding is already revoked by its voucher.
+    await expect(planRevocation({
+      catalogPath: operator.path,
+      voucher: signer,
+      targets: operator.solver.map(({ digest }) => digest),
+    })).rejects.toThrow(/already revoked/u);
+  });
+
+  it("refuses, naming the revocation, a re-author that binds a retired key again, and writes nothing", async () => {
+    const operator = await rotated();
+    const named = new RegExp(
+      `revocation (${operator.revocations.map(({ digest }) => digest).join("|")}) retired key did:key:`,
+      "u",
+    );
+
+    // `jinn ceremony init` opens the stores at their original paths, which hold the retired keys.
+    await expect(reauthor(operator, { labels: ["a-solver", "a-requester"] })).rejects.toThrow(named);
+    await expect(stat(operator.path)).rejects.toThrow();
+  });
+
+  it("refuses, naming it, a revocation whose anchor the previous catalog does not declare, and writes nothing", async () => {
+    const operator = await rotated();
+    await writeFile(operator.previousPath, JSON.stringify({
+      ...operator.previous,
+      anchors: operator.previous.anchors.filter(({ digest }) => digest !== operator.revocationAnchor.digest),
+    }));
+
+    await expect(reauthor(operator)).rejects.toThrow(
+      new RegExp(`revocation ${operator.revocations[0]!.digest} .*relies on anchor ${operator.revocationAnchor.digest}`, "u"),
+    );
+    await expect(stat(operator.path)).rejects.toThrow();
+  });
+
+  it("refuses an anchor declared differently from the previous catalog: it would move a carried record's time", async () => {
+    const operator = await rotated();
+
+    await expect(reauthor(operator, { anchor: declaration(ANCHOR_A, "98") })).rejects.toThrow(/declared differently/u);
+    await expect(stat(operator.path)).rejects.toThrow();
+  });
+
+  it("still writes no revocations for a genesis that replaces no catalog", async () => {
+    const operator = await rotated();
+
+    const result = await reauthor(operator, { previous: false });
+
+    expect((await readCatalog(operator.path)).revocations).toEqual([]);
+    expect(result.carriedRevocations).toEqual([]);
   });
 });

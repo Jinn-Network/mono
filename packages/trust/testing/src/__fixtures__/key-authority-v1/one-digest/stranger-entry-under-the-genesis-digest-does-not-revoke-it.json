@@ -1,0 +1,47 @@
+{
+  "name": "stranger-entry-under-the-genesis-digest-does-not-revoke-it",
+  "description": "Another account's entry, filed under the genesis binding's digest, holds bindings scope. Its key revokes that digest. The revocation names both entries, but against the genesis binding it is not the key itself, and the stranger's binding does not stand, so it has no effect there.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "s",
+      "key": "K2",
+      "voucher": "B",
+      "from": "02-01",
+      "filed": "g"
+    },
+    {
+      "id": "c",
+      "key": "K3",
+      "voucher": "C",
+      "from": "04-01",
+      "consentBy": "K1"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "g",
+      "by": "K2",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "consent-chain-violation"
+    },
+    {
+      "key": "K1",
+      "expect": "accepted"
+    },
+    {
+      "key": "K3",
+      "expect": "accepted"
+    }
+  ]
+}

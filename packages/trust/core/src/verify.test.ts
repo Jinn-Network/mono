@@ -10,8 +10,8 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { describe, expect, test } from "vitest";
 
 import { canonicalJsonBytes } from "./canonical-json.js";
-import { ceremonyEvidenceDigest, serializeCeremonyMessage } from "./ceremony.js";
-import type { EoaCeremonyEvidence } from "./ceremony.js";
+import { bindingTermsCommitment, ceremonyEvidenceDigest, serializeCeremonyMessage } from "./ceremony.js";
+import type { EoaCeremonyEvidence, SafeCeremonyEvidence, SiweCeremonyMessage } from "./ceremony.js";
 import { dssePreAuthEncoding, parseDsseEnvelope, sealDsseEnvelope } from "./dsse.js";
 import {
   TRUST_KEY_BINDING_FORMAT,
@@ -19,11 +19,17 @@ import {
   TRUST_REVOCATION_FORMAT,
   TRUST_REVOCATION_MEDIA_TYPE,
 } from "./identifiers.js";
-import type { BindingResolver, ResolvedBinding, ResolvedRevocation, WitnessVerifier } from "./interfaces.js";
+import type {
+  BindingResolver,
+  Eip1271Witness,
+  ResolvedBinding,
+  ResolvedRevocation,
+  WitnessVerifier,
+} from "./interfaces.js";
 import type { KeyBinding } from "./key-binding.js";
 import { sealKeyBinding, validateKeyBinding } from "./key-binding.js";
 import type { DsseChainVerifier } from "./policy.js";
-import { didPkh } from "./spellings.js";
+import { didPkh, toChecksumAddress } from "./spellings.js";
 import {
   authenticateRequester,
   checkBindingRevocation,
@@ -57,6 +63,86 @@ function eoaCeremonyEvidence(): EoaCeremonyEvidence {
     messageBytes: hexToBytes(eoaFixture.messageBytesHex),
     signature: hexToBytes(eoaFixture.signatureHex),
   };
+}
+
+// ---------------------------------------------------------------------------
+// A Safe ceremony (§7.2): the same profiled SIWE message an EOA signs, signed under EIP-1271,
+// and a 1271 witness statement (§7.2a) saying which Safe, on which chain, accepted which hash.
+// Nothing checks the Safe's own signature offline, so its bytes here are a placeholder.
+// ---------------------------------------------------------------------------
+
+const SAFE_ADDRESS = "0x5555555555555555555555555555555555555555";
+const SAFE_VOUCHER_DID = didPkh(8453, SAFE_ADDRESS);
+const WITNESS_IRI = "https://spec.jinn.network/agents/witness-fixture";
+
+function safeCeremonyMessage(
+  agent: string,
+  didKey: string,
+  overrides: Partial<SiweCeremonyMessage> = {},
+): SiweCeremonyMessage {
+  return {
+    domain: "trust.jinn.network",
+    address: toChecksumAddress(SAFE_ADDRESS),
+    uri: "https://trust.jinn.network/ceremony/key-binding",
+    version: "1",
+    chainId: 8453,
+    nonce: "n-safe-1",
+    issuedAt: "2026-01-01T00:00:00Z",
+    resources: [agent, didKey],
+    ...overrides,
+  };
+}
+
+function safeCeremonyEvidence(
+  message: SiweCeremonyMessage,
+  signedBytes: Uint8Array = serializeCeremonyMessage("safe", message),
+): SafeCeremonyEvidence {
+  return { type: "safe", message, messageBytes: signedBytes, signature: Uint8Array.of(0x5a) };
+}
+
+/** The hash a Safe's `isValidSignature` is asked about for a signed message: its EIP-191 digest. */
+function personalSignHash(messageBytes: Uint8Array): string {
+  const prefix = new TextEncoder().encode(`\x19Ethereum Signed Message:\n${messageBytes.length}`);
+  return `0x${Buffer.from(keccak_256(new Uint8Array([...prefix, ...messageBytes]))).toString("hex")}`;
+}
+
+/** A 1271 witness statement that the voucher's Safe accepted `messageBytes`, unless `says` claims otherwise. */
+function safeWitness(messageBytes: Uint8Array, says: Record<string, unknown> = {}): Eip1271Witness {
+  const statement: Record<string, unknown> = {
+    chainId: 8453,
+    blockNumber: 1,
+    blockHash: `0x${"c".repeat(64)}`,
+    verifier: WITNESS_IRI,
+    safe: SAFE_ADDRESS,
+    hash: personalSignHash(messageBytes),
+    signature: "0x5a",
+    result: "0x1626ba7e",
+    ...says,
+  };
+  return {
+    chainId: statement["chainId"] as number,
+    blockNumber: 1,
+    blockHash: `0x${"c".repeat(64)}`,
+    verifier: WITNESS_IRI,
+    envelopeBytes: sealDsseEnvelope({
+      payloadBytes: canonicalJsonBytes(statement),
+      payloadType: "application/vnd.in-toto+json",
+      signatures: [{ signature: Uint8Array.of(1), keyid: "did:key:zWitnessFixture" }],
+    }),
+  };
+}
+
+/** `base`, vouched by the Safe instead, through a genuine ceremony and witness. */
+function safeVouched(
+  base: KeyBinding,
+): { binding: KeyBinding; ceremonyEvidence: SafeCeremonyEvidence; witness: Eip1271Witness } {
+  const ceremonyEvidence = safeCeremonyEvidence(safeCeremonyMessage(base.agent, base.key.didKey));
+  const binding: KeyBinding = {
+    ...base,
+    voucher: { kind: "account", did: SAFE_VOUCHER_DID, contractAccount: true },
+    ceremony: { type: "safe", digest: ceremonyEvidenceDigest(ceremonyEvidence) },
+  };
+  return { binding, ceremonyEvidence, witness: safeWitness(ceremonyEvidence.messageBytes) };
 }
 
 // ---------------------------------------------------------------------------
@@ -1616,18 +1702,11 @@ describe("settlementJoinCheck (§7.5a)", () => {
     });
 
     test("(e) a leg whose ceremony fails fails the join", async () => {
-      const binding: KeyBinding = { ...settlementBinding(), ceremony: { type: "safe", digest: `sha256:${"e".repeat(64)}` } };
+      const safeLeg = safeVouched(settlementBinding());
       const refusing: WitnessVerifier = { verify1271Witness: async () => ({ verified: false }) };
-      const witness = {
-        chainId: 8453,
-        blockNumber: 1,
-        blockHash: `0x${"c".repeat(64)}`,
-        verifier: AGENT,
-        envelopeBytes: Uint8Array.of(1),
-      };
-      expect(await joinWith(sealedLeg({ binding, witness }), refusing))
+      expect(await joinWith(sealedLeg(safeLeg), refusing))
         .toMatchObject({ ok: false, reason: expect.stringMatching(/settlement leg does not stand/) });
-      expect(await joinWith(sealedLeg({ binding, witness }))).toMatchObject({ ok: true });
+      expect(await joinWith(sealedLeg(safeLeg))).toMatchObject({ ok: true });
     });
   });
 
@@ -1759,25 +1838,16 @@ describe("checkBindingRevocation (§7.5 step 4, §7.4b)", () => {
 
   describe("by a revoker whose ceremony only the witness leg can verify", () => {
     const COLD_KEY = "did:key:z6MkfCOLD1111111111111111111111111111111";
-    const coldBinding = keyBinding({
+    const { binding: coldBinding, ceremonyEvidence, witness } = safeVouched(keyBinding({
       agent: AGENT,
       key: { publicKey: "0x00", keyid: COLD_KEY, algorithm: "ed25519", didKey: COLD_KEY },
       voucher: { kind: "account", did: VOUCHER_DID, contractAccount: true },
       scope: ["bindings"],
-      ceremony: { type: "safe", digest: `sha256:${"e".repeat(64)}` },
-    });
+    }));
     const coldResolver = new FakeBindingResolver().register({
       key: COLD_KEY,
       agent: AGENT,
-      resolved: authorityBinding(coldBinding, {
-        witness: {
-          chainId: 8453,
-          blockNumber: 1,
-          blockHash: `0x${"c".repeat(64)}`,
-          verifier: AGENT,
-          envelopeBytes: Uint8Array.of(1),
-        },
-      }),
+      resolved: authorityBinding(coldBinding, { ceremonyEvidence, witness }),
     });
     const revoked = resolvedBinding({ binding, revocations: [revocationEntry(COLD_KEY, "2026-02-01T00:00:00Z")] });
     const witnessSays = (verified: boolean): WitnessVerifier => ({ verify1271Witness: async () => ({ verified }) });
@@ -1847,6 +1917,104 @@ describe("checkBindingRevocation (§7.5 step 4, §7.4b)", () => {
 
     test("is refused by checkBindingRevocation with no revocation at all", async () => {
       expect(await checkBindingRevocation(unwritten([]), "2026-03-01T00:00:00Z", deps)).toMatchObject({ ok: false });
+    });
+  });
+
+  // Each listed entry is judged on its own, whichever entries sit beside it. The answers below are
+  // read through all three entry points, with the entry that carries the authority listed first
+  // and last, so an answer kept for one entry and reused for another shows in one of the orders.
+  describe("revocation entries listed together", () => {
+    const VERDICT = "did:key:z6MkfMEMOVERDICT1111111111111111111111111";
+    const SETTLEMENT = "did:key:z6MkfMEMOSETTLE11111111111111111111111111";
+    const STRANGER = "did:key:z6MkfMEMOSTRANGER111111111111111111111111";
+    const keys = signingKeys(VERDICT, SETTLEMENT, VOUCHER_DID, OTHER_VOUCHER_DID, STRANGER);
+    const verdict = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: VERDICT, algorithm: "ed25519", didKey: VERDICT },
+      voucher: { kind: "account", did: VOUCHER_DID, contractAccount: false },
+      scope: ["verdicts"],
+    });
+    const settlement = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x00", keyid: SETTLEMENT, algorithm: "ed25519", didKey: SETTLEMENT },
+      voucher: { kind: "account", did: OTHER_VOUCHER_DID, contractAccount: false },
+      scope: ["settlements"],
+    });
+    const base = revocationEntry(VOUCHER_DID, "2026-02-01T00:00:00Z");
+    const sealedBy = (signedBy: string): Uint8Array =>
+      keys.seal(base.revocation, TRUST_REVOCATION_MEDIA_TYPE, VOUCHER_DID, signedBy);
+
+    async function verdicts(revocations: readonly ResolvedRevocation[]) {
+      const resolved = resolvedBinding({
+        binding: verdict,
+        envelopeBytes: keys.seal(verdict, TRUST_KEY_BINDING_MEDIA_TYPE, VERDICT),
+        revocations,
+      });
+      const deps = {
+        bindingResolver: new FakeBindingResolver()
+          .register({ key: VERDICT, agent: AGENT, resolved })
+          .register({
+            key: SETTLEMENT,
+            agent: AGENT,
+            resolved: authorityBinding(settlement, { envelopeBytes: keys.seal(settlement, TRUST_KEY_BINDING_MEDIA_TYPE, SETTLEMENT) }),
+          }),
+        witnessVerifier: fakeWitnessVerifier,
+        dsseVerifier: keys.verifier,
+      };
+      return {
+        revocation: await checkBindingRevocation(resolved, "2026-03-01T00:00:00Z", deps),
+        envelope: await verifyEnvelopeBinding(
+          {
+            envelopeBytes: keys.seal({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, VERDICT),
+            key: VERDICT,
+            agent: AGENT,
+            family: "verdicts",
+            atTime: "2026-03-01T00:00:00Z",
+          },
+          deps,
+        ),
+        join: await settlementJoinCheck(
+          {
+            verdictKey: VERDICT,
+            settlementDeclarationKey: SETTLEMENT,
+            claimedEvaluatorAgent: AGENT,
+            family: "verdicts",
+            envelopeEffectiveTime: "2026-03-01T00:00:00Z",
+            claimTime: "2026-03-05T00:00:00Z",
+          },
+          deps,
+        ),
+      };
+    }
+
+    const revokedBoth = async (listed: readonly ResolvedRevocation[]) => {
+      const outcome = await verdicts(listed);
+      expect(outcome.revocation).toMatchObject({ ok: false });
+      expect(outcome.envelope).toMatchObject({ ok: false, reason: "revoked" });
+      expect(outcome.join).toMatchObject({ ok: false, reason: expect.stringMatching(/verdict leg is revoked/) });
+    };
+
+    test("alike in all but the envelope, the one the voucher signed revokes whichever is listed first", async () => {
+      const forged = { ...base, envelopeBytes: sealedBy(STRANGER) };
+      const genuine = { ...base, envelopeBytes: sealedBy(VOUCHER_DID) };
+      await revokedBoth([forged, genuine]);
+      await revokedBoth([genuine, forged]);
+    });
+
+    test("unwritable entries, one with authority and one without, revoke whichever is listed first", async () => {
+      // A bigint cannot be written out, so neither entry has a row of its own.
+      const unwritable = (envelopeBytes: Uint8Array, revokedBy: string): ResolvedRevocation => ({
+        ...base,
+        revocation: { ...base.revocation, revokedBy, nonce: 1n } as never,
+        envelopeBytes,
+      });
+      const withoutAuthority = unwritable(
+        keys.seal({ ...base.revocation, revokedBy: OTHER_VOUCHER_DID }, TRUST_REVOCATION_MEDIA_TYPE, OTHER_VOUCHER_DID),
+        OTHER_VOUCHER_DID,
+      );
+      const withAuthority = unwritable(sealedBy(VOUCHER_DID), VOUCHER_DID);
+      await revokedBoth([withoutAuthority, withAuthority]);
+      await revokedBoth([withAuthority, withoutAuthority]);
     });
   });
 });
@@ -2098,6 +2266,306 @@ describe("verifyEnvelopeBinding under a ceremony currency profile", () => {
       ok: false,
       reason: "ceremony-verification-failed",
       detail: expect.stringMatching(/terms cutover/),
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The same text applies wherever the walk asks whether a binding gives authority: a revoker, an
+// incumbent and a consenter each have to stand, and each stands only if its own ceremony meets the
+// text. In every case below the authority's EOA ceremony fails the text only because its record
+// took effect before the ceremony was issued, so the profile alone decides.
+// ---------------------------------------------------------------------------
+
+describe("authority under a ceremony currency profile", () => {
+  const CURRENT = "2026-07-28T00:00:00Z";
+  const STALE = "2026-01-01T00:00:00Z";
+  const NOT_YET_REVOKED = "2026-09-01T00:00:00Z";
+  const deps = (resolver: BindingResolver) => ({
+    bindingResolver: resolver,
+    witnessVerifier: fakeWitnessVerifier,
+    dsseVerifier: trustingDsseVerifier,
+  });
+
+  /** A bindings-scoped authority whose EOA ceremony meets the text only from `CURRENT` on. */
+  function eoaAuthority(effectiveStart: string, profile?: ResolvedBinding["ceremonyCurrency"], relationship: KeyBinding["relationship"] = "controls") {
+    const evidence = eoaCeremonyEvidence();
+    return authorityBinding(
+      keyBinding({
+        agent: eoaFixture.agentIri,
+        key: { publicKey: "0x04", keyid: eoaFixture.didKey, algorithm: "secp256k1", didKey: eoaFixture.didKey },
+        voucher: { kind: "account", did: didPkh(eoaFixture.voucherChainId, eoaFixture.message.address), contractAccount: false },
+        ceremony: { type: "eoa", digest: ceremonyEvidenceDigest(evidence) },
+        scope: ["bindings"],
+        relationship,
+      }),
+      { ceremonyEvidence: evidence, effectiveStart, ...(profile === undefined ? {} : { ceremonyCurrency: profile }) },
+    );
+  }
+
+  const successor = (extra: Partial<KeyBinding> = {}) => keyBinding({
+    agent: eoaFixture.agentIri,
+    key: { publicKey: "0x00", keyid: KEY_2, algorithm: "ed25519", didKey: KEY_2 },
+    voucher: { kind: "account", did: OTHER_VOUCHER_DID, contractAccount: false },
+    ...extra,
+  });
+
+  describe("a revocation signed by a sibling key", () => {
+    const target = resolvedBinding({
+      binding: successor(),
+      revocations: [revocationEntry(eoaFixture.didKey, "2026-08-01T00:00:00Z")],
+    });
+    const revokedWith = async (effectiveStart: string, profile?: ResolvedBinding["ceremonyCurrency"]) => (
+      await checkBindingRevocation(
+        target,
+        NOT_YET_REVOKED,
+        deps(new FakeBindingResolver().register({ key: eoaFixture.didKey, agent: eoaFixture.agentIri, resolved: eoaAuthority(effectiveStart, profile) })),
+      )
+    ).ok;
+
+    test("counts with the profile off, whatever the sibling's ceremony", async () => {
+      expect(await revokedWith(STALE)).toBe(false);
+    });
+
+    test("does not count with the profile on when the sibling's own ceremony fails it", async () => {
+      expect(await revokedWith(STALE, {})).toBe(true);
+    });
+
+    test("counts with the profile on when the sibling's own ceremony meets it", async () => {
+      expect(await revokedWith(CURRENT, {})).toBe(false);
+    });
+  });
+
+  describe("an incumbent that roots a self-extension", () => {
+    const voucher = { kind: "account" as const, did: didPkh(eoaFixture.voucherChainId, eoaFixture.message.address), contractAccount: false };
+    const standsWith = async (effectiveStart: string, profile?: ResolvedBinding["ceremonyCurrency"]) => {
+      const candidate = resolvedBinding({
+        binding: successor({ voucher }),
+        isGenesis: false,
+        effectiveStart: "2026-07-30T00:00:00Z",
+        incumbentControls: [{ key: eoaFixture.didKey, voucher }],
+      });
+      const resolver = new FakeBindingResolver()
+        .register({ key: KEY_2, agent: eoaFixture.agentIri, resolved: candidate })
+        .register({ key: eoaFixture.didKey, agent: eoaFixture.agentIri, resolved: eoaAuthority(effectiveStart, profile) });
+      return verifyEnvelopeBinding(
+        {
+          envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+          key: KEY_2,
+          agent: eoaFixture.agentIri,
+          family: "deliveries",
+          atTime: "2026-08-01T00:00:00Z",
+        },
+        deps(resolver),
+      );
+    };
+
+    test("roots it with the profile off, whatever the incumbent's ceremony", async () => {
+      expect(await standsWith(STALE)).toMatchObject({ ok: true });
+    });
+
+    test("does not root it with the profile on when the incumbent's own ceremony fails it", async () => {
+      expect(await standsWith(STALE, {})).toMatchObject({ ok: false, reason: "consent-chain-violation" });
+    });
+
+    test("roots it with the profile on when the incumbent's own ceremony meets it", async () => {
+      expect(await standsWith(CURRENT, {})).toMatchObject({ ok: true });
+    });
+  });
+
+  describe("a consent chain", () => {
+    const standsWith = async (effectiveStart: string, profile?: ResolvedBinding["ceremonyCurrency"]) => {
+      const candidate = resolvedBinding({
+        binding: successor({ consent: { keyid: eoaFixture.didKey, sig: btoa("irrelevant-in-this-fake") } }),
+        isGenesis: false,
+        effectiveStart: "2026-07-30T00:00:00Z",
+      });
+      const resolver = new FakeBindingResolver()
+        .register({ key: KEY_2, agent: eoaFixture.agentIri, resolved: candidate })
+        .register({ key: eoaFixture.didKey, agent: eoaFixture.agentIri, resolved: eoaAuthority(effectiveStart, profile) });
+      return verifyEnvelopeBinding(
+        {
+          envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_2),
+          key: KEY_2,
+          agent: eoaFixture.agentIri,
+          family: "deliveries",
+          atTime: "2026-08-01T00:00:00Z",
+        },
+        deps(resolver),
+      );
+    };
+
+    test("holds with the profile off, whatever the consenter's ceremony", async () => {
+      expect(await standsWith(STALE)).toMatchObject({ ok: true });
+    });
+
+    test("fails with the profile on when the consenter's own ceremony fails it", async () => {
+      expect(await standsWith(STALE, {})).toMatchObject({ ok: false, reason: "consent-chain-violation" });
+    });
+
+    test("holds with the profile on when the consenter's own ceremony meets it", async () => {
+      expect(await standsWith(CURRENT, {})).toMatchObject({ ok: true });
+    });
+  });
+
+  // One walk judges a row more than once. The row names neither the profile nor the effective start
+  // it is read under, so the answer kept for it is kept under those too: an answer reached without
+  // the profile is not the answer with it.
+  test("a revoker row judged without the profile earlier in a walk is judged again when it carries one", async () => {
+    const early = revocationEntry(eoaFixture.didKey, "2026-02-01T00:00:00Z");
+    const late = revocationEntry(eoaFixture.didKey, "2026-08-01T00:00:00Z");
+    const target = resolvedBinding({ binding: successor(), revocations: [early, late] });
+    const unprofiled = eoaAuthority(STALE);
+    const profiled = { ...unprofiled, ceremonyCurrency: {} };
+    const resolver: BindingResolver = {
+      resolveBinding: async (_query, atTime) => (atTime < "2026-06-01T00:00:00Z" ? profiled : unprofiled),
+    };
+    // The early entry reads the revoker with the profile and fails it; the late one reads the same
+    // row without it and counts.
+    expect((await checkBindingRevocation(target, NOT_YET_REVOKED, deps(resolver))).ok).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A Safe ceremony's message is checked as an EOA ceremony's is (§7.2; ceremony currency §3 to §6).
+// A 1271 witness says only that a Safe accepted a hash, so every case here runs under a witness
+// verifier that accepts the witness: what decides it is the message that hash is of.
+// ---------------------------------------------------------------------------
+
+describe("a Safe ceremony's message (§7.2, §7.2a)", () => {
+  const KEY = "did:key:z6MkfSAFEKEY111111111111111111111111111111";
+  const OTHER_KEY = "did:key:z6MkfSAFEOTHER1111111111111111111111111111";
+  const TERMS = { relationship: "controls", scope: ["deliveries"], validFrom: "2026-01-01T00:00:00Z" } as const;
+
+  async function verifySafe(options: {
+    readonly message?: SiweCeremonyMessage;
+    readonly signedBytes?: Uint8Array;
+    readonly witnessSays?: Record<string, unknown>;
+    readonly witnessVerifier?: WitnessVerifier;
+    readonly committed?: KeyBinding["ceremony"];
+    readonly resolved?: Partial<ResolvedBinding>;
+  } = {}) {
+    const evidence = safeCeremonyEvidence(options.message ?? safeCeremonyMessage(AGENT, KEY), options.signedBytes);
+    const binding = keyBinding({
+      agent: AGENT,
+      key: { publicKey: "0x04", keyid: KEY, algorithm: "ed25519", didKey: KEY },
+      voucher: { kind: "account", did: SAFE_VOUCHER_DID, contractAccount: true },
+      ceremony: options.committed ?? { type: "safe", digest: ceremonyEvidenceDigest(evidence) },
+      validFrom: TERMS.validFrom,
+    });
+    const resolver = new FakeBindingResolver().register({
+      key: KEY,
+      agent: AGENT,
+      resolved: resolvedBinding({
+        binding,
+        ceremonyEvidence: evidence,
+        witness: safeWitness(evidence.messageBytes, options.witnessSays),
+        ...options.resolved,
+      }),
+    });
+    return verifyEnvelopeBinding(
+      {
+        envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, KEY),
+        key: KEY,
+        agent: AGENT,
+        family: "deliveries",
+        atTime: "2026-03-01T00:00:00Z",
+      },
+      {
+        bindingResolver: resolver,
+        witnessVerifier: options.witnessVerifier ?? fakeWitnessVerifier,
+        dsseVerifier: trustingDsseVerifier,
+      },
+    );
+  }
+
+  const refused = (detail: RegExp) => ({
+    ok: false,
+    reason: "ceremony-verification-failed",
+    detail: expect.stringMatching(detail),
+  });
+
+  test("a genuine Safe ceremony verifies when the witness verifier accepts its witness", async () => {
+    expect(await verifySafe()).toMatchObject({ ok: true });
+  });
+
+  test("a genuine Safe ceremony fails when the witness verifier refuses its witness", async () => {
+    const refusing: WitnessVerifier = { verify1271Witness: async () => ({ verified: false, reason: "refused" }) };
+    expect(await verifySafe({ witnessVerifier: refusing })).toMatchObject(refused(/refused/));
+  });
+
+  test.each([
+    ["another Agent IRI", safeCeremonyMessage(OTHER_AGENT, KEY), /Agent IRI/],
+    ["another key", safeCeremonyMessage(AGENT, OTHER_KEY), /did:key/],
+    ["another domain", safeCeremonyMessage(AGENT, KEY, { domain: "login.example" }), /domain/],
+    ["another URI", safeCeremonyMessage(AGENT, KEY, { uri: "https://trust.jinn.network/login" }), /URI/],
+  ])("a message naming %s fails", async (_differsIn, message, detail) => {
+    expect(await verifySafe({ message })).toMatchObject(refused(detail));
+  });
+
+  test("a message that is not the bytes the Safe signed fails", async () => {
+    const signedBytes = serializeCeremonyMessage("safe", safeCeremonyMessage(OTHER_AGENT, KEY));
+    expect(await verifySafe({ signedBytes })).toMatchObject(refused(/re-serialize/));
+  });
+
+  test("a witness over another message fails", async () => {
+    const other = serializeCeremonyMessage("safe", safeCeremonyMessage(OTHER_AGENT, KEY));
+    expect(await verifySafe({ witnessSays: { hash: personalSignHash(other) } })).toMatchObject(refused(/hash/));
+  });
+
+  test("a witness for another Safe fails", async () => {
+    expect(await verifySafe({ witnessSays: { safe: "0x6666666666666666666666666666666666666666" } }))
+      .toMatchObject(refused(/Safe/));
+  });
+
+  test("a witness on another chain fails", async () => {
+    expect(await verifySafe({ witnessSays: { chainId: 1 } })).toMatchObject(refused(/chain/));
+  });
+
+  test("a witness statement that cannot be read fails", async () => {
+    const unreadable = { ...safeWitness(new Uint8Array()), envelopeBytes: new TextEncoder().encode("not a statement") };
+    expect(await verifySafe({ resolved: { witness: unreadable } })).toMatchObject(refused(/witness/));
+  });
+
+  test("a Safe ceremony with no message fails", async () => {
+    expect(await verifySafe({ resolved: { ceremonyEvidence: undefined } })).toMatchObject(refused(/Safe ceremony evidence/));
+  });
+
+  test("a message the record does not commit to fails", async () => {
+    expect(await verifySafe({ committed: { type: "safe", digest: `sha256:${"f".repeat(64)}` } }))
+      .toMatchObject(refused(/ceremony evidence digest/));
+  });
+
+  test("the witness verifier is not asked about a ceremony whose message fails", async () => {
+    let asked = 0;
+    const counting: WitnessVerifier = { verify1271Witness: async () => ({ verified: (asked += 1) > 0 }) };
+    expect(await verifySafe({ message: safeCeremonyMessage(OTHER_AGENT, KEY), witnessVerifier: counting }))
+      .toMatchObject(refused(/Agent IRI/));
+    expect(asked).toBe(0);
+  });
+
+  describe("under a ceremony currency profile", () => {
+    test("with no profile, a binding that takes effect before the ceremony was issued verifies as before", async () => {
+      expect(await verifySafe({ resolved: { effectiveStart: "2025-12-31T00:00:00Z" } })).toMatchObject({ ok: true });
+    });
+
+    test("with the profile, the same binding fails its ceremony", async () => {
+      expect(await verifySafe({ resolved: { effectiveStart: "2025-12-31T00:00:00Z", ceremonyCurrency: {} } }))
+        .toMatchObject(refused(/before the ceremony's issuedAt/));
+    });
+
+    test("with the profile, a ceremony committing to other terms fails", async () => {
+      const message = safeCeremonyMessage(AGENT, KEY, {
+        resources: [AGENT, KEY, bindingTermsCommitment({ ...TERMS, scope: ["deliveries", "bindings"] })],
+      });
+      expect(await verifySafe({ message, resolved: { ceremonyCurrency: {} } })).toMatchObject(refused(/commits to terms/));
+    });
+
+    test("with a terms cutover, an uncommitted ceremony fails and a committed one verifies", async () => {
+      const ceremonyCurrency = { termsCutover: TERMS.validFrom };
+      expect(await verifySafe({ resolved: { ceremonyCurrency } })).toMatchObject(refused(/terms cutover/));
+      const message = safeCeremonyMessage(AGENT, KEY, { resources: [AGENT, KEY, bindingTermsCommitment(TERMS)] });
+      expect(await verifySafe({ message, resolved: { ceremonyCurrency } })).toMatchObject({ ok: true });
     });
   });
 });

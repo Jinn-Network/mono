@@ -1,0 +1,48 @@
+{
+  "name": "reach-is-read-at-the-revocation-time",
+  "description": "A record ending later lifts nothing.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "e",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "until": "04-01"
+    },
+    {
+      "id": "l",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-15"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "e",
+      "by": "K1",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "at": "02-20",
+      "expect": "accepted"
+    },
+    {
+      "key": "K2",
+      "at": "03-01",
+      "expect": "revoked"
+    },
+    {
+      "key": "K2",
+      "expect": "revoked"
+    }
+  ]
+}

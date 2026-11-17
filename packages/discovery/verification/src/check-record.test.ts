@@ -6,10 +6,14 @@ import { describe, expect, test } from "vitest";
 import {
   DSSE_PAYLOAD_TYPE,
   canonicalJsonBytes,
+  ceremonyEvidenceDigest,
+  didPkh,
   dssePreAuthEncoding,
+  eip191MessageHash,
   sealDsseEnvelope,
   sealSignedPayload,
   sealSignedRecord,
+  serializeCeremonyMessage,
 } from "@jinn-network/trust-core";
 import type {
   BindingResolver,
@@ -17,6 +21,8 @@ import type {
   Eip1271Witness,
   KeyBinding,
   ResolvedBinding,
+  SafeCeremonyEvidence,
+  SiweCeremonyMessage,
 } from "@jinn-network/trust-core";
 import { createBindingResolver, createWitnessVerifier } from "@jinn-network/trust-resolve";
 import type { SealedKeyBindingRecord } from "@jinn-network/trust-resolve";
@@ -879,6 +885,52 @@ describe("a corrupted signed record", () => {
 });
 
 describe("trust binding", () => {
+  const SAFE = "0x4444444444444444444444444444444444444444";
+
+  /** A Safe's ceremony binding `didKey` to AGENT, and a 1271 witness statement that the Safe accepted
+   * it. The witness's author is no verifier's policy-accepted one, so a real verifier re-executes. */
+  function safeCeremony(didKey: string) {
+    const message: SiweCeremonyMessage = {
+      domain: "trust.jinn.network",
+      address: SAFE,
+      uri: "https://trust.jinn.network/ceremony/key-binding",
+      version: "1",
+      chainId: 84532,
+      nonce: "n-safe-1",
+      issuedAt: "2026-01-01T00:00:00Z",
+      resources: [AGENT, didKey],
+    };
+    const messageBytes = serializeCeremonyMessage("safe", message);
+    const ceremonyEvidence: SafeCeremonyEvidence = { type: "safe", message, messageBytes, signature: Uint8Array.of(0xbb) };
+    const statement = {
+      chainId: 84532,
+      blockNumber: 12345,
+      blockHash: `0x${"cc".repeat(32)}`,
+      verifier: "urn:uuid:44444444-4444-4444-8444-444444444444",
+      safe: SAFE,
+      hash: eip191MessageHash(messageBytes),
+      signature: `0x${"bb".repeat(65)}`,
+      result: "0x1626ba7e",
+    };
+    const witness: Eip1271Witness = {
+      chainId: statement.chainId,
+      blockNumber: statement.blockNumber,
+      blockHash: statement.blockHash,
+      verifier: statement.verifier,
+      envelopeBytes: sealDsseEnvelope({
+        payloadBytes: encoder.encode(JSON.stringify(statement)),
+        payloadType: DSSE_PAYLOAD_TYPE,
+        signatures: [{ signature: Uint8Array.of(1), keyid: "did:key:zWitness" }],
+      }),
+    };
+    return {
+      voucher: { kind: "account" as const, did: didPkh(84532, SAFE), contractAccount: true },
+      ceremony: { type: "safe" as const, digest: ceremonyEvidenceDigest(ceremonyEvidence) },
+      ceremonyEvidence,
+      witness,
+    };
+  }
+
   function resolving(binding: Partial<ResolvedBinding["binding"]>): BindingResolver {
     const resolved = {
       binding: {
@@ -952,11 +1004,17 @@ describe("trust binding", () => {
   });
 
   test("a witness verifier that throws is an outage too", async () => {
-    const bindingResolver = resolving({ ceremony: { type: "safe", digest: `sha256:${"a".repeat(64)}` } as never });
+    const key = "did:key:zSafeVouched";
+    const { voucher, ceremony, ceremonyEvidence, witness } = safeCeremony(key);
+    const bindingResolver = resolving({
+      key: { publicKey: key, keyid: key, algorithm: "ed25519", didKey: key },
+      voucher,
+      ceremony,
+    });
     const resolved = await bindingResolver.resolveBinding({ key: "", agent: "" }, "");
     const report = await checkRecord(signedEvaluation(ed25519()), {
       trust: {
-        bindingResolver: { resolveBinding: async () => ({ ...resolved!, witness: {} as never }) },
+        bindingResolver: { resolveBinding: async () => ({ ...resolved!, ceremonyEvidence, witness }) },
         witnessVerifier: { verify1271Witness: async () => { throw new Error("no route to host"); } },
       },
     });
@@ -1014,20 +1072,20 @@ describe("trust binding", () => {
     /** A store holding one binding the host must verify, and nothing else this package can read. */
     function realResolver(options: {
       readonly key: ReturnType<typeof ed25519>;
-      readonly type?: "oidc-machine" | "safe";
       readonly verifyHostedCeremony: () => Promise<boolean>;
-      readonly witness?: Eip1271Witness;
+      /** A Safe ceremony in place of the default OIDC machine one. */
+      readonly safe?: ReturnType<typeof safeCeremony>;
     }): BindingResolver {
-      const { key, type = "oidc-machine", verifyHostedCeremony, witness } = options;
+      const { key, verifyHostedCeremony, safe } = options;
       const binding = {
         protocol: "https://spec.jinn.network/trust/key-binding/v1",
         agent: AGENT,
         key: { publicKey: key.keyid, keyid: key.keyid, algorithm: "ed25519", didKey: key.keyid },
-        voucher: { kind: "oidc-machine", subject: "repo:example/example:ref:refs/heads/main" },
+        voucher: safe?.voucher ?? { kind: "oidc-machine", subject: "repo:example/example:ref:refs/heads/main" },
         relationship: "controls",
         scope: ["verdicts"],
         validFrom: "2026-01-01T00:00:00Z",
-        ceremony: { type, digest: CEREMONY },
+        ceremony: safe?.ceremony ?? { type: "oidc-machine", digest: CEREMONY },
         strength: "strong",
         anchors: [],
       } as unknown as KeyBinding;
@@ -1039,7 +1097,7 @@ describe("trust binding", () => {
           signatures: [{ signature: Uint8Array.of(1), keyid: key.keyid }],
         }),
         bindingDigest: `sha256:${"d".repeat(64)}`,
-        ...(witness === undefined ? {} : { witness }),
+        ...(safe === undefined ? {} : { ceremonyEvidence: safe.ceremonyEvidence, witness: safe.witness }),
       };
       return createBindingResolver({
         bindings: { listBindingsForAgent: async () => [record], listRevocationsForTargets: async () => [] },
@@ -1080,30 +1138,10 @@ describe("trust binding", () => {
 
     test("a witness archive that cannot be read is an outage, and one that answers no fails the record", async () => {
       const key = ed25519();
-      const statement = {
-        chainId: 84532,
-        blockNumber: 12345,
-        blockHash: `0x${"cc".repeat(32)}`,
-        verifier: "urn:uuid:44444444-4444-4444-8444-444444444444",
-        safe: "0x4444444444444444444444444444444444444444",
-        hash: `0x${"aa".repeat(32)}`,
-        signature: `0x${"bb".repeat(65)}`,
-        result: "0x1626ba7e",
-      };
-      const witness: Eip1271Witness = {
-        chainId: statement.chainId,
-        blockNumber: statement.blockNumber,
-        blockHash: statement.blockHash,
-        verifier: statement.verifier,
-        envelopeBytes: sealDsseEnvelope({
-          payloadBytes: canonicalJsonBytes(statement),
-          payloadType: DSSE_PAYLOAD_TYPE,
-          signatures: [{ signature: Uint8Array.of(1), keyid: "did:key:zWitness" }],
-        }),
-      };
+      const safe = safeCeremony(key.keyid);
       const reportWith = (readContract: () => Promise<unknown>) => checkRecord(signedEvaluation(key), {
         trust: {
-          bindingResolver: realResolver({ key, type: "safe", verifyHostedCeremony: async () => true, witness }),
+          bindingResolver: realResolver({ key, verifyHostedCeremony: async () => true, safe }),
           witnessVerifier: createWitnessVerifier({ archiveClient: { getChainId: async () => 84532, readContract } }),
         },
       });

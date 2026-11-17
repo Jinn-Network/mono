@@ -1,0 +1,34 @@
+{
+  "name": "revoker-without-bindings-scope",
+  "description": "A standing key without bindings scope cannot revoke.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "c",
+      "key": "K4",
+      "voucher": "A",
+      "from": "02-01",
+      "scope": [
+        "verdicts"
+      ]
+    }
+  ],
+  "revocations": [
+    {
+      "target": "g",
+      "by": "K4",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "accepted"
+    }
+  ]
+}

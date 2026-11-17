@@ -1,0 +1,34 @@
+{
+  "name": "consenter-with-no-chain",
+  "description": "A consenter must itself stand.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "x",
+      "key": "K5",
+      "voucher": "C",
+      "from": "02-01",
+      "scope": [
+        "bindings"
+      ]
+    },
+    {
+      "id": "y",
+      "key": "K6",
+      "voucher": "C",
+      "from": "03-01",
+      "consentBy": "K5"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K6",
+      "expect": "consent-chain-violation"
+    }
+  ]
+}

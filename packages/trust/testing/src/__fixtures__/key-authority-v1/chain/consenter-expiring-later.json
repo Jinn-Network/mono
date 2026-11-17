@@ -1,0 +1,27 @@
+{
+  "name": "consenter-expiring-later",
+  "description": "Authority is judged at the candidate's effective start, not at evidence time.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01",
+      "until": "03-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "B",
+      "from": "02-01",
+      "consentBy": "K1"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "at": "06-01",
+      "expect": "accepted"
+    }
+  ]
+}

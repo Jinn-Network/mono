@@ -1,0 +1,44 @@
+{
+  "name": "own-revocation-naming-a-record-whose-ceremony-fails",
+  "description": "A key's own revocation of a sibling whose ceremony fails has no effect: no ceremony backs that sibling's scope.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "o",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "scope": [
+        "verdicts"
+      ]
+    },
+    {
+      "id": "f",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "scope": [
+        "bindings"
+      ],
+      "ceremony": "absent"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "f",
+      "by": "K2",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "accepted"
+    }
+  ]
+}

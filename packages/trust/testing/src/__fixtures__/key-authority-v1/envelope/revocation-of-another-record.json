@@ -1,0 +1,43 @@
+{
+  "name": "revocation-of-another-record",
+  "description": "K1 revokes x. A second revocation entry names the genesis binding, and its envelope is one in which K1 revokes x. Its fields do not match its envelope, so it has no effect: the genesis binding stands, and x is revoked.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "x",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "x",
+      "by": "K1",
+      "at": "03-01"
+    },
+    {
+      "target": "g",
+      "by": "K1",
+      "at": "03-01",
+      "envelope": {
+        "target": "x"
+      }
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "accepted"
+    },
+    {
+      "key": "K2",
+      "expect": "revoked"
+    }
+  ]
+}

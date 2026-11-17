@@ -1,0 +1,34 @@
+{
+  "name": "consent-at-one-instant-digest-below",
+  "description": "Authority at one instant does not depend on digest order: the consented record sorts first.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "c",
+      "key": "K4",
+      "voucher": "A",
+      "from": "02-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "B",
+      "from": "02-01",
+      "consentBy": "K4",
+      "below": [
+        "c"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "accepted"
+    }
+  ]
+}

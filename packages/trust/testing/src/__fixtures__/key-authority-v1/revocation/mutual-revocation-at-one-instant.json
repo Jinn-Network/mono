@@ -1,0 +1,40 @@
+{
+  "name": "mutual-revocation-at-one-instant",
+  "description": "Two keys revoking each other at one instant both take effect.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "c",
+      "key": "K4",
+      "voucher": "A",
+      "from": "02-01"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "g",
+      "by": "K4",
+      "at": "03-01"
+    },
+    {
+      "target": "c",
+      "by": "K1",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "revoked"
+    },
+    {
+      "key": "K4",
+      "expect": "revoked"
+    }
+  ]
+}

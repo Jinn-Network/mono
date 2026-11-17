@@ -22,7 +22,7 @@ import type {
   Scope,
   Sha256Digest,
 } from "@jinn-network/trust-core";
-import { createAnchorResolver, createBindingResolver } from "@jinn-network/trust-resolve";
+import { TrustResolveError, createAnchorResolver, createBindingResolver } from "@jinn-network/trust-resolve";
 import type {
   BindingStore,
   SealedKeyBindingRecord,
@@ -73,6 +73,8 @@ const COLD_KEY = testDidKey("binding-authority-cold-key");
 const STRANGER_KEY = testDidKey("binding-authority-stranger-key");
 const STRANGER_SECOND_KEY = testDidKey("binding-authority-stranger-second-key");
 
+const AGENT_ID = "eip155:84532/erc721:0x2222222222222222222222222222222222222222/7";
+
 interface BindOptions {
   readonly key: string;
   readonly signer: EoaTestSigner;
@@ -87,6 +89,8 @@ interface BindOptions {
   readonly relationship?: Relationship;
   /** A ceremony other than a genuine EOA one, which this package cannot check by itself. */
   readonly ceremonyType?: Exclude<CeremonyType, "eoa">;
+  /** Vouched by this agentId through an `agentId` ceremony, in place of `signer`'s account. */
+  readonly agentId?: string;
   /** Drops the ceremony evidence from the record, so its ceremony cannot verify. */
   readonly withoutCeremonyEvidence?: boolean;
   /** Replaces the genuine evidence the record would hold. */
@@ -97,7 +101,11 @@ class World {
   readonly records: SealedKeyBindingRecord[] = [];
   readonly revocations: SealedRevocationRecord[] = [];
   readonly anchors = new Map<Sha256Digest, string>();
+  /** The registry's owner of each agentId. */
+  readonly registry = new Map<string, `0x${string}`>();
   lookups = 0;
+  /** Past this many lookups the store fails, so a case about the work of a resolve ends however much it would do. */
+  lookupLimit = Number.POSITIVE_INFINITY;
 
   constructor(
     readonly requireAnchors: boolean,
@@ -114,12 +122,15 @@ class World {
 
   async bind(options: BindOptions): Promise<SealedKeyBindingRecord> {
     const anchorDigest = this.anchor(options.key, options.anchoredAt ?? options.validFrom);
+    const ceremonyType = options.agentId === undefined ? options.ceremonyType ?? "eoa" : "agentId";
     const fixture = await buildKeyBindingFixture({
       agent: AGENT,
       workingKeyDidKey: options.key,
-      ceremonyType: options.ceremonyType ?? "eoa",
-      voucher: accountVoucher(84532, options.signer.address),
-      ...(options.ceremonyType === undefined ? { eoaCeremony: { signer: options.signer, chainId: 84532 } } : {}),
+      ceremonyType,
+      voucher: options.agentId === undefined
+        ? accountVoucher(84532, options.signer.address)
+        : { kind: "agentId", caip19: options.agentId },
+      ...(ceremonyType === "eoa" ? { eoaCeremony: { signer: options.signer, chainId: 84532 } } : {}),
       ...(options.relationship === undefined ? {} : { relationship: options.relationship }),
       validFrom: options.validFrom,
       ...(options.expiresAt === undefined ? {} : { expiresAt: options.expiresAt }),
@@ -138,7 +149,7 @@ class World {
         : { ceremonyEvidence: fixture.ceremonyEvidence }),
       ...(options.evidence === undefined || fixture.ceremonyEvidence === undefined
         ? {}
-        : { ceremonyEvidence: options.evidence(fixture.ceremonyEvidence) as EoaCeremonyEvidence }),
+        : { ceremonyEvidence: options.evidence(fixture.ceremonyEvidence as EoaCeremonyEvidence) as EoaCeremonyEvidence }),
     };
     this.records.push(record);
     return record;
@@ -157,6 +168,7 @@ class World {
     return {
       listBindingsForAgent: async (agent) => {
         this.lookups += 1;
+        if (this.lookups > this.lookupLimit) throw new Error(`the store was asked more than ${this.lookupLimit} times`);
         return records.filter(({ binding }) => binding.agent === agent);
       },
       listRevocationsForTargets: async (targets) =>
@@ -180,6 +192,17 @@ class World {
       ...(this.verifyHostedCeremony === undefined ? {} : { verifyHostedCeremony: this.verifyHostedCeremony }),
       recordSignedByItsKey: this.recordSignedByItsKey
         ?? ((record) => fakes.dsseVerifier(record.envelopeBytes).validSignerKeyids.includes(record.binding.key.didKey)),
+      chainFacts: {
+        ownerOf: async (agentId) => {
+          const owner = this.registry.get(agentId);
+          if (owner === undefined) throw new TrustResolveError("INVALID_INPUT", `the registry holds no agent ${agentId}`);
+          return owner;
+        },
+        getAgentWalletAtBlock: async () => {
+          throw new Error("not read by these cases");
+        },
+      },
+      compositionAuthority: { dsseVerifier: fakes.dsseVerifier, witnessVerifier: fakes.witnessVerifier },
     });
     return { bindingResolver, witnessVerifier: fakes.witnessVerifier, dsseVerifier: fakes.dsseVerifier };
   }
@@ -270,6 +293,12 @@ function sealedAsAnotherType(envelopeBytes: Uint8Array, payloadType: string): Ui
   });
 }
 
+/** The same envelope with its signature by `keyid` instead: a record its own key did not sign. */
+function signedBy(envelopeBytes: Uint8Array, keyid: string): Uint8Array {
+  const { payloadBytes, payloadType } = parseDsseEnvelope(envelopeBytes);
+  return sealDsseEnvelope({ payloadBytes, payloadType, signatures: [{ signature: Uint8Array.of(1), keyid }] });
+}
+
 /** Mints with a fresh key until the record's digest sorts the wanted side of `than`'s. */
 async function bindSorted(
   world: World,
@@ -298,6 +327,7 @@ const UNREADABLE_TIME = "2026-02-01T00:00Z";
 
 const stands = { ok: true };
 const refusedChain = { ok: false, reason: "consent-chain-violation" };
+const notResolved = { ok: false, reason: "binding-not-resolved" };
 
 async function bindGenesis(world: World, extra: Partial<BindOptions> = {}) {
   return world.bind({ key: GENESIS_KEY, signer: OWNER, validFrom: T0, ...extra });
@@ -1117,6 +1147,132 @@ describe.each([
       await w.bind({ key: STRANGER_KEY, signer: STRANGER, validFrom: T1, ceremonyType: "oidc-machine" });
       await w.bind({ key: STRANGER_SECOND_KEY, signer: STRANGER, validFrom: T2 });
       expect(await w.verdict(STRANGER_SECOND_KEY)).toMatchObject(refusedChain);
+    });
+  });
+
+  // Key authority section 4: an `agentId` binding composes at T only when the account the registry
+  // names as its owner holds a binding to the same Agent that stands at T (section 6).
+  describe("an agentId binding's composition (key authority section 4)", () => {
+    /** The founding account's genesis, a binding of COLD_KEY by the account the registry names as
+     * the agentId's owner, and the agentId's binding of NEXT_KEY. Both later records are consented
+     * by the genesis key, so that only the composition is in question. */
+    async function composition(w: World) {
+      w.registry.set(AGENT_ID, SECOND_OWNER.address);
+      await bindGenesis(w);
+      const account = await w.bind({ key: COLD_KEY, signer: SECOND_OWNER, validFrom: T1, consentBy: GENESIS_KEY });
+      await w.bind({ key: NEXT_KEY, signer: SECOND_OWNER, agentId: AGENT_ID, validFrom: T2, consentBy: GENESIS_KEY });
+      return account;
+    }
+
+    test("composes with the owner's account binding that stands", async () => {
+      const w = world();
+      await composition(w);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(stands);
+    });
+
+    test("does not compose with an account binding whose envelope its key did not sign", async () => {
+      const w = world();
+      const account = await composition(w);
+      w.records[w.records.indexOf(account)] = { ...account, envelopeBytes: signedBy(account.envelopeBytes, STRANGER_KEY) };
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(notResolved);
+    });
+
+    test("does not compose with an account binding its voucher account revoked before the instant", async () => {
+      const w = world();
+      const account = await composition(w);
+      await w.revoke(account, accountVoucher(84532, SECOND_OWNER.address).did, T3);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(notResolved);
+      // Authority counts a revocation only strictly before the instant it is judged at.
+      expect(await w.verdict(NEXT_KEY, T3)).toMatchObject(stands);
+    });
+
+    test("does not compose with an account binding whose chain does not hold", async () => {
+      const w = world();
+      w.registry.set(AGENT_ID, SECOND_OWNER.address);
+      await bindGenesis(w);
+      await w.bind({ key: COLD_KEY, signer: SECOND_OWNER, validFrom: T1 });
+      await w.bind({ key: NEXT_KEY, signer: SECOND_OWNER, agentId: AGENT_ID, validFrom: T2, consentBy: GENESIS_KEY });
+      expect(await w.verdict(COLD_KEY)).toMatchObject(refusedChain);
+      expect(await w.verdict(NEXT_KEY)).toMatchObject(notResolved);
+    });
+
+    test("does not compose with an account binding that rests on the agentId binding itself", async () => {
+      const w = world();
+      w.registry.set(AGENT_ID, SECOND_OWNER.address);
+      await w.bind({ key: GENESIS_KEY, signer: SECOND_OWNER, agentId: AGENT_ID, validFrom: T0 });
+      await w.bind({ key: COLD_KEY, signer: SECOND_OWNER, validFrom: T1, consentBy: GENESIS_KEY });
+      expect(await w.verdict(GENESIS_KEY)).toMatchObject(notResolved);
+      expect(await w.verdict(COLD_KEY)).toMatchObject(refusedChain);
+    });
+
+    // Each of the owner's account bindings joins by the consent of an agentId binding's key that took
+    // effect just before it, and nothing roots them, so judging the composition at one of them reaches
+    // the composition at every earlier one. Decided again on every path that reaches it, that is work
+    // exponential in the records; decided once, it is about one lookup per pair per instant. The owner's
+    // bindings `operate` rather than `control`, so none is another's incumbent and each walk reads one
+    // consent: what is counted is the composition leg's own work.
+    test("is decided once per resolve however many of the owner's bindings lean on agentId bindings", async () => {
+      const w = world();
+      w.registry.set(AGENT_ID, SECOND_OWNER.address);
+      await bindGenesis(w);
+      const pairs = 20;
+      const minute = (index: number) => new Date(Date.parse(T1) + index * 60_000).toISOString();
+      let leaning = GENESIS_KEY;
+      for (let index = 0; index < pairs; index += 1) {
+        leaning = testDidKey(`binding-authority-leaning-${index}`);
+        // eslint-disable-next-line no-await-in-loop -- fixtures build in order.
+        await w.bind({ key: leaning, signer: SECOND_OWNER, agentId: AGENT_ID, validFrom: minute(2 * index) });
+        // eslint-disable-next-line no-await-in-loop -- fixtures build in order.
+        await w.bind({
+          key: testDidKey(`binding-authority-leant-on-${index}`),
+          signer: SECOND_OWNER,
+          relationship: "operates",
+          validFrom: minute(2 * index + 1),
+          consentBy: leaning,
+        });
+      }
+      w.lookupLimit = 2 * pairs * pairs;
+      expect(await w.verdictInStoredOrder(leaning)).toMatchObject(notResolved);
+    });
+
+    // Now the owner's genesis roots every composition, each agentId binding joins by its consent with no
+    // `bindings` scope to give on, and each was retired by its own key later on. The genesis operates, so
+    // it is no incumbent of the owner's other bindings, and those sort before it, so every composition
+    // asks after each of them first. A resolve the leg makes is judged only at its own instant, so it does
+    // not work out the scope of a revocation that takes effect after it, no composition reaches the one
+    // at that later instant, and each is still decided once.
+    test("is decided once per resolve when the agentId bindings leant on are retired later", async () => {
+      const w = world();
+      w.registry.set(AGENT_ID, SECOND_OWNER.address);
+      const ownerKey = "did:key:zzzzKeeper";
+      await w.bind({ key: ownerKey, signer: SECOND_OWNER, validFrom: T0, relationship: "operates" });
+      const marks = [..."123456789ABCDEFGHJKL"];
+      const minute = (index: number) => new Date(Date.parse(T1) + index * 60_000).toISOString();
+      let leaning = ownerKey;
+      for (const [index, mark] of marks.entries()) {
+        leaning = `did:key:zB${mark}`;
+        // eslint-disable-next-line no-await-in-loop -- fixtures build in order.
+        const vouched = await w.bind({
+          key: leaning,
+          signer: SECOND_OWNER,
+          agentId: AGENT_ID,
+          validFrom: minute(2 * index),
+          consentBy: ownerKey,
+          scope: ["verdicts"],
+        });
+        // eslint-disable-next-line no-await-in-loop -- fixtures build in order.
+        await w.bind({
+          key: `did:key:zA${mark}`,
+          signer: SECOND_OWNER,
+          relationship: "operates",
+          validFrom: minute(2 * index + 1),
+          consentBy: leaning,
+        });
+        // eslint-disable-next-line no-await-in-loop -- fixtures build in order.
+        await w.revoke(vouched, leaning, T4);
+      }
+      w.lookupLimit = 4 * marks.length * marks.length;
+      expect(await w.verdictInStoredOrder(leaning)).toMatchObject(stands);
     });
   });
 

@@ -1,0 +1,25 @@
+{
+  "name": "stored-entry-that-does-not-parse-comes-first",
+  "description": "An entry that does not parse but can be placed counts for what came first. It gains nothing, and the record after it is not genesis.",
+  "profile": "anchors-required",
+  "entries": [
+    {
+      "id": "m",
+      "anchor": "2025-12-01T00:00:00.000Z"
+    }
+  ],
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "consent-chain-violation"
+    }
+  ]
+}

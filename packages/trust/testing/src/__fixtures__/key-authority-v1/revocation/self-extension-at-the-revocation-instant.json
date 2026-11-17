@@ -1,0 +1,38 @@
+{
+  "name": "self-extension-at-the-revocation-instant",
+  "description": "The same for an incumbent.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "B",
+      "from": "02-01",
+      "consentBy": "K1"
+    },
+    {
+      "id": "t",
+      "key": "K3",
+      "voucher": "B",
+      "from": "03-01"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "n",
+      "by": "K1",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K3",
+      "expect": "accepted"
+    }
+  ]
+}

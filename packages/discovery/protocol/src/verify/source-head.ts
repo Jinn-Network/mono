@@ -26,7 +26,8 @@ import type { SourceHeadOutcome } from "./outcomes.js";
 //     re-signing.
 //   - the same position RE-SIGNED at a later instant, which §5.2 obliges a
 //     live source to do before `refreshBy` expires (`serve` ships
-//     `maintainHead` for it, though no in-tree publisher calls it while idle).
+//     `maintainHead` and the durable writer's `refreshIdleHead` for it; the
+//     Colophon announcement source re-signs while idle, #4187).
 //     `issuedAt` monotonicity passes, and then the linkage walk fails:
 //     a returning consumer is fed only entries ABOVE its mark, so the head's
 //     own cited entry -- the boundary itself -- is absent from the fed set

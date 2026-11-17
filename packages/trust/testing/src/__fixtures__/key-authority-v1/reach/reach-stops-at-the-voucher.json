@@ -1,0 +1,38 @@
+{
+  "name": "reach-stops-at-the-voucher",
+  "description": "A revocation stays with its voucher.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "a",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01"
+    },
+    {
+      "id": "b",
+      "key": "K2",
+      "voucher": "B",
+      "from": "03-01",
+      "consentBy": "K1"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "b",
+      "by": "K1",
+      "at": "04-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "accepted"
+    }
+  ]
+}

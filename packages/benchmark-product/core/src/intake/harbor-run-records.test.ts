@@ -443,6 +443,98 @@ describe("harborCarriedEvidence — what a Harbor import carries of a trial's ow
     expect(refusalOf("trial-result.json", text).message).toContain(`names your home directory (${homedir()})`);
   });
 
+  // #5302: on a cluster or a CI runner Harbor's -o is often outside any home directory and still
+  // names the user. The record names that jobs directory in trials_dir and trial_uri, which the
+  // import removes; any other string that names it is a path of the machine that ran Harbor.
+  test.each([
+    [
+      "a file in the trial directory trial_uri names, in an exception message",
+      "trial-result.json",
+      {
+        id: "x",
+        trial_uri: "file:///scratch/alice/jobs/terminus-2/hello-world__55xttAM",
+        config: { trials_dir: "jobs/terminus-2" },
+        exception_info: {
+          exception_type: "FileNotFoundError",
+          exception_message: "[Errno 2] No such file or directory: '/scratch/alice/jobs/terminus-2/hello-world__55xttAM/agent/trajectory.json'",
+        },
+      },
+      "exception_info.exception_message",
+    ],
+    [
+      "the job directory that holds the trial trial_uri names",
+      "trial-result.json",
+      {
+        id: "x",
+        trial_uri: "file:///scratch/alice/jobs/terminus-2/hello-world__55xttAM",
+        exception_info: { exception_type: "OSError", exception_message: "cannot lock /scratch/alice/jobs/terminus-2/job.log" },
+      },
+      "exception_info.exception_message",
+    ],
+    [
+      "a trial directory trial_uri percent-encodes",
+      "trial-result.json",
+      {
+        id: "x",
+        trial_uri: "file:///data/alice%20b/jobs/oracle/hello-world__55xttAM",
+        exception_info: { exception_type: "OSError", exception_message: "cannot read /data/alice b/jobs/oracle/hello-world__55xttAM/verifier" },
+      },
+      "exception_info.exception_message",
+    ],
+    [
+      "an absolute trials_dir, in a step's exception message",
+      "trial-result.json",
+      {
+        id: "x",
+        config: { trials_dir: "/data/ci-builder/jobs/oracle" },
+        step_results: [{ exception_info: { exception_type: "OSError", exception_message: "cannot read /data/ci-builder/jobs/oracle/job.log" } }],
+      },
+      "step_results[0].exception_info.exception_message",
+    ],
+    [
+      "an absolute trials_dir, in an agent setting",
+      "trial-config.json",
+      { trial_name: "hello-world__55xttAM", trials_dir: "/data/ci-builder/jobs/oracle", agent: { kwargs: { cache_dir: "/data/ci-builder/jobs/oracle/cache" } } },
+      "agent.kwargs.cache_dir",
+    ],
+    [
+      "a Windows trial directory trial_uri names, in an exception message as Python prints it",
+      "trial-result.json",
+      {
+        id: "x",
+        trial_uri: "file:///D:/work/jobs/terminus-2/hello-world__55xttAM",
+        config: { trials_dir: "jobs\\terminus-2" },
+        exception_info: { exception_type: "PermissionError", exception_message: "[Errno 13] Permission denied: 'D:\\\\work\\\\jobs\\\\terminus-2\\\\hello-world__55xttAM\\\\agent'" },
+      },
+      "exception_info.exception_message",
+    ],
+  ])("a trial record naming %s, outside any home directory, is refused, naming the file and the field", (_what, name, record, field) => {
+    const error = refusalOf(name, JSON.stringify(record, null, 4));
+    expect(error.code).toBe("validation");
+    expect(error.issues!.map((issue) => issue.path)).toEqual([`job/trial-1/${name}`]);
+    expect(error.message).toContain(`Harbor trial file job/trial-1/${name}, at ${field}, names the jobs directory of the machine that ran Harbor`);
+  });
+
+  test("a path that only begins with the jobs directory trial_uri names, and a relative one, are carried as Harbor wrote them", () => {
+    const text = JSON.stringify({
+      id: "x",
+      trial_uri: "file:///scratch/alice/jobs/terminus-2/hello-world__55xttAM",
+      config: { trials_dir: "jobs/terminus-2", artifacts: ["/app/jobs/terminus-2-notes.txt"] },
+      exception_info: { exception_type: "OSError", exception_message: "cannot read jobs/terminus-2/hello-world__55xttAM/a and /scratch/alice/jobs/terminus-2-old/b" },
+    }, null, 4);
+    expect(carried("trial-result.json", text)).toBe(text.replace(/^ *"trial_uri": .*\n/mu, ""));
+  });
+
+  test.each([
+    ["a URL of another scheme", "https://harbor.example.com/trials/hello-world__55xttAM"],
+    ["not a URL", "scratch/alice/jobs/terminus-2/hello-world__55xttAM"],
+  ])("a trial_uri that is %s is refused: the trial directory it should name is unknown", (_what, uri) => {
+    const error = refusalOf("trial-result.json", JSON.stringify({ id: "x", trial_uri: uri }, null, 4));
+    expect(error.code).toBe("validation");
+    expect(error.message).toContain("its trial_uri is not a file: URI");
+    expect(error.message).not.toContain(uri);
+  });
+
   test.each([
     ["a bind mount", "environment.mounts", [{ type: "bind", source: "/srv/datasets", target: "/data" }], "environment.mounts[0].source"],
     ["an instruction file", "extra_instruction_paths", ["/srv/notes/instructions.md"], "extra_instruction_paths[0]"],
@@ -485,6 +577,7 @@ describe("harborCarriedEvidence — what a Harbor import carries of a trial's ow
     ["a REST URL under /users/ with a key in its query", "agent.kwargs", { endpoint: "https://api.example.com/users/me?api_key=S3cretValueXYZ" }, "agent.kwargs.endpoint", "S3cretValueXYZ"],
     ["an MCP server URL under /home/ with a token in its query", "agent.mcp_servers", [{ name: "docs", transport: "sse", url: "https://mcp.example.com/home/sse?access_token=qwerty123" }], "agent.mcp_servers[0].url", "qwerty123"],
     ["a credential used as a member name", "agent.kwargs", { headers: { "sk-proj-AbCdEf0123456789": "x" } }, "agent.kwargs.headers", "sk-proj-AbCdEf0123456789"],
+    ["a URL with a token in its fragment", "agent.kwargs", { callback: "https://app.example.com/cb#access_token=qwerty123" }, "agent.kwargs.callback", "qwerty123"],
   ])("a trial record holding %s is refused, naming the file and the field and not the value", (_what, field, value, named, secret) => {
     for (const [name, text, at] of trialRecords(field, value)) {
       const error = refusalOf(name, text);
@@ -513,6 +606,42 @@ describe("harborCarriedEvidence — what a Harbor import carries of a trial's ow
         const error = refusalOf(name, text);
         expect(`${error.message}\n${JSON.stringify(error.issues)}`, `${name} at ${field}`).not.toContain(secret);
       }
+    }
+  });
+
+  const TOKEN = "ghp_R8x2Kq9LmN4pT7vW1yZ3aB5cD6eF0gH2iJ4k";
+
+  // #5302: a secret the import does not know as one, where a rule that shows a path or a field
+  // reads it, is refused without being shown.
+  test("no refusal shows a token-shaped string, a URL fragment or a query value, whichever rule names it", () => {
+    const probes: readonly (readonly [string, unknown, string])[] = [
+      ["agent.kwargs.endpoint", `https://api.example.com/users/${TOKEN}`, TOKEN],
+      ["agent.env", { CACHE_HOME: `/home/${TOKEN}` }, TOKEN],
+      ["agent.skills", [`/srv/skills/${TOKEN}`], TOKEN],
+      ["agent.skills", ["/srv/skills/web#sig=qwerty123"], "qwerty123"],
+      ["environment.mounts", [{ type: "bind", source: "/srv/data?X-Amz-Signature=qwerty123", target: "/data" }], "qwerty123"],
+      ["agent.kwargs.api_keys", { [TOKEN]: "github" }, TOKEN],
+      ["agent.model_info", { [TOKEN]: "/home/alice/notes" }, TOKEN],
+      ["agent.model_info", { [TOKEN]: { "/home/alice": 1 } }, TOKEN],
+    ];
+    for (const [field, value, secret] of probes) {
+      for (const [name, text] of trialRecords(field, value)) {
+        const error = refusalOf(name, text);
+        expect(`${error.message}\n${JSON.stringify(error.issues)}`, `${name} at ${field}`).not.toContain(secret);
+      }
+    }
+  });
+
+  test.each([
+    ["agent kwargs", "agent.kwargs", { [TOKEN]: "x" }, "agent.kwargs"],
+    ["agent env", "agent.env", { [TOKEN]: "${HF_TOKEN}" }, "agent.env"],
+    ["an MCP server", "agent.mcp_servers", [{ name: "docs", transport: "sse", url: "https://mcp.example.com/sse", [TOKEN]: "x" }], "agent.mcp_servers[0]"],
+    ["verifier headers", "verifier.kwargs.headers", { [TOKEN]: "x" }, "verifier.kwargs.headers"],
+  ])("a token-shaped member name in %s is refused as a member name in its parent field, without the name", (_what, field, value, named) => {
+    for (const [name, text, at] of trialRecords(field, value)) {
+      const error = refusalOf(name, text);
+      expect(error.message).toContain(`at a member name in ${at.replace(field, named)}, holds a token-shaped string`);
+      expect(`${error.message}\n${JSON.stringify(error.issues)}`).not.toContain(TOKEN);
     }
   });
 
@@ -552,6 +681,172 @@ describe("harborCarriedEvidence — what a Harbor import carries of a trial's ow
   test("Harbor's reward-file message with a relative path is carried as Harbor wrote it", () => {
     const text = '{\n    "exception_info": {\n        "exception_type": "RewardFileNotFoundError",\n        "exception_message": "No reward file found at jobs/oracle/t__x/verifier/reward.txt or jobs/oracle/t__x/verifier/reward.json"\n    }\n}';
     expect(carried("trial-result.json", text)).toBe(text);
+  });
+
+  test("a long run of path separators is read in linear time", () => {
+    // #5302: a home-directory match that could start anywhere in a run of separators took about
+    // 15 seconds on the record below, and an evidence file may be 8 MiB. Read in linear time it
+    // takes about 6 milliseconds; the budget sits between the two.
+    const text = JSON.stringify({ trial_name: "hello-world__55xttAM", agent: { kwargs: { pattern: "/".repeat(200_000) } } });
+    const started = performance.now();
+    const kept = carried("trial-config.json", text);
+    const elapsed = performance.now() - started;
+    expect(kept).toBe(text);
+    expect(elapsed).toBeLessThan(1_000);
+  });
+
+  // #5332: the answer for each string below was taken from the patterns as they stood before they
+  // were rewritten to read a long run once, so a rewrite that changes what the import refuses or
+  // carries fails here. `agent.kwargs.note` is an ordinary name, so only the string's own shape counts.
+  test.each([
+    ["a user and password", "https://user:pw@example.com/x"],
+    ["a user alone", "ssh://git@host/repo"],
+    ["an empty user", "a://@h"],
+    ["a port before the @", "a://host:8080@x"],
+    ["a scheme after other words", "see https://u@h now"],
+    ["a scheme in capitals", "HTTP://U@H"],
+    ["a scheme that follows a digit", "1http://u@h"],
+    ["a scheme that follows signs", "+.-a://u@h"],
+    ["a scheme with every kind of character", "x-y.z+w1://u@h"],
+    ["a second URL after a clean one", "https://example.com/a and ftp://bob@example.com"],
+  ])("a string holding %s is refused as a URL carrying credentials", (_what, note) => {
+    for (const [name, text, at] of trialRecords("agent.kwargs.note", note)) {
+      const error = refusalOf(name, text);
+      expect(error.message).toContain(`at ${at}, holds a URL carrying credentials`);
+    }
+  });
+
+  test.each([
+    ["a query parameter", "https://h/p?api_key=abc"],
+    ["a second query parameter", "https://h/p?x=1&token=abc"],
+    ["a fragment parameter", "https://h/p#access_token=abc"],
+    ["a parameter after a fragment", "https://h/p?x=1#key=2"],
+    ["a parameter after a semicolon", "https://h/p;passwd=x"],
+    ["a parameter after an ampersand alone", "a&secret=1"],
+    ["a name in capitals", "?Password=x"],
+    ["a name that holds auth", "?my_authz=1"],
+    ["a name that holds credential", "?credential=x"],
+    ["a name that holds bearer", "?bearer=x"],
+    ["a second question mark", "a?b?key=v"],
+    ["a question mark and a semicolon", "?;key=v"],
+    ["a name between two question marks", "?key?x=1"],
+    ["a name before a semicolon after an ampersand", "&key;x=1"],
+    ["a value that is an equals sign", "?key=="],
+    ["a name that ends at the equals sign of the value before it", "?x=1&Key=2"],
+    ["a parameter inside text", "see https://h/p?token=abc, then"],
+  ])("a string holding %s is refused as a URL carrying credentials", (_what, note) => {
+    for (const [name, text, at] of trialRecords("agent.kwargs.note", note)) {
+      const error = refusalOf(name, text);
+      expect(error.message).toContain(`at ${at}, holds a URL carrying credentials`);
+    }
+  });
+
+  test.each([
+    ["a path with an @ after a slash", "https://example.com/path@x"],
+    ["an @ after a question mark", "https://example.com?x=y@z"],
+    ["an @ after a fragment", "https://example.com#frag@x"],
+    ["an @ with no scheme", "://u@h"],
+    ["a scheme of digits only", "123://u@h"],
+    ["a scheme of signs only", "-+.://u@h"],
+    ["a scheme with one slash", "a:/u@h"],
+    ["a mailto address", "mailto:u@h"],
+    ["white space after the slashes", "a:// u@h"],
+    ["a credential name without a value", "?key"],
+    ["a credential name with an empty value", "?key="],
+    ["a credential name whose value is an ampersand", "?key=&x"],
+    ["a credential name whose value is a fragment", "?key=#x"],
+    ["a credential name whose value is white space", "?key= x"],
+    ["a credential name split by white space", "?ke y=1"],
+    ["a credential name split by a semicolon", "?k;ey=1"],
+    ["a credential name with no question mark before it", "key=abc"],
+    ["a credential name before the semicolon that starts the parameter", "key;x=1"],
+    ["a credential name that is a value", "?a=key&b=1"],
+    ["a credential name in a value that holds another equals sign", "?x=key=1"],
+    ["a credential name in an ordinary parameter name", "?a=1&b=key"],
+    ["a parameter with an ordinary name", "https://h/p?page=2&size=10#top"],
+    ["three asterisks", "***"],
+  ])("a string holding %s is carried as written", (_what, note) => {
+    const text = JSON.stringify({ trial_name: "hello-world__55xttAM", agent: { kwargs: { note } } });
+    expect(carried("trial-config.json", text)).toBe(text);
+  });
+
+  test.each([
+    ["twenty characters of all three kinds", "Abcdefghij0123456789"],
+    ["a run joined by a hyphen and an underscore", "abcdefghij-ABCDEFGH_12"],
+    ["a run inside a sentence", "the token Abcdefghij0123456789 is here"],
+    ["a run of a hundred", "aB3".repeat(34)],
+  ])("a string holding %s is refused as token-shaped", (_what, note) => {
+    for (const [name, text] of trialRecords("agent.kwargs.note", note)) {
+      expect(refusalOf(name, text).message).toContain("holds a token-shaped string");
+    }
+  });
+
+  test.each([
+    ["nineteen characters", "Abcdefghij012345678"],
+    ["twenty characters with no digit", "Abcdefghijklmnopqrst"],
+    ["twenty characters with no upper case", "abcdefghij0123456789"],
+    ["twenty characters with no lower case", "ABCDEFGHIJ0123456789"],
+    ["runs of ten and thirteen split by a space", "Abcdefghij 0123456789abc"],
+    ["runs split by a dot", "Abcdefghij.0123456789abc"],
+    ["three kinds spread over two runs", "ABCDEFGHIJKLMNOP abcdefghijklmnop0123456789"],
+  ])("a string holding %s is carried as written", (_what, note) => {
+    const text = JSON.stringify({ trial_name: "hello-world__55xttAM", agent: { kwargs: { note } } });
+    expect(carried("trial-config.json", text)).toBe(text);
+  });
+
+  // #5332: each check below took time that grew with the square of the run, or threw. An evidence
+  // file may be 8 MiB. Before the fix the first took more than ten minutes on a 1,000,000-letter run
+  // (7 seconds on 100,000, as measured in the issue, growing with the square of the run) and the third more than half an hour; the 8 MiB run
+  // threw a RangeError. Read once, each takes well under a second; the budget leaves a loaded
+  // runner room.
+  const EVIDENCE_CAP = 8 * 1024 * 1024;
+  function timedCarry(note: string): { readonly text: string; readonly kept: string; readonly milliseconds: number } {
+    const text = JSON.stringify({ trial_name: "hello-world__55xttAM", agent: { kwargs: { note } } });
+    const started = performance.now();
+    const kept = carried("trial-config.json", text);
+    return { text, kept, milliseconds: performance.now() - started };
+  }
+
+  test("a run of a million letters is read in linear time", () => {
+    const { text, kept, milliseconds } = timedCarry("a".repeat(1_000_000));
+    expect(kept).toBe(text);
+    expect(milliseconds).toBeLessThan(2_000);
+  });
+
+  test("a question mark followed by a million characters that repeat a credential-shaped name is read in linear time", () => {
+    for (const note of ["?" + "key".repeat(333_334), "#" + "token".repeat(200_000), "&" + "k;ey".repeat(250_000)]) {
+      const { text, kept, milliseconds } = timedCarry(note);
+      expect(kept).toBe(text);
+      expect(milliseconds).toBeLessThan(2_000);
+    }
+  });
+
+  test("a run of millions of question marks or scheme characters is read in linear time", () => {
+    for (const note of ["?".repeat(2_000_000), "a:".repeat(1_000_000), "1".repeat(2_000_000) + "a", "a://".repeat(500_000)]) {
+      const { text, kept, milliseconds } = timedCarry(note);
+      expect(kept).toBe(text);
+      expect(milliseconds).toBeLessThan(2_000);
+    }
+  });
+
+  test("a single run of letters up to the evidence cap is carried, not an internal error", () => {
+    const { text, kept, milliseconds } = timedCarry("a".repeat(EVIDENCE_CAP - 200));
+    expect(kept).toBe(text);
+    expect(milliseconds).toBeLessThan(5_000);
+  });
+
+  test("a single token-shaped run up to the evidence cap is refused as token-shaped, not an internal error", () => {
+    const note = "aB3".repeat(Math.floor((EVIDENCE_CAP - 200) / 3));
+    const error = refusalOf("trial-config.json", JSON.stringify({ trial_name: "hello-world__55xttAM", agent: { kwargs: { note } } }));
+    expect(error.code).toBe("validation");
+    expect(error.message).toContain("at agent.kwargs.note, holds a token-shaped string");
+  });
+
+  test("a key-shaped run up to the evidence cap is refused as key-shaped, not an internal error", () => {
+    const note = "sk-" + "a".repeat(EVIDENCE_CAP - 200);
+    const error = refusalOf("trial-config.json", JSON.stringify({ trial_name: "hello-world__55xttAM", agent: { kwargs: { note } } }));
+    expect(error.code).toBe("validation");
+    expect(error.message).toContain("at agent.kwargs.note, holds a key-shaped string");
   });
 });
 
@@ -1436,6 +1731,32 @@ describe("readHarborRunImport — the official Terminal-Bench 2.1 slate", () => 
       expect(imported.error.detail).toContain(field);
       expect(imported.error.detail).toContain(shown);
       if (secret !== undefined) expect(JSON.stringify(imported.error)).not.toContain(secret);
+      expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+    });
+
+    // #5302: Harbor given an absolute -o outside any home directory on a CI runner, and the
+    // trial's exception message naming a file under it.
+    test("a trial record naming the jobs directory Harbor wrote it to on another machine is refused at import, naming the file and the field", async () => {
+      await lockedOfficialSlate();
+      const jobs = jobsAsHarborWroteThem();
+      const trialsDir = "/scratch/ci-builder/jobs/terminus-2";
+      const trialDir = `${trialsDir}/${basename(TIMED_OUT_TRIAL)}`;
+      rewriteJson(join(jobs, TIMED_OUT_TRIAL, "config.json"), (config) => {
+        config["trials_dir"] = trialsDir;
+      });
+      rewriteJson(join(jobs, TIMED_OUT_TRIAL, "result.json"), (result) => {
+        result["trial_uri"] = `file://${trialDir}`;
+        result["config"].trials_dir = trialsDir;
+        result["exception_info"].exception_message = `[Errno 2] No such file or directory: '${trialDir}/agent/trajectory.json'`;
+      });
+      const { imported } = await importJobs(jobs);
+      expect(imported.ok).toBe(false);
+      if (imported.ok) throw new Error("expected the import to be refused");
+      expect(imported.error.code).toBe("validation");
+      expect(imported.error.issues!.map((issue) => issue.path)).toEqual(["terminus-2/chess-best-move__gs92yNg/result.json"]);
+      expect(imported.error.detail).toContain(
+        "at exception_info.exception_message, names the jobs directory of the machine that ran Harbor",
+      );
       expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
     });
 

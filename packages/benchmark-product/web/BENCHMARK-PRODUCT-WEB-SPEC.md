@@ -4,7 +4,7 @@
 |---|---|
 | **Version** | 0.3 |
 | **Date** | 2026-08-07 |
-| **Amended** | 2026-08-19 — catalog `method.bind` form ([DR-2026-08-19](../../../log/decisions/2026-08-19-colophon-method-cli-discover.md)); 2026-09-02 — declared and strict all-slots denominators on the headline tables (issue #2977); 2026-09-04 — per-subject sourcing of the strict denominator and the negative-delta state message (issues #3700, #3701); 2026-10-07 — no rate stated for a headline arm with `n` 0 (issue #4975); 2026-11-17 — the verification card names timestamp proofs as the reader tool does (issue #5241) |
+| **Amended** | 2026-08-19 — catalog `method.bind` form ([DR-2026-08-19](../../../log/decisions/2026-08-19-colophon-method-cli-discover.md)); 2026-09-02 — declared and strict all-slots denominators on the headline tables (issue #2977); 2026-09-04 — per-subject sourcing of the strict denominator and the negative-delta state message (issues #3700, #3701); 2026-10-07 — no rate stated for a headline arm with `n` 0 (issue #4975); 2026-11-17 — the verification card names timestamp proofs, and the records they cover, as the reader tool does (issues #5241, #5278) |
 | **Author** | Packet BP-30, amended by packet BP-31 of the standalone benchmarking product implementation program |
 | **Shape** | `feat` |
 | **Status** | draft |
@@ -369,12 +369,14 @@ reader checks the sealed claim names that `verify` did not run and `publish`
 runs on the bundle. The success card lists them under "Not run here"; a draft
 that has not reported carries no such field and the card shows no list.
 When the result carries timestamp proofs, the card names them as the reader
-tool does (reader-facing vocabulary spec §4.2, v1.14): a "Timestamps" list,
-one "<subject> timestamp proof" per carried proof with its status, and a
-"Timestamp coverage" list that names each subject's outcome *timestamped*,
-*none*, or *promised but missing*. The result keeps the raw values
-(`anchored`, `absent`, `declared-but-absent`); a subject outcome the card has
-no name for makes the result unreadable rather than printing the raw value.
+tool does (reader-facing vocabulary spec §4.2, v1.14 and v1.15): a
+"Timestamps" list, one "<subject> timestamp proof" per carried proof with its
+status, and a "Timestamp coverage" list that names each subject's outcome
+*timestamped*, *none*, or *promised but missing*. A subject is named as the
+reader names it: *lock*, and *the runs* for the record labeled `matrix`. The
+result keeps the raw values (`anchored`, `absent`, `declared-but-absent`,
+`matrix`); a subject outcome the card has no name for makes the result
+unreadable rather than printing the raw value.
 Record-integrity or recomputation divergence is a prominent
 typed error and never a passing status.
 

@@ -10,12 +10,15 @@ import { toChecksumAddress } from "@jinn-network/trust-core";
 // leg of `verify.ts` (`verifyEoaCeremony`, T8/T9) independently recovers
 // the signer from raw signature bytes, so the kit's EOA fixtures need
 // genuine, verifiable signatures, not fakes. This is the only ceremony
-// type the kit signs for real: Safe/agentId/OIDC/GitHub-human ceremonies
-// are the resolver's job (`trust-resolve`'s `witness.ts`/`binding-
-// resolver.ts`), and `verify.ts`'s own ceremony leg trusts a non-null
-// `ResolvedBinding` for those types without re-verifying (see
-// `verifyCeremonyLeg` in trust-core's `verify.ts`) -- so the kit's fake
-// `BindingResolver` can mark them resolved without any signature at all.
+// type the kit signs for real. A Safe signature is checked only by its 1271
+// witness, which the kit's fake `WitnessVerifier` stands in for, so a Safe
+// fixture carries a genuine message and witness statement but a placeholder
+// signature (`fixtures.ts`). agentId/OIDC/GitHub-human ceremonies are the
+// resolver's job (`trust-resolve`'s `binding-resolver.ts`), and `verify.ts`'s
+// own ceremony leg trusts a non-null `ResolvedBinding` for those types
+// without re-verifying (see `verifyCeremonyLeg` in trust-core's `verify.ts`)
+// -- so the kit's fake `BindingResolver` can mark them resolved without any
+// signature at all.
 // ---------------------------------------------------------------------------
 
 function ascii(value: string): Uint8Array {

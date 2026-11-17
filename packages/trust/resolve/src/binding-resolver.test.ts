@@ -10,16 +10,21 @@ import {
   ceremonyEvidenceDigest,
   deriveStrength,
   didPkh,
+  eip191MessageHash,
+  parseDsseEnvelope,
   sealDsseEnvelope,
   serializeCeremonyMessage,
 } from "@jinn-network/trust-core";
 import type {
   AnchorResolver,
   ChainFactResolver,
+  DsseChainVerifier,
   EoaCeremonyEvidence,
   KeyBinding,
   Revocation,
+  SafeCeremonyEvidence,
   Sha256Digest,
+  WitnessVerifier,
 } from "@jinn-network/trust-core";
 import { hexToBytes } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -40,6 +45,7 @@ const KEY_OWNER = "did:key:zKeyKeeper";
 const DIGEST_A = ("sha256:" + "a".repeat(64)) as Sha256Digest;
 const DIGEST_B = ("sha256:" + "b".repeat(64)) as Sha256Digest;
 const CEREMONY_DIGEST = ("sha256:" + "c".repeat(64)) as Sha256Digest;
+const DIGEST_R = ("sha256:" + "d".repeat(64)) as Sha256Digest;
 const AGENT_ASSET = "eip155:84532/erc721:0x2222222222222222222222222222222222222222/7";
 
 /** These cases are not about envelopes, except where one passes its own `recordSignedByItsKey`. */
@@ -1073,10 +1079,19 @@ describe("createBindingResolver", () => {
         throw new Error("not used in this test");
       }),
     };
-    const resolver = createBindingResolver({ bindings: store, anchors, chainFacts });
+    const resolver = createBindingResolver({
+      bindings: store,
+      anchors,
+      chainFacts,
+      compositionAuthority: {
+        dsseVerifier: () => ({ validSignerKeyids: [] }),
+        witnessVerifier: { verify1271Witness: async () => ({ verified: false }) },
+      },
+    });
 
     const resolved = await resolver.resolveBinding({ key: KEY_A, agent: AGENT }, "2026-06-01T00:00:00.000Z");
     expect(resolved).toBeNull();
+    expect(chainFacts.ownerOf).toHaveBeenCalledWith(AGENT_ASSET);
   });
 
   it("does not resolve an agentId binding when no chainFacts resolver is configured", async () => {
@@ -1097,9 +1112,14 @@ describe("createBindingResolver", () => {
     const stranger = privateKeyToAccount(`0x${"5".repeat(64)}`);
     const ownerVoucher = { kind: "account" as const, did: didPkh(84532, owner.address), contractAccount: false };
     const ownerKey = { publicKey: "pk2", keyid: KEY_OWNER, algorithm: "secp256k1", didKey: KEY_OWNER };
+    const at = "2026-06-01T00:00:00.000Z";
+    // The owner's record takes effect first, so it is the genesis binding and stands on its own.
+    const OWNED = "2025-12-01T00:00:00.000Z";
+    const REVOKED = "2026-03-01T00:00:00.000Z";
     const anchors = fakeAnchors({
       [DIGEST_A]: "2026-01-01T00:00:00.000Z",
-      [DIGEST_B]: "2026-01-01T00:00:00.000Z",
+      [DIGEST_B]: OWNED,
+      [DIGEST_R]: REVOKED,
     });
     const chainFacts: ChainFactResolver = {
       ownerOf: vi.fn(async () => owner.address),
@@ -1107,15 +1127,34 @@ describe("createBindingResolver", () => {
         throw new Error("not used in this test");
       }),
     };
-    const agentIdRecord = record(accountBinding({
+    /** Trusts each envelope's declared keyids: the ceremonies are the signatures these cases are about. */
+    const declaredSigners: DsseChainVerifier = (envelopeBytes) => ({
+      validSignerKeyids: parseDsseEnvelope(envelopeBytes).signatures
+        .map((signature) => signature.keyid)
+        .filter((keyid): keyid is string => keyid !== undefined),
+    });
+    const witnesses = (verified: boolean): WitnessVerifier => ({ verify1271Witness: async () => ({ verified }) });
+    const compositionAuthority = { dsseVerifier: declaredSigners, witnessVerifier: witnesses(false) };
+
+    /** An envelope over `fields`, declaring `keyid` as its signer. */
+    function sealedBy(fields: unknown, payloadType: string, keyid: string): Uint8Array {
+      return sealDsseEnvelope({ payloadBytes: canonicalJsonBytes(fields), payloadType, signatures: [{ signature: Uint8Array.of(1), keyid }] });
+    }
+
+    const agentIdBinding = accountBinding({
       voucher: { kind: "agentId", caip19: AGENT_ASSET },
       ceremony: { type: "agentId", digest: CEREMONY_DIGEST },
       strength: deriveStrength("agentId"),
       anchors: [{ digest: DIGEST_A }],
-    }), DIGEST_A);
+    });
+    const agentIdRecord: SealedKeyBindingRecord = {
+      binding: agentIdBinding,
+      envelopeBytes: sealedBy(agentIdBinding, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_A),
+      bindingDigest: DIGEST_A,
+    };
 
     /** A genuine EIP-191 ceremony over `[AGENT, KEY_OWNER]`, signed by `signer`. */
-    async function ceremonyBy(signer: typeof owner): Promise<EoaCeremonyEvidence> {
+    async function ceremonyBy(signer: typeof owner, issuedAt: string): Promise<EoaCeremonyEvidence> {
       const message = {
         domain: "trust.jinn.network",
         address: signer.address,
@@ -1123,7 +1162,7 @@ describe("createBindingResolver", () => {
         version: "1" as const,
         chainId: 84532,
         nonce: "composition-nonce",
-        issuedAt: "2026-01-01T00:00:00.000Z",
+        issuedAt,
         resources: [AGENT, KEY_OWNER],
       };
       const messageBytes = serializeCeremonyMessage("eoa", message);
@@ -1131,21 +1170,46 @@ describe("createBindingResolver", () => {
       return { type: "eoa", message, messageBytes, signature };
     }
 
-    async function accountLeg(overrides: Partial<KeyBinding> = {}, evidenceBy: typeof owner = owner) {
-      const ceremonyEvidence = await ceremonyBy(evidenceBy);
+    /** The owner's account binding of KEY_OWNER, sealed by that key. */
+    async function accountLeg(overrides: Partial<KeyBinding> = {}, evidenceBy: typeof owner = owner, issuedAt = OWNED) {
+      const ceremonyEvidence = await ceremonyBy(evidenceBy, issuedAt);
       const binding = accountBinding({
         key: ownerKey,
         voucher: ownerVoucher,
+        validFrom: OWNED,
         ceremony: { type: "eoa", digest: ceremonyEvidenceDigest(ceremonyEvidence) },
         anchors: [{ digest: DIGEST_B }],
         ...overrides,
       });
-      return { ...record(binding, DIGEST_B), ceremonyEvidence };
+      const leg: SealedKeyBindingRecord = {
+        binding,
+        envelopeBytes: sealedBy(binding, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_OWNER),
+        bindingDigest: DIGEST_B,
+        ceremonyEvidence,
+      };
+      return leg;
     }
 
-    const composed = async (leg: SealedKeyBindingRecord, options: Pick<CreateBindingResolverOptions, "verifyHostedCeremony"> = {}) =>
-      createBindingResolver({ bindings: fakeStore([agentIdRecord, leg]), anchors, chainFacts, ...options })
-        .resolveBinding({ key: KEY_A, agent: AGENT }, "2026-06-01T00:00:00.000Z");
+    /** What resolves for KEY_A, the agentId's key, taken over both stored orders and required to be one answer. */
+    async function composed(
+      leg: SealedKeyBindingRecord,
+      options: Partial<CreateBindingResolverOptions> = {},
+      { revocations = [], atTime = at }: { readonly revocations?: readonly SealedRevocationRecord[]; readonly atTime?: string } = {},
+    ) {
+      const [first, second] = await Promise.all([[agentIdRecord, leg], [leg, agentIdRecord]].map((stored) => createBindingResolver({
+        bindings: {
+          ...fakeStore(stored),
+          listRevocationsForTargets: async (targets) => revocations.filter(({ revocation }) => targets.includes(revocation.target as Sha256Digest)),
+        },
+        anchors,
+        chainFacts,
+        compositionAuthority,
+        recordSignedByItsKey: (entry) => declaredSigners(entry.envelopeBytes).validSignerKeyids.includes(entry.binding.key.didKey),
+        ...options,
+      }).resolveBinding({ key: KEY_A, agent: AGENT }, atTime)));
+      expect(second).toEqual(first);
+      return first;
+    }
 
     it("composes with a genuine ceremony of the registry owner", async () => {
       expect((await composed(await accountLeg()))?.bindingDigest).toBe(DIGEST_A);
@@ -1189,20 +1253,196 @@ describe("createBindingResolver", () => {
       expect(await composed({ ...ended, binding: unending })).toBeNull();
     });
 
-    it("composes with a Safe's account ceremony only on the host's say-so", async () => {
-      const { ceremonyEvidence: _ceremonyEvidence, ...safe } = await accountLeg({
+    // Key authority section 4: the owner's record must stand at the instant (section 6).
+    it("does not compose with the owner's record when its key did not sign its envelope", async () => {
+      const leg = await accountLeg();
+      expect(await composed({ ...leg, envelopeBytes: sealedBy(leg.binding, TRUST_KEY_BINDING_MEDIA_TYPE, KEY_A) })).toBeNull();
+    });
+
+    describe("a revocation of the owner's record", () => {
+      const revokedBy = (did: string): SealedRevocationRecord => {
+        const revocation = revocationFields({ target: DIGEST_B, revokedBy: did, anchors: [{ digest: DIGEST_R }], effectiveFrom: REVOKED });
+        return { revocation, envelopeBytes: sealedBy(revocation, TRUST_REVOCATION_MEDIA_TYPE, did) };
+      };
+
+      it("by the owner's account ends the composition once it has taken effect", async () => {
+        expect(await composed(await accountLeg(), {}, { revocations: [revokedBy(ownerVoucher.did)] })).toBeNull();
+      });
+
+      it("by the owner's account does not reach the instant it takes effect, which counts only what came before", async () => {
+        const resolved = await composed(await accountLeg(), {}, { revocations: [revokedBy(ownerVoucher.did)], atTime: REVOKED });
+        expect(resolved?.bindingDigest).toBe(DIGEST_A);
+      });
+
+      it("by someone with no authority over it has no effect", async () => {
+        const resolved = await composed(await accountLeg(), {}, { revocations: [revokedBy(didPkh(84532, stranger.address))] });
+        expect(resolved?.bindingDigest).toBe(DIGEST_A);
+      });
+    });
+
+    it("does not compose with the owner's record when its chain does not hold", async () => {
+      // Two founding claims at one instant under two vouchers: neither is the genesis, and nothing
+      // gives the owner's record authority.
+      const unfounded = await accountLeg({ validFrom: "2026-01-01T00:00:00.000Z", anchors: [{ digest: DIGEST_A }] });
+      expect(await composed(unfounded)).toBeNull();
+    });
+
+    it("does not compose with the owner's record that rests on the agentId binding itself", async () => {
+      // The agentId record is the genesis, and the owner's record joins by its key's consent, so each
+      // stands only if the other does: the least relation holds neither up.
+      const consented = await accountLeg({
+        validFrom: "2026-02-01T00:00:00.000Z",
+        anchors: [{ digest: DIGEST_R }],
+        consent: { keyid: KEY_A, sig: btoa("declared-signers-check-the-keyid") },
+      });
+      expect(await composed(consented)).toBeNull();
+    });
+
+    it("keeps its own guarded resolver when the host's compositionAuthority carries a bindingResolver", async () => {
+      const consented = await accountLeg({
+        validFrom: "2026-02-01T00:00:00.000Z",
+        anchors: [{ digest: DIGEST_R }],
+        consent: { keyid: KEY_A, sig: btoa("declared-signers-check-the-keyid") },
+      });
+      // A host resolver with no guard of its own: if the walk ever asks it, a self-resting composition has no stop.
+      let hostCalls = 0;
+      const hostAuthority = {
+        ...compositionAuthority,
+        bindingResolver: {
+          resolveBinding: async () => {
+            hostCalls += 1;
+            if (hostCalls > 50) throw new Error("the host's resolver was asked again and again");
+            return null;
+          },
+        },
+      };
+      expect(await composed(consented, { compositionAuthority: hostAuthority })).toBeNull();
+      expect(hostCalls).toBe(0);
+    }, 5_000);
+
+    it("does not compose without what judges whether the owner's record stands", async () => {
+      expect(await composed(await accountLeg(), { compositionAuthority: undefined })).toBeNull();
+    });
+
+    // Each agentId's key is also one of the owner's keys, all at one instant, so deciding one
+    // composition asks what resolves for every other agentId's key, and decides that composition while
+    // the first is being decided: a ring. The guard answers by which compositions are being decided, so a
+    // ring has exponentially many answers to give in its width. A narrow one is followed, and its answer is
+    // the guard's: no composition holds, and the owner's record answers for the key. A wide one ends the
+    // resolve as an outage.
+    function ringOf(letters: string) {
+      const ring = Array.from(letters, (letter, index): SealedKeyBindingRecord[] => {
+        const didKey = `did:key:zRing${letter}`;
+        const key = { publicKey: `pk-ring-${letter}`, keyid: didKey, algorithm: "secp256k1", didKey };
+        const vouched = accountBinding({
+          key,
+          voucher: { kind: "agentId", caip19: `eip155:84532/erc721:0x2222222222222222222222222222222222222222/${100 + index}` },
+          ceremony: { type: "agentId", digest: CEREMONY_DIGEST },
+          strength: deriveStrength("agentId"),
+        });
+        // The owner's record of the same key carries no ceremony evidence, so it never stands.
+        const owned = accountBinding({ key, voucher: ownerVoucher });
+        const digest = (kind: string) => `sha256:${kind.repeat(62)}${(16 + index).toString(16)}` as Sha256Digest;
+        return [
+          { binding: vouched, envelopeBytes: sealedBy(vouched, TRUST_KEY_BINDING_MEDIA_TYPE, didKey), bindingDigest: digest("e") },
+          { binding: owned, envelopeBytes: sealedBy(owned, TRUST_KEY_BINDING_MEDIA_TYPE, didKey), bindingDigest: digest("f") },
+        ];
+      }).flat();
+      let lookups = 0;
+      const resolver = createBindingResolver({
+        bindings: {
+          ...fakeStore(ring),
+          listBindingsForAgent: async () => {
+            lookups += 1;
+            if (lookups > 20_000) throw new Error("the store was asked more than 20000 times");
+            return ring;
+          },
+        },
+        anchors,
+        chainFacts,
+        compositionAuthority,
+        recordSignedByItsKey: (entry) => declaredSigners(entry.envelopeBytes).validSignerKeyids.includes(entry.binding.key.didKey),
+      });
+      return {
+        resolve: () => resolver.resolveBinding({ key: ring[0]!.binding.key.didKey, agent: AGENT }, at),
+        lookups: () => lookups,
+      };
+    }
+
+    it("follows a narrow ring of compositions at one instant to the guard's answer", async () => {
+      const ring = ringOf("ABCDE");
+      expect((await ring.resolve())?.binding.voucher).toEqual(ownerVoucher);
+      expect(ring.lookups()).toBeLessThan(100);
+    });
+
+    it("ends a resolve as an outage rather than follow a ring of compositions at one instant too wide to follow", async () => {
+      const ring = ringOf("ABCDEFGHJK");
+      await expect(ring.resolve()).rejects.toMatchObject({ code: "RESOLUTION_FAILED" });
+      expect(ring.lookups()).toBeLessThan(1_000);
+    });
+
+    describe("under a deployment's ceremony currency profile", () => {
+      it("composes with the owner's record whose ceremony meets it", async () => {
+        expect((await composed(await accountLeg(), { ceremonyCurrency: {} }))?.bindingDigest).toBe(DIGEST_A);
+      });
+
+      it("does not compose with the owner's record whose ceremony fails it", async () => {
+        const vouchedLate = await accountLeg({}, owner, "2026-01-15T00:00:00.000Z");
+        expect((await composed(vouchedLate))?.bindingDigest).toBe(DIGEST_A);
+        expect(await composed(vouchedLate, { ceremonyCurrency: {} })).toBeNull();
+      });
+    });
+
+    /** The owner's record as a Safe's: a Safe ceremony whose message names `resources`, which the
+     * record commits to, and a 1271 witness about the voucher's Safe and chain and those bytes. */
+    async function safeLeg(resources: readonly string[] = [AGENT, KEY_OWNER]): Promise<SealedKeyBindingRecord> {
+      const message = { ...(await ceremonyBy(owner, OWNED)).message, resources };
+      const messageBytes = serializeCeremonyMessage("safe", message);
+      const ceremonyEvidence: SafeCeremonyEvidence = { type: "safe", message, messageBytes, signature: Uint8Array.of(0xbb) };
+      const { ceremonyEvidence: _eoaEvidence, ...safe } = await accountLeg({
         voucher: { ...ownerVoucher, contractAccount: true },
-        ceremony: { type: "safe", digest: CEREMONY_DIGEST },
+        ceremony: { type: "safe", digest: ceremonyEvidenceDigest(ceremonyEvidence) },
         strength: deriveStrength("safe"),
       });
-      expect(await composed(safe)).toBeNull();
-      expect(await composed(safe, { verifyHostedCeremony: async () => false })).toBeNull();
-      expect((await composed(safe, { verifyHostedCeremony: async () => true }))?.bindingDigest).toBe(DIGEST_A);
-      await expect(composed(safe, {
+      const statement = { chainId: 84532, safe: owner.address, hash: eip191MessageHash(messageBytes) };
+      return {
+        ...safe,
+        ceremonyEvidence,
+        witness: {
+          chainId: 84532,
+          blockNumber: 1,
+          blockHash: `0x${"9".repeat(64)}`,
+          verifier: AGENT,
+          envelopeBytes: sealDsseEnvelope({ payloadBytes: canonicalJsonBytes(statement), signatures: [{ signature: Uint8Array.of(1) }] }),
+        },
+      };
+    }
+    const witness = (verified: boolean) => ({ compositionAuthority: { dsseVerifier: declaredSigners, witnessVerifier: witnesses(verified) } });
+
+    it("composes with a Safe's account record only on the host's say-so and a witness that verifies", async () => {
+      const witnessed = await safeLeg();
+      expect(await composed(witnessed, witness(true))).toBeNull();
+      expect(await composed(witnessed, { verifyHostedCeremony: async () => false, ...witness(true) })).toBeNull();
+      expect(await composed(witnessed, { verifyHostedCeremony: async () => true, ...witness(false) })).toBeNull();
+      expect((await composed(witnessed, { verifyHostedCeremony: async () => true, ...witness(true) }))?.bindingDigest).toBe(DIGEST_A);
+      await expect(composed(witnessed, {
         verifyHostedCeremony: async () => {
           throw new Error("no route to host");
         },
+        ...witness(true),
       })).rejects.toThrow("no route to host");
+    });
+
+    // A Safe ceremony stands on its message, checked as an EOA ceremony's is, and a witness about
+    // those bytes: neither the host's say-so nor a witness the verifier believes is enough alone.
+    it("does not compose with a Safe's account record that carries no Safe ceremony", async () => {
+      const { ceremonyEvidence: _ceremonyEvidence, ...bare } = await safeLeg();
+      expect(await composed(bare, { verifyHostedCeremony: async () => true, ...witness(true) })).toBeNull();
+    });
+
+    it("does not compose with a Safe's account record whose message names another key", async () => {
+      const elsewhere = await safeLeg([AGENT, "did:key:zKeyElsewhere"]);
+      expect(await composed(elsewhere, { verifyHostedCeremony: async () => true, ...witness(true) })).toBeNull();
     });
 
     describe("when the registry cannot be read", () => {
@@ -1210,7 +1450,8 @@ describe("createBindingResolver", () => {
         bindings: fakeStore([agentIdRecord]),
         anchors,
         chainFacts: { ...chainFacts, ownerOf },
-      }).resolveBinding({ key: KEY_A, agent: AGENT }, "2026-06-01T00:00:00.000Z");
+        compositionAuthority,
+      }).resolveBinding({ key: KEY_A, agent: AGENT }, at);
 
       it("lets an outage out as an outage", async () => {
         await expect(asking(async () => {

@@ -1,0 +1,32 @@
+{
+  "name": "join-settlement-leg-with-no-chain",
+  "description": "The settlement leg must stand at the envelope's time.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "x",
+      "key": "K5",
+      "voucher": "C",
+      "from": "02-01",
+      "scope": [
+        "settlements"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "join": {
+        "verdict": "K1",
+        "settlement": "K5",
+        "envelope": "03-01",
+        "claim": "05-01"
+      },
+      "expect": "refused"
+    }
+  ]
+}

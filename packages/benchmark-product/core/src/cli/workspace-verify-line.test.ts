@@ -84,7 +84,7 @@ describe("workspace verify timestamp proofs (issue #5241)", () => {
       "  no chain attestation yet",
       "Timestamp coverage",
       "  lock: timestamped",
-      "  matrix: promised but missing — this run promised opentimestamps/v1 and the bundle carries no matching timestamp proof",
+      "  the runs: promised but missing — this run promised opentimestamps/v1 and the bundle carries no matching timestamp proof",
       "a timestamp proof is still pending, and `report` closes the anchoring window.",
       "",
     ].join("\n"));
@@ -95,9 +95,34 @@ describe("workspace verify timestamp proofs (issue #5241)", () => {
       ...TIMESTAMPED,
       anchors: { anchors: [], subjects: [{ subject: "matrix", outcome: "absent" }], invalid: [] },
     });
-    expect(human).toContain("  matrix: none — no timestamp proof was carried and none was promised");
+    expect(human).toContain("  the runs: none — no timestamp proof was carried and none was promised");
     for (const retired of [/\banchored\b/u, /\babsent\b/u, /declared-but-absent/u, /Anchor subjects/u, /time basis/u, /trust material/u, /anchor evidence/u]) {
       expect(human).not.toMatch(retired);
     }
+  });
+
+  // Spec section 4.2, v1.15 (issue #5278): the record labeled `matrix` is the runs on every human
+  // line, the per-proof line included; `--json` keeps the raw subject.
+  test("names the matrix proof's record the runs, as the reader does", () => {
+    const human = renderWorkspaceVerifyHuman({
+      ...TIMESTAMPED,
+      anchors: {
+        anchors: [{
+          recordSha256: "e".repeat(64),
+          status: "pending",
+          provider: "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+          subject: "matrix",
+          timeBasis: "chain-time",
+          trustMaterial: "none",
+        }],
+        subjects: [{ subject: "lock", outcome: "absent" }, { subject: "matrix", outcome: "anchored" }],
+        invalid: [],
+      },
+    });
+    expect(human).toContain(
+      `the runs timestamp proof: https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1, chain-time, pending, record ${"e".repeat(64)}`,
+    );
+    expect(human).toContain("Timestamp coverage\n  lock: none — no timestamp proof was carried and none was promised\n  the runs: timestamped");
+    expect(human).not.toMatch(/^ *matrix\b/mu);
   });
 });

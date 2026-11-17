@@ -94,9 +94,11 @@ test("usage exits 2 and states the exit contract", async () => {
   assert.match(result.stderr, /Protocol identifiers the protocol spec release serves resolve to their\ndocuments; the rest are names, not addresses/);
   assert.doesNotMatch(result.stderr, /Protocol identifiers are names/);
   assert.match(result.stderr, /platform bytes installed from npm/);
-  // The reader's words for what the caller supplies and what it checks: trust anchors and
-  // timestamp proofs, not "trust material" or a bare "anchor" (reader-facing vocabulary §4.2).
-  assert.match(result.stderr, /Trust anchors are yours, not the bundle's: with none supplied a well-formed\ntimestamp proof reports present rather than verified/);
+  // The reader's words for what the caller supplies and what it checks: trust anchors, block
+  // headers and timestamp proofs, not "trust material" or a bare "anchor" (reader-facing
+  // vocabulary §4.2, v1.16: the notes name block headers apart from trust anchors, so the usage
+  // text names both).
+  assert.match(result.stderr, /Trust anchors and block headers are yours, not the bundle's: with none supplied\nfor its time source, a well-formed timestamp proof reports present rather than\nverified, and none ships with this tool\./);
   assert.doesNotMatch(result.stderr, /[Tt]rust material/);
   assert.doesNotMatch(result.stderr, /well-formed anchor/);
   assert.doesNotMatch(result.stderr, /jinn\.network/);
@@ -341,13 +343,13 @@ test("the default human surface discloses every carried anchor and every subject
   // Supplied-but-unverifying is disclosed as itself, never as "no trust anchors supplied".
   assert.match(output, /lock timestamp proof · authority-time · present · 2026-02-02T12:00:00Z/);
   assert.match(output, /time source not evaluated: the trust anchors you supplied do not verify this timestamp proof/);
-  assert.match(output, /matrix timestamp proof · chain-time · verified · block 880017/);
-  assert.match(output, /time source evaluated against trust anchors you supplied — 2026-08-17T12:00:00Z/);
+  assert.match(output, /the runs timestamp proof · chain-time · verified · block 880017/);
+  assert.match(output, /time source evaluated against block headers you supplied — 2026-08-17T12:00:00Z/);
   // An authority-time proof whose evaluated instant is the genTime already on the head line does
   // not repeat it.
   assert.doesNotMatch(output, /supplied — 2026-01-01T12:00:00Z/);
   assert.match(output, new RegExp(`record ${"1".repeat(64)}`));
-  assert.match(output, /Timestamp coverage\n {2}lock: timestamped\n {2}matrix: timestamped/);
+  assert.match(output, /Timestamp coverage\n {2}lock: timestamped\n {2}the runs: timestamped/);
   assert.match(output, /A timestamp proof \(anchor\) dates the bytes it covers and says nothing/);
   assert.match(output, /not\s+that results were produced after it/);
 });
@@ -375,7 +377,7 @@ test("the default human surface names a missing and a promised-but-missing times
   assert.match(output, /no timestamp proofs carried/);
   assert.match(output, /lock: promised but missing — this run promised rfc3161-tsa\/v1 and the bundle carries no matching timestamp proof/);
   assert.doesNotMatch(output, /jinn\.network/);
-  assert.match(output, /matrix: none — no timestamp proof was carried and none was promised/);
+  assert.match(output, /the runs: none — no timestamp proof was carried and none was promised/);
 });
 
 test("a pending anchor prints its own status and reason, never a completed one's", async () => {
@@ -439,6 +441,169 @@ test("accepted anchor reasons alias raw identifiers for humans while JSON keeps 
   const machine = await runVerifierCli(["bundle", "--json"], { verify: async () => verified(report) });
   assert.equal(machine.exitCode, 0);
   assert.equal(JSON.parse(machine.stdout).anchors.anchors[0].reason, reason);
+});
+
+// Spec section 4.2, v1.15 (issue #5278): the human lines name the record `matrix.json` as the runs,
+// the section 5 name, while --json and the sealed claim keep the raw subject `matrix`.
+test("the timestamp blocks name the matrix subject the runs while --json keeps matrix", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  /** @type {import("../dist/index.js").PublicBundleVerificationResult} */
+  const report = {
+    format: "benchmark-product-public-bundle/6",
+    identity: "a".repeat(64),
+    checks: V6_CHECKS,
+    ...V6_IDENTITIES,
+    anchors: {
+      anchors: [{
+        recordSha256: "3".repeat(64),
+        status: "pending",
+        provider: "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+        subject: "matrix",
+        timeBasis: "chain-time",
+        trustMaterial: "none",
+      }],
+      subjects: [
+        { subject: "lock", outcome: "absent" },
+        {
+          subject: "matrix",
+          outcome: "declared-but-absent",
+          declaredProfiles: ["https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1"],
+        },
+      ],
+      invalid: [],
+    },
+  };
+
+  const human = await runVerifierCli(["bundle"], { verify: async () => verified(report) });
+  assert.equal(human.exitCode, 0);
+  assert.match(human.stdout, /^ {2}the runs timestamp proof · chain-time · pending$/m);
+  assert.match(human.stdout, /^ {2}the runs: promised but missing — this run promised opentimestamps\/v1 /m);
+  assert.doesNotMatch(human.stdout, /^ {2}matrix\b/m);
+  assert.doesNotMatch(human.stdout, /\bmatrix (?:timestamp|:)/i);
+
+  const machine = await runVerifierCli(["bundle", "--json"], { verify: async () => verified(report) });
+  assert.equal(machine.exitCode, 0);
+  const anchors = JSON.parse(machine.stdout).anchors;
+  assert.equal(anchors.anchors[0].subject, "matrix");
+  assert.deepEqual(anchors.subjects.map((/** @type {{ subject: string }} */ entry) => entry.subject), ["lock", "matrix"]);
+});
+
+// Spec section 4.2, v1.16 (issue #5253): whether this reader supplied material is decided per
+// profile, so each proof's note names the material its own time source needs: trust anchors
+// (`--tsa-root`) for an authority-time proof, block headers (`--ots-headers`) for a chain-time one.
+// The proofs are real and so is the evaluation: `verify` runs `evaluateIntegrityAnchors` over the
+// material the flags built, as `verifyPublicBundleSnapshot` does, so no case states a
+// `trustMaterial` the evaluator would not report.
+test("each timestamp proof's note names the material its own time source needs (issue #5253)", async () => {
+  const { evaluateIntegrityAnchors, runVerifierCli } = await import("../dist/index.js");
+  const { MATRIX_RECORD_KIND, RUN_RECORD_KIND } = await import("@jinn-network/benchmarking-records");
+  const {
+    buildOpenTimestampsAnchorEvidenceRecord,
+    buildRfc3161AnchorEvidenceRecord,
+    createFixtureAuthority,
+    createOpenTimestampsKitFixtures,
+  } = await import("@jinn-network/trust-testing");
+  const runSha256 = "1".repeat(64);
+  const matrixSha256 = "2".repeat(64);
+  const authority = createFixtureAuthority("issue-5253");
+  const ots = createOpenTimestampsKitFixtures(Buffer.from(matrixSha256, "hex"));
+  /** @param {{ readonly bytes: Uint8Array, readonly recordDigest: string }} built */
+  const carried = (built) => ({ recordSha256: built.recordDigest.slice("sha256:".length), bytes: built.bytes });
+  const lock = carried(buildRfc3161AnchorEvidenceRecord({
+    subjectKind: RUN_RECORD_KIND,
+    subjectSha256: runSha256,
+    proofBytes: authority.mintTimeStampToken({ subjectSha256: runSha256, genTime: "20260501120000Z" }).tokenDer,
+  }));
+  /** @param {Uint8Array} proofBytes */
+  const runs = (proofBytes) => carried(buildOpenTimestampsAnchorEvidenceRecord({
+    subjectKind: MATRIX_RECORD_KIND,
+    subjectSha256: matrixSha256,
+    proofBytes,
+  }));
+  const headers = ots.blockHeaders.map(({ height, header }) => `${height}:${Buffer.from(header).toString("hex")}\n`).join("");
+  const files = new Map([
+    ["root.der", authority.certificateDer],
+    ["headers.txt", new TextEncoder().encode(headers)],
+  ]);
+  /**
+   * @param {readonly string[]} flags
+   * @param {readonly { recordSha256: string, bytes: Uint8Array }[]} records
+   */
+  const check = (flags, records) => runVerifierCli(["bundle", ...flags], {
+    readFile: (path) => readFixture(files, path),
+    verify: async (_dir, options) => verified({
+      format: "benchmark-product-public-bundle/6",
+      identity: "a".repeat(64),
+      checks: V6_CHECKS,
+      ...V6_IDENTITIES,
+      anchors: evaluateIntegrityAnchors({
+        records,
+        runSha256,
+        matrixSha256,
+        closeAt: "2026-06-01T00:00:00Z",
+        ...(options?.anchorTrust === undefined ? {} : { trust: options.anchorTrust }),
+      }),
+    }),
+  });
+  /**
+   * The note printed under the one proof whose head line starts with `head`.
+   * @param {string} stdout
+   * @param {string} head
+   */
+  const noteUnder = (stdout, head) => {
+    const lines = stdout.split("\n");
+    const at = lines.findIndex((line) => line.startsWith(`  ${head} · `));
+    assert.ok(at >= 0, `no proof line for ${head} in:\n${stdout}`);
+    return lines[at + 1];
+  };
+  const lockHead = "lock timestamp proof · authority-time";
+  const runsHead = "the runs timestamp proof · chain-time";
+
+  // No material at all: the chain-time proof points at block headers, the authority-time one at
+  // trust anchors.
+  const bare = await check([], [lock, runs(ots.completeProof)]);
+  assert.equal(bare.exitCode, 0, bare.stderr);
+  assert.equal(noteUnder(bare.stdout, runsHead), "    time source not evaluated: no block headers supplied");
+  assert.equal(noteUnder(bare.stdout, lockHead), "    time source not evaluated: no trust anchors supplied");
+
+  // Only a root: it verifies the authority-time proof and was never material for the chain-time
+  // one, so that proof is not told that no trust anchors were supplied.
+  const rootOnly = await check(["--tsa-root", "root.der"], [lock, runs(ots.completeProof)]);
+  assert.equal(rootOnly.exitCode, 0, rootOnly.stderr);
+  assert.match(rootOnly.stdout, /^ {2}the runs timestamp proof · chain-time · present · block 880017$/m);
+  assert.equal(noteUnder(rootOnly.stdout, runsHead), "    time source not evaluated: no block headers supplied");
+  assert.match(rootOnly.stdout, /^ {2}lock timestamp proof · authority-time · verified · 2026-05-01T12:00:00Z$/m);
+  assert.equal(noteUnder(rootOnly.stdout, lockHead), "    time source evaluated against trust anchors you supplied");
+  assert.doesNotMatch(rootOnly.stdout, /no trust anchors supplied/);
+
+  // Only block headers: the mirror case.
+  const headersOnly = await check(["--ots-headers", "headers.txt"], [lock, runs(ots.completeProof)]);
+  assert.equal(headersOnly.exitCode, 0, headersOnly.stderr);
+  assert.match(headersOnly.stdout, /^ {2}the runs timestamp proof · chain-time · verified · block 880017$/m);
+  assert.equal(
+    noteUnder(headersOnly.stdout, runsHead),
+    "    time source evaluated against block headers you supplied — 2026-08-17T12:00:00Z",
+  );
+  assert.equal(noteUnder(headersOnly.stdout, lockHead), "    time source not evaluated: no trust anchors supplied");
+
+  // Block headers that do not include the attested block: supplied, and still not `verified`.
+  const otherBlock = await check(["--ots-headers", "headers.txt"], [runs(ots.unknownHeightCompleteProof)]);
+  assert.equal(otherBlock.exitCode, 0, otherBlock.stderr);
+  assert.equal(
+    noteUnder(otherBlock.stdout, runsHead),
+    "    time source not evaluated: the block headers you supplied do not verify this timestamp proof",
+  );
+
+  // `--json` carries the evaluator's raw entry and none of this prose.
+  const machine = await check(["--json", "--tsa-root", "root.der"], [lock, runs(ots.completeProof)]);
+  assert.equal(machine.exitCode, 0, machine.stderr);
+  const entries = JSON.parse(machine.stdout).anchors.anchors;
+  assert.deepEqual(
+    entries.map((/** @type {{ subject: string, status: string, trustMaterial: string }} */ entry) =>
+      [entry.subject, entry.status, entry.trustMaterial]).sort(),
+    [["lock", "verified", "supplied"], ["matrix", "present", "none"]],
+  );
+  assert.doesNotMatch(machine.stdout, /time source|block headers|trust anchors/);
 });
 
 test("an unanchored bundle's human surface is unchanged — no anchor section at all", async () => {
@@ -1170,6 +1335,10 @@ test("a refusal's human line uses the reader's names while --json keeps the modu
       `${admission}reviewer signature or judge/key binding is invalid`,
     ],
     [
+      "binary admission replay failed: replacementLedger.entries.0.reviews.1: reviewer signature or evaluator/key binding is invalid",
+      "binary admission replay failed: replacementLedger.entries.0.reviews.1: reviewer signature or judge/key binding is invalid",
+    ],
+    [
       `${admission}review verdict must be one Result Evaluation envelope with one signature`,
       `${admission}review verdict must be one DSSE-signed Result Evaluation with one signature`,
     ],
@@ -1207,15 +1376,42 @@ test("a refusal's human line uses the reader's names while --json keeps the modu
   }
 });
 
-// Every rule is anchored at the message's start, so wording that only contains a rule's words, as
-// publisher-chosen text can, prints unchanged.
+// Every rule is anchored at the message's start, the two admission-reviewer rules after an optional
+// review path, so a rule's own words after other text, as publisher-chosen text can carry them,
+// print unchanged. Each body is one rule's wording; removing any one rule's `^` changes its line.
 test("refusal wording is rewritten only where a rule matches from the message's start", async () => {
   const { runVerifierCli } = await import("../dist/index.js");
-  const message = 'manifest entry "digest mismatch for x.json" is missing';
-  const result = await runVerifierCli(["bundle"], {
-    verify: async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); },
-  });
-  assert.equal(result.stderr, `colophon-check: ${message}\n`);
+  const hex = "3".repeat(64);
+  const lead = "carried timestamp proof is invalid: ";
+  for (const body of [
+    "Matrix v2 failed deterministic assembly-3.0 replay",
+    "carried anchor is invalid: the proof does not verify",
+    `${lead}the anchored digest ${hex} is neither this bundle's sealed Run nor its sealed Matrix`,
+    `${lead}subject.kind is lock, but its digest resolves to this bundle's sealed Run`,
+    `${lead}subject.kind is lock, but its digest resolves to this bundle's sealed Matrix`,
+    `${lead}an authority-time lock anchor carries no comparable genTime`,
+    `${lead}no proof verifier implements the anchor profile example-profile`,
+    "anchor record digest mismatch",
+    "evidence record digest mismatch",
+    'digest mismatch for "share.txt"',
+    `matrix-rederivation: re-derived digest sha256:${hex} !== received sha256:${hex}`,
+    "verdict catalog does not match Matrix verdict closure",
+    `verdict ${hex} evaluator mismatch`,
+    "evaluator trust set must exactly equal Matrix-referenced evaluators",
+    "evaluator <identifier: see --json> keyId is not derived from its SPKI",
+    "report-envelope: invalid DSSE envelope: TrustCoreError: DSSE envelope payload is not strict standard or URL-safe base64.",
+    "Report author/keyId/didKey are not derived from the bundled Report SPKI",
+    "report-recompute: recomputed results do not match the sealed Report results",
+    "claim package anchors is not the exact projection of verified facts",
+    "reviewer signature or evaluator/key binding is invalid",
+    "review verdict must be one Result Evaluation envelope with one signature",
+  ]) {
+    const message = `unknown member: ${body}`;
+    const result = await runVerifierCli(["bundle"], {
+      verify: async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); },
+    });
+    assert.equal(result.stderr, `colophon-check: ${message}\n`, message);
+  }
 });
 
 test("freeze-repo failures keep identifiers in --json and alias them for a human", async () => {
@@ -1841,6 +2037,26 @@ const V8_SHAPE = {
   },
 };
 
+/**
+ * One `/10` result declaring every capability the registry carries, so every check a capability
+ * can add renders here. Derived, never listed: a capability registered later is declared, and its
+ * check rendered, with no edit to this file (issue #5333).
+ *
+ * @returns {Promise<import("../dist/index.js").PublicBundleVerificationResult>}
+ */
+async function v10EveryCapability() {
+  const { CAPABILITY_REGISTRY, expectedChecks } = await import("../dist/index.js");
+  // The wire vector is code-unit sorted; `expectedChecks` refuses any other order.
+  const capabilities = [...new Set(CAPABILITY_REGISTRY.map(({ token }) => token))].sort();
+  return {
+    format: "benchmark-product-public-bundle/10",
+    identity: "a".repeat(64),
+    capabilities,
+    checks: expectedChecks(capabilities),
+    ...V6_IDENTITIES,
+  };
+}
+
 /** The rendered check rows: every line that begins with one of the checks the shape declares. */
 function checkRows(output, checks) {
   return checks.map((check) => {
@@ -1852,9 +2068,10 @@ function checkRows(output, checks) {
 
 test("every printed check name carries its plain-language gloss (issue #3861)", async () => {
   const { renderVerifiedBundle } = await import("../dist/index.js");
-  // Two shapes cover all ten check names in the union: the disclosed `/8` closure carries `trust`,
+  // Three shapes cover every check name in the union: the disclosed `/8` closure carries `trust`,
   // `integrity-anchors`, and `disclosure-specification`; the evidence-native `/5` carries
-  // `artifact-integrity` and `signature-validity`.
+  // `artifact-integrity` and `signature-validity`; the `/10` result declaring every registered
+  // capability carries every check a capability adds, `external-import` among them.
   const glosses = {
     "manifest": "every listed file is here, unaltered",
     "evidence-closure": "every run's evidence is carried here",
@@ -1864,14 +2081,16 @@ test("every printed check name carries its plain-language gloss (issue #3861)", 
     "claim-consistency": "the claim agrees with the records here",
     "integrity-anchors": "the timestamp proofs are well formed",
     "disclosure-specification": "what was pinned is recorded and matches",
+    "external-import": "the import marker matches the claim",
     "artifact-integrity": "each artifact matches its fingerprint",
     "signature-validity": "each signature matches its key",
   };
   const seen = new Set();
-  for (const shape of [V8_SHAPE, V5_METADATA_FIRST]) {
+  for (const shape of [V8_SHAPE, V5_METADATA_FIRST, await v10EveryCapability()]) {
     const output = renderVerifiedBundle(shape);
     for (const { check, row } of checkRows(output, shape.checks)) {
       seen.add(check);
+      assert.ok(Object.hasOwn(glosses, check), `no pinned gloss for ${check}`);
       // Name verbatim, then a state, then the gloss — the gloss never replaces the sealed name.
       assert.match(
         row,
@@ -1880,11 +2099,15 @@ test("every printed check name carries its plain-language gloss (issue #3861)", 
       );
     }
   }
-  // The two shapes together must cover every check any supported closure can emit, so this test
-  // cannot drift narrower than the product. The exhaustiveness of the gloss map itself is a type
-  // obligation -- it is keyed by the check union, the same discipline `CHECK_SUBJECTS` uses.
-  const { PUBLIC_BUNDLE_VERIFICATION_CHECKS, PUBLIC_BUNDLE_V6_CHECKS, PUBLIC_BUNDLE_V7_CHECKS, PUBLIC_BUNDLE_V8_CHECKS } =
-    await import("../dist/index.js");
+  // The three shapes together must cover every check any supported closure can emit, so this test
+  // cannot drift narrower than the product. The composed generation's checks are read from the
+  // capability registry, so a capability that adds a check widens this set with no edit here. The
+  // exhaustiveness of the gloss map itself is a type obligation -- it is keyed by the check union,
+  // the same discipline `CHECK_SUBJECTS` uses.
+  const {
+    CAPABILITY_REGISTRY, expectedChecks,
+    PUBLIC_BUNDLE_VERIFICATION_CHECKS, PUBLIC_BUNDLE_V6_CHECKS, PUBLIC_BUNDLE_V7_CHECKS, PUBLIC_BUNDLE_V8_CHECKS,
+  } = await import("../dist/index.js");
   const { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } = await import("@jinn-network/benchmarking-evidence");
   const everyCheck = new Set([
     ...PUBLIC_BUNDLE_VERIFICATION_CHECKS,
@@ -1892,8 +2115,9 @@ test("every printed check name carries its plain-language gloss (issue #3861)", 
     ...PUBLIC_BUNDLE_V7_CHECKS,
     ...PUBLIC_BUNDLE_V8_CHECKS,
     ...EVIDENCE_NATIVE_BUNDLE_V5_CHECKS,
+    ...expectedChecks([...new Set(CAPABILITY_REGISTRY.map(({ token }) => token))].sort()),
   ]);
-  assert.deepEqual([...seen].sort(), [...everyCheck].sort(), "both shapes must cover every check a closure can emit");
+  assert.deepEqual([...seen].sort(), [...everyCheck].sort(), "the shapes must cover every check a closure can emit");
   assert.deepEqual(Object.keys(glosses).sort(), [...everyCheck].sort(), "every emittable check needs a gloss");
 });
 

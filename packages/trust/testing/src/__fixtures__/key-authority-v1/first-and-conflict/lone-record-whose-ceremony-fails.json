@@ -1,0 +1,25 @@
+{
+  "name": "lone-record-whose-ceremony-fails",
+  "description": "A lone candidate still resolves, so verification names the failure.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "ceremony": "absent"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "ceremony-verification-failed"
+    }
+  ]
+}

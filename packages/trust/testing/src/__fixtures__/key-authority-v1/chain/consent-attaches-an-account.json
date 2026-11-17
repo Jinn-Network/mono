@@ -1,0 +1,25 @@
+{
+  "name": "consent-attaches-an-account",
+  "description": "A standing bindings key consents a new account.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "B",
+      "from": "02-01",
+      "consentBy": "K1"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "accepted"
+    }
+  ]
+}

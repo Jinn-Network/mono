@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ceremonyEvidenceDigest, verifyEoaCeremony } from "./ceremony.js";
+import { ceremonyEvidenceDigest, matchSafeCeremony, verifyEoaCeremony } from "./ceremony.js";
 import { canonicalJsonBytes } from "./canonical-json.js";
 import { dssePreAuthEncoding, sealDsseEnvelope } from "./dsse.js";
 import { TRUST_KEY_BINDING_MEDIA_TYPE } from "./identifiers.js";
@@ -146,10 +146,21 @@ async function verifyCeremonyLeg(
 ): Promise<{ verified: boolean; reason?: string }> {
   const ceremonyType = resolved.binding.ceremony.type;
 
-  if (ceremonyType === "eoa") {
-    if (resolved.ceremonyEvidence === undefined) {
-      return { verified: false, reason: "resolved binding is missing its EOA ceremony evidence." };
+  if (ceremonyType === "eoa" || ceremonyType === "safe") {
+    const evidence = resolved.ceremonyEvidence;
+    if (evidence === undefined) {
+      return {
+        verified: false,
+        reason: `resolved binding is missing its ${ceremonyType === "eoa" ? "EOA" : "Safe"} ceremony evidence.`,
+      };
     }
+    const { witness } = resolved;
+    if (ceremonyType === "safe" && witness === undefined) {
+      return { verified: false, reason: "resolved binding is missing its 1271 witness." };
+    }
+    const currency = resolved.ceremonyCurrency === undefined
+      ? undefined
+      : { profile: resolved.ceremonyCurrency, effectiveStart: resolved.effectiveStart };
     // §7.1's digest-referenced ceremony evidence: the record's own
     // `ceremony.digest` commits to a specific evidence blob. Without this
     // check the resolver-supplied `ceremonyEvidence` is never tied to that
@@ -157,8 +168,14 @@ async function verifyCeremonyLeg(
     // matches would verify, regardless of what the signed record actually
     // committed to (major finding: the digest is otherwise decorative).
     try {
+      if (evidence.type !== ceremonyType) {
+        return {
+          verified: false,
+          reason: `ceremony evidence is of type "${String(evidence.type)}", not the binding's "${ceremonyType}".`,
+        };
+      }
       const committedDigest = resolved.binding.ceremony.digest;
-      const suppliedDigest = ceremonyEvidenceDigest(resolved.ceremonyEvidence);
+      const suppliedDigest = ceremonyEvidenceDigest(evidence);
       if (suppliedDigest !== committedDigest) {
         return {
           verified: false,
@@ -166,24 +183,22 @@ async function verifyCeremonyLeg(
             + `committed ceremony.digest "${committedDigest}".`,
         };
       }
-      const result = verifyEoaCeremony(
-        resolved.ceremonyEvidence,
-        resolved.binding,
-        resolved.ceremonyCurrency === undefined
-          ? undefined
-          : { profile: resolved.ceremonyCurrency, effectiveStart: resolved.effectiveStart },
-      );
-      return { verified: result.verified, ...(result.reason === undefined ? {} : { reason: result.reason }) };
+      if (evidence.type === "eoa") {
+        const result = verifyEoaCeremony(evidence, resolved.binding, currency);
+        return { verified: result.verified, ...(result.reason === undefined ? {} : { reason: result.reason }) };
+      }
+      // A Safe signs the same message an EOA does (§7.2), so its message is checked as an EOA
+      // ceremony's is, and the witness must be about this Safe and these bytes.
+      const content = matchSafeCeremony(evidence, witness!, resolved.binding, currency);
+      if (!content.matches) {
+        return { verified: false, ...(content.mismatch === undefined ? {} : { reason: content.mismatch }) };
+      }
     } catch {
       return { verified: false, reason: "ceremony evidence cannot be read." };
     }
-  }
-
-  if (ceremonyType === "safe") {
-    if (resolved.witness === undefined) {
-      return { verified: false, reason: "resolved binding is missing its 1271 witness." };
-    }
-    const result = await witnessVerifier.verify1271Witness(resolved.witness);
+    // §7.2a: whether the witness is believed is the injected verifier's call. It is asked last, so
+    // a ceremony refused offline costs no read.
+    const result = await witnessVerifier.verify1271Witness(witness!);
     return { verified: result.verified, ...(result.reason === undefined ? {} : { reason: result.reason }) };
   }
 
@@ -400,6 +415,19 @@ async function bindingStands(
   revocationsThatCount: RevocationsThatCount = "all",
 ): Promise<boolean> {
   return await authorityUsable(resolved, atTime, walk, revocationsThatCount) && chainHolds(resolved, walk);
+}
+
+/**
+ * Whether a resolved binding stands at `atTime` (key authority section 6), for a leg outside
+ * this module that takes authority from one: the account binding an `agentId` composition rests
+ * on (section 4). It is `bindingStands`, on a walk of its own.
+ */
+export async function checkBindingStands(
+  resolved: ResolvedBinding,
+  atTime: string,
+  deps: BindingAuthorityDeps,
+): Promise<boolean> {
+  return bindingStands(resolved, atTime, startWalk(deps));
 }
 
 /** What one binding's record offers §7.4a, before the batch it was sealed in

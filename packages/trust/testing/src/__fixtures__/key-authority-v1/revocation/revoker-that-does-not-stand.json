@@ -1,0 +1,34 @@
+{
+  "name": "revoker-that-does-not-stand",
+  "description": "A revoker must stand at the revocation's effective time.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "x",
+      "key": "K5",
+      "voucher": "C",
+      "from": "02-01",
+      "scope": [
+        "bindings"
+      ]
+    }
+  ],
+  "revocations": [
+    {
+      "target": "g",
+      "by": "K5",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "accepted"
+    }
+  ]
+}

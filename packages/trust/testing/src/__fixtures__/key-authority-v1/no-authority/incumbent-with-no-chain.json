@@ -1,0 +1,30 @@
+{
+  "name": "incumbent-with-no-chain",
+  "description": "An incumbent must itself stand, whatever order a store lists records in.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "x",
+      "key": "K5",
+      "voucher": "C",
+      "from": "02-01"
+    },
+    {
+      "id": "y",
+      "key": "K6",
+      "voucher": "C",
+      "from": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K6",
+      "expect": "consent-chain-violation"
+    }
+  ]
+}

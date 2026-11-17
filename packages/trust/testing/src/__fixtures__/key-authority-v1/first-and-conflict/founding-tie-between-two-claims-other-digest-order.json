@@ -1,0 +1,31 @@
+{
+  "name": "founding-tie-between-two-claims-other-digest-order",
+  "description": "The same world with the other digest order.",
+  "bindings": [
+    {
+      "id": "x",
+      "key": "K5",
+      "voucher": "C",
+      "from": "01-01"
+    },
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01",
+      "below": [
+        "x"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "key": "K5",
+      "expect": "consent-chain-violation"
+    },
+    {
+      "key": "K1",
+      "expect": "consent-chain-violation"
+    }
+  ]
+}

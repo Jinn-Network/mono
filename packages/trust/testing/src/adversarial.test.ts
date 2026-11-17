@@ -25,7 +25,6 @@ import {
   createEoaTestSigner,
   resolvedRevocation,
   buildRevocationFixture,
-  stubWitness,
   testAgentIri,
   testDidKey,
 } from "./fixtures.js";
@@ -250,7 +249,7 @@ describe("§16 adversarial battery", () => {
       workingKeyDidKey: key,
       ceremonyType: "safe",
       voucher: accountVoucher(84532, "0x8888888888888888888888888888888888888888" as `0x${string}`, true),
-      witness: stubWitness(testAgentIri("adversarial-fabricated-witness-author")),
+      safeCeremony: { witnessAuthor: testAgentIri("adversarial-fabricated-witness-author") },
     });
     fakes.registerBinding({ key, agent, resolved: fixture.resolved, validFrom: fixture.binding.validFrom });
     // Deliberately no `registerWitnessResult` call -- an unsigned/
