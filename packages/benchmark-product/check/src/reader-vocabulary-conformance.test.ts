@@ -622,7 +622,7 @@ const READER_RENDERS: readonly string[] = [
   renderVerifiedBundle(metadataFirst(3)),
   // A report carrying an invalid anchor is refused, not rendered; its refusal is in the pins.
   // Render both with and without `disclosure-specification` so `CHECK_SUBJECTS` reaches every
-  // active check subject, including the hidden term #5251 tracks.
+  // active check subject.
   ...Object.values(ANCHOR_CASES)
     .map((report) => report() as IntegrityAnchorsReport)
     .filter((report) => report.invalid.length === 0)
@@ -771,9 +771,10 @@ const SHOWN: readonly RegExp[] = [
   /(?<![\w/.@-])[A-Za-z0-9][\w.@-]*\/v\d[\w.]*/gu,
   // Method identifiers by name, alone or as `name@version` (spec section 2).
   new RegExp(`(?<![\\w-])(?:${METHOD_NAMES.map(phrase).join("|")})(?:@\\d+)?(?![\\w-])`, "gu"),
-  // Only the hyphenated check names, except in the `What is recomputed is …` caveat line, where
-  // `CHECK_SUBJECTS` spells `the disclosure specification` with spaces (#5251): `manifest` and
-  // `trust` are plain words in reader prose ("trust anchors") and carry no inherited name.
+  // Only the hyphenated check names, and `disclosure-specification` only as written: `phrase` would
+  // also mask a spaced "disclosure specification", a noun section 5 hides, wherever reader prose
+  // printed it. `manifest` and `trust` are plain words in reader prose ("trust anchors") and carry
+  // no inherited name.
   new RegExp(
     `(?<![\\w-])(?:${CHECK_NAMES.filter((name) => name.includes("-") && name !== "disclosure-specification").map(phrase).join("|")})(?![\\w-])`,
     "gu",
@@ -1024,22 +1025,22 @@ function ledgerDifferences(
 const REPORT_VIOLATION_OWNER = 3862 as const;
 /**
  * The reader tool's refusal lines and the recomputed-checks caveat (`CHECK_SUBJECTS` in
- * `outcome.ts`). The issue's body cites the timestamp-proof refusals as its examples; what it asks
- * section 4.2 to rule is whether a refusal line, which is also the `--json` `message` value,
- * follows section 5 at all, and that ruling decides every stderr entry below. PR #5219, which
- * closed #3863, names it as the tracker for "the reader's refusal lines from deeper modules".
+ * `outcome.ts`), ruled in spec section 4.2 (v1.13, *Refusal lines*): the human refusal line follows
+ * section 5, the `--json` `message` keeps the refusing module's words, and a field path prints as
+ * written. The one entry it still owns follows from that last rule, and it rules the entry out of
+ * section 5's reach rather than retiring it.
  */
 const READER_PROSE_AND_REFUSAL_OWNER = 5251 as const;
 
 /** The `Timestamps` and `Timestamp coverage` blocks name each covered record by its claim anchor subject, so a reader meets "matrix". */
 const TIMESTAMP_SUBJECT_OWNER = 5278 as const;
 
-/** The open issues on Jinn-Network/mono that own recorded violations: each either retires its
- * entries or rules them out of section 5's reach, and its change updates this ledger. */
+/** The issues on Jinn-Network/mono that own recorded violations: each either retires its entries
+ * or rules them out of section 5's reach, and its change updates this ledger. */
 const OWNERS = {
   [REPORT_VIOLATION_OWNER]: "Report page vocabulary",
   [TIMESTAMP_SUBJECT_OWNER]: "the subject label in the reader's timestamp blocks",
-  [READER_PROSE_AND_REFUSAL_OWNER]: "the reader tool's refusal lines and recomputed-checks caveat",
+  [READER_PROSE_AND_REFUSAL_OWNER]: "a field path a refusal line prints as written",
 } as const;
 
 interface KnownViolation extends Violation {
@@ -1417,87 +1418,14 @@ const KNOWN_VIOLATIONS: readonly KnownViolation[] = [
       "Report…",
     ],
   },
-  {
-    surface: "colophon-check stderr", rule: "hidden term", name: "Matrix",
-    owner: READER_PROSE_AND_REFUSAL_OWNER,
-    units: [
-      "colophon-check: Matrix v2 failed deterministic assembly-3.0 replay",
-      "colophon-check: carried anchor is invalid: the anchored digest <sha256> is neither this bundle's sealed Run nor its sealed Matrix",
-      "colophon-check: evaluator trust set must exactly equal Matrix-referenced evaluators",
-      "colophon-check: verdict catalog does not match Matrix verdict closure",
-    ],
-  },
-  {
-    surface: "colophon-check stderr", rule: "hidden term", name: "catalog",
-    owner: READER_PROSE_AND_REFUSAL_OWNER,
-    units: [
-      "colophon-check: verdict catalog does not match Matrix verdict closure",
-    ],
-  },
-  {
-    surface: "colophon-check stderr", rule: "hidden term", name: "envelope",
-    owner: READER_PROSE_AND_REFUSAL_OWNER,
-    units: [
-      "colophon-check: binary admission replay failed: resolutions.0.reviews.0: review verdict must be one Result Evaluation envelope with one signature",
-      "colophon-check: report-envelope: invalid DSSE envelope: TrustCoreError: DSSE envelope payload is not strict standard or URL-safe base64.",
-    ],
-  },
-  {
-    surface: "colophon-check stderr", rule: "hidden term", name: "projection",
-    owner: READER_PROSE_AND_REFUSAL_OWNER,
-    units: [
-      "colophon-check: claim package anchors is not the exact projection of verified facts",
-      "colophon-check: claim package headline.baseline.passRate is not the exact projection of verified facts",
-      "colophon-check: claim package records.reportEnvelopeSha256 is not the exact projection of verified facts",
-      "colophon-check: claim package verification.trustRoot is not the exact projection of verified facts",
-    ],
-  },
-  {
-    surface: "colophon-check stderr", rule: "second name", name: "fingerprint",
-    owner: READER_PROSE_AND_REFUSAL_OWNER,
-    units: [
-      "colophon-check: anchor record digest mismatch",
-      "colophon-check: carried anchor is invalid: the anchored digest <sha256> is neither this bundle's sealed Run nor its sealed Matrix",
-      "colophon-check: digest mismatch for \"share.txt\"",
-      "colophon-check: evidence record digest mismatch",
-      "colophon-check: matrix-rederivation: re-derived digest sha256:<sha256> !== received sha256:<sha256>",
-    ],
-  },
-  {
-    surface: "colophon-check stderr", rule: "second name", name: "judge",
-    owner: READER_PROSE_AND_REFUSAL_OWNER,
-    units: [
-      "colophon-check: binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid",
-      "colophon-check: evaluator <identifier: see --json> keyId is not derived from its SPKI",
-      "colophon-check: evaluator trust set must exactly equal Matrix-referenced evaluators",
-      "colophon-check: verdict <sha256> evaluator mismatch",
-    ],
-  },
-  {
-    surface: "colophon-check stderr", rule: "second name", name: "the claim",
-    owner: READER_PROSE_AND_REFUSAL_OWNER,
-    units: [
-      "colophon-check: claim package anchors is not the exact projection of verified facts",
-      "colophon-check: claim package headline.baseline.passRate is not the exact projection of verified facts",
-      "colophon-check: claim package records.reportEnvelopeSha256 is not the exact projection of verified facts",
-      "colophon-check: claim package verification.trustRoot is not the exact projection of verified facts",
-    ],
-  },
-  {
-    surface: "colophon-check stderr", rule: "second name", name: "the result",
-    owner: READER_PROSE_AND_REFUSAL_OWNER,
-    units: [
-      "colophon-check: Report author/keyId/didKey are not derived from the bundled Report SPKI",
-      "colophon-check: report-recompute: recomputed results do not match the sealed Report results",
-    ],
-  },
+  // Ruled by #5251 (spec section 4.2, *Refusal lines*): a refusal prints a field path as written,
+  // and `anchors` is the claim field that holds its timestamp proofs, so a reader meets the contract
+  // spelling. `SHOWN` reads only dotted field paths as paths, so this one-word path is recorded.
   {
     surface: "colophon-check stderr", rule: "second name", name: "timestamp proof",
     owner: READER_PROSE_AND_REFUSAL_OWNER,
     units: [
-      "colophon-check: anchor record digest mismatch",
-      "colophon-check: carried anchor is invalid: the anchored digest <sha256> is neither this bundle's sealed Run nor its sealed Matrix",
-      "colophon-check: claim package anchors is not the exact projection of verified facts",
+      "colophon-check: the claim's field anchors does not agree with the records here",
     ],
   },
   // Owned by #5278. The `Timestamps` and `Timestamp coverage` blocks name each covered record by
@@ -1509,23 +1437,6 @@ const KNOWN_VIOLATIONS: readonly KnownViolation[] = [
       "matrix timestamp proof",
       "matrix: none — no timestamp proof was carried and none was promised",
       "matrix: timestamped",
-    ],
-  },
-  {
-    surface: "colophon-check stdout", rule: "hidden term", name: "disclosure specification",
-    owner: READER_PROSE_AND_REFUSAL_OWNER,
-    units: [
-      "well-formedness, and the disclosure specification — against the bytes the",
-    ],
-  },
-  {
-    surface: "colophon-check stdout", rule: "second name", name: "the result",
-    owner: READER_PROSE_AND_REFUSAL_OWNER,
-    units: [
-      "calculations, the report, and claim consistency — against the bytes the",
-      "calculations, the report, claim consistency, and the external-import marker",
-      "calculations, the report, claim consistency, and timestamp proof",
-      "calculations, the report, claim consistency, timestamp proof",
     ],
   },
   {
