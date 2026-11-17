@@ -10,6 +10,7 @@ import {
   ceremonyEvidenceDigest,
   deriveStrength,
   didPkh,
+  eip191MessageHash,
   parseDsseEnvelope,
   sealDsseEnvelope,
   serializeCeremonyMessage,
@@ -21,6 +22,7 @@ import type {
   EoaCeremonyEvidence,
   KeyBinding,
   Revocation,
+  SafeCeremonyEvidence,
   Sha256Digest,
   WitnessVerifier,
 } from "@jinn-network/trust-core";
@@ -1334,17 +1336,34 @@ describe("createBindingResolver", () => {
       });
     });
 
-    it("composes with a Safe's account record only on the host's say-so and a witness that verifies", async () => {
-      const { ceremonyEvidence: _ceremonyEvidence, ...safe } = await accountLeg({
+    /** The owner's record as a Safe's: a Safe ceremony whose message names `resources`, which the
+     * record commits to, and a 1271 witness about the voucher's Safe and chain and those bytes. */
+    async function safeLeg(resources: readonly string[] = [AGENT, KEY_OWNER]): Promise<SealedKeyBindingRecord> {
+      const message = { ...(await ceremonyBy(owner, OWNED)).message, resources };
+      const messageBytes = serializeCeremonyMessage("safe", message);
+      const ceremonyEvidence: SafeCeremonyEvidence = { type: "safe", message, messageBytes, signature: Uint8Array.of(0xbb) };
+      const { ceremonyEvidence: _eoaEvidence, ...safe } = await accountLeg({
         voucher: { ...ownerVoucher, contractAccount: true },
-        ceremony: { type: "safe", digest: CEREMONY_DIGEST },
+        ceremony: { type: "safe", digest: ceremonyEvidenceDigest(ceremonyEvidence) },
         strength: deriveStrength("safe"),
       });
-      const witnessed: SealedKeyBindingRecord = {
+      const statement = { chainId: 84532, safe: owner.address, hash: eip191MessageHash(messageBytes) };
+      return {
         ...safe,
-        witness: { chainId: 84532, blockNumber: 1, blockHash: `0x${"9".repeat(64)}`, verifier: AGENT, envelopeBytes: Uint8Array.of(1) },
+        ceremonyEvidence,
+        witness: {
+          chainId: 84532,
+          blockNumber: 1,
+          blockHash: `0x${"9".repeat(64)}`,
+          verifier: AGENT,
+          envelopeBytes: sealDsseEnvelope({ payloadBytes: canonicalJsonBytes(statement), signatures: [{ signature: Uint8Array.of(1) }] }),
+        },
       };
-      const witness = (verified: boolean) => ({ compositionAuthority: { dsseVerifier: declaredSigners, witnessVerifier: witnesses(verified) } });
+    }
+    const witness = (verified: boolean) => ({ compositionAuthority: { dsseVerifier: declaredSigners, witnessVerifier: witnesses(verified) } });
+
+    it("composes with a Safe's account record only on the host's say-so and a witness that verifies", async () => {
+      const witnessed = await safeLeg();
       expect(await composed(witnessed, witness(true))).toBeNull();
       expect(await composed(witnessed, { verifyHostedCeremony: async () => false, ...witness(true) })).toBeNull();
       expect(await composed(witnessed, { verifyHostedCeremony: async () => true, ...witness(false) })).toBeNull();
@@ -1355,6 +1374,18 @@ describe("createBindingResolver", () => {
         },
         ...witness(true),
       })).rejects.toThrow("no route to host");
+    });
+
+    // A Safe ceremony stands on its message, checked as an EOA ceremony's is, and a witness about
+    // those bytes: neither the host's say-so nor a witness the verifier believes is enough alone.
+    it("does not compose with a Safe's account record that carries no Safe ceremony", async () => {
+      const { ceremonyEvidence: _ceremonyEvidence, ...bare } = await safeLeg();
+      expect(await composed(bare, { verifyHostedCeremony: async () => true, ...witness(true) })).toBeNull();
+    });
+
+    it("does not compose with a Safe's account record whose message names another key", async () => {
+      const elsewhere = await safeLeg([AGENT, "did:key:zKeyElsewhere"]);
+      expect(await composed(elsewhere, { verifyHostedCeremony: async () => true, ...witness(true) })).toBeNull();
     });
 
     describe("when the registry cannot be read", () => {
