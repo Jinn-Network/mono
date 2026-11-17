@@ -110,7 +110,7 @@ not drift. Do not rerun it again. When the order cannot be told, the refresh sto
 which separates two cases:
 
 - **Transient.** `GitHub compare failed` with a network error, a timeout, a 5xx or a rate
-  limit. The marker's commit exists, so the same compare passes later: rerun the job.
+  limit. The marker's commit exists, so the same compare answers later: rerun the job.
 - **Lasting.** `GitHub compare failed` with a 404 means GitHub does not have the commit
   the marker names, for example one that was never on a branch of `Jinn-Network/mono` or
   has since been removed. The compare asks about the marker's commit whatever the run's
@@ -122,9 +122,11 @@ which separates two cases:
 The refresh itself has no step that clears a lasting case. The one input it does not
 order is a marker that is missing or malformed (not exactly the four canonical lines): it
 names no commit, so the refresh skips the compare, mirrors the bundle, and rewrites the
-marker with the run's own source. Producing that state means committing a change to the
-host repository's `.jinn-profile-host-source`, and the rule above forbids hand edits of
-that repository. **This runbook therefore does not give a recovery step for a lasting
+marker with the run's own source. Producing that state takes either a change to the
+host repository's `.jinn-profile-host-source`, which the rule above forbids, or a refresh
+run whose `WORKFLOW_PATH` differs from the marker's `generated-by` line, because the marker
+counts as canonical only for the workflow path the run is given (issue #5287 tracks that
+bypass). Neither is a documented step. **This runbook therefore does not give a recovery step for a lasting
 case. It needs a maintainer decision** between: (1) a one-time, recorded maintainer
 exception that removes or corrupts the marker in the host repository, after which the next
 refresh repairs it and the order check is off for that one refresh only; (2) a change to
@@ -135,11 +137,10 @@ can be ordered. Until a maintainer picks one, treat the red as a standing alarm.
 A deliberate rollback of the host to an older attested commit is **not supported**. When
 the marker is canonical and names a later commit than the one being published, the
 refresh is refused with `profile host refresh refused`, and the break-glass invocation
-below goes through the same check. The only way past it is the marker exception in the
-paragraph above, which also needs a maintainer decision, and which would drop the
-order guard for that refresh rather than make it accept an older commit by design.
-A missing or malformed marker names no commit to order and is repaired as before. The
-break-glass invocation below runs the same check, so `gh` must be signed in where it runs.
+below goes through the same check. The only ways past it are the two that make the marker read as malformed, named in the
+paragraph above. Neither is a documented step, and each drops the order guard for that
+refresh rather than making it accept an older commit by design. The break-glass invocation
+needs `gh` signed in where it runs.
 
 The refresh is deliberately **not** a `needs:` of `stable-live-host-verification`. Adding
 a write-credential job to that gate's dependency chain would let a skipped refresh skip
