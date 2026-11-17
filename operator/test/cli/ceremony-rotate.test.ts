@@ -35,14 +35,24 @@ interface Submitted {
   readonly transactionHash: `0x${string}`;
 }
 
-function harness(options: { readonly failRevocationFinality?: boolean } = {}) {
+interface HarnessOptions {
+  /** Throw from the finality wait of this act, once: the run is killed while waiting. */
+  readonly interruptWait?: 'rebind' | 'revocation';
+}
+
+function harness(options: HarnessOptions = {}) {
   const home = mkdtempSync(join(tmpdir(), 'ceremony-rotate-'));
   const dir = join(home, '.jinn-operator');
   mkdirSync(dir, { recursive: true });
+  const configPath = join(dir, 'config.json');
   const calls: string[] = [];
   const submitted: Submitted[] = [];
+  /** `identityStores` as the config named it at each anchor submission, by submission index. */
+  const storesAtSubmit: (Record<string, string> | undefined)[] = [];
   let account = agentAccount;
   let finalityWaits = 0;
+  // Waits run genesis, then the rebind, then the revocation.
+  const interruptAt = options.interruptWait === undefined ? undefined : { rebind: 2, revocation: 3 }[options.interruptWait];
   const deps: CeremonyCommandDeps = {
     async readChainCustody() {
       calls.push('readChainCustody');
@@ -56,6 +66,9 @@ function harness(options: { readonly failRevocationFinality?: boolean } = {}) {
         async signMessage(input) { return signer.signMessage({ message: { raw: input.message.raw } }); },
         async submit(digest) {
           calls.push(`submit:${digest}`);
+          storesAtSubmit.push(existsSync(configPath)
+            ? (JSON.parse(readFileSync(configPath, 'utf-8')) as { identityStores: Record<string, string> }).identityStores
+            : undefined);
           // Each anchor mines ten minutes after the last, from a fixed genesis block time.
           const seconds = 1_786_000_000 + submitted.length * 600;
           const anchor = {
@@ -76,10 +89,7 @@ function harness(options: { readonly failRevocationFinality?: boolean } = {}) {
         async waitForFinalized(input) {
           finalityWaits += 1;
           calls.push('waitForFinalized');
-          // The third wait: genesis, then the rebind, then the revocation.
-          if (options.failRevocationFinality === true && finalityWaits === 3) {
-            throw new Error('killed during the revocation finality wait');
-          }
+          if (finalityWaits === interruptAt) throw new Error(`killed during the ${options.interruptWait} finality wait`);
           return {
             digest: input.digest,
             anchorTime: input.locator.anchorTime,
@@ -96,12 +106,13 @@ function harness(options: { readonly failRevocationFinality?: boolean } = {}) {
   return {
     home,
     dir,
-    configPath: join(dir, 'config.json'),
+    configPath,
     catalogPath: join(dir, 'trust.json'),
     authorityStore: join(home, '.jinn-ceremony', 'authority.enc.json'),
     deps,
     calls,
     submitted,
+    storesAtSubmit,
     useAccount(next: typeof agentAccount) { account = next; },
   };
 }
@@ -128,7 +139,7 @@ async function run(h: Harness, argv: string[]): Promise<Record<string, unknown>>
   return envelopes[envelopes.length - 1]!;
 }
 
-async function provisioned(options: { readonly failRevocationFinality?: boolean } = {}): Promise<Harness> {
+async function provisioned(options: HarnessOptions = {}): Promise<Harness> {
   const h = harness(options);
   const init = await run(h, [
     'init', '--dir', h.dir, '--role-sets', 'requester,admission,solver', '--authority-store', h.authorityStore, '--execute',
@@ -180,6 +191,25 @@ async function openCatalog(h: Harness, now: string) {
     },
     now: new Date(now),
   });
+}
+
+/** Opens a solver store as the daemon does at boot, against the catalog at `at`. */
+async function bootAt(h: Harness, storePath: string, at: string) {
+  const trust = await openCatalog(h, at);
+  return openRoleIdentitySet({
+    agent: config(h).agentIri,
+    requiredRoles: SOLVER_ROLES,
+    storePath,
+    password: PASSWORD,
+    bindingResolver: trust.bindingResolver,
+    revocationAuthority: trust,
+    verifyRoleBinding: trust.verifyRoleBinding,
+    now: () => new Date(at),
+  });
+}
+
+function rotationReceipt(h: Harness): Record<string, unknown> {
+  return JSON.parse(readFileSync(join(h.dir, 'ceremony', 'rotation.json'), 'utf-8'));
 }
 
 describe('ceremony rotate', () => {
@@ -297,13 +327,16 @@ describe('ceremony rotate', () => {
     expect(String(refusal.message)).toContain('no identityStores.evaluator');
   });
 
-  it('resumes an interrupted rotation onto the same new store, without a second rebind', async () => {
-    const h = await provisioned({ failRevocationFinality: true });
+  it('resumes an interruption in the revocation wait onto the anchor it recorded, not a second one', async () => {
+    const h = await provisioned({ interruptWait: 'revocation' });
+    const retiredStore = config(h).identityStores.solver!;
     await expect(run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']))
       .rejects.toThrow(/killed during the revocation finality wait/u);
-    const receipt = JSON.parse(readFileSync(join(h.dir, 'ceremony', 'rotation.json'), 'utf-8')) as {
-      stores: Record<string, string>;
-    };
+    const newStore = (rotationReceipt(h).stores as Record<string, string>).solver!;
+    const [, rebind, revocation] = h.submitted;
+    // The rebind landed, so the config already names the new store, whose keys boot; nothing is revoked yet.
+    expect(config(h).identityStores.solver).toBe(newStore);
+    await expect(bootAt(h, newStore, rebind!.anchorTime)).resolves.toBeDefined();
     const afterRebind = catalogBindings(h).length;
 
     const result = await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
@@ -311,10 +344,78 @@ describe('ceremony rotate', () => {
     expect(result.kind).toBe('ceremony_rotate_complete');
     expect(result.resumed).toBe(true);
     expect(result.rebindAnchor).toBeNull();
-    expect(config(h).identityStores.solver).toBe(receipt.stores.solver);
+    // genesis, the rebind, and the revocation: the re-run waits on the recorded anchor and sends none.
+    expect(h.submitted).toHaveLength(3);
+    expect(result.revocationAnchor).toMatchObject({
+      transactionHash: revocation!.transactionHash,
+      effectiveTime: revocation!.anchorTime,
+    });
+    expect(config(h).identityStores.solver).toBe(newStore);
     expect(catalogBindings(h)).toHaveLength(afterRebind);
-    // genesis, the rebind, the interrupted revocation, and the revocation that landed.
-    expect(h.submitted).toHaveLength(4);
+    await expect(bootAt(h, retiredStore, revocation!.anchorTime)).rejects.toThrow(/binding is revoked at boot/u);
+    await expect(bootAt(h, newStore, revocation!.anchorTime)).resolves.toBeDefined();
+  });
+
+  it('resumes an interruption in the rebind wait onto the anchor it recorded, not a second one', async () => {
+    const h = await provisioned({ interruptWait: 'rebind' });
+    const retiredStore = config(h).identityStores.solver!;
+    await expect(run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']))
+      .rejects.toThrow(/killed during the rebind finality wait/u);
+    const [, rebind] = h.submitted;
+    // Nothing landed: the config still names the retiring store, and nothing revokes it.
+    expect(config(h).identityStores.solver).toBe(retiredStore);
+
+    const result = await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
+
+    expect(result.kind).toBe('ceremony_rotate_complete');
+    expect(result.resumed).toBe(true);
+    expect(result.rebindAnchor).toMatchObject({ transactionHash: rebind!.transactionHash, validFrom: rebind!.anchorTime });
+    // genesis, the rebind, and the revocation.
+    expect(h.submitted).toHaveLength(3);
+    expect(config(h).identityStores.solver).toBe((rotationReceipt(h).stores as Record<string, string>).solver);
+  });
+
+  it('repoints identityStores after the rebind lands and before the revocation is anchored', async () => {
+    const h = await provisioned();
+    const retiredStore = config(h).identityStores.solver!;
+
+    await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
+
+    // Submissions run genesis, the rebind, then the revocation. The config names the retiring store
+    // until the replacement is bound, and the new one before anything is revoked, so no step leaves
+    // it naming a store whose bindings the catalog revokes.
+    expect(h.storesAtSubmit[1]!.solver).toBe(retiredStore);
+    expect(h.storesAtSubmit[2]!.solver).toBe(config(h).identityStores.solver);
+    expect(config(h).identityStores.solver).not.toBe(retiredStore);
+  });
+
+  it.each([
+    ['as rotate writes it', (receipt: Record<string, unknown>) => receipt],
+    [
+      'as the first rotate wrote it, naming only the new stores',
+      ({ schemaVersion, roleSets, stores }: Record<string, unknown>) => ({ schemaVersion, roleSets, stores }),
+    ],
+  ])('starts no second rotation when a finished receipt lost its completion mark (%s)', async (_shape, shape) => {
+    const h = await provisioned();
+    await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
+    // The process stopped after the last write but before the receipt was marked complete.
+    const { completedAt, ...unmarked } = rotationReceipt(h);
+    expect(completedAt).toEqual(expect.any(String));
+    writeFileSync(join(h.dir, 'ceremony', 'rotation.json'), JSON.stringify(shape(unmarked)));
+    const stores = config(h).identityStores;
+    const submissions = h.submitted.length;
+    const catalog = readFileSync(h.catalogPath);
+
+    const result = await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
+
+    expect(result.kind).toBe('ceremony_rotate_complete');
+    expect(result.rebindAnchor).toBeNull();
+    expect(result.revocationAnchor).toBeNull();
+    expect(result.storesCreated).toEqual([]);
+    expect(h.submitted).toHaveLength(submissions);
+    expect(readFileSync(h.catalogPath)).toEqual(catalog);
+    expect(config(h).identityStores).toEqual(stores);
+    expect(rotationReceipt(h).completedAt).toEqual(expect.any(String));
   });
 
   it('refuses to retire keys the catalog never bound', async () => {
