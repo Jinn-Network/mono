@@ -7,6 +7,7 @@ import {
   TRUST_KEY_BINDING_MEDIA_TYPE,
   TRUST_REVOCATION_MEDIA_TYPE,
   canonicalJsonBytes,
+  ceremonyCurrencyFailure,
   ceremonyEvidenceDigest,
   compareCalendarStrictRfc3339Instants,
   compareCodeUnitStrings,
@@ -20,6 +21,7 @@ import type {
   AnchorResolver,
   BindingResolver,
   BindingResolverQuery,
+  CeremonyCurrencyProfile,
   ChainFactResolver,
   Eip1271Witness,
   EoaCeremonyEvidence,
@@ -31,7 +33,7 @@ import type {
   Sha256Digest,
 } from "@jinn-network/trust-core";
 
-import { TrustResolveError } from "./errors.js";
+import { TrustResolveError, invalidInput } from "./errors.js";
 
 // ---------------------------------------------------------------------------
 // §7.3's at-time binding resolution, composed for `BindingResolver`:
@@ -130,6 +132,16 @@ export interface CreateBindingResolverOptions {
   /** Under an anchor-requiring profile an unanchored binding never
    * resolves (§7.3). Defaults to `true`, the safer default. */
   readonly requireAnchors?: boolean;
+  /** The deployment's choice under the ceremony currency text,
+   * `https://spec.jinn.network/profiles/ceremony-currency/v1`. Omit it and the
+   * text is not applied: every ceremony is checked as before it. Supply it and
+   * an `eoa` ceremony must also hold under the text at its record's effective
+   * start, here and, because each resolved binding carries this profile, in
+   * `verify.ts`. A `termsCutover` must be readable and needs `requireAnchors`,
+   * since only an anchor fixes the effective start. `safe` ceremonies are the
+   * host's leg: a host that verifies them in `verifyHostedCeremony` applies the
+   * text there. */
+  readonly ceremonyCurrency?: CeremonyCurrencyProfile;
   /** Observability seam for §7.3's "the conflict is surfaced to policy" --
    * `trust-resolve` has no policy layer of its own. */
   readonly onConflict?: (conflict: BindingConflict) => void;
@@ -308,8 +320,26 @@ async function ceremonyCanBeVerified(
 const eoaCeremonyVerdicts = new WeakMap<SealedKeyBindingRecord, boolean>();
 
 /** `trust-core`'s offline leg, once per record: recovering a signer is the
- * dearest step of a resolve, and the answer is a fact about the record. */
-function eoaCeremonyVerified(record: SealedKeyBindingRecord): boolean {
+ * dearest step of a resolve, and the answer is a fact about the record. The
+ * ceremony currency text, when the deployment applies it, is read at the
+ * record's effective start on top of that answer. */
+function eoaCeremonyVerified(
+  { record, effectiveStart }: EffectiveBinding,
+  currency: CeremonyCurrencyProfile | undefined,
+): boolean {
+  if (!eoaSignatureAndContentVerified(record)) return false;
+  if (currency === undefined) return true;
+  try {
+    return ceremonyCurrencyFailure(record.ceremonyEvidence!.message, record.binding, {
+      profile: currency,
+      effectiveStart,
+    }) === undefined;
+  } catch {
+    return false; // Evidence that cannot be read verifies nothing.
+  }
+}
+
+function eoaSignatureAndContentVerified(record: SealedKeyBindingRecord): boolean {
   const known = eoaCeremonyVerdicts.get(record);
   if (known !== undefined) return known;
   let verified = false;
@@ -328,14 +358,15 @@ function eoaCeremonyVerified(record: SealedKeyBindingRecord): boolean {
  * record naming the account: an agentId ceremony is only as verified as this.
  * This reads that record's ceremony, not its own chain or revocations. */
 async function accountCeremonyVerified(
-  record: SealedKeyBindingRecord,
-  verifyHostedCeremony: CreateBindingResolverOptions["verifyHostedCeremony"],
+  entry: EffectiveBinding,
+  options: Pick<CreateBindingResolverOptions, "verifyHostedCeremony" | "ceremonyCurrency">,
 ): Promise<boolean> {
+  const { record } = entry;
   switch (record.binding.ceremony.type) {
     case "eoa":
-      return eoaCeremonyVerified(record);
+      return eoaCeremonyVerified(entry, options.ceremonyCurrency);
     case "safe":
-      return ceremonyCanBeVerified(record, verifyHostedCeremony);
+      return ceremonyCanBeVerified(record, options.verifyHostedCeremony);
     default:
       return false;
   }
@@ -349,7 +380,7 @@ async function agentIdCompositionHolds(
   candidate: SealedKeyBindingRecord,
   atTime: string,
   peers: readonly EffectiveBinding[],
-  options: Pick<CreateBindingResolverOptions, "chainFacts" | "verifyHostedCeremony">,
+  options: Pick<CreateBindingResolverOptions, "chainFacts" | "verifyHostedCeremony" | "ceremonyCurrency">,
 ): Promise<boolean> {
   const voucher = candidate.binding.voucher;
   if (voucher.kind !== "agentId") return true; // composition applies only to agentId vouchers
@@ -368,7 +399,8 @@ async function agentIdCompositionHolds(
   }
   const ownerDid = didPkhFromAddress(chainId, ownerAddress);
 
-  for (const { record, effectiveStart } of peers) {
+  for (const peer of peers) {
+    const { record, effectiveStart } = peer;
     // Each row is weighed on its own, as in `isGenesisAmong`: a row the store files under
     // the candidate's digest is not the candidate.
     if (record === candidate) continue;
@@ -376,20 +408,21 @@ async function agentIdCompositionHolds(
     if (record.binding.voucher.did !== ownerDid) continue;
     if (!isWithinWindow(record.binding, effectiveStart, atTime)) continue;
     // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
-    if (await accountCeremonyVerified(record, options.verifyHostedCeremony)) return true;
+    if (await accountCeremonyVerified(peer, options)) return true;
   }
   return false;
 }
 
 /** §7.5 step 3 for a record this resolver has in hand, whatever is resolving. */
 async function ceremonyVerified(
-  record: SealedKeyBindingRecord,
+  entry: EffectiveBinding,
   atTime: string,
   peers: readonly EffectiveBinding[],
-  options: Pick<CreateBindingResolverOptions, "chainFacts" | "verifyHostedCeremony">,
+  options: Pick<CreateBindingResolverOptions, "chainFacts" | "verifyHostedCeremony" | "ceremonyCurrency">,
 ): Promise<boolean> {
+  const { record } = entry;
   if (!(await ceremonyCanBeVerified(record, options.verifyHostedCeremony))) return false;
-  if (record.binding.ceremony.type === "eoa" && !eoaCeremonyVerified(record)) return false;
+  if (record.binding.ceremony.type === "eoa" && !eoaCeremonyVerified(entry, options.ceremonyCurrency)) return false;
   return agentIdCompositionHolds(record, atTime, peers, options);
 }
 
@@ -503,6 +536,15 @@ function isGenesisAmong(candidate: EffectiveBinding, allForAgent: readonly Effec
  */
 export function createBindingResolver(options: CreateBindingResolverOptions): BindingResolver {
   const requireAnchors = options.requireAnchors ?? true;
+  const termsCutover = options.ceremonyCurrency?.termsCutover;
+  if (termsCutover !== undefined) {
+    if (!requireAnchors) {
+      invalidInput("a terms cutover is named only under a profile that requires anchors (ceremony currency §6).");
+    }
+    if (!isCalendarStrictRfc3339(termsCutover)) {
+      invalidInput(`terms cutover "${termsCutover}" cannot be read (ceremony currency §6).`);
+    }
+  }
   const signatureVerdicts = new WeakMap<SealedKeyBindingRecord, boolean>();
   const signedByItsKey = (record: SealedKeyBindingRecord): boolean => {
     const known = signatureVerdicts.get(record);
@@ -561,7 +603,8 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
       // is not one: it cannot beat a record that verifies, whatever its time. Alone
       // it still resolves, so that verification can name what failed.
       const verified = withComposition.filter(
-        ({ record }) => record.binding.ceremony.type !== "eoa" || eoaCeremonyVerified(record),
+        (candidate) => candidate.record.binding.ceremony.type !== "eoa"
+          || eoaCeremonyVerified(candidate, options.ceremonyCurrency),
       );
       const winner = [...(verified.length > 0 ? verified : withComposition)].sort(compareCandidates)[0]!;
       if (withComposition.length > 1 && options.onConflict) {
@@ -600,9 +643,9 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
           namedInWindow.length > 0 && isWithinWindow(winner.record.binding, winner.effectiveStart, effectiveTime)
         )) continue;
         const targetScope: string[] = [];
-        for (const { record } of namedInWindow) {
+        for (const named of namedInWindow) {
           // eslint-disable-next-line no-await-in-loop -- revocation sets are small.
-          if (await ceremonyVerified(record, effectiveTime, readable, options)) targetScope.push(...record.binding.scope);
+          if (await ceremonyVerified(named, effectiveTime, readable, options)) targetScope.push(...named.record.binding.scope);
         }
         revocations.push({
           revocation: revocationRecord.revocation,
@@ -625,6 +668,7 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
         ...(winner.record.ceremonyEvidence === undefined ? {} : { ceremonyEvidence: winner.record.ceremonyEvidence }),
         ...(winner.record.witness === undefined ? {} : { witness: winner.record.witness }),
         ...(incumbentControls.length === 0 ? {} : { incumbentControls }),
+        ...(options.ceremonyCurrency === undefined ? {} : { ceremonyCurrency: options.ceremonyCurrency }),
       };
       return resolved;
     },

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { EoaCeremonyEvidence } from "./ceremony.js";
+import type { CeremonyCurrencyProfile, EoaCeremonyEvidence } from "./ceremony.js";
 import type { KeyBinding } from "./key-binding.js";
 import type { Revocation } from "./revocation.js";
 import type { Sha256Digest } from "./types.js";
@@ -52,6 +52,13 @@ export interface ResolvedBinding {
   /** Present when `binding.ceremony.type === "safe"` -- the 1271 witness
    * statement for the injected `WitnessVerifier` leg (§7.2a). */
   readonly witness?: Eip1271Witness;
+  /** The deployment's ceremony currency profile, present when the resolver
+   * applies `https://spec.jinn.network/profiles/ceremony-currency/v1`. `verify.ts`
+   * then checks an `eoa` ceremony against it at `effectiveStart`. Absent,
+   * ceremonies are checked as they were before that text. Present, a ceremony
+   * that fails it gives no authority, so it can also lose a key conflict to
+   * another record or stop a revocation it signed from counting. */
+  readonly ceremonyCurrency?: CeremonyCurrencyProfile;
   /** True only for the founding binding of the Agent IRI -- no §7.4a
    * consent-chain check applies (design §7.4a: "the genesis binding of an
    * Agent IRI stands alone"). */

@@ -62,6 +62,110 @@
       "sha256": "9d7405e6934dc342e09facb71985c759003fe06e12835d6afb446bbebda69858"
     },
     {
+      "id": "ceremony-currency-v1/README.md",
+      "sha256": "d36ebb698a97e368a59bac14b73e854a57677afb98ff49ad26bf19e7eb3d7f5c"
+    },
+    {
+      "id": "ceremony-currency-v1/commitment-after-a-third-resource.json",
+      "sha256": "a37a21472c3876e5be03041a6a23cc5938ae70d1b1b7266642b614a12d1a2170"
+    },
+    {
+      "id": "ceremony-currency-v1/commitment-in-upper-case.json",
+      "sha256": "471b1b1768868cce9c3d079f02a087ed447a2f09a0ec1bc3e901fab93a2de42b"
+    },
+    {
+      "id": "ceremony-currency-v1/commitment-not-last.json",
+      "sha256": "ef6a26b8aeab88e25755d6154d6a2c1bdaca589b0cc900fb9514ee2c3c4b635d"
+    },
+    {
+      "id": "ceremony-currency-v1/commitment-of-an-unknown-version.json",
+      "sha256": "ff6cb5d122f741471ca9514a4826e01d90170fbe01438892a97ea0af2102da04"
+    },
+    {
+      "id": "ceremony-currency-v1/committed-after-the-cutover.json",
+      "sha256": "e2f9c88b9ad038c9f3b14e8f4cda063c0f94925fd1555e35d289705271f4596f"
+    },
+    {
+      "id": "ceremony-currency-v1/committed-with-an-expiry.json",
+      "sha256": "30630c6a7e41b39a5ebb7dfbccc999896a42e5ce424c100f24a9b521f19aa3b2"
+    },
+    {
+      "id": "ceremony-currency-v1/committed.json",
+      "sha256": "6abe57a07781172b774e78c5b38caa40ca9a76da11cf29652ecf17ee8e244cb4"
+    },
+    {
+      "id": "ceremony-currency-v1/domain-in-upper-case.json",
+      "sha256": "3bad58aa119fa56ff621b963e15ac550a40d655c4518b19f42987c76104f0d1d"
+    },
+    {
+      "id": "ceremony-currency-v1/end-moved.json",
+      "sha256": "f75526a2ae61af081526652479050b0bc1cda39edb8fa96c83ae61f467fcf8fa"
+    },
+    {
+      "id": "ceremony-currency-v1/end-removed.json",
+      "sha256": "38c71e77746a209061eb00d819a86364bddab024a6e1648b489e3f05a7d24d4b"
+    },
+    {
+      "id": "ceremony-currency-v1/no-commitment-and-no-cutover.json",
+      "sha256": "665909ee2335783b62b446fd70d9a38eaacb68084ac04c601bacced504cef7e8"
+    },
+    {
+      "id": "ceremony-currency-v1/no-commitment-at-the-cutover.json",
+      "sha256": "188ef4ec31dc00851047e0cd3c9776485f3a42a053ee5caf215f1c7552963cf2"
+    },
+    {
+      "id": "ceremony-currency-v1/no-commitment-before-the-cutover.json",
+      "sha256": "86985507fba4919a6df8316ac47f8f1af32034510304455151848c1c6194ec81"
+    },
+    {
+      "id": "ceremony-currency-v1/other-domain.json",
+      "sha256": "721c4c3e6fe5958859108ebccc498323856d6e1a3d23010ad05072e9a752d16d"
+    },
+    {
+      "id": "ceremony-currency-v1/other-relationship.json",
+      "sha256": "5e9b1413400a2cd53376d6be3b08500985bd0d756f261b8d8f414850fa66a104"
+    },
+    {
+      "id": "ceremony-currency-v1/other-start.json",
+      "sha256": "8766cfc77f00003cb7c2159e1f1951bbb4861d4f9840fd39b2527aa8fb59af0a"
+    },
+    {
+      "id": "ceremony-currency-v1/other-uri.json",
+      "sha256": "24ac098a463636c73c3c739c97687f39474d2586b03534490bb176a0c21d1966"
+    },
+    {
+      "id": "ceremony-currency-v1/takes-effect-after-the-expiration.json",
+      "sha256": "783fcf6217ce654eaedfa3e5c5e01791c6485e49430476d7f08c1ea3ad4340f0"
+    },
+    {
+      "id": "ceremony-currency-v1/takes-effect-at-the-expiration.json",
+      "sha256": "3f846bcaddf8c2388ee9be0cdcefd47da84e65064acd883e7355a7e47a13c4ff"
+    },
+    {
+      "id": "ceremony-currency-v1/takes-effect-before-the-account-vouched.json",
+      "sha256": "85f56e278c29ce527d69b1bc09f2ad85a1bf25086c43d7dbecb73418d40b6e13"
+    },
+    {
+      "id": "ceremony-currency-v1/two-commitments.json",
+      "sha256": "ef6078ca1648271bb3214e6d7fa6d84ee8a1439cabfc89a3491eaee74d9e3853"
+    },
+    {
+      "id": "ceremony-currency-v1/unreadable-expiration.json",
+      "sha256": "5d491f49b3edd003ea01553762d5b58f238c0c72fc01317730d99e3f55efef6c"
+    },
+    {
+      "id": "ceremony-currency-v1/unreadable-issued-at.json",
+      "sha256": "8e27e2408121724f34567dee7e91fd5072e91675e195eea6801bed1594a21baf"
+    },
+    {
+      "id": "ceremony-currency-v1/verified-long-after-the-expiration.json",
+      "sha256": "a02855a9bc5756fc2024189303a8f6749ed50700ce17c11072386602f7f961da"
+    },
+    {
+      "id": "ceremony-currency-v1/wider-scope.json",
+      "sha256": "5da02b869ec1dafebdc71ea11cd8ebeec7a63ea0526246d1f747f579daa87a95"
+    },
+    {
       "id": "ceremony-v1/README.md",
       "sha256": "7ab88585b59da27948c34dd6617fa86e86a271a9e49d853e61448cfa670b8e7b"
     },

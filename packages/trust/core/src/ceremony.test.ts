@@ -9,6 +9,8 @@ import { describe, expect, test } from "vitest";
 
 import type { AuthorizationStatement } from "./authorization.js";
 import {
+  bindingTermsCommitment,
+  bindingTermsDigest,
   matchCeremonyContent,
   recoverEip191Address,
   serializeCeremonyMessage,
@@ -389,6 +391,133 @@ describe("the profile's ceremony domain and URI (§7.2)", () => {
       verified: false,
       recoveredAddress: TEST_ADDRESS,
       reason: expect.stringMatching(reason),
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The ceremony currency text, https://spec.jinn.network/profiles/ceremony-currency/v1.
+// Its vectors run in `@jinn-network/trust-testing`; these pin the API and the
+// rule being off by default.
+// ---------------------------------------------------------------------------
+
+describe("ceremony currency (ceremony-currency/v1)", () => {
+  const terms = {
+    relationship: "controls",
+    scope: ["deliveries", "verdicts", "bindings"],
+    validFrom: "2026-07-28T00:00:00Z",
+  } as const;
+  const DIGEST = "b6e3f9b48d4b2b992439e8f8d8081dff7668df5cadb8b0ec90f2b1aef7851bb9";
+
+  function committedBinding(): KeyBinding {
+    return { ...bindingVouchedByTestKey(), ...terms, scope: [...terms.scope] };
+  }
+
+  function committedCeremony(overrides: Partial<SiweCeremonyMessage> = {}): EoaCeremonyEvidence {
+    return signedEoaCeremony({
+      resources: [eoaFixture.agentIri, eoaFixture.didKey, bindingTermsCommitment(terms)],
+      ...overrides,
+    });
+  }
+
+  test("the terms digests of the text's own examples (§2)", () => {
+    expect(bindingTermsDigest(terms)).toBe(DIGEST);
+    expect(bindingTermsDigest({ ...terms, expiresAt: "2026-08-28T00:00:00Z" }))
+      .toBe("1494223e6ce203bd9bbe3fa9f79508208acfad5e7d7afe323c416c70075c639e");
+    expect(bindingTermsCommitment(terms)).toBe(`urn:jinn:trust:binding-terms:v1:sha256:${DIGEST}`);
+  });
+
+  test("only relationship, scope, validFrom and expiresAt are terms", () => {
+    expect(bindingTermsDigest(committedBinding())).toBe(DIGEST);
+  });
+
+  test("without a currency check a ceremony verifies as before, whatever it commits to", () => {
+    const binding = { ...committedBinding(), scope: ["deliveries"] };
+    expect(verifyEoaCeremony(committedCeremony({ issuedAt: "2026-08-01T00:00:00Z" }), binding))
+      .toEqual({ verified: true, recoveredAddress: TEST_ADDRESS });
+  });
+
+  test("a ceremony that commits to its record's terms verifies within its window", () => {
+    const check = { profile: {}, effectiveStart: "2026-07-28T00:00:00Z" };
+    expect(verifyEoaCeremony(committedCeremony(), committedBinding(), check))
+      .toEqual({ verified: true, recoveredAddress: TEST_ADDRESS });
+  });
+
+  test.each([
+    ["a record with wider scope", { scope: ["deliveries", "verdicts", "bindings", "settlements"] }, {}, /commits to terms/],
+    ["a record with an end the account never signed", { expiresAt: "2027-01-01T00:00:00Z" }, {}, /commits to terms/],
+    ["an effective start before issuedAt", {}, { issuedAt: "2026-07-28T00:00:00.001Z" }, /before the ceremony's issuedAt/],
+    ["an effective start after expirationTime", {}, { expirationTime: "2026-07-27T23:59:59Z" }, /after the ceremony's expirationTime/],
+    ["an issuedAt that cannot be read", {}, { issuedAt: "2026-07-28T00:00Z" }, /issuedAt "2026-07-28T00:00Z" cannot be read/],
+  ])("%s fails the ceremony", (_label, record, message, reason) => {
+    const check = { profile: {}, effectiveStart: "2026-07-28T00:00:00Z" };
+    expect(verifyEoaCeremony(committedCeremony(message), { ...committedBinding(), ...record }, check)).toEqual({
+      verified: false,
+      recoveredAddress: TEST_ADDRESS,
+      reason: expect.stringMatching(reason),
+    });
+  });
+
+  test("under a terms cutover an uncommitted ceremony fails from the cutover on (§6)", () => {
+    const uncommitted = signedEoaCeremony();
+    const binding = committedBinding();
+    const profile = { termsCutover: "2026-07-28T00:00:00Z" };
+    expect(verifyEoaCeremony(uncommitted, binding, { profile, effectiveStart: "2026-07-28T00:00:00Z" }))
+      .toEqual({ verified: false, recoveredAddress: TEST_ADDRESS, reason: expect.stringMatching(/terms cutover/) });
+    expect(verifyEoaCeremony(uncommitted, binding, { profile: { termsCutover: "2026-07-28T00:00:00.001Z" }, effectiveStart: "2026-07-28T00:00:00Z" }).verified)
+      .toBe(true);
+    expect(verifyEoaCeremony(committedCeremony(), binding, { profile, effectiveStart: "2026-07-28T00:00:00Z" }).verified)
+      .toBe(true);
+  });
+
+  test("a terms cutover that cannot be read fails closed", () => {
+    const check = { profile: { termsCutover: "2026-07-28" }, effectiveStart: "2026-07-28T00:00:00Z" };
+    expect(verifyEoaCeremony(committedCeremony(), committedBinding(), check)).toEqual({
+      verified: false,
+      recoveredAddress: TEST_ADDRESS,
+      reason: expect.stringMatching(/terms cutover "2026-07-28" cannot be read/),
+    });
+  });
+
+  test("the repository's sealed ceremony still verifies under the text with no cutover", () => {
+    const check = { profile: {}, effectiveStart: "2026-07-28T00:00:00Z" };
+    expect(verifyEoaCeremony(eoaCeremony(), keyBindingFor(eoaFixture.agentIri), check).verified).toBe(true);
+  });
+
+  // The structured message is tied to the signed bytes only by re-serialization, which writes each
+  // resource as one line. Each ceremony below keeps the account's bytes and signature and rewrites
+  // `resources` into a list that serializes to those same bytes, so the commitment must still bind.
+  const widerScope = ["deliveries", "verdicts", "bindings", "settlements"];
+  const currencyCheck = { profile: {}, effectiveStart: terms.validFrom };
+
+  test("a commitment folded into the resource before it still binds the record (§3)", () => {
+    const safe = "did:pkh:eip155:84532:0x1111111111111111111111111111111111111111";
+    const commitment = bindingTermsCommitment(terms);
+    const signed = signedEoaCeremony({ resources: [eoaFixture.agentIri, eoaFixture.didKey, safe, commitment] });
+    const folded: EoaCeremonyEvidence = {
+      ...signed,
+      message: { ...signed.message, resources: [eoaFixture.agentIri, eoaFixture.didKey, `${safe}\n- ${commitment}`] },
+    };
+    expect(serializeCeremonyMessage("eoa", folded.message)).toEqual(signed.messageBytes);
+    expect(verifyEoaCeremony(folded, { ...committedBinding(), scope: widerScope }, currencyCheck)).toEqual({
+      verified: false,
+      recoveredAddress: TEST_ADDRESS,
+      reason: expect.stringMatching(/not a single line of text/),
+    });
+  });
+
+  test("a commitment wrapped in an array still binds the record (§3)", () => {
+    const signed = committedCeremony();
+    const resources = [eoaFixture.agentIri, eoaFixture.didKey, [bindingTermsCommitment(terms)]];
+    const wrapped: EoaCeremonyEvidence = {
+      ...signed,
+      message: { ...signed.message, resources: resources as unknown as readonly string[] },
+    };
+    expect(serializeCeremonyMessage("eoa", wrapped.message)).toEqual(signed.messageBytes);
+    expect(verifyEoaCeremony(wrapped, { ...committedBinding(), scope: widerScope }, currencyCheck)).toEqual({
+      verified: false,
+      recoveredAddress: TEST_ADDRESS,
+      reason: expect.stringMatching(/not a single line of text/),
     });
   });
 });

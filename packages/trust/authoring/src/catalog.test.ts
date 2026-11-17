@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
 import { TrustAuthoringError } from "./errors.js";
 
 import { NATIVE_ANCHOR_CHAIN_ID, NATIVE_ANCHOR_PROFILE, type AnchorDeclaration } from "./anchor.js";
-import { authorRoleBinding, type SealedBindingEntry } from "./binding.js";
+import { authorRoleBinding, roleBindingTerms, type SealedBindingEntry } from "./binding.js";
 import {
   appendOperator,
   authorCatalog,
@@ -83,6 +83,7 @@ async function bindingsFor(input: {
       agent: input.agent,
       didKey: roleSigner.keyId,
       issuedAt: input.validFrom,
+      terms: roleBindingTerms(role, input.validFrom),
       ...(settlement ? { settlementSafe: SAFE } : {}),
     });
     entries.push(await authorRoleBinding({

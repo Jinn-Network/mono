@@ -6,7 +6,8 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { canonicalJsonBytes } from "./canonical-json.js";
 import { compareCodeUnitStrings } from "./order.js";
 import { invalidInput } from "./errors.js";
-import { recordDigest } from "./hashing.js";
+import { recordDigest, sha256Hex } from "./hashing.js";
+import { compareCalendarStrictRfc3339Instants, isCalendarStrictRfc3339 } from "./rfc3339.js";
 import { toChecksumAddress } from "./spellings.js";
 import type { AuthorizationStatement } from "./authorization.js";
 import type { KeyBinding } from "./key-binding.js";
@@ -333,6 +334,138 @@ export function matchCeremonyContent(
   return { matches: true };
 }
 
+// ---------------------------------------------------------------------------
+// The ceremony currency text, https://spec.jinn.network/profiles/ceremony-currency/v1.
+// A ceremony names the Agent IRI and the key, so without more a record's
+// terms are the bound key's word. A ceremony may commit to them in its last
+// `resources` entry (§2, §3); a binding's effective start lies in the
+// ceremony's own window (§4); and a deployment may name a terms cutover from
+// which the commitment is required (§6). A deployment applies the text by
+// supplying a `CeremonyCurrencyCheck`; without one nothing here changes.
+// ---------------------------------------------------------------------------
+
+/** Every terms commitment begins with this, whatever its version (§3). */
+const BINDING_TERMS_COMMITMENT_FAMILY = "urn:jinn:trust:binding-terms:";
+
+/** A commitment under this text is this prefix followed by the terms digest (§2). */
+export const BINDING_TERMS_COMMITMENT_PREFIX = "urn:jinn:trust:binding-terms:v1:sha256:";
+
+/** A key binding's terms (§2): no other field is one. */
+export interface BindingTerms {
+  readonly relationship: KeyBinding["relationship"];
+  readonly scope: readonly string[];
+  readonly validFrom: string;
+  readonly expiresAt?: string | undefined;
+}
+
+/** The terms digest (§2): the SHA-256 of the RFC 8785 form of the terms, each
+ * exactly as the record states it, as 64 lowercase hexadecimal digits. */
+export function bindingTermsDigest(terms: BindingTerms): string {
+  return sha256Hex(canonicalJsonBytes({
+    relationship: terms.relationship,
+    scope: terms.scope,
+    validFrom: terms.validFrom,
+    ...(terms.expiresAt === undefined ? {} : { expiresAt: terms.expiresAt }),
+  }));
+}
+
+/** The last `resources` entry of a ceremony that commits to `terms` (§2). */
+export function bindingTermsCommitment(terms: BindingTerms): string {
+  return `${BINDING_TERMS_COMMITMENT_PREFIX}${bindingTermsDigest(terms)}`;
+}
+
+/** What a deployment chooses under the ceremony currency text. Supplying one
+ * applies §3 and §4. A `termsCutover` also applies §6; a deployment names one
+ * only under a profile that requires anchors, where the effective start is
+ * fixed by the anchor. */
+export interface CeremonyCurrencyProfile {
+  /** From this instant on, a binding whose ceremony does not commit to terms fails it (§6). */
+  readonly termsCutover?: string;
+}
+
+/** The ceremony currency text as it applies to one binding. */
+export interface CeremonyCurrencyCheck {
+  readonly profile: CeremonyCurrencyProfile;
+  /** The binding's effective start (key authority text). A ceremony's times are
+   * compared with it and never with a clock (§4). */
+  readonly effectiveStart: string;
+}
+
+/** Times in the key authority text's order: instants when both can be read, and
+ * a time that cannot be read after every time that can. */
+function compareAuthorityTimes(left: string, right: string): number {
+  const instants = compareCalendarStrictRfc3339Instants(left, right);
+  if (instants !== undefined) return instants;
+  const leftReadable = isCalendarStrictRfc3339(left);
+  if (leftReadable !== isCalendarStrictRfc3339(right)) return leftReadable ? -1 : 1;
+  return compareCodeUnitStrings(left, right);
+}
+
+/**
+ * Why the ceremony a key binding relies on fails the ceremony currency text,
+ * or `undefined` when it does not. `message` is a key-binding ceremony whose
+ * bytes and content `matchCeremonyContent` has already tied to the record.
+ */
+export function ceremonyCurrencyFailure(
+  message: SiweCeremonyMessage,
+  terms: BindingTerms,
+  check: CeremonyCurrencyCheck,
+): string | undefined {
+  // The structured message is tied to the signed bytes only by re-serialization, which writes each
+  // resource as one line. An entry that is not a single-line string serializes to the same bytes as
+  // a different list, so it could hide a commitment the account signed; such a ceremony cannot be
+  // read under this text.
+  if (message.resources.some((resource) => typeof resource !== "string" || /[\r\n]/u.test(resource))) {
+    return "ceremony resources hold an entry that is not a single line of text, so its terms commitment "
+      + "cannot be read (ceremony currency §3).";
+  }
+  // §3: a commitment, once present, must be the only one, the last entry, and these terms'.
+  const commitments = message.resources.filter((resource) => resource.startsWith(BINDING_TERMS_COMMITMENT_FAMILY));
+  if (commitments.length > 1) {
+    return `ceremony resources hold ${commitments.length} terms commitments; at most one is allowed `
+      + "(ceremony currency §3).";
+  }
+  const [commitment] = commitments;
+  if (commitment !== undefined) {
+    if (message.resources[message.resources.length - 1] !== commitment) {
+      return "ceremony terms commitment is not its last resource (ceremony currency §3).";
+    }
+    const expected = bindingTermsCommitment(terms);
+    if (commitment !== expected) {
+      return `ceremony commits to terms "${commitment}", not the record's "${expected}" (ceremony currency §3).`;
+    }
+  }
+
+  // §4: the effective start lies in the ceremony's window, both ends inclusive.
+  if (!isCalendarStrictRfc3339(message.issuedAt)) {
+    return `ceremony issuedAt "${message.issuedAt}" cannot be read (ceremony currency §4).`;
+  }
+  if (message.expirationTime !== undefined && !isCalendarStrictRfc3339(message.expirationTime)) {
+    return `ceremony expirationTime "${message.expirationTime}" cannot be read (ceremony currency §4).`;
+  }
+  if (compareAuthorityTimes(check.effectiveStart, message.issuedAt) < 0) {
+    return `binding effective start "${check.effectiveStart}" is before the ceremony's issuedAt `
+      + `"${message.issuedAt}" (ceremony currency §4).`;
+  }
+  if (message.expirationTime !== undefined && compareAuthorityTimes(check.effectiveStart, message.expirationTime) > 0) {
+    return `binding effective start "${check.effectiveStart}" is after the ceremony's expirationTime `
+      + `"${message.expirationTime}" (ceremony currency §4).`;
+  }
+
+  // §6: from the deployment's terms cutover on, the commitment is required.
+  const cutover = check.profile.termsCutover;
+  if (cutover !== undefined) {
+    if (!isCalendarStrictRfc3339(cutover)) {
+      return `the deployment's terms cutover "${cutover}" cannot be read (ceremony currency §6).`;
+    }
+    if (commitment === undefined && compareAuthorityTimes(check.effectiveStart, cutover) >= 0) {
+      return `ceremony does not commit to terms, and the binding takes effect at "${check.effectiveStart}", `
+        + `at or after the deployment's terms cutover "${cutover}" (ceremony currency §6).`;
+    }
+  }
+  return undefined;
+}
+
 function accountAddressFromVoucher(binding: KeyBinding): `0x${string}` | undefined {
   if (binding.voucher.kind !== "account") return undefined;
   const match = /^did:pkh:eip155:[0-9]+:(0x[0-9a-fA-F]{40})$/.exec(binding.voucher.did);
@@ -351,10 +484,15 @@ function describeError(cause: unknown): string {
  * genuinely signed but mismatched (lifted) ceremony still fails. This is
  * what a binding "accepted on its envelope signature alone" (the negative
  * fixture, §16) is missing: ceremony authority, not envelope possession.
+ *
+ * With a `currency` check it also applies the ceremony currency text
+ * (`ceremonyCurrencyFailure`). Without one it checks exactly what it did
+ * before that text.
  */
 export function verifyEoaCeremony(
   ceremony: EoaCeremonyEvidence,
   binding: KeyBinding,
+  currency?: CeremonyCurrencyCheck,
 ): CeremonyResult {
   const voucherAddress = accountAddressFromVoucher(binding);
   if (voucherAddress === undefined) {
@@ -380,6 +518,11 @@ export function verifyEoaCeremony(
   const content = matchCeremonyContent(ceremony, binding);
   if (!content.matches) {
     return { verified: false, recoveredAddress, reason: content.mismatch };
+  }
+
+  if (currency !== undefined) {
+    const failure = ceremonyCurrencyFailure(ceremony.message, binding, currency);
+    if (failure !== undefined) return { verified: false, recoveredAddress, reason: failure };
   }
 
   return { verified: true, recoveredAddress };

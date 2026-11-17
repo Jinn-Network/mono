@@ -167,7 +167,13 @@ async function verifyCeremonyLeg(
             + `committed ceremony.digest "${committedDigest}".`,
         };
       }
-      const result = verifyEoaCeremony(resolved.ceremonyEvidence, resolved.binding);
+      const result = verifyEoaCeremony(
+        resolved.ceremonyEvidence,
+        resolved.binding,
+        resolved.ceremonyCurrency === undefined
+          ? undefined
+          : { profile: resolved.ceremonyCurrency, effectiveStart: resolved.effectiveStart },
+      );
       return { verified: result.verified, ...(result.reason === undefined ? {} : { reason: result.reason }) };
     } catch {
       return { verified: false, reason: "ceremony evidence cannot be read." };
@@ -344,7 +350,11 @@ async function authorityUsable(
 ): Promise<boolean> {
   const row = rowOf(resolved);
   if (row === undefined || !withinWindow(resolved, atTime)) return false;
-  const sound = await settle(walk, `record\u001f${row}`, async () => (
+  // The ceremony currency text reads the effective start and the profile as well as the row.
+  const currency = resolved.ceremonyCurrency === undefined
+    ? ""
+    : `\u001f${resolved.effectiveStart}\u001f${resolved.ceremonyCurrency.termsCutover ?? ""}`;
+  const sound = await settle(walk, `record\u001f${row}${currency}`, async () => (
     signedBy(walk, resolved.envelopeBytes, resolved.binding.key.didKey)
     && (await verifyCeremonyLeg(resolved, walk.witnessVerifier)).verified
   ));

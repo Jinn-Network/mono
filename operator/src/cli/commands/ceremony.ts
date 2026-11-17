@@ -43,6 +43,7 @@ import {
   openCatalogAuthority,
   openRoleSigners,
   performEoaCeremony,
+  roleBindingTerms,
   type AnchorLocator,
   type CatalogAuthoritySigner,
   type FinalizedAnchorObservation,
@@ -725,6 +726,9 @@ async function authorBindings(input: {
       // re-checks the equality, so a drift refuses here rather than producing a catalog whose
       // consent-chain checks fail at boot.
       issuedAt: input.validFrom,
+      // Ceremony currency §2: the last resource commits to the terms `authorRoleBinding` seals,
+      // and `authorRoleBinding` refuses a ceremony that commits to any other terms.
+      terms: roleBindingTerms(role, input.validFrom),
       // §2.3b: settlement-scoped roles declare the service Safe as a third resource, inside the
       // EIP-191-signed bytes.
       ...(isSettlementRole(role) ? { settlementSafe: input.plan.custody.safeAddress } : {}),

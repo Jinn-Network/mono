@@ -2040,6 +2040,68 @@ describe("authenticateRequester (§7.5b)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// The ceremony currency text (https://spec.jinn.network/profiles/ceremony-currency/v1)
+// applies at step 3 only when the resolved binding carries the deployment's profile.
+// ---------------------------------------------------------------------------
+
+describe("verifyEnvelopeBinding under a ceremony currency profile", () => {
+  async function verifyAt(effectiveStart: string, ceremonyCurrency?: ResolvedBinding["ceremonyCurrency"]) {
+    const evidence = eoaCeremonyEvidence();
+    const binding = keyBinding({
+      agent: eoaFixture.agentIri,
+      key: { publicKey: "0x04", keyid: eoaFixture.didKey, algorithm: "secp256k1", didKey: eoaFixture.didKey },
+      voucher: { kind: "account", did: didPkh(eoaFixture.voucherChainId, eoaFixture.message.address), contractAccount: false },
+      ceremony: { type: "eoa", digest: ceremonyEvidenceDigest(evidence) },
+      validFrom: "2026-01-01T00:00:00Z",
+    });
+    const resolver = new FakeBindingResolver().register({
+      key: eoaFixture.didKey,
+      agent: eoaFixture.agentIri,
+      resolved: resolvedBinding({
+        binding,
+        ceremonyEvidence: evidence,
+        effectiveStart,
+        ...(ceremonyCurrency === undefined ? {} : { ceremonyCurrency }),
+      }),
+    });
+    return verifyEnvelopeBinding(
+      {
+        envelopeBytes: sealedEnvelope({ hello: "world" }, TRUST_KEY_BINDING_MEDIA_TYPE, eoaFixture.didKey),
+        key: eoaFixture.didKey,
+        agent: eoaFixture.agentIri,
+        family: "deliveries",
+        atTime: "2026-08-01T00:00:00Z",
+      },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
+    );
+  }
+
+  test("with no profile, a binding that takes effect before its ceremony was issued verifies as before", async () => {
+    expect(await verifyAt("2026-01-01T00:00:00Z")).toMatchObject({ ok: true });
+  });
+
+  test("with the profile, the same binding fails its ceremony", async () => {
+    expect(await verifyAt("2026-01-01T00:00:00Z", {})).toMatchObject({
+      ok: false,
+      reason: "ceremony-verification-failed",
+      detail: expect.stringMatching(/before the ceremony's issuedAt/),
+    });
+  });
+
+  test("with the profile, a binding that takes effect within the ceremony's window verifies", async () => {
+    expect(await verifyAt("2026-07-28T00:00:00Z", {})).toMatchObject({ ok: true });
+  });
+
+  test("with a terms cutover, an uncommitted ceremony fails from the cutover on", async () => {
+    expect(await verifyAt("2026-07-28T00:00:00Z", { termsCutover: "2026-07-28T00:00:00Z" })).toMatchObject({
+      ok: false,
+      reason: "ceremony-verification-failed",
+      detail: expect.stringMatching(/terms cutover/),
+    });
+  });
+});
+
 // Key authority section 8: a voucher whose `contractAccount` is `true` cannot revoke, and a
 // revocation whose `revokedBy` names one has no effect. Each case runs once with the voucher a
 // contract account and once with it not, so the field alone decides.
