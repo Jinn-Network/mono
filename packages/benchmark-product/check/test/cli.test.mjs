@@ -1917,6 +1917,26 @@ const V8_SHAPE = {
   },
 };
 
+/**
+ * One `/10` result declaring every capability the registry carries, so every check a capability
+ * can add renders here. Derived, never listed: a capability registered later is declared, and its
+ * check rendered, with no edit to this file (issue #5333).
+ *
+ * @returns {Promise<import("../dist/index.js").PublicBundleVerificationResult>}
+ */
+async function v10EveryCapability() {
+  const { CAPABILITY_REGISTRY, expectedChecks } = await import("../dist/index.js");
+  // The wire vector is code-unit sorted; `expectedChecks` refuses any other order.
+  const capabilities = [...new Set(CAPABILITY_REGISTRY.map(({ token }) => token))].sort();
+  return {
+    format: "benchmark-product-public-bundle/10",
+    identity: "a".repeat(64),
+    capabilities,
+    checks: expectedChecks(capabilities),
+    ...V6_IDENTITIES,
+  };
+}
+
 /** The rendered check rows: every line that begins with one of the checks the shape declares. */
 function checkRows(output, checks) {
   return checks.map((check) => {
@@ -1928,9 +1948,10 @@ function checkRows(output, checks) {
 
 test("every printed check name carries its plain-language gloss (issue #3861)", async () => {
   const { renderVerifiedBundle } = await import("../dist/index.js");
-  // Two shapes cover all ten check names in the union: the disclosed `/8` closure carries `trust`,
+  // Three shapes cover every check name in the union: the disclosed `/8` closure carries `trust`,
   // `integrity-anchors`, and `disclosure-specification`; the evidence-native `/5` carries
-  // `artifact-integrity` and `signature-validity`.
+  // `artifact-integrity` and `signature-validity`; the `/10` result declaring every registered
+  // capability carries every check a capability adds, `external-import` among them.
   const glosses = {
     "manifest": "every listed file is here, unaltered",
     "evidence-closure": "every run's evidence is carried here",
@@ -1940,14 +1961,16 @@ test("every printed check name carries its plain-language gloss (issue #3861)", 
     "claim-consistency": "the claim agrees with the records here",
     "integrity-anchors": "the timestamp proofs are well formed",
     "disclosure-specification": "what was pinned is recorded and matches",
+    "external-import": "the import marker matches the claim",
     "artifact-integrity": "each artifact matches its fingerprint",
     "signature-validity": "each signature matches its key",
   };
   const seen = new Set();
-  for (const shape of [V8_SHAPE, V5_METADATA_FIRST]) {
+  for (const shape of [V8_SHAPE, V5_METADATA_FIRST, await v10EveryCapability()]) {
     const output = renderVerifiedBundle(shape);
     for (const { check, row } of checkRows(output, shape.checks)) {
       seen.add(check);
+      assert.ok(Object.hasOwn(glosses, check), `no pinned gloss for ${check}`);
       // Name verbatim, then a state, then the gloss — the gloss never replaces the sealed name.
       assert.match(
         row,
@@ -1956,11 +1979,15 @@ test("every printed check name carries its plain-language gloss (issue #3861)", 
       );
     }
   }
-  // The two shapes together must cover every check any supported closure can emit, so this test
-  // cannot drift narrower than the product. The exhaustiveness of the gloss map itself is a type
-  // obligation -- it is keyed by the check union, the same discipline `CHECK_SUBJECTS` uses.
-  const { PUBLIC_BUNDLE_VERIFICATION_CHECKS, PUBLIC_BUNDLE_V6_CHECKS, PUBLIC_BUNDLE_V7_CHECKS, PUBLIC_BUNDLE_V8_CHECKS } =
-    await import("../dist/index.js");
+  // The three shapes together must cover every check any supported closure can emit, so this test
+  // cannot drift narrower than the product. The composed generation's checks are read from the
+  // capability registry, so a capability that adds a check widens this set with no edit here. The
+  // exhaustiveness of the gloss map itself is a type obligation -- it is keyed by the check union,
+  // the same discipline `CHECK_SUBJECTS` uses.
+  const {
+    CAPABILITY_REGISTRY, expectedChecks,
+    PUBLIC_BUNDLE_VERIFICATION_CHECKS, PUBLIC_BUNDLE_V6_CHECKS, PUBLIC_BUNDLE_V7_CHECKS, PUBLIC_BUNDLE_V8_CHECKS,
+  } = await import("../dist/index.js");
   const { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } = await import("@jinn-network/benchmarking-evidence");
   const everyCheck = new Set([
     ...PUBLIC_BUNDLE_VERIFICATION_CHECKS,
@@ -1968,8 +1995,9 @@ test("every printed check name carries its plain-language gloss (issue #3861)", 
     ...PUBLIC_BUNDLE_V7_CHECKS,
     ...PUBLIC_BUNDLE_V8_CHECKS,
     ...EVIDENCE_NATIVE_BUNDLE_V5_CHECKS,
+    ...expectedChecks([...new Set(CAPABILITY_REGISTRY.map(({ token }) => token))].sort()),
   ]);
-  assert.deepEqual([...seen].sort(), [...everyCheck].sort(), "both shapes must cover every check a closure can emit");
+  assert.deepEqual([...seen].sort(), [...everyCheck].sort(), "the shapes must cover every check a closure can emit");
   assert.deepEqual(Object.keys(glosses).sort(), [...everyCheck].sort(), "every emittable check needs a gloss");
 });
 
