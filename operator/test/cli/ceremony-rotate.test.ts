@@ -20,6 +20,7 @@ import {
   type CeremonyCommandDeps,
 } from '../../src/cli/commands/ceremony.js';
 import type { CommandContext } from '../../src/cli/command.js';
+import { orderedRolesForSet } from '../../src/cli/commands/native-requester.js';
 import { openNativeTrustCatalog } from '../../src/daemon/native-trust-catalog.js';
 import { openRoleIdentitySet, type NativeRoleIdentityRole } from '../../src/daemon/role-identities.js';
 
@@ -494,5 +495,161 @@ describe('ceremony init re-authoring a rotated operator', () => {
     expect((refusal.details as { state: string }).state).toBe('rotated-family');
     expect(existsSync(h.catalogPath)).toBe(false);
     expect(h.calls.filter((call) => call === 'openAnchorSession')).toHaveLength(sessions);
+  });
+
+  it('refuses a family whose rotation is unfinished, which the config still names, from the rotation receipt', async () => {
+    const h = await provisioned({ interruptWait: 'rebind' });
+    const retiringStore = config(h).identityStores.solver!;
+    await expect(run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']))
+      .rejects.toThrow(/killed during the rebind finality wait/u);
+    // The rotation is unfinished: the config still names the store it is retiring, so only the
+    // receipt says the solver keys are on their way out.
+    expect(config(h).identityStores.solver).toBe(retiringStore);
+    const previousPath = join(h.home, 'trust.previous.json');
+    renameSync(h.catalogPath, previousPath);
+    const sessions = h.calls.filter((call) => call === 'openAnchorSession').length;
+
+    const refusal = await run(h, reauthorArgv(h, ['--previous-catalog', previousPath]));
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect((refusal.details as { state: string }).state).toBe('rotated-family');
+    expect(String(refusal.message)).toContain(join(h.dir, 'ceremony', 'rotation.json'));
+    expect(existsSync(h.catalogPath)).toBe(false);
+    expect(h.calls.filter((call) => call === 'openAnchorSession')).toHaveLength(sessions);
+  });
+});
+
+/**
+ * Joining another catalog after a rotation (#5327). `join` opens the stores at
+ * `<dir>/identity/<family>.enc.json`, and after a rotation those hold the keys it retired. A join
+ * into a catalog at another path bound them there and pointed `identityStores` back at them.
+ */
+describe('ceremony join after a rotation', () => {
+  /** A second catalog, sealed at another path by another operator under the same catalog authority. */
+  async function secondCatalog(h: Harness): Promise<{ readonly path: string; readonly genesis: string }> {
+    const otherDir = join(h.home, '.jinn-operator-b');
+    mkdirSync(otherDir, { recursive: true });
+    const init = await run(h, [
+      'init', '--dir', otherDir, '--role-sets', 'requester,admission,solver', '--authority-store', h.authorityStore,
+      '--execute',
+    ]);
+    expect(init.kind).toBe('ceremony_init_complete');
+    return { path: join(otherDir, 'trust.json'), genesis: String(init.policyGenesisDigest) };
+  }
+
+  const joinArgv = (h: Harness, second: { readonly path: string; readonly genesis: string }, roleSets: string) => [
+    'join', '--dir', h.dir, '--role-sets', roleSets, '--catalog', second.path, '--genesis', second.genesis,
+    '--authority-store', h.authorityStore, '--execute',
+  ];
+
+  /** Captures what a refused join must leave as it was: no anchor session, no catalog or config write. */
+  function snapshot(h: Harness, catalogPath: string): () => void {
+    const sessions = h.calls.filter((call) => call === 'openAnchorSession').length;
+    const submissions = h.submitted.length;
+    const catalog = readFileSync(catalogPath);
+    const configBytes = readFileSync(h.configPath);
+    return () => {
+      expect(h.calls.filter((call) => call === 'openAnchorSession')).toHaveLength(sessions);
+      expect(h.submitted).toHaveLength(submissions);
+      expect(readFileSync(catalogPath)).toEqual(catalog);
+      expect(readFileSync(h.configPath)).toEqual(configBytes);
+    };
+  }
+
+  it('refuses, before any anchor, to bind a family rotate replaced into a catalog at another path', async () => {
+    const h = await provisioned();
+    const rotation = await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
+    expect(rotation.kind).toBe('ceremony_rotate_complete');
+    const second = await secondCatalog(h);
+    const unchanged = snapshot(h, second.path);
+
+    const refusal = await run(h, joinArgv(h, second, 'requester,solver'));
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect(refusal.details).toMatchObject({ state: 'rotated-family', sideEffects: false });
+    expect(String(refusal.message)).toContain('for solver');
+    unchanged();
+  });
+
+  it('refuses a family whose rotation is unfinished, which the config still names, from the rotation receipt', async () => {
+    const h = await provisioned({ interruptWait: 'rebind' });
+    const retiringStore = config(h).identityStores.solver!;
+    await expect(run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']))
+      .rejects.toThrow(/killed during the rebind finality wait/u);
+    expect(config(h).identityStores.solver).toBe(retiringStore);
+    const second = await secondCatalog(h);
+    const unchanged = snapshot(h, second.path);
+
+    const refusal = await run(h, joinArgv(h, second, 'requester,solver'));
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect(refusal.details).toMatchObject({ state: 'rotated-family', sideEffects: false });
+    expect(String(refusal.message)).toContain(join(h.dir, 'ceremony', 'rotation.json'));
+    unchanged();
+  });
+
+  it('refuses, rather than guess, when the rotation receipt cannot be read', async () => {
+    const h = await provisioned({ interruptWait: 'rebind' });
+    await expect(run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']))
+      .rejects.toThrow(/killed during the rebind finality wait/u);
+    const receiptPath = join(h.dir, 'ceremony', 'rotation.json');
+    // Truncated mid-write: the config still names the store being retired, and only this file says so.
+    writeFileSync(receiptPath, '{"schemaVersion":1,"roleSe');
+    const second = await secondCatalog(h);
+    const unchanged = snapshot(h, second.path);
+
+    const refusal = await run(h, joinArgv(h, second, 'requester,solver'));
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect(refusal.details).toMatchObject({ state: 'rotation-receipt-unreadable', sideEffects: false });
+    expect(String(refusal.message)).toContain(receiptPath);
+    expect(String(refusal.message)).toContain('refuses rather than guess');
+    unchanged();
+  });
+
+  it('says so when the config names a rotated store and no rotation receipt exists', async () => {
+    const h = await provisioned();
+    await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
+    renameSync(join(h.dir, 'ceremony', 'rotation.json'), join(h.home, 'rotation.set-aside.json'));
+    const second = await secondCatalog(h);
+    const unchanged = snapshot(h, second.path);
+
+    const refusal = await run(h, joinArgv(h, second, 'requester,solver'));
+
+    expect(refusal.details).toMatchObject({ state: 'rotated-family', sideEffects: false });
+    expect(String(refusal.message)).toContain(`${join(h.dir, 'ceremony', 'rotation.json')} does not exist`);
+    unchanged();
+  });
+
+  it('refuses in the plan as well, so the plan never lists a retired store to bind', async () => {
+    const h = await provisioned();
+    await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
+    const second = await secondCatalog(h);
+    const unchanged = snapshot(h, second.path);
+
+    const refusal = await run(h, joinArgv(h, second, 'requester,solver').filter((arg) => arg !== '--execute'));
+
+    expect(refusal.details).toMatchObject({ state: 'rotated-family', sideEffects: false });
+    unchanged();
+  });
+
+  it('still joins a family no rotation touched, binding the keys of the store the config names for it', async () => {
+    const h = await provisioned();
+    await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
+    const rotatedSolver = config(h).identityStores.solver!;
+    const second = await secondCatalog(h);
+
+    const result = await run(h, joinArgv(h, second, 'requester'));
+
+    expect(result.kind).toBe('ceremony_join_complete');
+    const requester = await openRoleSigners({
+      storePath: config(h).identityStores.requester!,
+      password: PASSWORD,
+      ownedRoles: orderedRolesForSet('requester'),
+      create: false,
+    });
+    expect((result.bindings as { keyId: string }[]).map(({ keyId }) => keyId).sort())
+      .toEqual([...requester.values()].map(({ keyId }) => keyId).sort());
+    expect(config(h).identityStores.solver).toBe(rotatedSolver);
   });
 });

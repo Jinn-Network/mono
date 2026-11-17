@@ -206,7 +206,9 @@ revocations as `carriedRevocations`.
 - the re-author would bind a key a carried revocation retired, for the same Agent (the refusal names
   the revocation);
 - the config's `identityStores` names a different store than `<dir>/identity/<family>.enc.json` for a
-  family it would bind: that family was rotated, whatever `--previous-catalog` names.
+  family it would bind, or `<dir>/ceremony/rotation.json` records a rotation of that family, finished
+  or not: that family was rotated, whatever `--previous-catalog` names. A `rotation.json` that cannot
+  be read is refused as well, rather than taken for no rotation.
 
 A re-author after `jinn ceremony rotate` meets the last two refusals: the retired-key one when
 `--previous-catalog` is the catalog holding the rotation's revocations, the rotated-family one for
