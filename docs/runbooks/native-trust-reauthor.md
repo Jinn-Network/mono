@@ -209,8 +209,9 @@ revocations as `carriedRevocations`.
   included, whatever `--previous-catalog` and `--config` name (`rotated-family`). It reads two
   records: a store `jinn ceremony rotate` minted for that family,
   `<dir>/identity/<family>.rotated-<stamp>.enc.json`, which every rotation leaves beside the
-  original store, and `<dir>/ceremony/rotation.json`, which records the latest rotation, finished or
-  not. A `rotation.json` that cannot be read is refused as well, rather than taken for no rotation
+  original store (a store of that name the config names counts too, wherever it now sits), and
+  `<dir>/ceremony/rotation.json`, which records the latest rotation, finished or not. A
+  `rotation.json` that cannot be read is refused as well, rather than taken for no rotation
   (`rotation-receipt-unreadable`);
 - neither record shows a rotation of a family it would bind, but the config's `identityStores` names
   a store other than `<dir>/identity/<family>.enc.json` for it (`store-elsewhere`): `init` would
