@@ -1623,7 +1623,7 @@ test('self-test: the exemption refuses every test file npm may ship and passes o
   const pin = loadProductReleasePlatformPin(repoRoot, manifest);
   const check = (files, changed) => () => assertPlatformSourceMatchesReceipt(
     pin,
-    [{ name: 'x', directory: 'packages/x', ...(files === undefined ? {} : { files }) }],
+    [{ name: 'x', directory: 'packages/x', ignoreFiles: [], ...(files === undefined ? {} : { files }) }],
     () => changed,
   );
   // A leading `./` or `/` is ignored: the entry covers its directory, and only that.
@@ -1654,7 +1654,7 @@ test('self-test: the exemption reads every files entry and manifest target fail-
   const pin = loadProductReleasePlatformPin(repoRoot, manifest);
   const check = (source, changed) => () => assertPlatformSourceMatchesReceipt(
     pin,
-    [{ name: 'x', directory: 'packages/x', ...source }],
+    [{ name: 'x', directory: 'packages/x', ignoreFiles: [], ...source }],
     () => changed.map((file) => `packages/x/${file}`),
   );
   const refuses = (source, file) =>
@@ -1695,6 +1695,37 @@ test('self-test: the exemption reads every files entry and manifest target fail-
     );
   }
   assert.doesNotThrow(check({ files: ['dist/', '!fixtures/'] }, ['fixtures/a.test.ts']));
+});
+
+test('self-test: the exemption refuses a test file under a directory that holds a .npmignore or .gitignore (issue #5306)', () => {
+  const manifest = checkerManifest();
+  const pin = loadProductReleasePlatformPin(repoRoot, manifest);
+  const check = (source, changed) => () => assertPlatformSourceMatchesReceipt(
+    pin,
+    [{ name: 'x', directory: 'packages/x', ...source }],
+    () => changed.map((file) => `packages/x/${file}`),
+  );
+  const refuses = (source, file) =>
+    assert.throws(check(source, [file]), new RegExp(`\\n {2}packages/x/${escapeRegExp(file)}(?:\\n|$)`, 'u'), JSON.stringify(source));
+  // `npm pack --dry-run` on npm 11.19.0 ships the file beside each layout in this block, and none of
+  // them without the ignore file. An inclusion rule matches the directory that holds it: `fixtures`
+  // by base name, and a root directory named like an always-packed file. A negation in that
+  // directory's own ignore file puts back what the rules above exclude, there and below.
+  refuses({ files: ['dist/', 'fixtures', 'lib/sub/'], ignoreFiles: ['lib/fixtures/.gitignore'] }, 'lib/fixtures/a.test.ts');
+  refuses({ files: ['dist/', 'fixtures', 'lib/sub/'], ignoreFiles: ['lib/fixtures/.npmignore'] }, 'lib/fixtures/a.test.ts');
+  refuses({ files: ['dist/', 'fixtures'], main: 'lib/index.js', ignoreFiles: ['lib/fixtures/.gitignore'] }, 'lib/fixtures/a.test.ts');
+  refuses({ files: ['dist/'], ignoreFiles: ['readme.d/.npmignore'] }, 'readme.d/a.test.ts');
+  refuses({ files: ['dist/'], ignoreFiles: ['README/.gitignore'] }, 'README/a.test.ts');
+  refuses({ files: ['dist/', 'fixtures', 'lib/sub/'], ignoreFiles: ['lib/fixtures/.gitignore'] }, 'lib/fixtures/deep/a.test.ts');
+  // A source that does not say which ignore files it holds is never exempt.
+  refuses({ files: ['dist/'] }, 'src/a.test.ts');
+  // Near miss: npm drops a root ignore file when `files` is set, as five closure packages have, and an
+  // ignore file elsewhere in the package, here in a directory whose name begins the test file's, does
+  // not count.
+  assert.doesNotThrow(check(
+    { files: ['dist/', 'fixtures/'], ignoreFiles: ['.gitignore', '.npmignore', 'fixtures/.gitignore', 'src/sub/.npmignore'] },
+    ['src/a.test.ts', 'vitest.config.ts', 'src/subway/a.test.ts'],
+  ));
 });
 
 test('the platform source check compares a test file a compared package names as its main, browser or bin target (issue #5296)', () => {
@@ -1843,6 +1874,67 @@ test('the source comparison reads git, fetching the receipt commit a shallow che
     for (const value of ['--upload-pack=true', canary.slice(0, 12), undefined]) {
       assert.throws(() => gitChangedFiles(clone, value, ['pkg/a']), /must be a 40-character commit sha/u, String(value));
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('each compared package carries the .npmignore and .gitignore files git has under it at HEAD, and an unlisted tree refuses (issue #5306)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'colophon-receipt-ignore-'));
+  const env = {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: join(root, 'no-global-config'),
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_AUTHOR_NAME: 'test',
+    GIT_AUTHOR_EMAIL: 'test@example.invalid',
+    GIT_COMMITTER_NAME: 'test',
+    GIT_COMMITTER_EMAIL: 'test@example.invalid',
+  };
+  const git = (cwd, ...args) => {
+    const result = spawnSync('git', args, { cwd, env, encoding: 'utf8' });
+    assert.equal(result.status, 0, `git ${args.join(' ')}: ${result.stderr}`);
+  };
+  const write = (repository, files) => {
+    for (const [path, text] of Object.entries(files)) {
+      mkdirSync(join(repository, path, '..'), { recursive: true });
+      writeFileSync(join(repository, path), text);
+    }
+  };
+  try {
+    const repository = join(root, 'repository');
+    mkdirSync(repository);
+    git(repository, 'init', '--quiet');
+    write(repository, {
+      'pkg/x/.gitignore': 'dist/\n',
+      'pkg/x/lib/fixtures/.gitignore': '!a.test.ts\n',
+      'pkg/x/lib/fixtures/a.test.ts': 'one\n',
+      'pkg/x/fixtures/\u00e9/.npmignore': '!a.test.ts\n',
+      'pkg/x/src/a.test.ts': 'one\n',
+      'pkg/x/src/x.gitignore': 'one\n',
+      'pkg/xy/sub/.npmignore': '!a.test.ts\n',
+      'pkg/z/sub/.gitignore': '!a.test.ts\n',
+    });
+    git(repository, 'add', '.');
+    git(repository, 'commit', '--quiet', '--no-verify', '-m', 'tree');
+    // Not in git's tree at HEAD, so npm never packed it into a canary.
+    write(repository, { 'pkg/x/src/.npmignore': '!a.test.ts\n' });
+    const dependency = (name, directory) => ({ name, directory, manifest: { name, version: '0.1.0', files: ['dist/', 'fixtures', 'lib/sub/'] } });
+    const packages = [dependency('@jinn-network/x', 'pkg/x'), dependency('@jinn-network/xy', 'pkg/xy'), dependency('@jinn-network/z', 'pkg/z')];
+    const manifest = { name: '@colophon-claims/check', version: '0.2.2', dependencies: { '@jinn-network/x': '0.1.0', '@jinn-network/xy': '0.1.0' } };
+    const sources = platformSourceDirectories(repository, manifest, packages);
+    assert.deepEqual(sources.map(({ name, ignoreFiles }) => ({ name, ignoreFiles })), [
+      { name: '@jinn-network/x', ignoreFiles: ['.gitignore', 'fixtures/\u00e9/.npmignore', 'lib/fixtures/.gitignore'] },
+      { name: '@jinn-network/xy', ignoreFiles: ['sub/.npmignore'] },
+    ]);
+    const pin = loadProductReleasePlatformPin(repoRoot, checkerManifest());
+    const compare = (files) => () => assertPlatformSourceMatchesReceipt(pin, sources, () => files);
+    assert.throws(compare(['pkg/x/lib/fixtures/a.test.ts']), /\n {2}pkg\/x\/lib\/fixtures\/a\.test\.ts(?:\n|$)/u);
+    assert.doesNotThrow(compare(['pkg/x/src/a.test.ts']));
+    // A tree git cannot list is a refusal, never a package with no ignore files.
+    const empty = join(root, 'empty');
+    mkdirSync(empty);
+    git(empty, 'init', '--quiet');
+    assert.throws(() => platformSourceDirectories(empty, manifest, packages), /cannot list the platform source at HEAD: /u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
