@@ -998,6 +998,101 @@ describe('ceremony rotate and its rotation receipt', () => {
     await expect(bootAt(h, config(h).identityStores.solver!, revokedAt)).resolves.toBeDefined();
   });
 
+  /**
+   * A rotated store's name carries the UTC second its rotation read off the clock, so two rotations
+   * of a family within one second name one store (#5345). These tests use the real clock, with no
+   * fake one: `inOneSecond` starts `act` as a second turns and keeps its result only when `act`
+   * finished within that second, so every rotation in it read the same second.
+   */
+  const nextSecond = () => new Promise((resolve) => { setTimeout(resolve, 1_000 - (Date.now() % 1_000)); });
+  async function inOneSecond<T>(prepare: () => Promise<Harness>, act: (h: Harness) => Promise<T>): Promise<T> {
+    // A slow machine can let the second turn during `act`; each try starts from a fresh operator.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const h = await prepare();
+      await nextSecond();
+      const second = Math.floor(Date.now() / 1_000);
+      const result = await act(h);
+      if (Math.floor(Date.now() / 1_000) === second) return result;
+    }
+    throw new Error('five tries could not fit the rotations into one second of the real clock');
+  }
+  const keyIdsOf = (result: Record<string, unknown>, field: 'bindings' | 'retired') =>
+    (result[field] as { keyId: string }[]).map(({ keyId }) => keyId).sort();
+
+  it('refuses a rotation started in the same second as the one whose store the config names, rather than retire nothing', async () => {
+    const { h, first, firstStore, plan, second, unchanged } = await inOneSecond(() => provisioned(), async (h) => {
+      const first = await run(h, rotateArgv(h, ['--execute']));
+      const firstStore = config(h).identityStores.solver!;
+      const unchanged = unchangedBy(h);
+      const plan = await run(h, rotateArgv(h));
+      const second = await run(h, rotateArgv(h, ['--execute']));
+      return { h, first, firstStore, plan, second, unchanged };
+    });
+
+    expect(first.kind).toBe('ceremony_rotate_complete');
+    // The second rotation's new store would be the first one's, which the config names and the
+    // second would retire. It refuses, in the plan as well, before anything is minted or anchored.
+    for (const refusal of [plan, second]) {
+      expect(refusal).toMatchObject({
+        code: 'invalid_invocation',
+        details: { state: 'new-store-exists', sideEffects: false },
+      });
+      expect(String(refusal.message)).toContain(`${firstStore}, but a file is already there, the store this rotation would retire`);
+    }
+    unchanged();
+    expect(createCeremonyCommand(h.deps).helpText).toContain('new-store-exists');
+
+    // The first rotation's keys are still bound, and a rotation started in a later second retires them.
+    await nextSecond();
+    const third = await run(h, rotateArgv(h, ['--execute']));
+    expect(third.kind).toBe('ceremony_rotate_complete');
+    expect(keyIdsOf(third, 'retired')).toEqual(keyIdsOf(first, 'bindings'));
+    const revokedAt = h.submitted[h.submitted.length - 1]!.anchorTime;
+    await expect(bootAt(h, firstStore, revokedAt)).rejects.toThrow(/binding is revoked at boot/u);
+    await expect(bootAt(h, config(h).identityStores.solver!, revokedAt)).resolves.toBeDefined();
+  });
+
+  it('refuses to take a store already at its new store\'s path, as after the clock steps back, rather than revoke the keys the config names', async () => {
+    // A rotation in an earlier second retired the keys of the store init minted.
+    const rotatedOnce = async () => {
+      const h = await provisioned();
+      expect((await run(h, rotateArgv(h, ['--execute']))).kind).toBe('ceremony_rotate_complete');
+      return h;
+    };
+    const { h, target, refusal, unchanged } = await inOneSecond(rotatedOnce, async (h) => {
+      const target = ((await run(h, rotateArgv(h))).newStores as Record<string, string>).solver!;
+      // As after the clock steps back to the second an earlier rotation started in: a store of that
+      // rotation's, holding keys a rotation retired, is at the path this rotation names.
+      copyFileSync((rotationReceipt(h).retiring as Record<string, string>).solver!, target);
+      const unchanged = unchangedBy(h);
+      const refusal = await run(h, rotateArgv(h, ['--execute']));
+      return { h, target, refusal, unchanged };
+    });
+
+    expect(refusal).toMatchObject({ code: 'invalid_invocation', details: { state: 'new-store-exists', sideEffects: false } });
+    expect(String(refusal.message)).toContain(`${target}, but a file is already there.`);
+    unchanged();
+    await expect(bootAt(h, config(h).identityStores.solver!, h.submitted[h.submitted.length - 1]!.anchorTime))
+      .resolves.toBeDefined();
+  });
+
+  it('refuses, rather than report a rotation that retired nothing, when the store the config names is gone from the path its new store would take', async () => {
+    const { first, firstStore, refusal, unchanged } = await inOneSecond(() => provisioned(), async (h) => {
+      const first = await run(h, rotateArgv(h, ['--execute']));
+      const firstStore = config(h).identityStores.solver!;
+      // The store the first rotation minted is lost in the same second.
+      rmSync(firstStore);
+      const unchanged = unchangedBy(h);
+      const refusal = await run(h, rotateArgv(h, ['--execute']));
+      return { first, firstStore, refusal, unchanged };
+    });
+
+    expect(first.kind).toBe('ceremony_rotate_complete');
+    expect(refusal.code).toBe('invalid_invocation');
+    expect(String(refusal.message)).toContain(`the solver store at ${firstStore} could not be opened`);
+    unchanged();
+  });
+
   it('takes a resumed act\'s block time from the finality read, not the time its receipt recorded', async () => {
     const h = await stoppedAfterRepoint();
     const retiredStore = (rotationReceipt(h).retiring as Record<string, string>).solver!;
@@ -1279,5 +1374,28 @@ describe('ceremony rotate and its rotation receipt', () => {
     expect(refusal.code).toBe('invalid_invocation');
     expect(String(refusal.message)).toContain(expected);
     unchanged();
+  });
+
+  it('finishes from --retiring-store in the same second the lost rotation started, though a new rotation would refuse its store', async () => {
+    const { h, retiring, stores, plain, result } = await inOneSecond(() => provisioned({ interruptWait: 'revocation' }), async (h) => {
+      await expect(run(h, rotateArgv(h, ['--execute']))).rejects.toThrow(/killed during the revocation finality wait/u);
+      const { retiring, stores } = storesOf(h);
+      rmSync(receiptPathOf(h));
+      // In this second a new rotation would mint at the store the lost rotation bound.
+      const plain = await run(h, rotateArgv(h));
+      const result = await run(h, rotateArgv(h, ['--execute', '--retiring-store', `solver=${retiring.solver}`]));
+      return { h, retiring, stores, plain, result };
+    });
+
+    expect(plain.details).toMatchObject({ state: 'new-store-exists', path: stores.solver });
+    // Finishing the lost rotation takes that store as its new one and mints none, so it never meets
+    // the refusal.
+    expect(result.kind).toBe('ceremony_rotate_complete');
+    expect(keyIdsOf(result, 'retired')).toEqual(await keyIdsIn(retiring.solver!, SOLVER_ROLES));
+    expect(result.storesCreated).toEqual([]);
+    expect(config(h).identityStores.solver).toBe(stores.solver);
+    const revokedAt = h.submitted[h.submitted.length - 1]!.anchorTime;
+    await expect(bootAt(h, retiring.solver!, revokedAt)).rejects.toThrow(/binding is revoked at boot/u);
+    await expect(bootAt(h, stores.solver!, revokedAt)).resolves.toBeDefined();
   });
 });
