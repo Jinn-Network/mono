@@ -14,14 +14,16 @@
  * task.
  */
 
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { basename, join, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { cellKey, sealBenchmark } from "@jinn-network/benchmarking-records";
 import { evaluateVerdictRule, parseEvaluationSpec, sealEvaluationSpec } from "@jinn-network/task-execution-profiles";
 import { sealTask } from "@jinn-network/task-execution-protocol";
+import { materializePublicBundle } from "../bundle/materialize.js";
+import { verifyPublicBundle } from "../bundle/verify.js";
 import { BenchmarkProductError } from "../errors.js";
 import { armAdd } from "../operations/arms.js";
 import { attachBenchmarkToDraft } from "../operations/attach.js";
@@ -31,9 +33,12 @@ import { importSweBenchRows } from "../operations/import.js";
 import { initWorkspace } from "../operations/init.js";
 import { selectMethod } from "../operations/method.js";
 import { importRunRecords } from "../operations/run-import.js";
+import { runCollect } from "../operations/run-collect.js";
 import { runLock } from "../operations/run-lock.js";
 import { runQuote } from "../operations/run-quote.js";
-import { EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES } from "../run/external-import.js";
+import { runReport } from "../operations/report.js";
+import { EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES, ExternalRunImportDeclarationSchema } from "../run/external-import.js";
+import { readRunState } from "../run/state.js";
 import { assignHarborTrialAttempt } from "../runtime/harbor/manifest.js";
 import { digestByTaskNameFromSuite, taskNameByDigestFromSuite } from "../runtime/suite-protocol/from-harbor.js";
 import type { SuiteProtocolSelection } from "../runtime/suite-protocol/manifest.js";
@@ -45,6 +50,7 @@ import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-s
 import {
   HARBOR_RUN_IMPORT_EVIDENCE_BYTES_PER_CELL,
   HARBOR_RUN_IMPORT_VERSIONS,
+  harborCarriedEvidence,
   harborRunImportEvidenceCap,
   readHarborRunImport,
   readHarborRunRecords,
@@ -330,6 +336,31 @@ describe("readHarborRunRecords — Harbor 0.21 jobs and trials", () => {
     expect(records.find((record) => record.cellKey === expected[1]!.cellKey)).toMatchObject({
       outcome: "unrun",
     });
+  });
+});
+
+describe("harborCarriedEvidence — what a Harbor import carries of a trial's own record (#5266)", () => {
+  const encode = (text: string) => new TextEncoder().encode(text);
+  const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+
+  function carried(name: string, text: string): string {
+    return decode(harborCarriedEvidence(jobsDir)({ name, path: `job/trial-1/${name}`, bytes: encode(text) }));
+  }
+
+  test("a local task's absolute path and an absolute trials_dir are removed, however the file is laid out", () => {
+    expect(carried(
+      "trial-config.json",
+      '{"task":{"path":"/srv/datasets/hello-world"},"trial_name":"hello-world__55xttAM","trials_dir":"/srv/jobs/job"}',
+    )).toBe('{"task":{},"trial_name":"hello-world__55xttAM"}');
+    expect(carried(
+      "trial-result.json",
+      '{"task_id": {"path": "/srv/datasets/hello-world"}, "trial_uri": "file:///srv/jobs/job/trial-1", "id": "x"}',
+    )).toBe('{"task_id": {}, "id": "x"}');
+  });
+
+  test("a relative trials_dir and a task named rather than pathed are carried as Harbor wrote them", () => {
+    const text = '{\n    "task": {\n        "path": null,\n        "name": "terminal-bench/hello-world"\n    },\n    "trials_dir": "jobs/job"\n}';
+    expect(carried("trial-config.json", text)).toBe(text);
   });
 });
 
@@ -1016,6 +1047,169 @@ describe("readHarborRunImport — the official Terminal-Bench 2.1 slate", () => 
         result: { importedCellCount: 6, written: { graded: 3, ungradeable: 0, notDelivered: 3 } },
       });
       expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("running");
+    });
+  });
+
+  describe("the host paths Harbor writes into its own record of a trial (#5266)", () => {
+    /** The real record's agent trial that ended in `AgentTimeoutError`, and so has a stack trace. */
+    const TIMED_OUT_TRIAL = join("terminus-2", "chess-best-move__gs92yNg");
+    /** An install path of the kind a Harbor stack trace is made of. */
+    const INSTALL_PATH = "/opt/harbor-install/lib/python3.12/site-packages/harbor/trial/trial.py";
+
+    /** Every trial directory of a jobs directory, relative to it. */
+    function trialDirs(jobs: string): readonly string[] {
+      return readdirSync(jobs).flatMap((job) =>
+        readdirSync(join(jobs, job), { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => join(job, entry.name)));
+    }
+
+    /** Puts `line` on its own line after the first line of `path` that holds `after`. */
+    function insertLine(path: string, after: string, line: string): void {
+      const text = readFileSync(path, "utf8");
+      const at = text.indexOf(after);
+      expect(at, `${path} holds ${after}`).toBeGreaterThan(-1);
+      const end = text.indexOf("\n", at) + 1;
+      writeFileSync(path, `${text.slice(0, end)}${line}\n${text.slice(end)}`);
+    }
+
+    /**
+     * The real jobs directory with the two lines `prune.mjs` deleted from each trial result put
+     * back where Harbor 0.21.0 writes them: `trial_uri`, the trial directory as an absolute
+     * `file:` URI, and on the timed-out trial `exception_info.exception_traceback`.
+     */
+    function jobsAsHarborWroteThem(): string {
+      const jobs = copyOfRealJobs();
+      for (const trial of trialDirs(jobs)) {
+        const dir = join(jobs, trial);
+        insertLine(
+          join(dir, "result.json"),
+          `"trial_name": "${basename(trial)}",`,
+          `    "trial_uri": ${JSON.stringify(pathToFileURL(realpathSync(dir)).href)},`,
+        );
+      }
+      const traceback = "Traceback (most recent call last):\n"
+        + `  File "${INSTALL_PATH}", line 512, in _execute_agent\n`
+        + "    await asyncio.wait_for(\n"
+        + "harbor.trial.trial.AgentTimeoutError: Agent execution timed out after 900.0 seconds\n";
+      insertLine(
+        join(jobs, TIMED_OUT_TRIAL, "result.json"),
+        '"exception_message": ',
+        `        "exception_traceback": ${JSON.stringify(traceback)},`,
+      );
+      return jobs;
+    }
+
+    function importJobs(jobs: string) {
+      const dump = readHarborRunImport({ workspaceDir, draftId: "draft-1", jobsDir: jobs });
+      return importRunRecords(context("2026-10-01T14:00:00.000Z"), {
+        draftId: "draft-1",
+        records: dump.records,
+        source: dump.source,
+        evidenceRoot: dump.evidenceRoot,
+        namedReader: "harbor",
+      }).then((imported) => ({ dump, imported }));
+    }
+
+    /** Each evidence file the import sealed, by its path in the jobs directory. */
+    function carriedFiles(dump: HarborRunImportDump, declarationSha256: string): Map<string, Uint8Array> {
+      const declaration = ExternalRunImportDeclarationSchema.parse(sealedJson(declarationSha256));
+      const carried = new Map<string, Uint8Array>();
+      for (const record of dump.records) {
+        const row = declaration.rows.find((candidate) => candidate.cellKey === record.cellKey)!;
+        (record.evidence ?? []).forEach((ref, index) => {
+          expect(row.evidence![index]!.name).toBe(ref.name);
+          carried.set(ref.path, getSealedBytes(workspaceDir, row.evidence![index]!.sha256));
+        });
+      }
+      return carried;
+    }
+
+    test("an absolute trial_uri and a stack trace are neither carried nor published, and every other byte is", async () => {
+      await lockedOfficialSlate();
+      const jobs = jobsAsHarborWroteThem();
+      const { dump, imported } = await importJobs(jobs);
+      expect(imported.ok, JSON.stringify(imported)).toBe(true);
+      if (!imported.ok) return;
+
+      // What each trial carries is the file Harbor wrote less those two members. That is the
+      // committed record, which prune.mjs made from the same files by deleting the same lines.
+      const carried = carriedFiles(dump, imported.result.declarationSha256);
+      expect(carried.size).toBe(18);
+      for (const [path, bytes] of carried) {
+        expect(Buffer.from(bytes).equals(readFileSync(join(REAL_JOBS, path))), path).toBe(true);
+      }
+
+      const collected = await runCollect(context("2026-10-01T14:05:00.000Z"), { draftId: "draft-1" });
+      expect(collected.ok, JSON.stringify(collected)).toBe(true);
+      const reported = await runReport(context("2026-10-01T14:10:00.000Z"), { draftId: "draft-1" });
+      expect(reported.ok, JSON.stringify(reported)).toBe(true);
+      if (!reported.ok) return;
+      const bundle = materializePublicBundle({
+        workspaceDir,
+        draftId: "draft-1",
+        benchmarkSha256: reported.result.claimPackage.records.benchmarkSha256,
+        runState: readRunState(workspaceDir, "draft-1")!,
+      });
+      await expect(verifyPublicBundle(bundle.bundleDir)).resolves.toMatchObject({ identity: bundle.identity });
+      const published = readdirSync(bundle.bundleDir, { recursive: true, withFileTypes: true })
+        .filter((entry) => entry.isFile())
+        .map((entry) => readFileSync(join(entry.parentPath, entry.name), "utf8"))
+        .join("\n");
+      for (const hostPath of [jobs, realpathSync(jobs), pathToFileURL(realpathSync(jobs)).href, INSTALL_PATH]) {
+        expect(published.includes(hostPath), hostPath).toBe(false);
+      }
+      expect(published).not.toContain("Traceback (most recent call last)");
+    });
+
+    test("an absolute trials_dir is carried in neither the trial config nor its copy in the trial result", async () => {
+      await lockedOfficialSlate();
+      const jobs = jobsAsHarborWroteThem();
+      // Harbor records the jobs directory it was given, and given an absolute one, every trial
+      // records it twice.
+      for (const trial of trialDirs(jobs)) {
+        for (const file of ["config.json", "result.json"]) {
+          const path = join(jobs, trial, file);
+          const job = trial.split(sep)[0]!;
+          const relative = `"trials_dir": "jobs/${job}"`;
+          const text = readFileSync(path, "utf8");
+          expect(text, path).toContain(relative);
+          writeFileSync(path, text.replace(relative, `"trials_dir": ${JSON.stringify(join(realpathSync(jobs), job))}`));
+        }
+      }
+      const { dump, imported } = await importJobs(jobs);
+      expect(imported.ok, JSON.stringify(imported)).toBe(true);
+      if (!imported.ok) return;
+      for (const [path, bytes] of carriedFiles(dump, imported.result.declarationSha256)) {
+        const committed = readFileSync(join(REAL_JOBS, path), "utf8");
+        const expected = path.endsWith("reward.txt")
+          ? committed
+          : committed.replace(/^ *"trials_dir": "jobs\/[a-z0-9-]+",\n/mu, "");
+        expect(new TextDecoder().decode(bytes), path).toBe(expected);
+      }
+    });
+
+    test.each([
+      ["the jobs directory", (jobs: string) => join(realpathSync(jobs), "cache")],
+      ["your home directory", () => join(homedir(), "datasets")],
+    ])("a trial record that still names %s is refused at import, naming the file, and the draft stays locked", async (what, hostPath) => {
+      await lockedOfficialSlate();
+      const jobs = jobsAsHarborWroteThem();
+      // A bind mount: a Harbor setting that can hold any path, and that the import does not remove.
+      const path = join(jobs, TIMED_OUT_TRIAL, "result.json");
+      const text = readFileSync(path, "utf8");
+      expect(text).toContain('"mounts": null,');
+      const mount = JSON.stringify([{ type: "bind", source: hostPath(jobs), target: "/data" }]);
+      writeFileSync(path, text.replace('"mounts": null,', `"mounts": ${mount},`));
+      const { imported } = await importJobs(jobs);
+      expect(imported.ok).toBe(false);
+      if (imported.ok) throw new Error("expected the import to be refused");
+      expect(imported.error.code).toBe("validation");
+      expect(imported.error.issues!.map((issue) => issue.path)).toEqual(["terminus-2/chess-best-move__gs92yNg/result.json"]);
+      expect(imported.error.detail).toContain("terminus-2/chess-best-move__gs92yNg/result.json");
+      expect(imported.error.detail).toContain("trial-result.json");
+      expect(imported.error.detail).toContain(what);
+      expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
     });
   });
 

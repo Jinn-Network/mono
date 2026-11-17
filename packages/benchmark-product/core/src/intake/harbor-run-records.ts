@@ -29,8 +29,19 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, join, relative as relativePath, sep } from "node:path";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import {
+  basename,
+  isAbsolute,
+  join,
+  parse as parsePath,
+  relative as relativePath,
+  resolve as resolvePath,
+  sep,
+  win32,
+} from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
   cellKey,
   expectedCellSet,
@@ -65,7 +76,11 @@ import {
   suiteSelectionFromHarbor,
   taskNameByDigestFromSuite,
 } from "../runtime/suite-protocol/from-harbor.js";
-import { EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES, type ExternalRunImportSource } from "../run/external-import.js";
+import {
+  EXTERNAL_IMPORT_MAX_AGGREGATE_BYTES,
+  type CarriedEvidence,
+  type ExternalRunImportSource,
+} from "../run/external-import.js";
 import { requireRunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import type { ExternalRunEvidenceRef, ExternalRunRecord } from "./external-run-records.js";
@@ -391,6 +406,191 @@ function trialEvidence(jobsDir: string, trialDir: string): readonly ExternalRunE
     evidenceIfPresent(jobsDir, join(trialDir, "agent", "trajectory.json"), "trajectory.json"),
   ].filter((ref): ref is ExternalRunEvidenceRef => ref !== undefined);
   return refs;
+}
+
+/** The evidence names under which the reader carries Harbor's own record of a trial. */
+const HARBOR_TRIAL_RECORDS: ReadonlySet<string> = new Set(["trial-result.json", "trial-config.json"]);
+
+/**
+ * The members Harbor 0.21 fills with the machine it ran on (`TrialResult`, `TrialConfig`):
+ * `trial_uri` is the trial directory as an absolute `file:` URI, `exception_traceback` is a stack
+ * trace of install paths, and `trials_dir` and the `path` of a local task are absolute when Harbor
+ * was given an absolute path. The last two are kept when relative.
+ */
+function isHarborHostPathMember(key: string, parentKey: string | undefined, valueText: string): boolean {
+  if (key === "trial_uri" || key === "exception_traceback") return true;
+  if (key !== "trials_dir" && !(key === "path" && (parentKey === "task" || parentKey === "task_id"))) return false;
+  const value: unknown = JSON.parse(valueText);
+  // `win32` reads `/x`, `\x`, `C:\x` and `C:/x` as absolute: each platform Harbor runs on.
+  return typeof value === "string" && win32.isAbsolute(value);
+}
+
+/**
+ * Deletes the members `remove` selects from a JSON text, and no other character: everything
+ * around them stays as written, layout and number spelling included. `text` must already parse.
+ * `remove` sees a member's key, the key of the object that holds it (none at the top level or
+ * in an array), and the member's value as written.
+ */
+function withoutJsonMembers(
+  text: string,
+  remove: (key: string, parentKey: string | undefined, valueText: string) => boolean,
+): string {
+  const spans: [number, number][] = [];
+  let at = 0;
+  const skipSpace = () => {
+    while (at < text.length && " \t\n\r\uFEFF".includes(text[at]!)) at += 1;
+  };
+  const readString = (): string => {
+    const start = at;
+    at += 1;
+    while (text[at] !== '"') at += text[at] === "\\" ? 2 : 1;
+    at += 1;
+    return JSON.parse(text.slice(start, at)) as string;
+  };
+  const readValue = (key: string | undefined): void => {
+    skipSpace();
+    if (text[at] === "{") readObject(key);
+    else if (text[at] === "[") readArray();
+    else if (text[at] === '"') readString();
+    else while (at < text.length && !",]} \t\n\r".includes(text[at]!)) at += 1;
+  };
+  const readArray = (): void => {
+    at += 1;
+    skipSpace();
+    if (text[at] === "]") {
+      at += 1;
+      return;
+    }
+    for (;;) {
+      readValue(undefined);
+      skipSpace();
+      at += 1;
+      if (text[at - 1] === "]") return;
+    }
+  };
+  const readObject = (ownKey: string | undefined): void => {
+    at += 1;
+    skipSpace();
+    if (text[at] === "}") {
+      at += 1;
+      return;
+    }
+    const members: { readonly start: number; readonly end: number; readonly removed: boolean }[] = [];
+    for (;;) {
+      skipSpace();
+      const start = at;
+      const key = readString();
+      skipSpace();
+      at += 1;
+      skipSpace();
+      const valueStart = at;
+      const inner = spans.length;
+      readValue(key);
+      const removed = remove(key, ownKey, text.slice(valueStart, at));
+      // A removed member takes everything inside it, so nothing nested in it is cut twice.
+      if (removed) spans.length = inner;
+      members.push({ start, end: at, removed });
+      skipSpace();
+      at += 1;
+      if (text[at - 1] === "}") break;
+    }
+    // A member followed by a kept one goes with its comma and the space before the next key. A
+    // removed run at the end goes with the comma before it, so no comma is left trailing.
+    let tail = members.length;
+    while (tail > 0 && members[tail - 1]!.removed) tail -= 1;
+    members.forEach((member, index) => {
+      if (member.removed && index < tail) spans.push([member.start, members[index + 1]!.start]);
+    });
+    if (tail < members.length) {
+      spans.push([tail === 0 ? members[0]!.start : members[tail - 1]!.end, members.at(-1)!.end]);
+    }
+  };
+  readValue(undefined);
+  let out = text;
+  for (const [start, end] of spans.sort((a, b) => b[0] - a[0])) out = out.slice(0, start) + out.slice(end);
+  return out;
+}
+
+/** The same members taken out of the parsed value, which the edited text must parse to. */
+function withoutParsedMembers(
+  value: unknown,
+  remove: (key: string, parentKey: string | undefined, valueText: string) => boolean,
+  ownKey?: string,
+): unknown {
+  if (Array.isArray(value)) return value.map((entry) => withoutParsedMembers(entry, remove));
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key, entry]) => !remove(key, ownKey, JSON.stringify(entry)))
+    .map(([key, entry]) => [key, withoutParsedMembers(entry, remove, key)]));
+}
+
+/**
+ * What a Harbor import carries of one evidence file it read (#5266). Applied to every file a
+ * `run import --from harbor` reads, with the jobs directory it was given.
+ *
+ * Everything carried is sealed and published with the claim. From a trial's `result.json` and
+ * `config.json` the reader removes the members `isHarborHostPathMember` names, character by
+ * character, so every other byte is what Harbor wrote, and it holds the edit to that by parsing
+ * the result. Then it refuses a trial record that still names the jobs directory or the home
+ * directory, naming the file: Harbor has other settings that can hold a path (a bind mount, an
+ * instruction file), and a path this reader does not know to remove is refused, not published.
+ * Every other file is carried as read.
+ */
+export function harborCarriedEvidence(jobsDir: string): CarriedEvidence {
+  const hostPaths: { readonly what: string; readonly path: string }[] = [];
+  const known = new Set<string>();
+  const add = (what: string, path: string) => {
+    // The filesystem root would match every path.
+    if (!isAbsolute(path) || parsePath(path).root === path || known.has(path)) return;
+    known.add(path);
+    hostPaths.push({ what, path });
+  };
+  add("the jobs directory", resolvePath(jobsDir));
+  try {
+    add("the jobs directory", realpathSync(jobsDir));
+  } catch {
+    // A jobs directory that cannot be resolved is read by no import.
+  }
+  add("your home directory", homedir());
+
+  return (file) => {
+    if (!HARBOR_TRIAL_RECORDS.has(file.name)) return file.bytes;
+    const cannotRemove = (why: string): never => refuse(
+      "validation",
+      file.path,
+      `Harbor trial file ${file.path} cannot be carried as ${file.name} without the host paths `
+        + `Harbor writes into it: ${why}.`,
+    );
+    let text: string;
+    let parsed: unknown;
+    try {
+      // The byte order mark, if any, stays in the text so that it is carried too.
+      text = new TextDecoder("utf8", { fatal: true, ignoreBOM: true }).decode(file.bytes);
+      parsed = JSON.parse(text.replace(/^\uFEFF/u, ""));
+    } catch {
+      return cannotRemove("it is not UTF-8 JSON");
+    }
+    const carried = withoutJsonMembers(text, isHarborHostPathMember);
+    if (!isDeepStrictEqual(
+      JSON.parse(carried.replace(/^\uFEFF/u, "")),
+      withoutParsedMembers(parsed, isHarborHostPathMember),
+    )) {
+      cannotRemove("removing them would change more than those fields");
+    }
+    for (const { what, path } of hostPaths) {
+      if (carried.includes(path) || carried.includes(JSON.stringify(path).slice(1, -1))) {
+        refuse(
+          "validation",
+          file.path,
+          `Harbor trial file ${file.path} names ${what} (${path}). It would be carried as `
+            + `${file.name} and published with the claim, so nothing was imported. run import `
+            + "removes trial_uri, exception_traceback, and an absolute trials_dir or task path from "
+            + "a trial's result.json and config.json, and this path is in another field of the file.",
+        );
+      }
+    }
+    return carried === text ? file.bytes : new TextEncoder().encode(carried);
+  };
 }
 
 function hasExecutionEvidence(evidence: readonly ExternalRunEvidenceRef[]): boolean {
