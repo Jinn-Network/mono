@@ -1,0 +1,46 @@
+{
+  "name": "join-settlement-leg-after-the-founding-account-revoked-its-genesis",
+  "description": "The same world with the genesis binding revoked by the founding account itself: the leg has no incumbent, so it does not stand.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "c",
+      "key": "K4",
+      "voucher": "A",
+      "from": "02-01",
+      "rel": "signs-for"
+    },
+    {
+      "id": "s",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-20",
+      "scope": [
+        "settlements"
+      ]
+    }
+  ],
+  "revocations": [
+    {
+      "target": "g",
+      "by": "account:A",
+      "at": "02-15"
+    }
+  ],
+  "checks": [
+    {
+      "join": {
+        "verdict": "K4",
+        "settlement": "K2",
+        "envelope": "03-01",
+        "claim": "05-01"
+      },
+      "expect": "refused"
+    }
+  ]
+}

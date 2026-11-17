@@ -1,0 +1,34 @@
+{
+  "name": "batch-after-founding",
+  "description": "A batch at a later instant stands through a root at an earlier instant.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "a",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01"
+    },
+    {
+      "id": "b",
+      "key": "K3",
+      "voucher": "A",
+      "from": "02-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "accepted"
+    },
+    {
+      "key": "K3",
+      "expect": "accepted"
+    }
+  ]
+}

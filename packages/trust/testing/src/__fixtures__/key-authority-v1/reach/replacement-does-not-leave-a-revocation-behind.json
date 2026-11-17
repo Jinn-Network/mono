@@ -1,0 +1,45 @@
+{
+  "name": "replacement-does-not-leave-a-revocation-behind",
+  "description": "A record tied with the revoked one takes the key and still shares the revocation.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "o",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01"
+    },
+    {
+      "id": "p",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "below": [
+        "o"
+      ]
+    }
+  ],
+  "revocations": [
+    {
+      "target": "o",
+      "by": "K1",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "revoked"
+    },
+    {
+      "key": "K2",
+      "at": "02-01",
+      "expect": "accepted"
+    }
+  ]
+}

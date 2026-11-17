@@ -1,0 +1,37 @@
+{
+  "name": "founding-account-through-a-later-record",
+  "description": "Revocations are shared across a standing, so the account revoking a later record of the genesis key ends it too.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "s",
+      "key": "K1",
+      "voucher": "A",
+      "from": "02-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "A",
+      "from": "04-01"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "s",
+      "by": "account:A",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "consent-chain-violation"
+    }
+  ]
+}

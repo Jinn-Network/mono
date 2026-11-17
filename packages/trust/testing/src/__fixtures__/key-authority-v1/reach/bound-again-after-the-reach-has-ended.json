@@ -1,0 +1,38 @@
+{
+  "name": "bound-again-after-the-reach-has-ended",
+  "description": "A record that first takes effect after the revocation shares nothing with it, once the record the revocation reached has ended.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "e",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "until": "03-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "A",
+      "from": "04-01"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "e",
+      "by": "K1",
+      "at": "02-15"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "accepted"
+    }
+  ]
+}

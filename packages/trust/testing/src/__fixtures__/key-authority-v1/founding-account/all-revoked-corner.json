@@ -1,0 +1,50 @@
+{
+  "name": "all-revoked-corner",
+  "description": "A bindings key that revokes every binding, its own included, leaves the founding account able to mint.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "c",
+      "key": "K4",
+      "voucher": "A",
+      "from": "02-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "A",
+      "from": "04-01"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "g",
+      "by": "K4",
+      "at": "03-01"
+    },
+    {
+      "target": "c",
+      "by": "K4",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "accepted"
+    },
+    {
+      "key": "K4",
+      "expect": "revoked"
+    },
+    {
+      "key": "K1",
+      "expect": "revoked"
+    }
+  ]
+}

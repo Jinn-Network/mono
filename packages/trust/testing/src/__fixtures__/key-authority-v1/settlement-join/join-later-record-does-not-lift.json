@@ -1,0 +1,49 @@
+{
+  "name": "join-later-record-does-not-lift",
+  "description": "A later record of the key does not lift a revocation of the record the envelope was joined to.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "s",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "until": "04-15",
+      "scope": [
+        "settlements"
+      ]
+    },
+    {
+      "id": "t",
+      "key": "K2",
+      "voucher": "A",
+      "from": "04-10",
+      "scope": [
+        "settlements"
+      ]
+    }
+  ],
+  "revocations": [
+    {
+      "target": "s",
+      "by": "K1",
+      "at": "04-01"
+    }
+  ],
+  "checks": [
+    {
+      "join": {
+        "verdict": "K1",
+        "settlement": "K2",
+        "envelope": "03-01",
+        "claim": "05-01"
+      },
+      "expect": "refused"
+    }
+  ]
+}

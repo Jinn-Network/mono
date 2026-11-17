@@ -1,0 +1,32 @@
+{
+  "name": "consent-by-genesis-at-the-founding-instant-digest-above",
+  "description": "The same world with the consented record sorting last.",
+  "bindings": [
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "B",
+      "from": "01-01",
+      "consentBy": "K1"
+    },
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01",
+      "below": [
+        "n"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "accepted"
+    },
+    {
+      "key": "K2",
+      "expect": "accepted"
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "name": "consent-at-one-instant-digest-above",
+  "description": "The same world with the consented record sorting last.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "B",
+      "from": "02-01",
+      "consentBy": "K4"
+    },
+    {
+      "id": "c",
+      "key": "K4",
+      "voucher": "A",
+      "from": "02-01",
+      "below": [
+        "n"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "accepted"
+    }
+  ]
+}

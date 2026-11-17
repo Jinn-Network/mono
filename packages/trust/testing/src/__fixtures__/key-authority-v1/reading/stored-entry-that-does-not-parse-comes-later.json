@@ -1,0 +1,25 @@
+{
+  "name": "stored-entry-that-does-not-parse-comes-later",
+  "description": "Later, it changes nothing.",
+  "profile": "anchors-required",
+  "entries": [
+    {
+      "id": "m",
+      "anchor": "02-01"
+    }
+  ],
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "accepted"
+    }
+  ]
+}

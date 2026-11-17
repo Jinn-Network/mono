@@ -1,0 +1,25 @@
+{
+  "name": "stored-entry-that-cannot-be-placed",
+  "description": "An entry whose anchors cannot be read is not placed and has no effect.",
+  "profile": "anchors-required",
+  "entries": [
+    {
+      "id": "m",
+      "anchor": "unreadable"
+    }
+  ],
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "accepted"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "name": "stranger-verdict-leg-under-the-genesis-digest",
+  "description": "The founding account revokes its genesis binding, and another account's entry is filed under the same digest. The revocation is not authorized against that entry, so it passes as a verdict leg. It is authorized against the genesis binding, so the settlement leg fails and the join is refused.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01",
+      "scope": [
+        "verdicts",
+        "bindings",
+        "settlements"
+      ]
+    },
+    {
+      "id": "s",
+      "key": "K2",
+      "voucher": "B",
+      "from": "02-01",
+      "filed": "g"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "g",
+      "by": "account:A",
+      "at": "02-15"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "revoked"
+    },
+    {
+      "join": {
+        "verdict": "K2",
+        "settlement": "K1",
+        "envelope": "03-01",
+        "claim": "05-01"
+      },
+      "expect": "refused"
+    }
+  ]
+}

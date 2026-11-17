@@ -1,0 +1,48 @@
+{
+  "name": "join-verdict-leg-revoked-by-the-envelope",
+  "description": "The verdict leg is read at the envelope's time.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "s",
+      "key": "K2",
+      "voucher": "A",
+      "from": "02-01",
+      "scope": [
+        "settlements"
+      ]
+    },
+    {
+      "id": "v",
+      "key": "K3",
+      "voucher": "A",
+      "from": "02-01",
+      "scope": [
+        "verdicts"
+      ]
+    }
+  ],
+  "revocations": [
+    {
+      "target": "v",
+      "by": "K1",
+      "at": "02-15"
+    }
+  ],
+  "checks": [
+    {
+      "join": {
+        "verdict": "K3",
+        "settlement": "K2",
+        "envelope": "03-01",
+        "claim": "05-01"
+      },
+      "expect": "refused"
+    }
+  ]
+}

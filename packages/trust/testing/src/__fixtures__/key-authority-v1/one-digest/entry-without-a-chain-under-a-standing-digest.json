@@ -1,0 +1,54 @@
+{
+  "name": "entry-without-a-chain-under-a-standing-digest",
+  "description": "An entry with no chain is filed under the digest of a binding that stands, and both are in window when a later binding of their account takes effect. The failed chain is the entry's own: the binding it is filed beside still stands, and the later binding extends from it.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01",
+      "until": "02-01"
+    },
+    {
+      "id": "c",
+      "key": "K4",
+      "voucher": "B",
+      "from": "01-15",
+      "consentBy": "K1"
+    },
+    {
+      "id": "h",
+      "key": "K3",
+      "voucher": "A",
+      "from": "04-01",
+      "consentBy": "K4"
+    },
+    {
+      "id": "o",
+      "key": "K2",
+      "voucher": "A",
+      "from": "03-01",
+      "filed": "h"
+    },
+    {
+      "id": "j",
+      "key": "K5",
+      "voucher": "A",
+      "from": "05-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "consent-chain-violation"
+    },
+    {
+      "key": "K3",
+      "expect": "accepted"
+    },
+    {
+      "key": "K5",
+      "expect": "accepted"
+    }
+  ]
+}

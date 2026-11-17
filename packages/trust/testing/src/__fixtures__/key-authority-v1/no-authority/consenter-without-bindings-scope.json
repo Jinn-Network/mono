@@ -1,0 +1,28 @@
+{
+  "name": "consenter-without-bindings-scope",
+  "description": "Consent needs bindings scope.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01",
+      "scope": [
+        "verdicts"
+      ]
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "B",
+      "from": "02-01",
+      "consentBy": "K1"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "consent-chain-violation"
+    }
+  ]
+}

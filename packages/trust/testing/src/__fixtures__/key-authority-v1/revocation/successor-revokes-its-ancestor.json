@@ -1,0 +1,35 @@
+{
+  "name": "successor-revokes-its-ancestor",
+  "description": "A binding can revoke the binding it descends from and still stand.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "c",
+      "key": "K4",
+      "voucher": "A",
+      "from": "02-01"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "g",
+      "by": "K4",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K1",
+      "expect": "revoked"
+    },
+    {
+      "key": "K4",
+      "expect": "accepted"
+    }
+  ]
+}

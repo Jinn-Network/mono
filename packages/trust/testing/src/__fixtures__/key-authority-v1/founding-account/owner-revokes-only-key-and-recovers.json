@@ -1,0 +1,45 @@
+{
+  "name": "owner-revokes-only-key-and-recovers",
+  "description": "The founding account can mint after its only key revoked itself. The revoked binding stays revoked as evidence.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "A",
+      "from": "03-01"
+    },
+    {
+      "id": "t",
+      "key": "K3",
+      "voucher": "A",
+      "from": "04-01"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "g",
+      "by": "K1",
+      "at": "02-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "accepted"
+    },
+    {
+      "key": "K3",
+      "expect": "accepted"
+    },
+    {
+      "key": "K1",
+      "expect": "revoked"
+    }
+  ]
+}

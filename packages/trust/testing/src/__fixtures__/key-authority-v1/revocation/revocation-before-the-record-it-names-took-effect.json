@@ -1,0 +1,31 @@
+{
+  "name": "revocation-before-the-record-it-names-took-effect",
+  "description": "An authorized key may revoke a record that has not yet taken effect, by naming it.",
+  "bindings": [
+    {
+      "id": "g",
+      "key": "K1",
+      "voucher": "A",
+      "from": "01-01"
+    },
+    {
+      "id": "n",
+      "key": "K2",
+      "voucher": "A",
+      "from": "04-01"
+    }
+  ],
+  "revocations": [
+    {
+      "target": "n",
+      "by": "K1",
+      "at": "03-01"
+    }
+  ],
+  "checks": [
+    {
+      "key": "K2",
+      "expect": "revoked"
+    }
+  ]
+}
