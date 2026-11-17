@@ -4,14 +4,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { BENCHMARK_RECORD_KIND, RUN_RECORD_KIND, parseBenchmark, parseRun, sealRun } from "@jinn-network/benchmarking-records";
-import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
+import { RECORD_KINDS, type SourceHead } from "@jinn-network/record-discovery-protocol";
 import type { PublicationRecord } from "@jinn-network/record-publication";
 import { TASK_EXECUTION_PROTOCOL_URI, TaskSpecificationSchema } from "@jinn-network/task-execution-protocol";
 import { buildSampleBenchmark } from "../intake/sample.js";
-import { createWorkspacePublicationHttpHandler, createWorkspacePublicationSource } from "../run/publication-source.js";
+import { acquirePublicationLock } from "../run/publication-lock.js";
+import {
+  createWorkspacePublicationHttpHandler,
+  createWorkspacePublicationSource,
+  refreshWorkspacePublicationHead,
+  withWorkspacePublicationSourceLock,
+} from "../run/publication-source.js";
 import { recordPublicationOrigin, recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import { readRunState, writeRunState } from "../run/state.js";
-import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
+import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { armAdd } from "./arms.js";
 import { authorityGrant } from "./authority-ops.js";
 import type { OperationContext } from "./context.js";
@@ -216,5 +222,160 @@ describe("publication registration authority and exact public chain", () => {
     });
     expect(registered.ok, JSON.stringify(registered)).toBe(true);
     expect(verified).toHaveLength(raw.tasks.length + 1);
+  });
+});
+
+describe("registration's frozen announcement time and the idle-head heartbeat (#5347)", () => {
+  const SOURCE_NAME = "colophon-benchmarks";
+
+  /**
+   * Another draft's announcement, signed at the fixture's 2026-08-13 clock. It gives the source a
+   * head, which by this host's clock is past half its window, so the heartbeat re-signs it at this
+   * host's clock, far after any time the fixture clock gives registration.
+   */
+  async function announceAnotherDraft(): Promise<void> {
+    const bytes = new TextEncoder().encode("another draft's record");
+    await withWorkspacePublicationSourceLock(workspaceDir, async () => {
+      const source = createWorkspacePublicationSource(workspaceDir, SOURCE_NAME);
+      await source.writer.recover();
+      await source.writer.append({
+        timestamp: "2026-08-13T11:00:00.000Z",
+        announcement: { announcementId: "another-draft", action: "available", record: { kind: RECORD_KINDS.task, digest: `sha256:${sha256Hex(bytes)}`, mediaType: "text/plain" } },
+        record: { bytes, contentType: "text/plain" },
+      });
+    });
+  }
+
+  async function configuredSample(now: () => string): Promise<string> {
+    const runSha256 = await lockedSample(now);
+    const base = await serveWorkspace();
+    expect((await publicationConfigure(context(now), { draftId: "draft-1", publicBaseUrl: base })).ok).toBe(true);
+    await announceAnotherDraft();
+    return runSha256;
+  }
+
+  async function servedHead(): Promise<SourceHead> {
+    return (await createWorkspacePublicationSource(workspaceDir, SOURCE_NAME).head.getExact())!;
+  }
+
+  /** Registration is complete, its frozen time is after `passed`, and its Run entry follows it. */
+  async function expectRegisteredAfter(runSha256: string, passed: SourceHead): Promise<void> {
+    const registration = readRunState(workspaceDir, "draft-1")!.publication!.registration;
+    expect(registration.state).toBe("complete");
+    expect(Date.parse(registration.announcedAt!)).toBeGreaterThan(Date.parse(passed.issuedAt));
+    const durable = (await createWorkspacePublicationSource(workspaceDir, SOURCE_NAME).writer.readState())!;
+    const run = Object.values(durable.announcements).find((entry) => entry.receipt.record?.digest === `sha256:${runSha256}`);
+    expect(run).toBeDefined();
+    expect(run!.receipt.sequence > passed.sequence).toBe(true);
+  }
+
+  // The heartbeat checks that no stage is `in-progress` and then re-signs, both under the source
+  // lock. Registration used to read its time and mark itself `in-progress` outside that lock, so a
+  // heartbeat whose check ran before the marker and whose re-sign read the host clock after
+  // registration read its time left the frozen time behind the served head, and every retry
+  // replayed it. A heartbeat cannot be paused between its two steps from here, so this one takes
+  // the same two steps under the same lock, with registration's clock read between them.
+  test("finishes when the heartbeat checks before registration is in-progress and re-signs after it read its time", async () => {
+    const now = clock();
+    const runSha256 = await configuredSample(now);
+
+    let timeRead!: () => void;
+    const registrationReadItsTime = new Promise<void>((resolve) => { timeRead = resolve; });
+    // `operateAsync` reads the clock once for its audit entry; registration's next read is its time.
+    let reads = 0;
+    const registrationClock = (): string => {
+      const at = now();
+      if (++reads === 2) timeRead();
+      return at;
+    };
+    let checked!: (state: string) => void;
+    const heartbeatChecked = new Promise<string>((resolve) => { checked = resolve; });
+    const heartbeat = withWorkspacePublicationSourceLock(workspaceDir, async () => {
+      checked(readRunState(workspaceDir, "draft-1")!.publication!.registration.state);
+      await registrationReadItsTime;
+      const source = createWorkspacePublicationSource(workspaceDir, SOURCE_NAME);
+      const outcome = await source.writer.refreshIdleHead();
+      // Read inside the hold: once it is released, registration announces and moves the head.
+      return { outcome, head: (await source.head.getExact())! };
+    });
+    expect(await heartbeatChecked).toBe("not-started");
+    // Settling without reading its time must not leave the heartbeat waiting.
+    const pending = publicationRegister(context(registrationClock), { draftId: "draft-1" }).finally(timeRead);
+    const { outcome, head } = await heartbeat;
+    expect(outcome.status).toBe("refreshed");
+
+    const result = await pending;
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    await expectRegisteredAfter(runSha256, head);
+  });
+
+  // From the start of the command, too: the held draft lock keeps registration from reading its
+  // time until the heartbeat has re-signed. The fixture clock trails this host's, as a clock read
+  // can trail a head re-signed in the same millisecond or across a clock step.
+  test("finishes when the heartbeat re-signs while it waits for the draft lock", async () => {
+    const now = clock();
+    const runSha256 = await configuredSample(now);
+    const draftLock = await acquirePublicationLock(workspaceDir, "draft-1");
+    const pending = publicationRegister(context(now), { draftId: "draft-1" });
+    let passed: SourceHead;
+    try {
+      expect((await refreshWorkspacePublicationHead(workspaceDir, SOURCE_NAME)).status).toBe("refreshed");
+    } finally {
+      // Read before the release: once registration holds the draft lock it announces and moves the head.
+      passed = await servedHead();
+      draftLock.release();
+    }
+
+    const result = await pending;
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    await expectRegisteredAfter(runSha256, passed);
+  });
+
+  // The other half: a time registration has frozen and not yet announced, here left by an attempt
+  // that failed before its first announcement, keeps the heartbeat withheld until a retry has
+  // announced at that time.
+  test("withholds the heartbeat from a time a failed attempt froze until a retry announces it", async () => {
+    const now = clock();
+    const runSha256 = await lockedSample(now);
+    // Foreign Tasks and Benchmark make origin verification the first thing the plan does.
+    const raw = await buildSampleBenchmark();
+    for (const task of raw.tasks) putSealedBytes(workspaceDir, task.bytes);
+    putSealedBytes(workspaceDir, raw.benchmark.bytes);
+    const foreignRunBytes = sealRun({
+      ...parseRun(getSealedBytes(workspaceDir, runSha256)),
+      benchmark: { digest: { sha256: raw.benchmark.sha256 } },
+    }).bytes;
+    const foreignRunSha256 = putSealedBytes(workspaceDir, foreignRunBytes);
+    recordWorkspaceAuthorship({ workspaceDir, recordSha256: foreignRunSha256, recordKind: RUN_RECORD_KIND, authoredAt: now() });
+    let sequence = 1;
+    for (const digest of [...raw.tasks.map((task) => task.sha256), raw.benchmark.sha256]) {
+      recordPublicationOrigin(workspaceDir, `sha256:${digest}`, {
+        source: { agent: "did:key:zForeign", name: "origin" },
+        sequence: String(sequence++).padStart(16, "0"),
+        entryDigest: `sha256:${"a".repeat(64)}`,
+      });
+    }
+    writeRunState(workspaceDir, "draft-1", { ...readRunState(workspaceDir, "draft-1")!, runSha256: foreignRunSha256 });
+    const base = await serveWorkspace();
+    expect((await publicationConfigure(context(now), { draftId: "draft-1", publicBaseUrl: base })).ok).toBe(true);
+    await announceAnotherDraft();
+    const source = createWorkspacePublicationSource(workspaceDir, SOURCE_NAME);
+    const before = (await source.writer.readState())!.last;
+
+    const failed = await publicationRegister(context(now), { draftId: "draft-1" }, {
+      verifyOrigin: { async verifyOrigin() { throw new Error("fixture: origin unreachable"); } },
+    });
+    expect(failed.ok).toBe(false);
+    const frozen = readRunState(workspaceDir, "draft-1")!.publication!.registration;
+    expect(frozen).toMatchObject({ state: "in-progress", announcedAt: expect.any(String) });
+    expect((await source.writer.readState())!.last).toEqual(before);
+    expect(await refreshWorkspacePublicationHead(workspaceDir, SOURCE_NAME)).toEqual({ status: "withheld", drafts: ["draft-1"] });
+
+    const retried = await publicationRegister(context(now), { draftId: "draft-1" }, {
+      verifyOrigin: { async verifyOrigin() { /* reachable now */ } },
+    });
+    expect(retried.ok, JSON.stringify(retried)).toBe(true);
+    expect(readRunState(workspaceDir, "draft-1")!.publication!.registration).toMatchObject({ state: "complete", announcedAt: frozen.announcedAt });
+    expect((await refreshWorkspacePublicationHead(workspaceDir, SOURCE_NAME)).status).toBe("refreshed");
   });
 });
