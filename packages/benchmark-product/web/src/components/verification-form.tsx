@@ -4,6 +4,7 @@ import { useActionState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { IDLE_ACTION_STATE, type GuiActionState } from "@/lib/action-state";
 import { presentProtocolText } from "@/lib/present-protocol-profile";
+import type { TimestampCoverageOutcome } from "@/lib/server/timestamp-coverage";
 
 interface VerificationFormProps {
   readonly action: (state: GuiActionState, formData: FormData) => Promise<GuiActionState>;
@@ -15,8 +16,6 @@ interface VerificationAnchor {
   readonly status: string;
   readonly subject?: string;
 }
-
-type TimestampCoverageOutcome = "anchored" | "absent" | "declared-but-absent";
 
 interface VerificationSubject {
   readonly subject: string;
