@@ -9,6 +9,7 @@ import {
   canonicalJsonBytes,
   ceremonyCurrencyFailure,
   ceremonyEvidenceDigest,
+  checkBindingStands,
   compareCalendarStrictRfc3339Instants,
   compareCodeUnitStrings,
   isCalendarStrictRfc3339,
@@ -19,6 +20,7 @@ import {
 } from "@jinn-network/trust-core";
 import type {
   AnchorResolver,
+  BindingAuthorityDeps,
   BindingResolver,
   BindingResolverQuery,
   CeremonyCurrencyProfile,
@@ -44,8 +46,9 @@ import { TrustResolveError, invalidInput } from "./errors.js";
 // `trust-resolve` has no policy layer of its own, so this composes the
 // injected `onConflict` observability hook instead). Also composes §7.2's
 // agentId account-composition leg: an agentId-voucher binding resolves
-// only alongside a valid account-ceremony binding to the SAME Agent IRI,
-// checked via the injected `ChainFactResolver`.
+// only alongside a binding of the registry owner's account to the SAME
+// Agent IRI that stands at the instant (key authority sections 4 and 6),
+// the owner read via the injected `ChainFactResolver`.
 //
 // Finding: `ChainFactResolver.ownerOf` (the frozen interface `trust-core`
 // defines, T9) has no block/time parameter -- it reads the registry's
@@ -113,6 +116,12 @@ export interface CreateBindingResolverOptions {
    * agent, and the leg fails. Any other throw is an outage: it leaves
    * `resolveBinding` as a throw. */
   readonly chainFacts?: ChainFactResolver;
+  /** What the agentId composition leg judges the registry owner's account binding with. Key
+   * authority section 4 composes only with one that stands at the instant (section 6): in window,
+   * signed by the key it binds, its ceremony verified, no authorized revocation before that
+   * instant, and its chain holding. That is `trust-core`'s `checkBindingStands`, which reads
+   * revocations, consents and witnesses with these legs. Omit it and no agentId binding composes. */
+  readonly compositionAuthority?: Pick<BindingAuthorityDeps, "dsseVerifier" | "witnessVerifier">;
   /** §7.5 step 3 for the ceremonies nothing in this package can verify:
    * `safe` (the witness leg in `verify.ts` does not tie a witness to this
    * record), `oidc-machine` (anchored JWKS) and `github-human`. A host that
@@ -354,41 +363,43 @@ function eoaSignatureAndContentVerified(record: SealedKeyBindingRecord): boolean
   return verified;
 }
 
-/** §7.2 asks the composition leg for a valid account-ceremony binding, not a
- * record naming the account: an agentId ceremony is only as verified as this.
- * This reads that record's ceremony, not its own chain or revocations. */
-async function accountCeremonyVerified(
-  entry: EffectiveBinding,
-  options: Pick<CreateBindingResolverOptions, "verifyHostedCeremony" | "ceremonyCurrency">,
-): Promise<boolean> {
-  const { record } = entry;
-  switch (record.binding.ceremony.type) {
-    case "eoa":
-      return eoaCeremonyVerified(entry, options.ceremonyCurrency);
-    case "safe":
-      return ceremonyCanBeVerified(record, options.verifyHostedCeremony);
-    default:
-      return false;
-  }
+/** What the agentId composition leg reads with in one resolve: the registry, what judges a
+ * binding's standing, and this resolver, carrying the compositions the asking resolve is part of
+ * deciding, each as its Agent, agentId and instant. */
+interface CompositionLeg {
+  readonly chainFacts: ChainFactResolver | undefined;
+  readonly authority: CreateBindingResolverOptions["compositionAuthority"];
+  readonly composing: ReadonlySet<string>;
+  readonly resolveAt: (
+    query: BindingResolverQuery,
+    atTime: string,
+    composing: ReadonlySet<string>,
+  ) => Promise<ResolvedBinding | null>;
 }
 
-/** §7.2's agentId composition leg: the agentId voucher's registry owner
- * must itself hold a currently-valid account-ceremony binding to the same
- * Agent IRI, valid at `atTime` (see the module's finding re: `ownerOf`
- * having no historical block parameter). */
+/** §7.2's agentId composition leg, as key authority section 4 states it: the account the
+ * registry names as the agentId's owner holds a binding to the same Agent, under that account as
+ * voucher, that stands at `atTime` (section 6). Authority is named by key, so the binding is what
+ * resolves for its key at that instant, and `checkBindingStands` judges it, with this resolver
+ * answering for every record its walk asks about. A composition that rests on itself holds nothing
+ * up, as chains do not (section 7): asked again while it is being decided, it does not hold. (See
+ * the module's finding re: `ownerOf` having no historical block parameter.) */
 async function agentIdCompositionHolds(
   candidate: SealedKeyBindingRecord,
   atTime: string,
   peers: readonly EffectiveBinding[],
-  options: Pick<CreateBindingResolverOptions, "chainFacts" | "verifyHostedCeremony" | "ceremonyCurrency">,
+  leg: CompositionLeg,
 ): Promise<boolean> {
-  const voucher = candidate.binding.voucher;
+  const { agent, voucher } = candidate.binding;
   if (voucher.kind !== "agentId") return true; // composition applies only to agentId vouchers
-  const { chainFacts } = options;
-  if (chainFacts === undefined) return false;
+  const { chainFacts, authority } = leg;
+  if (chainFacts === undefined || authority === undefined) return false;
 
   const chainId = parseCaip19ChainId(voucher.caip19);
   if (chainId === undefined) return false;
+
+  const composition = `${agent}\u001f${voucher.caip19}\u001f${atTime}`;
+  if (leg.composing.has(composition)) return false;
 
   let ownerAddress: string;
   try {
@@ -399,16 +410,22 @@ async function agentIdCompositionHolds(
   }
   const ownerDid = didPkhFromAddress(chainId, ownerAddress);
 
-  for (const peer of peers) {
-    const { record, effectiveStart } = peer;
-    // Each row is weighed on its own, as in `isGenesisAmong`: a row the store files under
-    // the candidate's digest is not the candidate.
-    if (record === candidate) continue;
-    if (record.binding.voucher.kind !== "account") continue;
-    if (record.binding.voucher.did !== ownerDid) continue;
-    if (!isWithinWindow(record.binding, effectiveStart, atTime)) continue;
-    // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
-    if (await accountCeremonyVerified(peer, options)) return true;
+  const composing = new Set([...leg.composing, composition]);
+  const bindingResolver: BindingResolver = {
+    resolveBinding: (query, at) => leg.resolveAt(query, at, composing),
+  };
+  const ownerKeys = new Set(peers
+    .filter(({ record }) => record.binding.voucher.kind === "account" && record.binding.voucher.did === ownerDid)
+    .map(({ record }) => record.binding.key.didKey));
+  for (const key of [...ownerKeys].sort(compareCodeUnitStrings)) {
+    // eslint-disable-next-line no-await-in-loop -- sequential: the first that stands settles it.
+    const account = await bindingResolver.resolveBinding({ key, agent }, atTime);
+    if (account === null || account.binding.agent !== agent) continue;
+    if (account.binding.voucher.kind !== "account" || account.binding.voucher.did !== ownerDid) continue;
+    // §7.2: the account vouches through an account ceremony, not one a host verified for another kind.
+    if (account.binding.ceremony.type !== "eoa" && account.binding.ceremony.type !== "safe") continue;
+    // eslint-disable-next-line no-await-in-loop -- sequential: the first that stands settles it.
+    if (await checkBindingStands(account, atTime, { bindingResolver, ...authority })) return true;
   }
   return false;
 }
@@ -418,12 +435,13 @@ async function ceremonyVerified(
   entry: EffectiveBinding,
   atTime: string,
   peers: readonly EffectiveBinding[],
-  options: Pick<CreateBindingResolverOptions, "chainFacts" | "verifyHostedCeremony" | "ceremonyCurrency">,
+  options: Pick<CreateBindingResolverOptions, "verifyHostedCeremony" | "ceremonyCurrency">,
+  leg: CompositionLeg,
 ): Promise<boolean> {
   const { record } = entry;
   if (!(await ceremonyCanBeVerified(record, options.verifyHostedCeremony))) return false;
   if (record.binding.ceremony.type === "eoa" && !eoaCeremonyVerified(entry, options.ceremonyCurrency)) return false;
-  return agentIdCompositionHolds(record, atTime, peers, options);
+  return agentIdCompositionHolds(record, atTime, peers, leg);
 }
 
 /** The order §7.3 ranks an Agent's bindings by: earliest effective start,
@@ -559,118 +577,125 @@ export function createBindingResolver(options: CreateBindingResolverOptions): Bi
     return signed;
   };
 
-  return {
-    async resolveBinding(query: BindingResolverQuery, atTime: string): Promise<ResolvedBinding | null> {
-      const allForAgent = await options.bindings.listBindingsForAgent(query.agent);
+  const resolveAt = async (
+    query: BindingResolverQuery,
+    atTime: string,
+    composing: ReadonlySet<string>,
+  ): Promise<ResolvedBinding | null> => {
+    const leg: CompositionLeg = { chainFacts: options.chainFacts, authority: options.compositionAuthority, composing, resolveAt };
+    const allForAgent = await options.bindings.listBindingsForAgent(query.agent);
 
-      const withEffectiveStart: EffectiveBinding[] = [];
-      for (const record of allForAgent) {
-        if (!canBePlaced(record)) continue;
-        // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
-        const effectiveStart = await effectiveStartOf(record.binding, options.anchors);
-        if (effectiveStart === undefined) {
-          if (requireAnchors || typeof record.binding.validFrom !== "string") continue; // unanchored -- non-resolvable (§7.3)
-          withEffectiveStart.push({ record, effectiveStart: record.binding.validFrom });
-          continue;
-        }
-        withEffectiveStart.push({ record, effectiveStart });
+    const withEffectiveStart: EffectiveBinding[] = [];
+    for (const record of allForAgent) {
+      if (!canBePlaced(record)) continue;
+      // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
+      const effectiveStart = await effectiveStartOf(record.binding, options.anchors);
+      if (effectiveStart === undefined) {
+        if (requireAnchors || typeof record.binding.validFrom !== "string") continue; // unanchored -- non-resolvable (§7.3)
+        withEffectiveStart.push({ record, effectiveStart: record.binding.validFrom });
+        continue;
       }
-      const readable = withEffectiveStart.filter(({ record }) => isReadableBinding(record));
+      withEffectiveStart.push({ record, effectiveStart });
+    }
+    const readable = withEffectiveStart.filter(({ record }) => isReadableBinding(record));
 
-      // The ceremony gate applies to what may resolve, never to the set the
-      // genesis and the incumbents are read from: a record nothing here can
-      // verify may be the true genesis, and leaving it out would make the next
-      // record the founder of the IRI (§7.4a).
-      const forKeyAtTime: EffectiveBinding[] = [];
-      for (const candidate of readable) {
-        if (candidate.record.binding.key.didKey !== query.key) continue;
-        if (!isWithinWindow(candidate.record.binding, candidate.effectiveStart, atTime)) continue;
-        if (!signedByItsKey(candidate.record)) continue;
-        // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
-        if (await ceremonyCanBeVerified(candidate.record, options.verifyHostedCeremony)) forKeyAtTime.push(candidate);
-      }
-      if (forKeyAtTime.length === 0) return null;
+    // The ceremony gate applies to what may resolve, never to the set the
+    // genesis and the incumbents are read from: a record nothing here can
+    // verify may be the true genesis, and leaving it out would make the next
+    // record the founder of the IRI (§7.4a).
+    const forKeyAtTime: EffectiveBinding[] = [];
+    for (const candidate of readable) {
+      if (candidate.record.binding.key.didKey !== query.key) continue;
+      if (!isWithinWindow(candidate.record.binding, candidate.effectiveStart, atTime)) continue;
+      if (!signedByItsKey(candidate.record)) continue;
+      // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
+      if (await ceremonyCanBeVerified(candidate.record, options.verifyHostedCeremony)) forKeyAtTime.push(candidate);
+    }
+    if (forKeyAtTime.length === 0) return null;
 
-      const withComposition: EffectiveBinding[] = [];
-      for (const candidate of forKeyAtTime) {
-        // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
-        const holds = await agentIdCompositionHolds(candidate.record, atTime, readable, options);
-        if (holds) withComposition.push(candidate);
-      }
-      if (withComposition.length === 0) return null;
+    const withComposition: EffectiveBinding[] = [];
+    for (const candidate of forKeyAtTime) {
+      // eslint-disable-next-line no-await-in-loop -- candidate sets are small.
+      const holds = await agentIdCompositionHolds(candidate.record, atTime, readable, leg);
+      if (holds) withComposition.push(candidate);
+    }
+    if (withComposition.length === 0) return null;
 
-      // §7.3's conflict is between bindings, and a record whose own ceremony fails
-      // is not one: it cannot beat a record that verifies, whatever its time. Alone
-      // it still resolves, so that verification can name what failed.
-      const verified = withComposition.filter(
-        (candidate) => candidate.record.binding.ceremony.type !== "eoa"
-          || eoaCeremonyVerified(candidate, options.ceremonyCurrency),
-      );
-      const winner = [...(verified.length > 0 ? verified : withComposition)].sort(compareCandidates)[0]!;
-      if (withComposition.length > 1 && options.onConflict) {
-        options.onConflict({
-          key: query.key,
-          agent: query.agent,
-          atTime,
-          digests: withComposition.map(({ record }) => record.bindingDigest).sort(compareCodeUnitStrings),
-          resolvedDigest: winner.record.bindingDigest,
-        });
-      }
+    // §7.3's conflict is between bindings, and a record whose own ceremony fails
+    // is not one: it cannot beat a record that verifies, whatever its time. Alone
+    // it still resolves, so that verification can name what failed.
+    const verified = withComposition.filter(
+      (candidate) => candidate.record.binding.ceremony.type !== "eoa"
+        || eoaCeremonyVerified(candidate, options.ceremonyCurrency),
+    );
+    const winner = [...(verified.length > 0 ? verified : withComposition)].sort(compareCandidates)[0]!;
+    if (withComposition.length > 1 && options.onConflict) {
+      options.onConflict({
+        key: query.key,
+        agent: query.agent,
+        atTime,
+        digests: withComposition.map(({ record }) => record.bindingDigest).sort(compareCodeUnitStrings),
+        resolvedDigest: winner.record.bindingDigest,
+      });
+    }
 
-      // A revocation ends a key's standing under a voucher, not one spelling of it: whoever
-      // holds a key can seal it again, and the record that wins must not leave a revocation
-      // of the one it replaced behind. Which records one reaches is read at its effective
-      // time, not at `atTime`, so a record ending later lifts nothing, and a record that
-      // first takes effect after it shares nothing, so a voucher can bind the key again once
-      // what it reached has ended.
-      const standing = readable.filter(({ record }) => record.binding.key.didKey === query.key
-        && voucherIdentityEquals(record.binding.voucher, winner.record.binding.voucher)
-        && signedByItsKey(record));
-      const revocationRecords = await options.bindings.listRevocationsForTargets(
-        standing.map(({ record }) => record.bindingDigest),
-      );
-      const revocations: ResolvedRevocation[] = [];
-      for (const revocationRecord of revocationRecords) {
-        if (!isReadableRevocation(revocationRecord)) continue;
+    // A revocation ends a key's standing under a voucher, not one spelling of it: whoever
+    // holds a key can seal it again, and the record that wins must not leave a revocation
+    // of the one it replaced behind. Which records one reaches is read at its effective
+    // time, not at `atTime`, so a record ending later lifts nothing, and a record that
+    // first takes effect after it shares nothing, so a voucher can bind the key again once
+    // what it reached has ended.
+    const standing = readable.filter(({ record }) => record.binding.key.didKey === query.key
+      && voucherIdentityEquals(record.binding.voucher, winner.record.binding.voucher)
+      && signedByItsKey(record));
+    const revocationRecords = await options.bindings.listRevocationsForTargets(
+      standing.map(({ record }) => record.bindingDigest),
+    );
+    const revocations: ResolvedRevocation[] = [];
+    for (const revocationRecord of revocationRecords) {
+      if (!isReadableRevocation(revocationRecord)) continue;
+      // eslint-disable-next-line no-await-in-loop -- revocation sets are small.
+      const effectiveTime = await effectiveTimeOfRevocation(revocationRecord.revocation, options.anchors);
+      if (effectiveTime === undefined) continue; // unanchored revocations never take effect
+      // A store may hold one digest in more than one row, so none of this reads a single row.
+      const { target } = revocationRecord.revocation;
+      const named = standing.filter(({ record }) => record.bindingDigest === target);
+      const namedInWindow = named.filter(({ record, effectiveStart }) => isWithinWindow(record.binding, effectiveStart, effectiveTime));
+      if (named.length > 0 && target !== winner.record.bindingDigest && !(
+        namedInWindow.length > 0 && isWithinWindow(winner.record.binding, winner.effectiveStart, effectiveTime)
+      )) continue;
+      const targetScope: string[] = [];
+      for (const named of namedInWindow) {
         // eslint-disable-next-line no-await-in-loop -- revocation sets are small.
-        const effectiveTime = await effectiveTimeOfRevocation(revocationRecord.revocation, options.anchors);
-        if (effectiveTime === undefined) continue; // unanchored revocations never take effect
-        // A store may hold one digest in more than one row, so none of this reads a single row.
-        const { target } = revocationRecord.revocation;
-        const named = standing.filter(({ record }) => record.bindingDigest === target);
-        const namedInWindow = named.filter(({ record, effectiveStart }) => isWithinWindow(record.binding, effectiveStart, effectiveTime));
-        if (named.length > 0 && target !== winner.record.bindingDigest && !(
-          namedInWindow.length > 0 && isWithinWindow(winner.record.binding, winner.effectiveStart, effectiveTime)
-        )) continue;
-        const targetScope: string[] = [];
-        for (const named of namedInWindow) {
-          // eslint-disable-next-line no-await-in-loop -- revocation sets are small.
-          if (await ceremonyVerified(named, effectiveTime, readable, options)) targetScope.push(...named.record.binding.scope);
-        }
-        revocations.push({
-          revocation: revocationRecord.revocation,
-          envelopeBytes: revocationRecord.envelopeBytes,
-          effectiveTime,
-          ...(targetScope.length > 0 ? { targetScope } : {}),
-        });
+        if (await ceremonyVerified(named, effectiveTime, readable, options, leg)) targetScope.push(...named.record.binding.scope);
       }
-      revocations.sort((a, b) => compareTimes(a.effectiveTime, b.effectiveTime)
-        || compareCodeUnitStrings(recordDigest(a.envelopeBytes), recordDigest(b.envelopeBytes)));
+      revocations.push({
+        revocation: revocationRecord.revocation,
+        envelopeBytes: revocationRecord.envelopeBytes,
+        effectiveTime,
+        ...(targetScope.length > 0 ? { targetScope } : {}),
+      });
+    }
+    revocations.sort((a, b) => compareTimes(a.effectiveTime, b.effectiveTime)
+      || compareCodeUnitStrings(recordDigest(a.envelopeBytes), recordDigest(b.envelopeBytes)));
 
-      const incumbentControls = findIncumbentControls(winner, readable);
-      const resolved: ResolvedBinding = {
-        binding: winner.record.binding,
-        envelopeBytes: winner.record.envelopeBytes,
-        bindingDigest: winner.record.bindingDigest,
-        effectiveStart: winner.effectiveStart,
-        isGenesis: isGenesisAmong(winner, withEffectiveStart),
-        revocations,
-        ...(winner.record.ceremonyEvidence === undefined ? {} : { ceremonyEvidence: winner.record.ceremonyEvidence }),
-        ...(winner.record.witness === undefined ? {} : { witness: winner.record.witness }),
-        ...(incumbentControls.length === 0 ? {} : { incumbentControls }),
-        ...(options.ceremonyCurrency === undefined ? {} : { ceremonyCurrency: options.ceremonyCurrency }),
-      };
-      return resolved;
-    },
+    const incumbentControls = findIncumbentControls(winner, readable);
+    const resolved: ResolvedBinding = {
+      binding: winner.record.binding,
+      envelopeBytes: winner.record.envelopeBytes,
+      bindingDigest: winner.record.bindingDigest,
+      effectiveStart: winner.effectiveStart,
+      isGenesis: isGenesisAmong(winner, withEffectiveStart),
+      revocations,
+      ...(winner.record.ceremonyEvidence === undefined ? {} : { ceremonyEvidence: winner.record.ceremonyEvidence }),
+      ...(winner.record.witness === undefined ? {} : { witness: winner.record.witness }),
+      ...(incumbentControls.length === 0 ? {} : { incumbentControls }),
+      ...(options.ceremonyCurrency === undefined ? {} : { ceremonyCurrency: options.ceremonyCurrency }),
+    };
+    return resolved;
+  };
+
+  return {
+    resolveBinding: (query: BindingResolverQuery, atTime: string) => resolveAt(query, atTime, new Set()),
   };
 }

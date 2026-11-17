@@ -36,6 +36,10 @@ envelope's time. Its `deps` and `checkBindingRevocation`'s need a resolver that
 answers for every key of an Agent: a revoker's key is rarely in the family the binding
 it revokes signs.
 
+`checkBindingStands` asks all of key authority section 6 of a resolved binding at an
+instant, for a leg outside the procedure that takes authority from one, such as the
+account binding an `agentId` composition rests on.
+
 ## What identifies a binding
 
 A store files each record under a digest, and a store that takes digests as given can

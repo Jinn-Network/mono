@@ -20,6 +20,16 @@ bindings resolve only when the host passes `verifyHostedCeremony`. A record
 that does not resolve still counts when deciding which binding came first: it
 may be the true genesis.
 
+The `agentId` composition leg composes only with a binding of the registry
+owner's account to the same Agent that stands at the instant asked about (key
+authority sections 4 and 6): what resolves for its key there, with an account
+ceremony, judged by `@jinn-network/trust-core`'s `checkBindingStands`. So it is
+in window, signed by its key, its ceremony verified, no authorized revocation
+reaches it before that instant, and its chain holds. Judging that reads
+revocations, consents and witnesses, so the host passes its DSSE and witness legs
+as `compositionAuthority`; without them no `agentId` binding composes. A
+composition that rests on itself holds nothing up.
+
 The genesis binding of an Agent IRI is the first record placed for it. At a tie
 at that instant, a record that claims founding, a `controls` binding that names
 no consent, goes ahead of one that does not, and records of one voucher are
