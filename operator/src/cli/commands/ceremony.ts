@@ -47,6 +47,7 @@ import {
   performEoaCeremony,
   planRevocation,
   rebindRoles,
+  retiredKeys,
   revocationsToCarry,
   revokeBinding,
   roleBindingTerms,
@@ -1586,6 +1587,25 @@ async function runJoin(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
   }
 
   const { signers, authority, created } = await mintCustody({ plan, password: password.password });
+  // Before any anchor: a revocation in the catalog this join appends to retired one of these keys,
+  // and binding it again, to this Agent or a new one, would make it verify again.
+  const retired = await retiredKeys(plan.catalogPath);
+  try {
+    assertNoRetiredKeyBound(
+      retired,
+      [...signers.values()].map(({ role, keyId }) => ({ agent: agentForRole(plan, role), keyId })),
+    );
+  } catch (cause) {
+    return emitEnvelope({
+      code: 'invalid_invocation',
+      message: cause instanceof Error ? cause.message : String(cause),
+      hint: `join binds the keys in ${join(plan.dir, 'identity')}/<family>.enc.json, and after \`jinn ceremony rotate\` `
+        + 'those stores hold the keys it retired. A rotated family cannot be added to a catalog by join, under its '
+        + 'Agent IRI or a new one.',
+      exampleCli: EXAMPLE_CLI,
+      details: { feature: 'ceremony', state: 'retired-key-bound', sideEffects: created.length > 0 },
+    }, { writer: ctx.writer, exit: ctx.exit });
+  }
 
   const anchorDigest = ceremonyAnchorDigest({
     agentIri: plan.agentIri,
@@ -2731,11 +2751,12 @@ Status:
   --previous-catalog <where it went>. Every revocation it holds is carried into the new catalog
   verbatim, with the binding each names and the anchors both reference, so a retired key stays
   retired. Without the flag, init refuses once its receipt shows it sealed a catalog at --catalog or
-  <dir>/ceremony/rotation.json exists. With it, init refuses, before any anchor, to bind a key a
-  carried revocation retired, for the same Agent IRI. That still catches a family \`rotate\` replaced
-  once the records STORES names are gone and the config names no other store for it, but only while
-  the config or the run receipt supplies the operator's agentIri and admissionAgent: with neither,
-  init mints new Agent IRIs and that check passes.
+  <dir>/ceremony/rotation.json exists. With it, init refuses (retired-key-bound), before any anchor,
+  to bind a key a carried revocation retired, whatever Agent IRI it would bind the key to. join
+  refuses the same way, before any anchor, to bind a key a revocation in its --catalog retired. So a
+  family \`rotate\` replaced is still refused once the records STORES names are gone and the config
+  names no other store for it, also when neither the config nor the run receipt supplies the
+  operator's agentIri and admissionAgent and init or join mints new Agent IRIs.
 
   STORES. init and join bind the role stores at <dir>/identity/<family>.enc.json, never the stores
   identityStores names, and after \`rotate\` those hold the keys it retired. So both refuse

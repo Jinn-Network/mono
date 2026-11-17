@@ -219,7 +219,6 @@ export async function revocationsToCarry(catalogPath: string): Promise<CarriedRe
   const bindings = catalogBindings(file);
   const anchors = new Map<string, AnchorDeclaration>();
   const carriedBindings = new Map<string, Record<string, unknown>>();
-  const retired: CarriedRevocations["retired"][number][] = [];
   for (const entry of file.revocations) {
     const report = validateRevocation(new Uint8Array(Buffer.from(entry.envelope, "base64")));
     if (!report.conforms || report.value === undefined) {
@@ -241,37 +240,62 @@ export async function revocationsToCarry(catalogPath: string): Promise<CarriedRe
     if (named !== undefined) {
       // `catalogBindings` keeps the file's order, so the parsed index is the raw entry's.
       carriedBindings.set(named.digest, file.bindings[target]!);
-      retired.push({
-        revocation: entry.digest,
-        agent: named.binding.agent,
-        keyId: named.binding.key.didKey,
-        effectiveFrom: revocation.effectiveFrom,
-      });
     }
   }
   return {
     revocations: [...file.revocations],
     bindings: [...carriedBindings.values()],
     anchors: [...anchors.values()],
-    retired,
+    retired: retiredIn(file),
   };
 }
 
+/** The key and Agent each revocation in `file` retires, where `file` holds the binding it names. */
+function retiredIn(file: CatalogFile): CarriedRevocations["retired"] {
+  if (file.revocations.length === 0) return [];
+  const bindings = catalogBindings(file);
+  const revocations = catalogRevocations(file);
+  return file.revocations.flatMap((entry, index) => {
+    const revocation = revocations[index]!;
+    const named = bindings.find(({ digest }) => digest === revocation.target);
+    return named === undefined
+      ? []
+      : [{
+        revocation: entry.digest,
+        agent: named.binding.agent,
+        keyId: named.binding.key.didKey,
+        effectiveFrom: revocation.effectiveFrom,
+      }];
+  });
+}
+
 /**
- * Refuses, naming the revocation, a re-author that binds a key a carried revocation retired, for the
- * same Agent. That is the retired key binding again, and beside the carried record it would be a
- * second binding of one key to one Agent, which the catalog opener refuses as a conflict.
+ * The keys the revocations in the catalog at `catalogPath` retire, read as `revocationsToCarry` reads
+ * them. A join calls it, with `assertNoRetiredKeyBound`, before it spends gas on an anchor;
+ * `appendOperator` reads the file again rather than trusting a set handed to it.
+ */
+export async function retiredKeys(catalogPath: string): Promise<Pick<CarriedRevocations, "retired">> {
+  const { file } = await loadCatalog(catalogPath);
+  return { retired: retiredIn(file) };
+}
+
+/**
+ * Refuses, naming the revocation, a catalog write that binds a key a revocation it holds retired, to
+ * any Agent: the match is by key alone. A revocation reaches only the binding it names, so the key
+ * bound to another Agent would verify again, and a key retired after a leak would sign for that
+ * Agent. Bound to the same Agent it would be a second binding of one key, which the catalog opener
+ * refuses as a conflict.
  */
 export function assertNoRetiredKeyBound(
-  carried: CarriedRevocations,
+  carried: Pick<CarriedRevocations, "retired">,
   keys: readonly { readonly agent: string; readonly keyId: string }[],
 ): void {
   for (const key of keys) {
-    const retired = carried.retired.find(({ agent, keyId }) => agent === key.agent && keyId === key.keyId);
+    const retired = carried.retired.find(({ keyId }) => keyId === key.keyId);
     if (retired !== undefined) {
       throw new TrustAuthoringError(
-        `revocation ${retired.revocation} retired key ${key.keyId} for ${key.agent} from ${retired.effectiveFrom}; `
-          + "a re-authored catalog carries that revocation and must not bind the key again",
+        `revocation ${retired.revocation} retired key ${key.keyId} for ${retired.agent} from ${retired.effectiveFrom}; `
+          + `a catalog that holds that revocation must not bind the key again, to ${key.agent} or any other Agent`,
       );
     }
   }
@@ -581,6 +605,9 @@ async function sealSuccessor(input: {
  * unchanged by construction, so **existing operators' configs are untouched** — distribution is a
  * file copy plus a daemon restart (`assertFresh` makes a changed catalog under a running daemon a
  * hard refusal by design).
+ *
+ * Refuses, writing nothing, a binding of a key a revocation in the catalog retired, to any Agent
+ * (`assertNoRetiredKeyBound`).
  */
 export async function appendOperator(input: {
   readonly catalogPath: string;
@@ -601,6 +628,7 @@ export async function appendOperator(input: {
   // the same predecessor would otherwise seal a successor whose write silently overwrites ours.
   return withCatalogLock(input.catalogPath, async () => {
     const loaded = await loadCatalog(input.catalogPath);
+    assertNoRetiredKeyBound({ retired: retiredIn(loaded.file) }, newBindings);
 
     const existingDigests = new Set(
       loaded.file.bindings.map((entry) => String((entry as { digest?: unknown }).digest)),
