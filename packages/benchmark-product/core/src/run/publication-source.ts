@@ -35,6 +35,7 @@ import {
   type DurableSourceAppendIntent,
   type DurableSourceSigner,
   type DurableSourceState,
+  type IdleHeadRefreshOutcome,
   type SourceAppendIntentStore,
   type SourceStateStore,
 } from "@jinn-network/record-discovery-serve";
@@ -318,6 +319,17 @@ export function createWorkspacePublicationSource(
       await refreshWellKnown();
       return report;
     },
+    // The writer's refresh finishes a crashed append before it judges the head, which moves the
+    // position just as `recover` does. Recovering here first keeps the well-known document in
+    // step with it, and rewrites that document only when a position actually moved.
+    refreshIdleHead: async () => {
+      try {
+        if ((await writer.recover()).status === "recovered") await refreshWellKnown();
+      } catch (error) {
+        return { status: "faulted", error };
+      }
+      return writer.refreshIdleHead();
+    },
   };
   return {
     source,
@@ -404,6 +416,89 @@ export async function refreshWorkspacePublicationWellKnown(
     const blobs = createFsBlobStore(publicationServeRoot(workspaceDir));
     return writeSourceWellKnown(blobs, source.source, source.writer);
   }, onContended);
+}
+
+/**
+ * What one heartbeat did for the workspace source's head (#4187): the durable writer's own
+ * outcome, or `withheld` when a run holds a frozen announcement time the re-sign would overtake.
+ */
+export type WorkspacePublicationHeadRefresh =
+  | IdleHeadRefreshOutcome
+  | { readonly status: "withheld"; readonly drafts: readonly string[] };
+
+/**
+ * Drafts whose publication stage may still announce at a time it froze earlier.
+ *
+ * Registration, accounting, Matrix v2 and Report each freeze `announcedAt` when they start, so a
+ * retry replays the identical plan, and then announce at that instant or just after it. The
+ * writer refuses any append that does not strictly advance the served head. A head re-signed
+ * while such a stage is `in-progress` therefore carries an `issuedAt` its retry can never pass,
+ * and the stage could no longer finish. The heartbeat design does not cover this; it is the
+ * Colophon form of the floor coupling that design states for the operator's requester leg
+ * (its §5.4).
+ *
+ * Conservative by construction: a run naming another source is skipped, but a run document that
+ * cannot be read is reported, because it may hold exactly such a stage. Withholding leaves the
+ * head to lapse as it did before the heartbeat existed, which is never worse than today.
+ */
+function draftsHoldingFrozenAnnouncementTimes(workspaceDir: string, sourceName: string): readonly string[] {
+  let files: readonly string[];
+  try { files = readdirSync(runsDir(workspaceDir)); } catch { return []; }
+  const drafts: string[] = [];
+  for (const file of files) {
+    // The same RunState file selection `resolveWorkspacePublicationSourceName` makes below.
+    if (!file.endsWith(".json") || file.endsWith(".cancel-requested.json")) continue;
+    const draftId = file.slice(0, -".json".length);
+    // Read loosely, as that name resolution does: only the source name and stage states count.
+    type StageView = { readonly state?: unknown } | undefined;
+    type PublicationView = {
+      readonly source?: { readonly name?: unknown };
+      readonly registration?: StageView;
+      readonly accounting?: StageView;
+      readonly matrixV2?: StageView;
+      readonly report?: StageView;
+    } | null | undefined;
+    let publication: PublicationView;
+    try {
+      const bytes = readFileIfExistsSync(runStatePath(workspaceDir, draftId));
+      if (bytes === undefined) continue;
+      publication = (JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as { publication?: PublicationView } | null)?.publication;
+    } catch {
+      drafts.push(draftId);
+      continue;
+    }
+    if (publication === undefined || publication === null) continue;
+    const name = publication.source?.name;
+    if (typeof name === "string" && name !== sourceName) continue;
+    const stages = [publication.registration, publication.accounting, publication.matrixV2, publication.report];
+    if (stages.some((stage) => stage?.state === "in-progress")) drafts.push(draftId);
+  }
+  return drafts.sort();
+}
+
+/**
+ * One idle-head heartbeat for this workspace's source (#4187): re-signs the served head at its
+ * current position once no more than half of its window remains, so a reader that arrives while
+ * the source has nothing new to announce never fetches a stale head. Taken under the source lock,
+ * so it is serialized with every announcement exactly as announcements are with each other.
+ *
+ * Never throws: a lock that cannot be acquired is `faulted` like any other failure, because the
+ * caller is a loop and reports outcomes rather than exceptions.
+ */
+export async function refreshWorkspacePublicationHead(
+  workspaceDir: string,
+  sourceName: string,
+  onContended?: () => void,
+): Promise<WorkspacePublicationHeadRefresh> {
+  try {
+    return await withWorkspacePublicationSourceLock(workspaceDir, async () => {
+      const drafts = draftsHoldingFrozenAnnouncementTimes(workspaceDir, sourceName);
+      if (drafts.length > 0) return { status: "withheld", drafts };
+      return createWorkspacePublicationSource(workspaceDir, sourceName).writer.refreshIdleHead();
+    }, onContended);
+  } catch (error) {
+    return { status: "faulted", error };
+  }
 }
 
 /**

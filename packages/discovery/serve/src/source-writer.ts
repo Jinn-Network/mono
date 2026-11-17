@@ -1,6 +1,7 @@
 import type {
   Announcement,
   AnnouncementEntry,
+  RefreshWindowFailure,
   SourceHead,
   SourceIdentity,
 } from "@jinn-network/record-discovery-protocol";
@@ -28,7 +29,7 @@ import {
 
 import type { ArchivePage } from "./archive.js";
 import { signAnnouncementEntry, type ScopedDiscoverySigner } from "./entry-signing.js";
-import { MAX_REFRESH_BY_AHEAD_MS, signHead, type DsseEnvelope } from "./head.js";
+import { MAX_REFRESH_BY_AHEAD_MS, refreshHead, signHead, type DsseEnvelope } from "./head.js";
 import type { Clock, ReadableImmutableBlobStore, StoredBlob } from "./ports.js";
 
 const ARCHIVE_PAGE_CONTENT_TYPE = "application/json";
@@ -166,6 +167,51 @@ export interface DurableSourceWriter {
   append(command: AppendAnnouncementCommand): Promise<DurableSourceReceipt>;
   recover(): Promise<DurableSourceRecoveryReport>;
   readState(): Promise<DurableSourceState | undefined>;
+}
+
+/** The two instants of a served head's freshness window, as signed. */
+export interface SourceHeadWindow {
+  readonly issuedAt: string;
+  readonly refreshBy: string;
+}
+
+/**
+ * What one idle-head refresh did (#4187). Returned, never thrown: the caller is a loop on a short
+ * tick, and a throw per tick is noise rather than signal.
+ *
+ * - `refreshed`: re-signed at the same position; `previous` and `current` are the two windows.
+ * - `not-due`: more than half of the window the served head was minted with remains.
+ * - `no-position`: the source has never appended, so there is no head to refresh.
+ * - `append-in-flight`: an append staged an intent or moved the head while the refresh ran, and
+ *   nothing was written; or the state CAS was lost after the head was written at the position
+ *   the refresh had judged. The next tick tries again.
+ * - `refused`: the candidate head fails the §5.2 window check against this host's clock, so it
+ *   is neither signed nor written.
+ * - `faulted`: the path threw -- a blob-store read or write, the signer, or the state store. A
+ *   throw before the head write leaves the head as it was.
+ */
+export type IdleHeadRefreshOutcome =
+  | { readonly status: "refreshed"; readonly previous: SourceHeadWindow; readonly current: SourceHeadWindow }
+  | { readonly status: "not-due"; readonly current: SourceHeadWindow }
+  | { readonly status: "no-position" }
+  | { readonly status: "append-in-flight" }
+  | { readonly status: "refused"; readonly reason: RefreshWindowFailure; readonly current: SourceHeadWindow }
+  | { readonly status: "faulted"; readonly error: unknown };
+
+/**
+ * The head-only refresh a live source owes its readers while it has nothing new to announce
+ * (§5.2: an expired head is a withholding signal, not silence). Specified by the idle-head
+ * heartbeat design, docs/superpowers/specs/2026-09-09-idle-head-heartbeat-design.md (#4187). It
+ * lives on the durable writer rather than in `maintainHead`, because `maintainHead` never reads
+ * the writer's committed state: a `prevHead` overtaken by an append would install a head at a
+ * position the writer no longer holds.
+ *
+ * The caller serializes it with the source's appends exactly as appends are serialized with each
+ * other. The staged-intent check and the head-digest guard below narrow a race; they are not a
+ * lock.
+ */
+export interface DurableSourceHeadRefresher {
+  refreshIdleHead(): Promise<IdleHeadRefreshOutcome>;
 }
 
 export interface DurableSourceWriterOptions {
@@ -308,7 +354,7 @@ async function assertHeadMatchesState(
   source: SourceIdentity,
   state: DurableSourceState,
   signer: DurableSourceSigner,
-): Promise<{ readonly digest: `sha256:${string}`; readonly issuedAt: string } | null> {
+): Promise<{ readonly digest: `sha256:${string}`; readonly issuedAt: string; readonly head: SourceHead } | null> {
   if (state.last === null) {
     if (stored !== undefined) {
       throw new SourceWriterIntegrityError("source has no committed state position but a head already exists");
@@ -330,7 +376,23 @@ async function assertHeadMatchesState(
   ) {
     throw new SourceWriterIntegrityError("source head does not match the committed source position");
   }
-  return { digest: recordDigest(stored.bytes), issuedAt: head.issuedAt };
+  return { digest: recordDigest(stored.bytes), issuedAt: head.issuedAt, head };
+}
+
+/**
+ * The idle-head trigger (#4187, heartbeat design §4): due once the served head's remaining window has
+ * fallen to half the window it was minted with. Both are read from the head itself, never from
+ * this writer's `refreshWithinMs`, so a tighter profile tightens the trigger with it. The check is
+ * level-triggered: once due, every later tick is due too until a refresh lands, which is what
+ * tolerates a missed beat. A window that cannot be read is never due.
+ */
+function idleHeadRefreshDue(head: SourceHeadWindow, now: Date): boolean {
+  const issuedAtMs = parseHeadTimestamp(head.issuedAt);
+  const refreshByMs = parseHeadTimestamp(head.refreshBy);
+  const mintedMs = refreshByMs - issuedAtMs;
+  const remainingMs = refreshByMs - now.getTime();
+  if (!Number.isFinite(mintedMs) || !Number.isFinite(remainingMs)) return false;
+  return remainingMs <= mintedMs * 0.5;
 }
 
 function assertStateOwnership(state: DurableSourceState, source: SourceIdentity, keyId: string): void {
@@ -513,7 +575,9 @@ function makeInitialState(source: SourceIdentity, keyId: string): DurableSourceS
   };
 }
 
-export function createDurableSourceWriter(options: DurableSourceWriterOptions): DurableSourceWriter {
+export function createDurableSourceWriter(
+  options: DurableSourceWriterOptions,
+): DurableSourceWriter & DurableSourceHeadRefresher {
   const source = freezeJson(options.source);
   const sourceId = formatOrigin(source.agent, source.name);
   const requestedRefreshWithinMs = options.refreshWithinMs ?? MAX_REFRESH_BY_AHEAD_MS;
@@ -942,9 +1006,70 @@ export function createDurableSourceWriter(options: DurableSourceWriterOptions): 
     throw new SourceWriterIntegrityError("source append exceeded the CAS retry bound");
   }
 
+  async function refreshIdleHead(): Promise<IdleHeadRefreshOutcome> {
+    try {
+      // A crashed append is finished first, so the head judged below is the head of the position
+      // the writer actually holds. An intent still present afterwards was staged by a concurrent
+      // append: writing a head under it would make that intent's head guard throw on every later
+      // recover(), wedging the source (heartbeat design §5.2).
+      await recover();
+      if (await options.intents.read(sourceId) !== undefined) return { status: "append-in-flight" };
+      const state = await loadState();
+      if (state.value.last === null) return { status: "no-position" };
+      const served = (await assertHeadMatchesState(
+        await options.blobs.get(headPath(source.name)),
+        source,
+        state.value,
+        options.signer,
+      ))!;
+      const current: SourceHeadWindow = { issuedAt: served.head.issuedAt, refreshBy: served.head.refreshBy };
+
+      // One clock reading decides the trigger, the new instant and the window check alike.
+      const now = clock.now();
+      if (!idleHeadRefreshDue(current, now)) return { status: "not-due", current };
+      // `sequence`, `entry`, `origin` and `protocol` carry over; `issuedAt` strictly advances and
+      // `refreshBy` is recomputed from it. That re-basing is the heartbeat: moving `issuedAt`
+      // alone would leave the head lapsing on its original schedule (heartbeat design §2).
+      const next = refreshHead(served.head, { now: () => now }, refreshWithinMs);
+      // The bound every append is held to (#3481). `refreshHead` carries a future-dated
+      // `issuedAt` forward, so a head minted while this host's clock ran fast must not be
+      // re-signed past every correctly clocked reader's window (heartbeat design §5.3). The
+      // trigger already keeps an honestly minted head from being due while it is issued ahead
+      // of the clock, so this is the backstop for a head this writer did not mint.
+      const windowFailure = checkRefreshWindow(next, now);
+      if (windowFailure !== undefined) return { status: "refused", reason: windowFailure, current };
+
+      const envelope = await signHead(next, options.signer);
+      await assertSignerEnvelope(envelope, options.signer, "source head", MEDIA_HEAD, sealJson(next).bytes);
+      const bytes = sealJson(envelope).bytes;
+      const latest = await options.blobs.get(headPath(source.name));
+      if (
+        latest === undefined
+        || recordDigest(latest.bytes) !== served.digest
+        || await options.intents.read(sourceId) !== undefined
+      ) {
+        return { status: "append-in-flight" };
+      }
+      await options.blobs.put(headPath(source.name), bytes, MEDIA_HEAD);
+      assertStoredBlob(await options.blobs.get(headPath(source.name)), bytes, MEDIA_HEAD, "source head");
+      // The generic state carries no head, so it is committed unchanged; a state store that keeps
+      // its own record of the head refreshes that record on this commit (heartbeat design §5.4).
+      const committed = await options.states.compareAndSwap(sourceId, state.revision, state.value);
+      if (!committed.ok) return { status: "append-in-flight" };
+      return {
+        status: "refreshed",
+        previous: current,
+        current: { issuedAt: next.issuedAt, refreshBy: next.refreshBy },
+      };
+    } catch (error) {
+      return { status: "faulted", error };
+    }
+  }
+
   return {
     append,
     recover,
+    refreshIdleHead,
     async readState() {
       const state = await options.states.read(sourceId);
       if (state === undefined) return undefined;
