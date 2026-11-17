@@ -412,17 +412,165 @@ function trialEvidence(jobsDir: string, trialDir: string): readonly ExternalRunE
 const HARBOR_TRIAL_RECORDS: ReadonlySet<string> = new Set(["trial-result.json", "trial-config.json"]);
 
 /**
+ * How Harbor 0.21 begins the message of each error that means the verifier wrote no usable reward
+ * file (`RewardFileNotFoundError`, `RewardFileEmptyError`, `VerifierOutputParseError`, in
+ * `harbor/verifier/verifier.py`). The rest of the message is the trial's reward file path, under
+ * `trials_dir`.
+ */
+const HARBOR_REWARD_FILE_MESSAGES = [
+  "No reward file found at ",
+  "Reward file is empty at ",
+  "Failed to parse rewards from text file ",
+  "Failed to parse rewards from JSON file ",
+] as const;
+
+/**
  * The members Harbor 0.21 fills with the machine it ran on (`TrialResult`, `TrialConfig`):
  * `trial_uri` is the trial directory as an absolute `file:` URI, `exception_traceback` is a stack
  * trace of install paths, and `trials_dir` and the `path` of a local task are absolute when Harbor
- * was given an absolute path. The last two are kept when relative.
+ * was given an absolute path. A reward-file error's `exception_message` names the reward file
+ * under `trials_dir`, so it is absolute when `trials_dir` is (#5289); its `exception_type` stays.
+ * The last three are kept when relative.
  */
 function isHarborHostPathMember(key: string, parentKey: string | undefined, valueText: string): boolean {
   if (key === "trial_uri" || key === "exception_traceback") return true;
-  if (key !== "trials_dir" && !(key === "path" && (parentKey === "task" || parentKey === "task_id"))) return false;
+  const pathValued = key === "trials_dir"
+    || (key === "path" && (parentKey === "task" || parentKey === "task_id"))
+    || (key === "exception_message" && parentKey === "exception_info");
+  if (!pathValued) return false;
   const value: unknown = JSON.parse(valueText);
+  if (typeof value !== "string") return false;
   // `win32` reads `/x`, `\x`, `C:\x` and `C:/x` as absolute: each platform Harbor runs on.
-  return typeof value === "string" && win32.isAbsolute(value);
+  if (key !== "exception_message") return win32.isAbsolute(value);
+  return HARBOR_REWARD_FILE_MESSAGES.some((start) => value.startsWith(start) && win32.isAbsolute(value.slice(start.length)));
+}
+
+/**
+ * The settings through which a Harbor run passes credentials to the agent, the environment and
+ * the verifier: `kwargs` and `env` (agent, environment and verifier), `mcp_servers`, and
+ * `headers` wherever they appear. These are the four `prune.mjs` requires to be empty.
+ */
+const HARBOR_SETTINGS = new Set(["kwargs", "env", "mcp_servers", "headers"]);
+
+/**
+ * The `TrialConfig` fields whose value is a path on the machine that ran Harbor, by Harbor 0.21's
+ * own model (`harbor/models/trial/config.py`), with `[]` for any array index. In a trial
+ * `result.json` they sit under `config`.
+ */
+const HARBOR_HOST_PATH_FIELDS = new Set([
+  "environment.mounts[].source",
+  "environment.extra_docker_compose[]",
+  "extra_instruction_paths[]",
+  "agent.skills[]",
+  "agent.load_trajectory",
+  "task.download_dir",
+  "source_trial.path",
+]);
+
+/** A home directory on Linux (`/home/<name>`, `/root`), macOS (`/Users/<name>`) or Windows
+ * (`C:\Users\<name>`, `C:/Users/<name>`), wherever it sits in a string. */
+const HOME_DIRECTORY = /[\\/](?:home|Users)[\\/][^\\/\s"'`]+|(?<![\w.-])\/root(?![\w.-])/iu;
+/** A `file:` URI, however its path is spelled or percent-encoded. */
+const FILE_URI = /(?<![a-z0-9+.-])file:\//iu;
+/** `prune.mjs`'s credential-shaped name, widened to the names Harbor itself treats as sensitive
+ * (`KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|AUTH`, `harbor/utils/env.py`). */
+const CREDENTIAL_NAME = /key|secret|token|passw(?:or)?d|credential|auth|bearer/iu;
+/** Harbor's placeholder for a value it reads from the host's environment: it names the variable,
+ * not the value. A placeholder with a default (`${NAME:-value}`) carries the default, so it is
+ * not one of these. */
+const HARBOR_ENV_PLACEHOLDER = /^\$\{[^}:]+\}$/u;
+/** Credentials by their shape, wherever they appear. The first three are `prune.mjs`'s, with
+ * `sk-` held to the start of a word so that a name ending in `task-` or `disk-` is not one. */
+const CREDENTIAL_TEXT: readonly (readonly [RegExp, string])[] = [
+  [/(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{6,}/u, "a key-shaped string"],
+  [/bearer\s+\S/iu, "a bearer credential"],
+  [/[a-z][a-z0-9+.-]*:\/\/[^/\s?#@]*@/iu, "a URL carrying credentials"],
+  [new RegExp(`[?&;][^=&#\\s]*(?:${CREDENTIAL_NAME.source})[^=&#\\s]*=[^&#\\s]`, "iu"), "a URL carrying credentials"],
+  [/\*{4}/u, "a credential Harbor redacted to its first four and last three characters"],
+];
+
+/** A run of 20 or more letters, digits, `_` and `-` that mixes upper case, lower case and digits:
+ * how most API keys and access tokens are spelled, and no setting name or model id is. */
+function tokenShaped(text: string): boolean {
+  return (text.match(/[A-Za-z0-9_-]{20,}/gu) ?? []).some((run) => /[A-Z]/u.test(run) && /[a-z]/u.test(run) && /[0-9]/u.test(run));
+}
+
+interface HostPath {
+  readonly what: string;
+  readonly path: string;
+}
+
+/** Where a string sits in a trial record: the settings and the credential-shaped name it is under. */
+interface Within {
+  readonly settings: boolean;
+  readonly env: boolean;
+  readonly credentialName: boolean;
+}
+
+/**
+ * Why one key or string of a carried trial record cannot be published, or nothing. `shape` is
+ * its field with every array index written `[]`; a key is checked by its text alone. Paths are
+ * shown in the reason; a credential never is.
+ */
+function trialRecordStringFinding(
+  text: string,
+  thisMachine: readonly HostPath[],
+  shape: string | undefined,
+  within: Within,
+): string | undefined {
+  for (const { what, path } of thisMachine) {
+    if (text.includes(path)) return `names ${what} (${path})`;
+  }
+  const home = HOME_DIRECTORY.exec(text);
+  if (home !== null) return `names a home directory (${home[0]})`;
+  if (FILE_URI.test(text)) return "holds a file: URI";
+  if (shape !== undefined) {
+    if (HARBOR_HOST_PATH_FIELDS.has(shape.replace(/^config\./u, "")) && win32.isAbsolute(text)) {
+      return `names a path on the machine that ran Harbor (${text})`;
+    }
+  }
+  for (const [pattern, what] of CREDENTIAL_TEXT) {
+    if (pattern.test(text)) return `holds ${what}`;
+  }
+  if (shape === undefined || HARBOR_ENV_PLACEHOLDER.test(text)) return undefined;
+  if (within.env) return "holds an env value other than Harbor's ${NAME} placeholder, which can be a credential";
+  if (within.credentialName && text !== "") return "holds a value under a credential-shaped name";
+  if (within.settings && tokenShaped(text)) return "holds a token-shaped string, which can be a credential";
+  return undefined;
+}
+
+/** The first key or string of a carried trial record that cannot be published, by its field. */
+function trialRecordFinding(
+  value: unknown,
+  thisMachine: readonly HostPath[],
+  field = "",
+  shape = "",
+  within: Within = { settings: false, env: false, credentialName: false },
+): { readonly field: string; readonly reason: string } | undefined {
+  if (typeof value === "string") {
+    const reason = trialRecordStringFinding(value, thisMachine, shape, within);
+    return reason === undefined ? undefined : { field, reason };
+  }
+  if (Array.isArray(value)) {
+    for (const [index, entry] of value.entries()) {
+      const found = trialRecordFinding(entry, thisMachine, `${field}[${index}]`, `${shape}[]`, within);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (typeof value !== "object" || value === null) return undefined;
+  for (const [key, entry] of Object.entries(value)) {
+    const memberField = field === "" ? key : `${field}.${key}`;
+    const reason = trialRecordStringFinding(key, thisMachine, undefined, within);
+    if (reason !== undefined) return { field: `the name of ${memberField}`, reason };
+    const found = trialRecordFinding(entry, thisMachine, memberField, shape === "" ? key : `${shape}.${key}`, {
+      settings: within.settings || HARBOR_SETTINGS.has(key),
+      env: within.env || key === "env",
+      credentialName: within.credentialName || CREDENTIAL_NAME.test(key),
+    });
+    if (found !== undefined) return found;
+  }
+  return undefined;
 }
 
 /**
@@ -525,19 +673,42 @@ function withoutParsedMembers(
 }
 
 /**
- * What a Harbor import carries of one evidence file it read (#5266). Applied to every file a
- * `run import --from harbor` reads, with the jobs directory it was given.
+ * What a Harbor import carries of one evidence file it read (#5266, #5289). Applied to every file
+ * a `run import --from harbor` reads, with the jobs directory it was given.
  *
  * Everything carried is sealed and published with the claim. From a trial's `result.json` and
  * `config.json` the reader removes the members `isHarborHostPathMember` names, character by
  * character, so every other byte is what Harbor wrote, and it holds the edit to that by parsing
- * the result. Then it refuses a trial record that still names the jobs directory or the home
- * directory, naming the file: Harbor has other settings that can hold a path (a bind mount, an
- * instruction file), and a path this reader does not know to remove is refused, not published.
- * Every other file is carried as read.
+ * the result.
+ *
+ * Then it refuses the trial record, naming the file and the field, when any key or string left in
+ * it (after JSON unescaping):
+ * - contains the jobs directory (as given or resolved) or the home directory of the machine
+ *   running the import;
+ * - names a home directory of any machine: `/home/<name>`, `/Users/<name>` or a Windows
+ *   `\Users\<name>` or `/Users/<name>` anywhere in the string, or a path that starts at `/root`;
+ * - holds a `file:` URI;
+ * - is an absolute path in a field that Harbor's model defines as a path on the machine that ran
+ *   it (`HARBOR_HOST_PATH_FIELDS`);
+ * - is an `env` value other than Harbor's `${NAME}` placeholder;
+ * - is a non-empty value, other than that placeholder, under a credential-shaped name
+ *   (`CREDENTIAL_NAME`) at any depth;
+ * - holds a key-shaped `sk-` string, a bearer value, a URL with a user name or password or with a
+ *   credential-shaped query parameter, or Harbor's `****` redaction (`CREDENTIAL_TEXT`);
+ * - is token-shaped (`tokenShaped`) inside `kwargs`, `env`, `mcp_servers` or `headers`.
+ * These are the rules `test/fixtures/harbor-0.21-jobs-terminal-bench-2-1/prune.mjs` made the
+ * committed records under, less two that a claimant's run cannot meet: `prune.mjs` refuses every
+ * absolute path, where a trial record names container paths (`/app`, `/tmp`, `/opt`), and every
+ * non-empty `kwargs`, `mcp_servers` or `headers`, where those hold the agent's settings.
+ *
+ * Not detected: an absolute path of another machine outside a home directory and outside
+ * those fields (`/srv/data` in an agent setting or an exception message), a home directory
+ * written as `~name` or percent-encoded outside a `file:` URI, and a credential with none of
+ * these shapes under an ordinary name outside `env` (a lowercase hex key in `kwargs`). Every
+ * other file is carried as read and is not checked.
  */
 export function harborCarriedEvidence(jobsDir: string): CarriedEvidence {
-  const hostPaths: { readonly what: string; readonly path: string }[] = [];
+  const hostPaths: HostPath[] = [];
   const known = new Set<string>();
   const add = (what: string, path: string) => {
     // The filesystem root would match every path.
@@ -577,17 +748,18 @@ export function harborCarriedEvidence(jobsDir: string): CarriedEvidence {
     )) {
       cannotRemove("removing them would change more than those fields");
     }
-    for (const { what, path } of hostPaths) {
-      if (carried.includes(path) || carried.includes(JSON.stringify(path).slice(1, -1))) {
-        refuse(
-          "validation",
-          file.path,
-          `Harbor trial file ${file.path} names ${what} (${path}). It would be carried as `
-            + `${file.name} and published with the claim, so nothing was imported. run import `
-            + "removes trial_uri, exception_traceback, and an absolute trials_dir or task path from "
-            + "a trial's result.json and config.json, and this path is in another field of the file.",
-        );
-      }
+    const finding = trialRecordFinding(JSON.parse(carried.replace(/^﻿/u, "")), hostPaths);
+    if (finding !== undefined) {
+      refuse(
+        "validation",
+        file.path,
+        `Harbor trial file ${file.path}, at ${finding.field}, ${finding.reason}. It would be `
+          + `carried as ${file.name} and published with the claim, so nothing was imported. run `
+          + "import removes trial_uri, exception_traceback, an absolute trials_dir or task path, and "
+          + "a reward-file error message that names an absolute path from a trial's result.json and "
+          + "config.json, and refuses any other host path or credential in them. To import this "
+          + "run, run its trials again without the setting or input that put it there.",
+      );
     }
     return carried === text ? file.bytes : new TextEncoder().encode(carried);
   };
