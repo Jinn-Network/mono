@@ -48,6 +48,7 @@ import {
 import { requireRunState, writeRunState } from "../run/state.js";
 import type { OperationContext } from "./context.js";
 import { operateAsync } from "./operate-async.js";
+import { timestampAfter } from "./publication-report-timestamp.js";
 import type { OperationResult } from "./result.js";
 
 export interface PublicationConfigureInput {
@@ -372,28 +373,40 @@ export function publicationRegister(
       const runBytes = getSealedBytes(context.workspaceDir, lockedRunSha256);
 
       const postHoc = state.closedAt !== undefined;
-      const timestamp = publication.registration.announcedAt ?? context.clock();
+      const clockAt = publication.registration.announcedAt ?? context.clock();
+      let timestamp = clockAt;
       publication = { ...publication, mode: postHoc ? "local" : "prospective" };
-      if (publication.registration.state === "not-started") {
-        publication = { ...publication, registration: { ...publication.registration, state: "in-progress", announcedAt: timestamp, postHoc } };
-        state = {
-          ...state,
-          publication,
-        };
-        writeRunState(context.workspaceDir, input.draftId, state);
-      }
-      const members = buildRegistrationClosure(context.workspaceDir, runBytes, lockedRunSha256, timestamp);
+      // Built here so a closure that cannot be registered is refused before the stage freezes a time.
+      let members = buildRegistrationClosure(context.workspaceDir, runBytes, lockedRunSha256, timestamp);
       if (members.some((member) => "kind" in member && member.authority.mode === "origin-reference") && deps.verifyOrigin === undefined) {
         refuse("record-integrity", `runs.${input.draftId}.publication.origin`, "foreign registration dependencies require an injected exact origin verifier");
       }
-      const plan: PublicationPlan = {
-        id: `benchmark-registration:${input.draftId}:${lockedRunSha256}`,
-        stages: [{ stage: "registration", members }],
-      };
       let receipt: { sequence: string; entryDigest: `sha256:${string}` } | undefined;
       const announcement = createDiscoverySourceAnnouncementPort({ writer: source.writer });
       await withWorkspacePublicationSourceLock(context.workspaceDir, async () => {
         await source.writer.recover();
+        // The stage time is frozen here, under the source lock, strictly after the head served now
+        // and in the same lock hold as every registration announcement, not when the clock was read
+        // (#5347). The writer refuses an append that does not strictly advance the served head and
+        // a retry replays the frozen time, so a time frozen outside the lock, then passed by a head
+        // the heartbeat re-signed before it saw this stage `in-progress`, could never be announced.
+        // Under the lock the heartbeat either re-signed before the freeze, which the frozen time
+        // then passes, or sees this stage `in-progress` and withholds.
+        if (publication.registration.state === "not-started") {
+          timestamp = timestampAfter(clockAt, (await source.head.getExact())?.issuedAt, "publication.registration.announcedAt");
+          publication = { ...publication, registration: { ...publication.registration, state: "in-progress", announcedAt: timestamp, postHoc } };
+          state = {
+            ...state,
+            publication,
+          };
+          writeRunState(context.workspaceDir, input.draftId, state);
+          // The same closure, its announcements timed from the frozen time.
+          members = buildRegistrationClosure(context.workspaceDir, runBytes, lockedRunSha256, timestamp);
+        }
+        const plan: PublicationPlan = {
+          id: `benchmark-registration:${input.draftId}:${lockedRunSha256}`,
+          stages: [{ stage: "registration", members }],
+        };
         await executePublicationPlan(plan, {
           objects: source.artifactStore,
           journal: createWorkspacePublicationJournal(context.workspaceDir, input.draftId),
