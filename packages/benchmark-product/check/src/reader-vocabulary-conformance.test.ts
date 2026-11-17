@@ -52,8 +52,7 @@
  * that word.
  *
  * Violations already on `next` are recorded in `KNOWN_VIOLATIONS`, each with the open issue that
- * owns it (`OWNERS`), or `NO_OWNING_ISSUE` where no issue covers it yet, so the ledger says so
- * instead of borrowing an issue that does not. The ledger must equal what the surfaces carry
+ * owns it (`OWNERS`). The ledger must equal what the surfaces carry
  * exactly: a new violation fails, and so does a recorded one that has gone, so the list cannot
  * outlive the strings it describes. To regenerate it after a change that is meant:
  *
@@ -1013,7 +1012,7 @@ function ledgerDifferences(
     const key = ledgerKey(entry);
     if (seen.has(key)) diffs.push(`recorded twice: ${key}`);
     seen.add(key);
-    if (entry.owner !== NO_OWNING_ISSUE && !Object.hasOwn(OWNERS, entry.owner)) {
+    if (!Object.hasOwn(OWNERS, entry.owner)) {
       diffs.push(`owner of ${key} is #${String(entry.owner)}, which OWNERS does not list`);
     }
     if (entry.units.length === 0) diffs.push(`no units recorded for ${key}`);
@@ -1032,18 +1031,19 @@ const REPORT_VIOLATION_OWNER = 3862 as const;
  */
 const READER_PROSE_AND_REFUSAL_OWNER = 5251 as const;
 
+/** The `Timestamps` and `Timestamp coverage` blocks name each covered record by its claim anchor subject, so a reader meets "matrix". */
+const TIMESTAMP_SUBJECT_OWNER = 5278 as const;
+
 /** The open issues on Jinn-Network/mono that own recorded violations: each either retires its
  * entries or rules them out of section 5's reach, and its change updates this ledger. */
 const OWNERS = {
   [REPORT_VIOLATION_OWNER]: "Report page vocabulary",
+  [TIMESTAMP_SUBJECT_OWNER]: "the subject label in the reader's timestamp blocks",
   [READER_PROSE_AND_REFUSAL_OWNER]: "the reader tool's refusal lines and recomputed-checks caveat",
 } as const;
 
-/** A placeholder, not an owner: the violation is real and no open issue covers it yet. */
-const NO_OWNING_ISSUE = "no owning issue" as const;
-
 interface KnownViolation extends Violation {
-  readonly owner: keyof typeof OWNERS | typeof NO_OWNING_ISSUE;
+  readonly owner: keyof typeof OWNERS;
 }
 
 const REPORT_ASSET_SET: ReadonlySet<string> = new Set(REPORT_ASSETS);
@@ -1117,8 +1117,7 @@ function ledger(violations: readonly Violation[]): Record<string, readonly strin
 /**
  * The observed ledger as source for `KNOWN_VIOLATIONS`, keeping each recorded owner. An entry the
  * ledger does not have yet prints `OWNER_REQUIRED`, which is defined nowhere, so a regenerated
- * ledger does not load until someone names the issue that owns the new violation, or writes
- * `NO_OWNING_ISSUE` and says so where the change is reviewed.
+ * ledger does not load until someone names the issue that owns the new violation.
  */
 function printLedger(observed: readonly Violation[]): string {
   const owners = new Map(KNOWN_VIOLATIONS.map((known) => [ledgerKey(known), known.owner]));
@@ -1129,7 +1128,7 @@ function printLedger(observed: readonly Violation[]): string {
       ? "REPORT_VIOLATION_OWNER"
       : owner === READER_PROSE_AND_REFUSAL_OWNER
         ? "READER_PROSE_AND_REFUSAL_OWNER"
-        : owner === NO_OWNING_ISSUE ? "NO_OWNING_ISSUE" : "OWNER_REQUIRED";
+        : owner === TIMESTAMP_SUBJECT_OWNER ? "TIMESTAMP_SUBJECT_OWNER" : "OWNER_REQUIRED";
     return [
       "  {",
       `    surface: ${JSON.stringify(violation.surface)}, rule: ${JSON.stringify(violation.rule)}, name: ${JSON.stringify(violation.name)},`,
@@ -1501,13 +1500,11 @@ const KNOWN_VIOLATIONS: readonly KnownViolation[] = [
       "colophon-check: claim package anchors is not the exact projection of verified facts",
     ],
   },
-  // PLACEHOLDER, no owning issue. The `Timestamps` and `Timestamp coverage` blocks name each
-  // covered record by its claim anchor subject (`lock`, `matrix`), so a reader meets "matrix". No
-  // section 4.2 row rules that label, #5251 covers the refusal lines and the caveat only, and #5241
-  // the operator surfaces only.
+  // Owned by #5278. The `Timestamps` and `Timestamp coverage` blocks name each covered record by
+  // its claim anchor subject (`lock`, `matrix`), so a reader meets "matrix".
   {
     surface: "colophon-check stdout", rule: "hidden term", name: "Matrix",
-    owner: NO_OWNING_ISSUE,
+    owner: TIMESTAMP_SUBJECT_OWNER,
     units: [
       "matrix timestamp proof",
       "matrix: none — no timestamp proof was carried and none was promised",
