@@ -157,22 +157,23 @@ function initArgv(h: Harness, extra: string[] = []): string[] {
 }
 
 describe('ceremony CLI registration', () => {
-  it('is a registered verb whose help documents init, join, and show', async () => {
+  it('is a registered verb whose help documents init, join, rotate, and show', async () => {
     const io = captureIo();
     await runCli(['ceremony', '--help'], { writer: io.writer, exit: io.exit, stdoutIsTty: false });
     const help = io.writes.join('');
     expect(help).toContain('jinn ceremony init');
     expect(help).toContain('jinn ceremony join');
+    expect(help).toContain('jinn ceremony rotate');
     expect(help).toContain('jinn ceremony show');
     expect(io.exits).toEqual([]);
   });
 
   it('refuses an unknown subcommand', async () => {
     const h = harness();
-    const { ctx, io } = context({ argv: ['rotate'], home: h.home });
+    const { ctx, io } = context({ argv: ['rekey'], home: h.home });
     await createCeremonyCommand(h.deps).run(ctx);
     expect(lastEnvelope(io.writes).code).toBe('invalid_invocation');
-    expect(String(lastEnvelope(io.writes).message)).toContain('`init`, `join`, or `show`');
+    expect(String(lastEnvelope(io.writes).message)).toContain('`init`, `join`, `rotate`, or `show`');
   });
 });
 
