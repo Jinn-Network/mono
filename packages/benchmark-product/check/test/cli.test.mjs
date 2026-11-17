@@ -341,13 +341,13 @@ test("the default human surface discloses every carried anchor and every subject
   // Supplied-but-unverifying is disclosed as itself, never as "no trust anchors supplied".
   assert.match(output, /lock timestamp proof · authority-time · present · 2026-02-02T12:00:00Z/);
   assert.match(output, /time source not evaluated: the trust anchors you supplied do not verify this timestamp proof/);
-  assert.match(output, /matrix timestamp proof · chain-time · verified · block 880017/);
+  assert.match(output, /the runs timestamp proof · chain-time · verified · block 880017/);
   assert.match(output, /time source evaluated against trust anchors you supplied — 2026-08-17T12:00:00Z/);
   // An authority-time proof whose evaluated instant is the genTime already on the head line does
   // not repeat it.
   assert.doesNotMatch(output, /supplied — 2026-01-01T12:00:00Z/);
   assert.match(output, new RegExp(`record ${"1".repeat(64)}`));
-  assert.match(output, /Timestamp coverage\n {2}lock: timestamped\n {2}matrix: timestamped/);
+  assert.match(output, /Timestamp coverage\n {2}lock: timestamped\n {2}the runs: timestamped/);
   assert.match(output, /A timestamp proof \(anchor\) dates the bytes it covers and says nothing/);
   assert.match(output, /not\s+that results were produced after it/);
 });
@@ -375,7 +375,7 @@ test("the default human surface names a missing and a promised-but-missing times
   assert.match(output, /no timestamp proofs carried/);
   assert.match(output, /lock: promised but missing — this run promised rfc3161-tsa\/v1 and the bundle carries no matching timestamp proof/);
   assert.doesNotMatch(output, /jinn\.network/);
-  assert.match(output, /matrix: none — no timestamp proof was carried and none was promised/);
+  assert.match(output, /the runs: none — no timestamp proof was carried and none was promised/);
 });
 
 test("a pending anchor prints its own status and reason, never a completed one's", async () => {
@@ -439,6 +439,51 @@ test("accepted anchor reasons alias raw identifiers for humans while JSON keeps 
   const machine = await runVerifierCli(["bundle", "--json"], { verify: async () => verified(report) });
   assert.equal(machine.exitCode, 0);
   assert.equal(JSON.parse(machine.stdout).anchors.anchors[0].reason, reason);
+});
+
+// Spec section 4.2, v1.15 (issue #5278): the human lines name the record `matrix.json` as the runs,
+// the section 5 name, while --json and the sealed claim keep the raw subject `matrix`.
+test("the timestamp blocks name the matrix subject the runs while --json keeps matrix", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  /** @type {import("../dist/index.js").PublicBundleVerificationResult} */
+  const report = {
+    format: "benchmark-product-public-bundle/6",
+    identity: "a".repeat(64),
+    checks: V6_CHECKS,
+    ...V6_IDENTITIES,
+    anchors: {
+      anchors: [{
+        recordSha256: "3".repeat(64),
+        status: "pending",
+        provider: "https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1",
+        subject: "matrix",
+        timeBasis: "chain-time",
+        trustMaterial: "none",
+      }],
+      subjects: [
+        { subject: "lock", outcome: "absent" },
+        {
+          subject: "matrix",
+          outcome: "declared-but-absent",
+          declaredProfiles: ["https://spec.jinn.network/trust/anchor-profiles/opentimestamps/v1"],
+        },
+      ],
+      invalid: [],
+    },
+  };
+
+  const human = await runVerifierCli(["bundle"], { verify: async () => verified(report) });
+  assert.equal(human.exitCode, 0);
+  assert.match(human.stdout, /^ {2}the runs timestamp proof · chain-time · pending$/m);
+  assert.match(human.stdout, /^ {2}the runs: promised but missing — this run promised opentimestamps\/v1 /m);
+  assert.doesNotMatch(human.stdout, /^ {2}matrix\b/m);
+  assert.doesNotMatch(human.stdout, /\bmatrix (?:timestamp|:)/i);
+
+  const machine = await runVerifierCli(["bundle", "--json"], { verify: async () => verified(report) });
+  assert.equal(machine.exitCode, 0);
+  const anchors = JSON.parse(machine.stdout).anchors;
+  assert.equal(anchors.anchors[0].subject, "matrix");
+  assert.deepEqual(anchors.subjects.map((/** @type {{ subject: string }} */ entry) => entry.subject), ["lock", "matrix"]);
 });
 
 test("an unanchored bundle's human surface is unchanged — no anchor section at all", async () => {

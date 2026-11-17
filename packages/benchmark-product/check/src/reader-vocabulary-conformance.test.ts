@@ -1038,14 +1038,10 @@ const REPORT_VIOLATION_OWNER = 3862 as const;
  */
 const READER_PROSE_AND_REFUSAL_OWNER = 5251 as const;
 
-/** The `Timestamps` and `Timestamp coverage` blocks name each covered record by its claim anchor subject, so a reader meets "matrix". */
-const TIMESTAMP_SUBJECT_OWNER = 5278 as const;
-
 /** The issues on Jinn-Network/mono that own recorded violations: each either retires its entries
  * or rules them out of section 5's reach, and its change updates this ledger. */
 const OWNERS = {
   [REPORT_VIOLATION_OWNER]: "Report page vocabulary",
-  [TIMESTAMP_SUBJECT_OWNER]: "the subject label in the reader's timestamp blocks",
   [READER_PROSE_AND_REFUSAL_OWNER]: "a field path a refusal line prints as written",
 } as const;
 
@@ -1135,7 +1131,7 @@ function printLedger(observed: readonly Violation[]): string {
       ? "REPORT_VIOLATION_OWNER"
       : owner === READER_PROSE_AND_REFUSAL_OWNER
         ? "READER_PROSE_AND_REFUSAL_OWNER"
-        : owner === TIMESTAMP_SUBJECT_OWNER ? "TIMESTAMP_SUBJECT_OWNER" : "OWNER_REQUIRED";
+        : "OWNER_REQUIRED";
     return [
       "  {",
       `    surface: ${JSON.stringify(violation.surface)}, rule: ${JSON.stringify(violation.rule)}, name: ${JSON.stringify(violation.name)},`,
@@ -1432,17 +1428,6 @@ const KNOWN_VIOLATIONS: readonly KnownViolation[] = [
     owner: READER_PROSE_AND_REFUSAL_OWNER,
     units: [
       "colophon-check: the claim's field anchors does not agree with the records here",
-    ],
-  },
-  // Owned by #5278. The `Timestamps` and `Timestamp coverage` blocks name each covered record by
-  // its claim anchor subject (`lock`, `matrix`), so a reader meets "matrix".
-  {
-    surface: "colophon-check stdout", rule: "hidden term", name: "Matrix",
-    owner: TIMESTAMP_SUBJECT_OWNER,
-    units: [
-      "matrix timestamp proof",
-      "matrix: none — no timestamp proof was carried and none was promised",
-      "matrix: timestamped",
     ],
   },
   {

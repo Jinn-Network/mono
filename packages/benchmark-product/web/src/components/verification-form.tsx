@@ -28,7 +28,8 @@ interface VerificationSubject {
  * The reader tool's names for the timestamp-proof block (reader-facing vocabulary spec section 4.2,
  * v1.14; issue #5241): the claimant who reads this card next runs the reader on the same records.
  * This package cannot import the reader, so these copy it, and `verification-form.test.tsx` fails
- * when the reader's source stops printing them. The raw outcome values stay in the result.
+ * when the reader's source stops printing them. The raw outcome values stay in the result, and so
+ * does the raw subject `matrix`, which the reader names *the runs* (v1.15; issue #5278).
  */
 export const TIMESTAMP_PROOF_LABELS = {
   heading: "Timestamps",
@@ -40,7 +41,15 @@ export const TIMESTAMP_PROOF_LABELS = {
     absent: "none",
     "declared-but-absent": "promised but missing",
   } satisfies Record<TimestampCoverageOutcome, string>,
+  subjects: { lock: "lock", matrix: "the runs" },
 } as const;
+
+/** The reader's name for the record a proof covers; a subject the reader does not name prints as written. */
+function timestampSubjectName(subject: string): string {
+  return Object.hasOwn(TIMESTAMP_PROOF_LABELS.subjects, subject)
+    ? TIMESTAMP_PROOF_LABELS.subjects[subject as keyof typeof TIMESTAMP_PROOF_LABELS.subjects]
+    : subject;
+}
 
 function isTimestampCoverageOutcome(value: unknown): value is TimestampCoverageOutcome {
   return typeof value === "string" && Object.hasOwn(TIMESTAMP_PROOF_LABELS.outcomes, value);
@@ -106,11 +115,11 @@ export function VerificationForm({ action, draftId }: VerificationFormProps) {
           {result.anchors.anchors.length === 0
             ? <p>{TIMESTAMP_PROOF_LABELS.noneCarried}</p>
             : <ul className="list-disc pl-5">{result.anchors.anchors.map((anchor) => (
-              <li key={anchor.recordSha256}>{anchor.subject ?? "unresolved"} {TIMESTAMP_PROOF_LABELS.proof} · {anchor.status} · {anchor.recordSha256}</li>
+              <li key={anchor.recordSha256}>{anchor.subject === undefined ? "unresolved" : timestampSubjectName(anchor.subject)} {TIMESTAMP_PROOF_LABELS.proof} · {anchor.status} · {anchor.recordSha256}</li>
             ))}</ul>}
           <p className="mt-3 font-medium">{TIMESTAMP_PROOF_LABELS.coverageHeading}</p>
           <ul className="list-disc pl-5">{result.anchors.subjects.map((subject) => (
-            <li key={subject.subject}>{subject.subject}: {TIMESTAMP_PROOF_LABELS.outcomes[subject.outcome]}{subject.declaredProfiles !== undefined ? ` (${subject.declaredProfiles.map(presentProtocolText).join(", ")})` : ""}</li>
+            <li key={subject.subject}>{timestampSubjectName(subject.subject)}: {TIMESTAMP_PROOF_LABELS.outcomes[subject.outcome]}{subject.declaredProfiles !== undefined ? ` (${subject.declaredProfiles.map(presentProtocolText).join(", ")})` : ""}</li>
           ))}</ul>
         </> : null}
         {result.anchoringWindow !== undefined
