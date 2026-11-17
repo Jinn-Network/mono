@@ -36,7 +36,9 @@
  *   `READER_RENDERS`), and stderr (every refusal the characterization suite reaches, pinned in
  *   `characterization/testing/checker-outputs.expected.json` and held equal to the real CLI by
  *   `checker-outputs.test.ts`, plus the operational refusals and the two notes). Every flag the
- *   usage text lists is mapped to the rendering that covers its output (`CLI_FLAGS`).
+ *   usage text lists is mapped to the rendering that covers its output (`CLI_FLAGS`). Every other
+ *   refusal template the reader's modules write is read from their source and ruled in the last
+ *   section of this file (#5299).
  *
  * Not covered: `--json` output (contract, spec section 2), the product CLI and web app (outside the
  * spec's section 1 scope; see the note on `REPORT_ASSETS` for section 4.2's v1.14 ruling on their
@@ -76,6 +78,7 @@ import { domainBindingProof, type VerifiedDomainBinding } from "./identity/domai
 import { BUNDLE_V10_FORMAT, SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
 import type { PublicBundleSigner } from "./signers.js";
 import { goldenInput } from "./testing/golden-asset-input.js";
+import { refusalTemplateInventory, type RefusalTemplate } from "./testing/refusal-templates.js";
 import type { PublicBundleVerificationResult, VerifiedPublicBundleSnapshot } from "./verify.js";
 
 // ---------------------------------------------------------------------------
@@ -2038,5 +2041,286 @@ describe("reader-facing strings", () => {
     const observed = await observedViolations();
     if (process.env["GLOSSARY_CONFORMANCE_PRINT"] === "1") console.log(printLedger(observed));
     expect(ledgerDifferences(observed, KNOWN_VIOLATIONS)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Refusal templates the characterization suite does not reach (#5299)
+// ---------------------------------------------------------------------------
+
+/**
+ * Spec section 4.2's *Refusal lines* row reaches every refusal the reader prints, but the stderr
+ * surface above reads only the refusals the characterization suite pins. `refusalTemplateInventory`
+ * reads every refusal template the reader's own modules write, from their source, and each message a
+ * template can produce is sent through the CLI's human path and scanned like any other stderr line.
+ * A template whose human line still carries a word section 5 hides or renames is either reworded by a
+ * rule in `humanRefusalDetail` (`READER_WORDING` in `cli.ts`) or recorded below with its reason, so a
+ * new template that carries one fails here until it is ruled. The same messages are run with
+ * `--json`, which must print each byte for byte (spec section 2: the `message` value is contract).
+ *
+ * To see the whole inventory, each template with its status and human line:
+ *
+ *   REFUSAL_INVENTORY_PRINT=1 yarn vitest run src/reader-vocabulary-conformance.test.ts -t "refusal templates" --reporter=verbose
+ *
+ * which also prints, for any template that carries a word and is not recorded, an entry to copy
+ * once its reason is named.
+ */
+const REFUSAL_REASONS = {
+  "field name":
+    "It names a field of a sealed record (`arms`, `conflicted`, `cellKey`, a Result Evaluation's `subject`) as written."
+    + " Section 4.2's Refusal lines row prints a field path as written, and section 2 makes field names contract.",
+  "printed pattern":
+    "It prints, as written, the pattern a sealed value must match (`^sha256:[0-9a-f]{64}$`), which shows the value's"
+    + " form rather than naming a concept.",
+  "signature check":
+    "`verify` here is a cryptographic check of a signature or a carried proof, not recomputing the bundle's checks:"
+    + " the sense section 4.2 keeps in `do not verify this timestamp proof`.",
+  "no reader name":
+    "Section 5 hides the noun and gives it no reader-facing name, and the line cannot say what failed without it.",
+  "screening instrument":
+    "It names the screening instrument, which the line must tell apart from the run judges: the reader refuses a"
+    + " bundle that reuses it as one (`the screening instrument is reused as a run judge configuration`), and calling"
+    + " it a judge would make that line say a judge was reused as a judge. Section 5 has no other name for it.",
+  unreachable:
+    "The refusing module states that an earlier check keeps every bundle from reaching it (a backstop or a type"
+    + " narrowing), so no reader meets the line.",
+} as const;
+
+interface RecordedRefusal {
+  readonly module: string;
+  readonly template: string;
+  /** What the human line still carries, as `<rule> · <name>`, sorted. */
+  readonly carries: readonly string[];
+  readonly reason: keyof typeof REFUSAL_REASONS;
+}
+
+const JUDGE = "second name · judge";
+const CONFIGURATION = "second name · configuration";
+const CONFLICTED = "second name · runs the judges disagreed on";
+
+/** Every refusal template whose human line still carries a word section 5 hides or renames. */
+const RECORDED_REFUSALS: readonly RecordedRefusal[] = [
+  {
+    module: "admission/screening-sample.ts",
+    template: "itemSha256s[${index}]: must match ^sha256:[0-9a-f]{64}$, got ${JSON.stringify(itemSha256)}",
+    carries: ["second name · fingerprint"], reason: "printed pattern",
+  },
+  {
+    module: "admission/verification.ts",
+    template: "screeningTable.screeningInstrumentSha256: instrument does not reseal to its table commitment",
+    carries: [JUDGE], reason: "screening instrument",
+  },
+  {
+    module: "admission/verification.ts",
+    template: "resolutions.${index}.reviews.${index}: Result Evaluation subjects or predicate are malformed",
+    carries: ["hidden term · subject"], reason: "field name",
+  },
+  {
+    module: "admission/verification.ts",
+    template: "replacementLedger.entries.${index}.reviews.${index}: Result Evaluation subjects or predicate are malformed",
+    carries: ["hidden term · subject"], reason: "field name",
+  },
+  { module: "assets.ts", template: "sealed Report: expected wilson@1's arms/conflicted shape", carries: [CONFIGURATION, CONFLICTED], reason: "field name" },
+  { module: "assets.ts", template: "sealed Report: conflicted facts are invalid", carries: [CONFLICTED], reason: "field name" },
+  { module: "assets.ts", template: "sealed Report: expected pairwise-disagreement@1's pairs/conflicted shape", carries: [CONFLICTED], reason: "field name" },
+  { module: "assets.ts", template: "stored claim package: expected wilson@1's arms/conflicted shape", carries: [CONFIGURATION, CONFLICTED], reason: "field name" },
+  { module: "assets.ts", template: "stored claim package: conflicted facts are invalid", carries: [CONFLICTED], reason: "field name" },
+  { module: "assets.ts", template: "stored claim package: expected pairwise-disagreement@1's pairs/conflicted shape", carries: [CONFLICTED], reason: "field name" },
+  // "The verifier's qualification-axis guard (issue #3245) makes it unreachable", says the comment above it.
+  {
+    module: "assets.ts",
+    template: "binary public assets require exactly one producer-verified admission/instrument projection",
+    carries: ["hidden term · projection", JUDGE], reason: "unreachable",
+  },
+  {
+    module: "identity/domain-binding.ts",
+    template: "the domain binding's signature does not verify under its own key",
+    carries: ["second name · recompute"], reason: "signature check",
+  },
+  {
+    module: "profile/anchor-claims.ts",
+    template: "the carried proof does not verify: ${verifyCarriedProof(record.provider, record.subject.digest.sha256, proofBytes).reason}",
+    carries: ["second name · recompute"], reason: "signature check",
+  },
+  {
+    module: "profile/claim-consistency.ts",
+    template: "sealed Run carries no complete supported evaluation assurance primitives",
+    carries: ["hidden term · assurance primitive"], reason: "no reader name",
+  },
+  { module: "profile/claim.ts", template: "claim package: Report results do not carry wilson@1's arms/conflicted shape", carries: [CONFIGURATION, CONFLICTED], reason: "field name" },
+  { module: "profile/claim.ts", template: "claim package: Report results do not carry binary-instrument@1's conflicted shape", carries: [CONFLICTED], reason: "field name" },
+  { module: "profile/claim.ts", template: "claim package: Report results do not carry pairwise-disagreement@1's pairs/conflicted shape", carries: [CONFLICTED], reason: "field name" },
+  {
+    module: "profile/claim.ts",
+    template: "claim package: the stated assurance primitives do not match what the sealed Run record carries — a claim stating primitives the sealed Run does not carry would be dishonest",
+    carries: ["hidden term · assurance primitive"], reason: "no reader name",
+  },
+  {
+    module: "verify.ts",
+    template: "verification/assembly.jsonl.cellKey contains duplicate identities",
+    carries: ["second name · run"], reason: "field name",
+  },
+  { module: "verify.ts", template: "the screening instrument is reused as a run judge arm", carries: [JUDGE], reason: "screening instrument" },
+  // Both say so in the comment above them: "Unreachable: … Kept as a type narrowing".
+  {
+    module: "verify.ts",
+    template: "binary public assets require exactly one producer-verified admission/instrument projection",
+    carries: ["hidden term · projection", JUDGE], reason: "unreachable",
+  },
+  {
+    module: "verify.ts",
+    template: "comparison public assets require the verifier-derived comparison projection",
+    carries: ["hidden term · projection"], reason: "unreachable",
+  },
+];
+
+/** One message a template can produce, as the reader's two outputs print it. */
+interface RefusalProbe {
+  readonly message: string;
+  /** The human stderr output. */
+  readonly human: string;
+  /** The `--json` output's `message` value, and what else that run printed. */
+  readonly json: string;
+  readonly jsonStderr: string;
+  readonly humanStdout: string;
+}
+
+type RefusalStatus = "clean" | "reworded" | "carries";
+
+interface InventoryLine {
+  readonly template: RefusalTemplate;
+  /** `clean`: no word section 5 hides or renames to begin with. `reworded`: a rule removes every
+   * one. `carries`: the human line still carries one, so the template must be recorded. */
+  readonly status: RefusalStatus;
+  readonly carries: readonly string[];
+  readonly probes: readonly RefusalProbe[];
+}
+
+async function probeRefusal(message: string): Promise<RefusalProbe> {
+  const verify = async (): Promise<never> => {
+    throw Object.assign(new Error(message), { code: "record-integrity" });
+  };
+  const human = await runVerifierCli(["bundle"], { verify });
+  const json = await runVerifierCli(["bundle", "--json"], { verify });
+  return {
+    message,
+    human: human.stderr,
+    humanStdout: human.stdout,
+    json: (JSON.parse(json.stdout) as { message: string }).message,
+    jsonStderr: json.stderr,
+  };
+}
+
+function findings(texts: readonly string[]): string[] {
+  return scan("colophon-check stderr", texts.map((raw) => ({ raw })))
+    .map((violation) => `${violation.rule} · ${violation.name}`)
+    .sort();
+}
+
+async function inventoryLine(template: RefusalTemplate): Promise<InventoryLine> {
+  const probes = await Promise.all(template.messages.map(probeRefusal));
+  const carries = findings(probes.map((probe) => probe.human));
+  const before = findings(template.messages.map((message) => `colophon-check: ${message}\n`));
+  return { template, status: carries.length > 0 ? "carries" : before.length > 0 ? "reworded" : "clean", carries, probes };
+}
+
+const REFUSAL_INVENTORY = refusalTemplateInventory();
+
+function refusalKey(module: string, template: string): string {
+  return `${module} · ${template}`;
+}
+
+function refusalLedgerDifferences(observed: readonly InventoryLine[], recorded: readonly RecordedRefusal[]): string[] {
+  const carrying = new Map(observed
+    .filter((line) => line.status === "carries")
+    .map((line) => [refusalKey(line.template.module, line.template.template), line.carries]));
+  const diffs: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of recorded) {
+    const key = refusalKey(entry.module, entry.template);
+    if (seen.has(key)) diffs.push(`recorded twice: ${key}`);
+    seen.add(key);
+    const carries = carrying.get(key);
+    if (carries === undefined) diffs.push(`stale recorded refusal (its line no longer carries a word, or the template is gone): ${key}`);
+    else if (JSON.stringify(carries) !== JSON.stringify([...entry.carries].sort())) {
+      diffs.push(`${key} carries ${JSON.stringify(carries)}, recorded as ${JSON.stringify(entry.carries)}`);
+    }
+  }
+  for (const [key, carries] of carrying) {
+    if (!seen.has(key)) diffs.push(`unruled refusal template (reword it in humanRefusalDetail or record its reason): ${key} carries ${JSON.stringify(carries)}`);
+  }
+  return diffs;
+}
+
+function printInventory(lines: readonly InventoryLine[]): string {
+  const recorded = new Map(RECORDED_REFUSALS.map((entry) => [refusalKey(entry.module, entry.template), entry.reason]));
+  const counts = { clean: 0, reworded: 0, carries: 0 };
+  const out: string[] = [];
+  for (const line of lines) {
+    counts[line.status] += 1;
+    const reason = recorded.get(refusalKey(line.template.module, line.template.template));
+    const status = line.status === "carries" ? `recorded (${reason ?? "REASON_REQUIRED"})` : line.status;
+    out.push(`${status}  ${line.template.module}:${line.template.line}  ${line.template.template}`);
+    if (line.status !== "clean") for (const probe of line.probes) out.push(`    ${probe.human.trimEnd()}`);
+  }
+  const unrecorded = lines.filter((line) => line.status === "carries" && !recorded.has(refusalKey(line.template.module, line.template.template)));
+  return [
+    `${lines.length} templates in ${REFUSAL_INVENTORY.modules.length} modules: ${counts.clean} clean, ${counts.reworded} reworded, ${counts.carries} recorded`,
+    ...out,
+    ...unrecorded.map((line) => `  { module: ${JSON.stringify(line.template.module)}, template: ${JSON.stringify(line.template.template)}, carries: ${JSON.stringify(line.carries)}, reason: REASON_REQUIRED },`),
+  ].join("\n");
+}
+
+describe("refusal templates the reader's modules write", () => {
+  const byTemplate = (module: string, template: string): RefusalTemplate | undefined =>
+    REFUSAL_INVENTORY.templates.find((entry) => entry.module === module && entry.template === template);
+
+  test("the walk reads the reader's modules and finds every kind of throw site", () => {
+    for (const module of ["cli.ts", "verify.ts", "manifest.ts", "anchor/check.ts", "admission/verification.ts", "profile/claim.ts"]) {
+      expect(REFUSAL_INVENTORY.modules, module).toContain(module);
+    }
+    expect(REFUSAL_INVENTORY.modules.some((module) => module.includes("test") || module.startsWith("testing/"))).toBe(false);
+    // `refuse(...)`.
+    expect(byTemplate("verify.ts", "verdict catalog does not match Matrix verdict closure")).toBeDefined();
+    // `new Error(...)`.
+    expect(byTemplate("profile/trust.ts", "report trust keyId must equal didKey")).toBeDefined();
+    // An error class this package declares, through its constructor.
+    expect(byTemplate("profile/anchor-claims.ts", "anchor covers ${record.subject.digest.sha256}, which is neither this bundle's sealed Run nor its sealed Matrix")).toBeDefined();
+    // A function that forwards its parameters, filled with what its caller passes.
+    expect(byTemplate("admission/verification.ts", "screeningTable.rows: v2 table must cover all 664 pool item digests in sorted order")).toBeDefined();
+    // One property of a parameter, filled from the object literal a caller passes.
+    expect(byTemplate("assets.ts", "sealed Report: expected exactly one subject (this product's single-Matrix Report shape)")).toBeDefined();
+    // A template behind the wrapper that catches it.
+    expect(byTemplate("admission/verification.ts", "screeningTable.rows: v2 table must cover all 664 pool item digests in sorted order")?.messages)
+      .toContain("binary admission replay failed: screeningTable.rows: v2 table must cover all 664 pool item digests in sorted order");
+  });
+
+  test("every template whose line carries a word section 5 hides or renames is reworded by a rule or recorded with a reason", async () => {
+    const lines = await Promise.all(REFUSAL_INVENTORY.templates.map(inventoryLine));
+    if (process.env["REFUSAL_INVENTORY_PRINT"] === "1") console.log(printInventory(lines));
+    expect(refusalLedgerDifferences(lines, RECORDED_REFUSALS)).toEqual([]);
+    for (const entry of RECORDED_REFUSALS) expect(REFUSAL_REASONS[entry.reason], entry.template).toBeDefined();
+  });
+
+  test("a new template that carries a hidden term fails until it is ruled", async () => {
+    const lines = await Promise.all(REFUSAL_INVENTORY.templates.map(inventoryLine));
+    const added = await inventoryLine({
+      module: "verify.ts", line: 1, template: "the Matrix is not sealed", wraps: false, messages: ["the Matrix is not sealed"],
+    });
+    expect(added.status).toBe("carries");
+    expect(refusalLedgerDifferences([...lines, added], RECORDED_REFUSALS))
+      .toEqual(['unruled refusal template (reword it in humanRefusalDetail or record its reason): verify.ts · the Matrix is not sealed carries ["hidden term · Matrix"]']);
+  });
+
+  test("--json prints every message byte for byte, and the human line is one stderr line", async () => {
+    for (const template of REFUSAL_INVENTORY.templates) {
+      for (const message of template.messages) {
+        const probe = await probeRefusal(message);
+        expect(probe.json, message).toBe(message);
+        expect(probe.jsonStderr, message).toBe("");
+        expect(probe.humanStdout, message).toBe("");
+        expect(probe.human, message).toMatch(/^colophon-check: [^\n]*\n$/u);
+      }
+    }
   });
 });
