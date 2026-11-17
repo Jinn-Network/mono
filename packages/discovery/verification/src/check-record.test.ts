@@ -918,7 +918,7 @@ describe("trust binding", () => {
       blockHash: statement.blockHash,
       verifier: statement.verifier,
       envelopeBytes: sealDsseEnvelope({
-        payloadBytes: encoder.encode(JSON.stringify(statement)),
+        payloadBytes: canonicalJsonBytes(statement),
         payloadType: DSSE_PAYLOAD_TYPE,
         signatures: [{ signature: Uint8Array.of(1), keyid: "did:key:zWitness" }],
       }),
@@ -1142,7 +1142,7 @@ describe("trust binding", () => {
       const reportWith = (readContract: () => Promise<unknown>) => checkRecord(signedEvaluation(key), {
         trust: {
           bindingResolver: realResolver({ key, verifyHostedCeremony: async () => true, safe }),
-          witnessVerifier: createWitnessVerifier({ archiveClient: { readContract } }),
+          witnessVerifier: createWitnessVerifier({ archiveClient: { getChainId: async () => 84532, readContract } }),
         },
       });
 
