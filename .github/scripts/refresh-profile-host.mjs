@@ -375,16 +375,37 @@ export function inspectProvenance(hostDir, workflowPath) {
 }
 
 /**
- * Refuse to serve an older source over a newer one. A canonical marker names the commit of
- * the host's last content change; when that is another commit than this run's, GitHub's
- * compare must show it to be an ancestor of this run's source. A later commit is refused,
- * and an order that cannot be told fails closed. A missing or malformed marker names no
- * commit worth ordering and is left to the repair `run()` already makes.
- * @param {{ hostDir: string, workflowPath: string, sourceSha: string, exec: Function }} args
+ * The commit the marker's first line names, read for the order check alone. Unlike
+ * `inspectProvenance` it does not take the run's `WORKFLOW_PATH`: whether a marker is
+ * canonical depends on that path, and an order that waited on canonical let a run given
+ * another path skip the compare (#5287). The first line is the one read because every marker
+ * a refresh writes opens with that run's own source, whatever its environment put on the
+ * lines after it. A trailing CR is allowed, so a checkout that converts line endings cannot
+ * hide the commit.
+ * @param {string} hostDir
+ * @returns {string | null} null when there is no marker or its first line names no commit
  */
-export function refuseOlderSource({ hostDir, workflowPath, sourceSha, exec }) {
-  const { canonical, sourceSha: hostSha } = inspectProvenance(hostDir, workflowPath);
-  if (!canonical || hostSha === sourceSha) return;
+function readMarkedSource(hostDir) {
+  const provenancePath = path.join(hostDir, PROVENANCE_FILE);
+  if (!existsSync(provenancePath)) return null;
+  const [firstLine] = readFileSync(provenancePath, 'utf8').split('\n');
+  return /^source: Jinn-Network\/mono@([0-9a-fA-F]{40})\r?$/.exec(firstLine)?.[1] ?? null;
+}
+
+/**
+ * Refuse to serve an older source over a newer one. The marker names the commit of the
+ * host's last content change; when that is another commit than this run's, GitHub's compare
+ * must show it to be an ancestor of this run's source. A later commit is refused, and an
+ * order that cannot be told fails closed. The commit is read from the marker's first line
+ * whatever its other lines say, so a marker another workflow path wrote is ordered like a
+ * canonical one, and `run()` repairs a non-canonical marker only after this passes. A marker
+ * that is missing, or whose first line names no commit, has nothing to order and is left to
+ * that repair; no refresh writes one.
+ * @param {{ hostDir: string, sourceSha: string, exec: Function }} args
+ */
+export function refuseOlderSource({ hostDir, sourceSha, exec }) {
+  const hostSha = readMarkedSource(hostDir);
+  if (hostSha === null || hostSha === sourceSha) return;
   const { order, reason } = githubCommitOrder({
     exec,
     cwd: hostDir,
@@ -466,7 +487,7 @@ export function run({ bundleDir, hostDir, sourceSha, workflowPath, expectedGroup
   const { groups } = validateBundleDir(bundleDir, { sourceSha, expectedGroups });
   validateHostCheckout(bundleDir, hostDir);
   // Before the mirror, which deletes the host tree: a refused rerun leaves it as served.
-  refuseOlderSource({ hostDir, workflowPath, sourceSha, exec });
+  refuseOlderSource({ hostDir, sourceSha, exec });
   mirrorContent(bundleDir, hostDir);
   // `--force` is what makes the staged tree cover every mirrored path, and so what makes
   // `treeChanged` a sound idempotency oracle rather than a proxy for one: a plain

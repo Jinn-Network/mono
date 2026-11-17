@@ -325,7 +325,7 @@ test('a host marker whose order GitHub cannot give fails closed before anything 
   }
 });
 
-test('the order is asked only when a canonical host marker names another commit', () => {
+test('the order is asked only when the host marker names another commit', () => {
   const asked = [];
   const host = makeHostRepo();
   const first = makeBundle();
@@ -340,8 +340,8 @@ test('the order is asked only when a canonical host marker names another commit'
   assert.equal(refresh(later, host, NEXT_SHA, GROUPS, 'canary', compareOnNext(asked)).changed, true);
   assert.deepEqual(asked, [COMPARE_ARGS(NEXT_SHA, SHA)]);
 
-  // A malformed marker names no commit worth ordering and is repaired as before, even by an
-  // older source: the acceptance criteria leave that path as it was.
+  // A marker whose first line names no commit has nothing to order and is repaired as before,
+  // even by an older source: the acceptance criteria leave that path as it was.
   writeFileSync(path.join(host, '.jinn-profile-host-source'), 'source: hand-edited\n');
   git(host, ['add', '-A']);
   git(host, ['commit', '-q', '-m', 'hand-edited the marker']);
