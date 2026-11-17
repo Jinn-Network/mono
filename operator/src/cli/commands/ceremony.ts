@@ -1400,7 +1400,6 @@ function writeRotationReceipt(dir: string, receipt: RotationReceipt): void {
 
 /** One retiring role: its current key and the catalog binding of that key the rotation revokes. */
 interface RetiringRole {
-  readonly family: RoleSetName;
   readonly role: NativeRoleIdentityRole;
   readonly agent: string;
   readonly keyId: string;
@@ -1547,7 +1546,7 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
       if (bindingDigests.length === 0) {
         invalid(ctx, `${catalogPath} binds no ${role} key ${signer.keyId} for ${agent}; there is nothing to rotate`);
       }
-      retiring.push({ family, role, agent, keyId: signer.keyId, bindingDigests });
+      retiring.push({ role, agent, keyId: signer.keyId, bindingDigests });
     }
   }
   const revokedByVoucher = new Set(catalog.revocations
