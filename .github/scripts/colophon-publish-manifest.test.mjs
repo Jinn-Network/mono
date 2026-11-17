@@ -1649,6 +1649,77 @@ test('self-test: the exemption refuses every test file npm may ship and passes o
   assert.doesNotThrow(check(['dist/', 'fixtures/'], ['packages/x/src/a.test.ts', 'packages/x/vitest.config.ts']));
 });
 
+test('self-test: the exemption reads every files entry and manifest target fail-closed unless it is a plain path (issue #5296)', () => {
+  const manifest = checkerManifest();
+  const pin = loadProductReleasePlatformPin(repoRoot, manifest);
+  const check = (source, changed) => () => assertPlatformSourceMatchesReceipt(
+    pin,
+    [{ name: 'x', directory: 'packages/x', ...source }],
+    () => changed.map((file) => `packages/x/${file}`),
+  );
+  const refuses = (source, file) =>
+    assert.throws(check(source, [file]), new RegExp(`\\n {2}packages/x/${escapeRegExp(file)}(?:\\n|$)`, 'u'), JSON.stringify(source));
+  // `npm pack --dry-run` on npm 11.19.0, on a case-sensitive file system as on the Linux runner,
+  // ships the file beside each manifest in this block. npm joins the entries into one rules file, so
+  // a newline starts a new rule.
+  refuses({ files: ['dist/\n!fixtures/a.test.ts'] }, 'fixtures/a.test.ts');
+  refuses({ files: ['!dist\n!fixtures/a.test.ts'] }, 'fixtures/a.test.ts');
+  // npm prefixes each entry with `!` to include it, so `!!fixtures` is an inclusion, and `./!fixtures`
+  // and `/!fixtures` name a directory called `!fixtures`.
+  refuses({ files: ['dist/', '!!fixtures'] }, 'fixtures/a.test.ts');
+  refuses({ files: ['dist/', './!fixtures'] }, '!fixtures/a.test.ts');
+  refuses({ files: ['dist/', '/!fixtures'] }, '!fixtures/a.test.ts');
+  // npm matches case-insensitively, against the entry and against the path.
+  refuses({ files: ['dist/', 'FIXTURES/A.TEST.TS'] }, 'fixtures/a.test.ts');
+  refuses({ files: ['dist/'] }, 'DIST/a.test.ts');
+  // An entry with no slash also matches a file of that name in a directory npm walks for another entry.
+  refuses({ files: ['lib/sub/', 'a.test.ts'] }, 'lib/a.test.ts');
+  // npm packs the main, browser and bin targets whatever files says, and the files of a
+  // directories.bin directory are bin targets.
+  refuses({ files: ['dist/'], main: 'src/a.test.ts' }, 'src/a.test.ts');
+  refuses({ files: ['dist/'], browser: 'src/a.test.ts' }, 'src/a.test.ts');
+  refuses({ files: ['dist/'], bin: { x: './src/a.test.ts' } }, 'src/a.test.ts');
+  refuses({ files: ['dist/'], bin: './src/a.test.ts' }, 'src/a.test.ts');
+  refuses({ files: ['dist/'], directories: { bin: 'src' } }, 'src/fixtures/b.test.ts');
+  // A target the check cannot read as a plain path covers every path, here one npm does not ship.
+  refuses({ files: ['dist/'], main: 'dist/../src/a.test.ts' }, 'test/a.test.ts');
+  // Near miss: the forms the real closures use, a negated plain entry, and an empty main exempt a
+  // src test, a root vitest config, and a test under a directory named like an entry.
+  for (const source of [
+    { files: ['dist/', 'fixtures/', 'README.md'], main: './dist/index.js', bin: { x: './dist/bin.js' } },
+    { files: ['dist/', '!fixtures/'], main: '', bin: './dist/bin.js' },
+  ]) {
+    assert.doesNotThrow(
+      check(source, ['src/a.test.ts', 'vitest.config.ts', 'src/fixtures/a.test.ts', 'src/dist/a.test.ts']),
+      JSON.stringify(source),
+    );
+  }
+  assert.doesNotThrow(check({ files: ['dist/', '!fixtures/'] }, ['fixtures/a.test.ts']));
+});
+
+test('the platform source check compares a test file a compared package names as its main, browser or bin target (issue #5296)', () => {
+  const manifest = checkerManifest();
+  const pin = loadProductReleasePlatformPin(repoRoot, manifest);
+  const packages = loadCatalogPackages(repoRoot);
+  const evidence = packages.find(({ name }) => name === '@jinn-network/evidence-protocol');
+  const file = `${evidence.directory}/src/slug.test.ts`;
+  const compare = (fields) => () => assertPlatformSourceMatchesReceipt(
+    pin,
+    platformSourceDirectories(repoRoot, manifest, packages.map((pkg) =>
+      (pkg === evidence ? { ...pkg, manifest: { ...pkg.manifest, ...fields } } : pkg))),
+    () => [file],
+  );
+  assert.doesNotThrow(compare({}));
+  for (const fields of [
+    { main: './src/slug.test.ts' },
+    { browser: './src/slug.test.ts' },
+    { bin: { slug: './src/slug.test.ts' } },
+    { directories: { bin: './src' } },
+  ]) {
+    assert.throws(compare(fields), (error) => error.message.includes(`\n  ${file}\n`), JSON.stringify(fields));
+  }
+});
+
 test('the refusal names the real remedies, not a re-pin (issue #5214)', () => {
   const manifest = checkerManifest();
   const pin = loadProductReleasePlatformPin(repoRoot, manifest);
