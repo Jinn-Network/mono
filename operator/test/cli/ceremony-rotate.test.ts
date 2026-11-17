@@ -984,6 +984,7 @@ describe('ceremony rotate and its rotation receipt', () => {
     await expect(bootAt(h, stores.solver!, revocation.anchorTime)).resolves.toBeDefined();
     // Nothing is left bound for the next rotation to refuse on.
     expect((await run(h, rotateArgv(h))).kind).toBe('ceremony_rotate_plan');
+    expect(createCeremonyCommand(h.deps).helpText).toContain('--retiring-store <family>=<path>');
   });
 
   it('refuses a --retiring-store naming the store identityStores names, whose keys the lost rotation just bound', async () => {
@@ -1017,6 +1018,27 @@ describe('ceremony rotate and its rotation receipt', () => {
     expect(refusal.code).toBe('invalid_invocation');
     expect(refusal.details).toMatchObject({ state: 'retiring-store-mismatch', sideEffects: false });
     expect(String(refusal.message)).toContain('no earlier than');
+    unchanged();
+  });
+
+  it('refuses when the catalog revokes the keys of the store identityStores names, rather than revoke the only standing ones', async () => {
+    const h = await provisioned();
+    const first = await run(h, rotateArgv(h, ['--execute']));
+    expect(first.kind).toBe('ceremony_rotate_complete');
+    const { retiring, stores } = storesOf(h);
+    rmSync(receiptPathOf(h));
+    // The config pointed back at the store that rotation retired, whose bindings it revoked.
+    writeFileSync(h.configPath, JSON.stringify({
+      ...config(h),
+      identityStores: { ...config(h).identityStores, solver: retiring.solver },
+    }));
+    const unchanged = unchangedBy(h);
+
+    const refusal = await run(h, rotateArgv(h, ['--execute', '--retiring-store', `solver=${stores.solver}`]));
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect(refusal.details).toMatchObject({ state: 'retiring-store-mismatch', sideEffects: false });
+    expect(String(refusal.message)).toContain('holds no unrevoked binding');
     unchanged();
   });
 

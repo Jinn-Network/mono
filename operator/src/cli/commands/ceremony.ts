@@ -103,6 +103,7 @@ const OPTIONS = {
   store: { type: 'string' as const },
   'finality-timeout-ms': { type: 'string' as const },
   'resubmit-anchor': { type: 'boolean' as const, default: false },
+  'retiring-store': { type: 'string' as const, multiple: true as const },
   'dry-run': { type: 'boolean' as const, default: false },
   execute: { type: 'boolean' as const, default: false },
 };
@@ -1694,6 +1695,39 @@ function unaccountedBindings(input: {
   return [...found.values()];
 }
 
+/**
+ * `--retiring-store <family>=<path>`, once for each family of `--role-sets`: the store a rotation
+ * whose receipt was lost after its config repoint was retiring. `undefined` when the flag is absent.
+ */
+function parseRetiringStores(
+  ctx: CommandContext,
+  raw: readonly string[] | undefined,
+  roleSets: readonly RoleSetName[],
+): Partial<Record<RoleSetName, string>> | undefined {
+  if (raw === undefined || raw.length === 0) return undefined;
+  const named: Partial<Record<RoleSetName, string>> = {};
+  for (const entry of raw) {
+    const separator = entry.indexOf('=');
+    const family = entry.slice(0, separator) as RoleSetName;
+    const path = entry.slice(separator + 1);
+    if (separator < 0 || !roleSets.includes(family)) {
+      invalid(ctx, `--retiring-store takes <family>=<path> for a family of --role-sets (${roleSets.join(', ')}), got "${entry}"`);
+    }
+    if (named[family] !== undefined) invalid(ctx, `--retiring-store names "${family}" more than once`);
+    if (!isAbsolute(path)) invalid(ctx, `--retiring-store ${family} must be an absolute path, got "${path}"`);
+    named[family] = path;
+  }
+  const unnamed = roleSets.filter((family) => named[family] === undefined);
+  if (unnamed.length > 0) {
+    invalid(
+      ctx,
+      `--retiring-store names no store for ${unnamed.join(', ')}`,
+      'Name, for each family of --role-sets, the store the rotation whose receipt was lost was retiring.',
+    );
+  }
+  return named;
+}
+
 /** A UTC stamp safe in a file name, so a rotated store never lands on an existing path. */
 function rotationStamp(now: Date): string {
   return now.toISOString().replace(/[-:]/gu, '').replace(/\.\d{3}Z$/u, 'Z');
@@ -1763,6 +1797,7 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
   if (!Number.isFinite(finalityTimeoutMs) || finalityTimeoutMs <= 0) {
     invalid(ctx, `--finality-timeout-ms must be a positive number, got "${timeoutRaw}"`);
   }
+  const namedRetiring = parseRetiringStores(ctx, parsed.values['retiring-store'], roleSets);
 
   let custody: CeremonyChainCustody;
   try {
@@ -1809,19 +1844,54 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
       'Without an unfinished rotation, rotate starts a new one, which retires the keys the config names. Drop the flag to do that.',
     );
   }
+  if (namedRetiring !== undefined && resuming) {
+    // The same command, re-run after an interruption: the receipt it wrote names these stores.
+    const differs = roleSets.filter((family) => prior.retiring?.[family] !== namedRetiring[family]);
+    if (differs.length > 0) {
+      invalid(
+        ctx,
+        `--retiring-store names another store for ${differs.join(', ')} than the unfinished rotation in ${rotationReceiptPath(dir)} retires`,
+        'Re-run without --retiring-store: rotate resumes that rotation from its receipt.',
+      );
+    }
+  }
+  // A rotation whose receipt was lost after its config repoint: identityStores names the store it
+  // bound, and only the operator can name the store it was retiring. The catalog must bear that out
+  // before anything is anchored (below), and this run finishes that rotation rather than starting one.
+  const recovering = namedRetiring !== undefined && !resuming;
+  const refuseRetiringStore = (message: string): never => {
+    emitEnvelope({
+      code: 'invalid_invocation',
+      message,
+      hint: '--retiring-store names, for each family of the rotation whose receipt was lost, the store identityStores '
+        + 'named before that rotation. rotate revokes its keys only when the catalog binds the keys identityStores names '
+        + 'now, unrevoked, and bound each one after the key it replaces.',
+      exampleCli: EXAMPLE_CLI,
+      details: { feature: 'ceremony', state: 'retiring-store-mismatch', sideEffects: false },
+    }, { writer: ctx.writer, exit: ctx.exit });
+    throw new CeremonyRefusal(message);
+  };
+  if (recovering) {
+    for (const family of roleSets) {
+      if (namedRetiring[family] === configuredStores[family]) {
+        refuseRetiringStore(`--retiring-store names ${namedRetiring[family]} for ${family}, the store ${configPath} names. `
+          + 'After a rotation repoints the config, that store holds the keys it bound, not the ones it was retiring.');
+      }
+    }
+  }
   const retiringStores: Partial<Record<RoleSetName, string>> = Object.fromEntries(roleSets.map((family) => [
     family,
     // A receipt without them was written by a rotate that repointed the config last, so until that
     // rotation finished, the config still names them.
-    (resuming ? prior.retiring?.[family] : undefined) ?? configuredStores[family] as string,
+    (resuming ? prior.retiring?.[family] : namedRetiring?.[family]) ?? configuredStores[family] as string,
   ]));
   const stamp = rotationStamp(new Date());
-  const newStores: Partial<Record<RoleSetName, string>> = Object.fromEntries(roleSets.map((family) => [
-    family,
-    resuming && typeof prior.stores[family] === 'string'
-      ? prior.stores[family]
-      : join(dir, 'identity', `${family}.rotated-${stamp}.enc.json`),
-  ]));
+  const newStores: Partial<Record<RoleSetName, string>> = Object.fromEntries(roleSets.map((family) => {
+    if (resuming && typeof prior.stores[family] === 'string') return [family, prior.stores[family]];
+    // Finishing a rotation: the store it minted and bound is the one the config already names.
+    if (recovering) return [family, configuredStores[family] as string];
+    return [family, join(dir, 'identity', `${family}.rotated-${stamp}.enc.json`)];
+  }));
 
   // The keys being retired: the ones the retiring stores hold, and their catalog bindings.
   const catalog = catalogRecords(loadCatalogFile(ctx, catalogPath));
@@ -1858,6 +1928,50 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
     .filter(({ revokedBy }) => revokedBy === voucherDid)
     .map(({ target }) => target));
 
+  // Finishing a rotation from --retiring-store revokes the named stores' keys only when the catalog
+  // shows what that rotation's rebind left: each key of the store identityStores names bound and
+  // unrevoked, and bound after the named store's key for the same role. A rotation binds its
+  // replacement after the key it retires, so this never revokes the keys a rotation just bound.
+  const replacementKeys: string[] = [];
+  if (recovering) {
+    const validFromOf = (digests: readonly string[]): number[] => catalog.bindings
+      .filter(({ digest }) => digests.includes(digest))
+      .map(({ binding }) => Date.parse(binding.validFrom));
+    for (const family of roleSets) {
+      let replacement: ReadonlyMap<NativeRoleIdentityRole, RoleSigner>;
+      try {
+        // eslint-disable-next-line no-await-in-loop -- bounded (≤4 families).
+        replacement = await openRoleSigners({
+          storePath: newStores[family]!,
+          password: password.password,
+          ownedRoles: orderedRolesForSet(family),
+          create: false,
+        });
+      } catch (cause) {
+        return invalid(ctx, `the ${family} store at ${String(newStores[family])} could not be opened: ${cause instanceof Error ? cause.message : String(cause)}`);
+      }
+      for (const [role, signer] of replacement) {
+        const agent = agentForRole(plan, role);
+        const standing = catalog.bindings
+          .filter(({ digest, binding }) => binding.agent === agent && binding.key.didKey === signer.keyId
+            && !revokedByVoucher.has(digest))
+          .map(({ digest }) => digest);
+        if (standing.length === 0) {
+          refuseRetiringStore(`${catalogPath} holds no unrevoked binding of the ${role} key ${signer.keyId} in `
+            + `${String(newStores[family])}, the store ${configPath} names, so no rotation bound it and repointed the config at it.`);
+        }
+        const retired = retiring.find((entry) => entry.role === role)!;
+        if (Math.max(...validFromOf(retired.bindingDigests)) >= Math.min(...validFromOf(standing))) {
+          refuseRetiringStore(`${catalogPath} bound the ${role} key ${retired.keyId} in ${String(retiringStores[family])} `
+            + `no earlier than the key ${signer.keyId} in ${String(newStores[family])}, the store ${configPath} names. A `
+            + 'rotation binds its replacement after the key it retires, so these may be the keys a rotation just bound, '
+            + 'and rotate does not revoke them.');
+        }
+        replacementKeys.push(`${agent} ${signer.keyId}`);
+      }
+    }
+  }
+
   // A rotation stopped after its config repoint, whose receipt is then lost, leaves the config naming
   // the store it just bound while the keys it was retiring stay bound. A new rotation from the config
   // would revoke the newer keys and leave those. So a new rotation refuses while the catalog binds,
@@ -1865,8 +1979,10 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
   // holds. Roles of different families can share an Agent and scope (the discovery roles, the
   // settlement roles), so the keys of the config's other stores are set aside first. A resumed
   // rotation is exempt: its receipt names both stores, and its replacement keys are its own rebind.
+  // Finishing a rotation from --retiring-store is not: a key that neither the named stores nor the
+  // config's hold means the named stores are not all that rotation was retiring.
   if (!resuming) {
-    const held = new Set(retiring.map(({ agent, keyId }) => `${agent} ${keyId}`));
+    const held = new Set([...retiring.map(({ agent, keyId }) => `${agent} ${keyId}`), ...replacementKeys]);
     const unaccounted = () => unaccountedBindings({ catalog, retiring, voucherDid, revokedByVoucher, held });
     if (unaccounted().length > 0) {
       for (const family of Object.keys(ROLE_SETS) as RoleSetName[]) {
@@ -1891,15 +2007,27 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
     if (remaining.length > 0) {
       const roles = [...new Set(remaining.map(({ role }) => role))];
       const message = `${catalogPath} still binds, unrevoked under the agent EOA ${custody.agentEoa}, another key for `
-        + `${roles.join(', ')} that no store ${configPath} names holds: ${remaining.map(({ keyId }) => keyId).join(', ')}. `
-        + 'A rotation that stopped after it repointed the config leaves exactly this: the config names the keys it bound, '
-        + 'and the keys it was retiring are still bound. Rotating from the config would revoke the newer keys and leave '
-        + 'these bound, so rotate refuses before anything is minted or anchored.';
+        + `${roles.join(', ')} that no store ${configPath}${recovering ? ' or --retiring-store' : ''} names holds: `
+        + `${remaining.map(({ keyId }) => keyId).join(', ')}. `
+        + (recovering
+          ? 'So the stores --retiring-store names are not every store the rotation whose receipt was lost was retiring, '
+            + 'and rotate refuses before anything is anchored rather than leave those keys bound.'
+          : 'A rotation that stopped after it repointed the config leaves exactly this: the config names the keys it bound, '
+            + 'and the keys it was retiring are still bound. Rotating from the config would revoke the newer keys and leave '
+            + 'these bound, so rotate refuses before anything is minted or anchored.');
       emitEnvelope({
         code: 'invalid_invocation',
         message,
-        hint: `If ${rotationReceiptPath(dir)} was moved or deleted, restore it as rotate wrote it and re-run with the same `
-          + '--role-sets: rotate resumes that rotation. If its recorded anchor never reads back finalized, add --resubmit-anchor.',
+        hint: recovering
+          ? 'Re-run with the --role-sets of that rotation and a --retiring-store for each of its families. Roles of '
+            + 'different families share an Agent and scope, so a key listed here can belong to another family of it.'
+          : `If ${rotationReceiptPath(dir)} was moved or deleted, restore it as rotate wrote it and re-run with the same `
+            + '--role-sets: rotate resumes that rotation. If its recorded anchor never reads back finalized, add '
+            + '--resubmit-anchor. If the receipt is lost for good, finish that rotation from the store it was retiring, '
+            + 'which rotate leaves where it was (for a store init or join minted, '
+            + `${join(dir, 'identity', '<family>.enc.json')}): re-run with that rotation's --role-sets and, for each of its `
+            + 'families, --retiring-store <family>=<path> naming the store identityStores named before it. rotate revokes '
+            + 'those keys only when the catalog bound them before the keys identityStores names now.',
         exampleCli: EXAMPLE_CLI,
         details: { feature: 'ceremony', state: 'another-key-bound', sideEffects: false, bindings: remaining },
       }, { writer: ctx.writer, exit: ctx.exit });
@@ -1908,6 +2036,13 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
   }
   const allTargets = retiring.flatMap(({ bindingDigests }) => bindingDigests);
   const pendingTargets = allTargets.filter((digest) => !revokedByVoucher.has(digest));
+  if (recovering && pendingTargets.length === 0) {
+    invalid(
+      ctx,
+      `${catalogPath} already revokes every binding of the keys in ${roleSets.map((family) => retiringStores[family]).join(', ')}: `
+        + 'there is nothing to finish.',
+    );
+  }
 
   // Key authority section 8: only each binding's voucher account can revoke it. Shown against the
   // catalog before either anchor is sent; planning never asks the account to sign.
@@ -2403,6 +2538,16 @@ Status:
   timeout: re-run with --resubmit-anchor, which sends a fresh anchor for the act being resumed and
   records it in place of the old one, leaving the rest of the receipt as it was.
 
+  If rotation.json is lost for good after identityStores was repointed, finish that rotation from the
+  store it was retiring, which rotate leaves where it was (<dir>/identity/<family>.enc.json for a
+  store init or join minted): re-run with its --role-sets and --retiring-store <family>=<path> for
+  each of its families. That run mints no store, since the store identityStores names is the new one.
+  Before anything is anchored it refuses (retiring-store-mismatch) unless the catalog binds the keys
+  of the store identityStores names, unrevoked, each one after the named store's key for the same
+  role, so it never revokes the keys the lost rotation bound; and it refuses (another-key-bound)
+  while another key for those roles is bound that neither the named stores nor the configured ones
+  hold. It then sends a fresh revocation anchor and revokes the named stores' keys.
+
 Options (init, join, and rotate; rotate takes no --authority-store or --genesis):
   --dir <path>               Operator home (default ~/.jinn-client). The keystore, identity stores,
                              and config.json are resolved beneath it.
@@ -2422,6 +2567,9 @@ Options (init, join, and rotate; rotate takes no --authority-store or --genesis)
   --finality-timeout-ms <n>  How long to wait for the finalized tag (default 2700000, i.e. 45 min)
   --resubmit-anchor          rotate only: send a fresh anchor for the act an unfinished rotation
                              resumes, in place of a recorded one that never reads back finalized
+  --retiring-store <family>=<path>
+                             rotate only, once for each --role-sets family: the store a rotation
+                             whose rotation.json was lost after the repoint was retiring
   --execute                  Perform the ceremony. Without it, nothing is minted, sent, or written.
   --dry-run                  Force the read-only plan. Refuses if combined with --execute.
   --human                    Human-readable output, including the anchor and finality progress lines.
