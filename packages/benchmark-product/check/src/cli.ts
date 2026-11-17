@@ -129,16 +129,66 @@ function aliasPublisherNames(text: string, prefix: string, suffixes: readonly st
   return `${text.slice(0, nameStart)}${IDENTIFIER_ALIAS}${text.slice(end)}`;
 }
 
+/**
+ * The reader-facing vocabulary spec's refusal-lines row (section 4.2, #5251): the human line names
+ * each concept by its section 5 name, while `--json` keeps the refusing module's `message` byte for
+ * byte, because the conformance kit's `expectedMessagePattern` pins it. So the words change here,
+ * on the human line only, after publisher-chosen names are aliased. Every rule is anchored at the
+ * start of the message, so it rewrites the refusing module's fixed wording and never text a
+ * publisher chose. Paths, fingerprints, identifiers and check labels (`matrix-rederivation:`) are
+ * printed as written. Applied in order: the timestamp-proof lead is renamed before its reasons.
+ */
+const READER_WORDING: readonly (readonly [RegExp, string])[] = [
+  [/^Matrix v2 failed deterministic assembly-3\.0 replay$/u,
+    "the runs do not follow from a deterministic assembly-3.0 replay of the evidence"],
+  [/^carried anchor is invalid: /u, "carried timestamp proof is invalid: "],
+  [/^(carried timestamp proof is invalid: )the anchored digest ([0-9a-f]{64}) is neither this bundle's sealed Run nor its sealed Matrix$/u,
+    "$1the fingerprint it covers, $2, is neither this bundle's sealed run.json nor its sealed matrix.json"],
+  [/^(carried timestamp proof is invalid: subject\.kind is [\s\S]*), but its digest resolves to this bundle's sealed Run$/u,
+    "$1, but the fingerprint it covers is this bundle's sealed run.json"],
+  [/^(carried timestamp proof is invalid: subject\.kind is [\s\S]*), but its digest resolves to this bundle's sealed Matrix$/u,
+    "$1, but the fingerprint it covers is this bundle's sealed matrix.json"],
+  [/^(carried timestamp proof is invalid: )an authority-time lock anchor carries no comparable genTime$/u,
+    "$1an authority-time lock timestamp proof carries no comparable genTime"],
+  [/^(carried timestamp proof is invalid: )no proof verifier implements the anchor profile /u,
+    "$1no proof verifier implements the profile "],
+  [/^anchor record digest mismatch$/u, "timestamp proof fingerprint mismatch"],
+  [/^evidence record digest mismatch$/u, "evidence file fingerprint mismatch"],
+  [/^digest mismatch for ("[\s\S]*")$/u, "fingerprint mismatch for $1"],
+  [/^matrix-rederivation: re-derived digest /u, "matrix-rederivation: re-derived fingerprint "],
+  [/^verdict catalog does not match Matrix verdict closure$/u,
+    "verdicts.json does not list exactly the verdicts the runs reference"],
+  [/^verdict ([0-9a-f]{64}) evaluator mismatch$/u, "verdict $1 judge mismatch"],
+  [/^evaluator trust set must exactly equal Matrix-referenced evaluators$/u,
+    "the trusted judges must be exactly the judges the runs reference"],
+  [/^evaluator <identifier: see --json> keyId is not derived from its SPKI$/u,
+    "judge <identifier: see --json> keyId is not derived from its SPKI"],
+  [/^([\s\S]*: )?reviewer signature or evaluator\/key binding is invalid$/u,
+    "$1reviewer signature or judge/key binding is invalid"],
+  [/^([\s\S]*: )?review verdict must be one Result Evaluation envelope with one signature$/u,
+    "$1review verdict must be one DSSE-signed Result Evaluation with one signature"],
+  [/^report-envelope: invalid DSSE envelope: (?:TrustCoreError: )?(?:DSSE envelope )?/u,
+    "report-envelope: the signed result is not valid DSSE: "],
+  [/^Report author\/keyId\/didKey are not derived from the bundled Report SPKI$/u,
+    "the result's author/keyId/didKey are not derived from its bundled signing SPKI"],
+  [/^report-recompute: recomputed results do not match the sealed Report results$/u,
+    "report-recompute: the recomputed result does not match the sealed result"],
+  [/^claim package ([\s\S]+) is not the exact projection of verified facts$/u,
+    "the claim's field $1 does not agree with the records here"],
+];
+
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/gu;
 
-/** One refusal, one stderr line: aliases identifiers, then escapes every control character (line
- * feeds included), so a publisher-chosen string cannot forge a line of its own. */
+/** One refusal, one stderr line: aliases publisher names, puts the refusal in the reader's words,
+ * aliases identifiers, then escapes every control character (line feeds included), so a
+ * publisher-chosen string cannot forge a line of its own. */
 function humanRefusalDetail(message: string): string {
   const named = PUBLISHER_NAMED.reduce(
     (text, { prefix, suffixes }) => aliasPublisherNames(text, prefix, suffixes),
     message,
   );
-  return withoutHumanIdentifiers(named)
+  const worded = READER_WORDING.reduce((text, [pattern, wording]) => text.replace(pattern, wording), named);
+  return withoutHumanIdentifiers(worded)
     .replace(CONTROL_CHARACTER, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`);
 }
 

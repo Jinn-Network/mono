@@ -741,7 +741,7 @@ test("a publisher-named evaluator cannot forge a stderr line or print its name",
   assert.doesNotMatch(human.stderr, CONTROL_CHARACTER_EXCEPT_LF);
   assert.equal(human.stderr.split("\n").length, 2, "one refusal is one line");
   assert.ok(!human.stderr.split("\n").some((line) => line.startsWith("colophon-check: bundle verified")));
-  assert.match(human.stderr, /^colophon-check: evaluator <identifier: see --json> keyId is not derived from its SPKI\n$/u);
+  assert.match(human.stderr, /^colophon-check: judge <identifier: see --json> keyId is not derived from its SPKI\n$/u);
   assert.doesNotMatch(human.stderr, /urn:|evil/u);
 
   const json = await runVerifierCli(["bundle", "--json"], { verify });
@@ -776,7 +776,7 @@ test("a publisher name that embeds its template's suffix prints none of itself",
     verify: async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); },
   });
   assert.equal(result.exitCode, 1);
-  assert.equal(result.stderr, "colophon-check: evaluator <identifier: see --json> keyId is not derived from its SPKI\n");
+  assert.equal(result.stderr, "colophon-check: judge <identifier: see --json> keyId is not derived from its SPKI\n");
   assert.doesNotMatch(result.stderr, /bundle verified/u);
 });
 
@@ -792,6 +792,12 @@ test("aliasing a hostile publisher name stays linear in its length", async () =>
     [
       `trust.evaluators.${"reviewer ".repeat(110_000)}is not an Ed25519 public key`,
       "trust.evaluators.<identifier: see --json> is not an Ed25519 public key",
+    ],
+    // A publisher-chosen claim field path that repeats its own rule's tail (#5251): the reader's
+    // wording rules are anchored, so this costs one scan and prints unchanged.
+    [
+      `claim package ${"x is not the exact projection of verified facts ".repeat(25_000)}y`,
+      `claim package ${"x is not the exact projection of verified facts ".repeat(25_000)}y`,
     ],
   ]) {
     const started = performance.now();
@@ -1099,12 +1105,117 @@ test("a kind-mismatch refusal remains a readable contrast after aliasing", async
 
   const human = await runVerifierCli(["bundle"], deps);
   assert.equal(human.exitCode, 1);
-  assert.match(human.stderr, /but its digest resolves to this bundle's sealed Run/);
+  assert.match(human.stderr, /but the fingerprint it covers is this bundle's sealed run\.json/);
   assert.equal(human.stderr.match(/<identifier: see --json>/gu)?.length, 1);
   assert.doesNotMatch(human.stderr, INTERNAL_NAMESPACE);
 
   const json = await runVerifierCli(["bundle", "--json"], deps);
   assert.match(JSON.parse(json.stdout).message, /https:\/\/spec\.jinn\.network\/records\/benchmark-matrix\/v1/);
+});
+
+// Issue #5251, the reader-facing vocabulary spec's Refusal lines row (section 4.2): the human line
+// names each concept by its section 5 name, and --json keeps the refusing module's message byte for
+// byte, because the conformance kit's `expectedMessagePattern` and library callers read it.
+test("a refusal's human line uses the reader's names while --json keeps the module's message", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const hex = "3".repeat(64);
+  const admission = "binary admission replay failed: resolutions.0.reviews.0: ";
+  for (const [message, human] of [
+    [
+      "Matrix v2 failed deterministic assembly-3.0 replay",
+      "the runs do not follow from a deterministic assembly-3.0 replay of the evidence",
+    ],
+    [
+      `carried anchor is invalid: the anchored digest ${hex} is neither this bundle's sealed Run nor its sealed Matrix`,
+      `carried timestamp proof is invalid: the fingerprint it covers, ${hex}, is neither this bundle's sealed run.json nor its sealed matrix.json`,
+    ],
+    [
+      "carried anchor is invalid: subject.kind is lock, but its digest resolves to this bundle's sealed Matrix",
+      "carried timestamp proof is invalid: subject.kind is lock, but the fingerprint it covers is this bundle's sealed matrix.json",
+    ],
+    [
+      "carried anchor is invalid: an authority-time lock anchor carries no comparable genTime",
+      "carried timestamp proof is invalid: an authority-time lock timestamp proof carries no comparable genTime",
+    ],
+    [
+      "carried anchor is invalid: no proof verifier implements the anchor profile example-profile",
+      "carried timestamp proof is invalid: no proof verifier implements the profile example-profile",
+    ],
+    [
+      "carried anchor is invalid: the proof does not verify",
+      "carried timestamp proof is invalid: the proof does not verify",
+    ],
+    ["anchor record digest mismatch", "timestamp proof fingerprint mismatch"],
+    ["evidence record digest mismatch", "evidence file fingerprint mismatch"],
+    ['digest mismatch for "share.txt"', 'fingerprint mismatch for "share.txt"'],
+    [
+      `matrix-rederivation: re-derived digest sha256:${hex} !== received sha256:${"4".repeat(64)}`,
+      `matrix-rederivation: re-derived fingerprint sha256:${hex} !== received sha256:${"4".repeat(64)}`,
+    ],
+    [
+      "verdict catalog does not match Matrix verdict closure",
+      "verdicts.json does not list exactly the verdicts the runs reference",
+    ],
+    [`verdict ${hex} evaluator mismatch`, `verdict ${hex} judge mismatch`],
+    [
+      "evaluator trust set must exactly equal Matrix-referenced evaluators",
+      "the trusted judges must be exactly the judges the runs reference",
+    ],
+    [
+      "evaluator one keyId is not derived from its SPKI",
+      "judge <identifier: see --json> keyId is not derived from its SPKI",
+    ],
+    [
+      `${admission}reviewer signature or evaluator/key binding is invalid`,
+      `${admission}reviewer signature or judge/key binding is invalid`,
+    ],
+    [
+      `${admission}review verdict must be one Result Evaluation envelope with one signature`,
+      `${admission}review verdict must be one DSSE-signed Result Evaluation with one signature`,
+    ],
+    [
+      "report-envelope: invalid DSSE envelope: TrustCoreError: DSSE envelope payload is not strict standard or URL-safe base64.",
+      "report-envelope: the signed result is not valid DSSE: payload is not strict standard or URL-safe base64.",
+    ],
+    [
+      "Report author/keyId/didKey are not derived from the bundled Report SPKI",
+      "the result's author/keyId/didKey are not derived from its bundled signing SPKI",
+    ],
+    [
+      "report-recompute: recomputed results do not match the sealed Report results",
+      "report-recompute: the recomputed result does not match the sealed result",
+    ],
+    [
+      "claim package headline.baseline.passRate is not the exact projection of verified facts",
+      "the claim's field headline.baseline.passRate does not agree with the records here",
+    ],
+    // A field path prints as written, even where its name is a contract spelling.
+    [
+      "claim package anchors is not the exact projection of verified facts",
+      "the claim's field anchors does not agree with the records here",
+    ],
+  ]) {
+    const verify = async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); };
+    const result = await runVerifierCli(["bundle"], { verify });
+    assert.equal(result.exitCode, 1, message);
+    assert.equal(result.stderr, `colophon-check: ${human}\n`, message);
+
+    const json = await runVerifierCli(["bundle", "--json"], { verify });
+    assert.equal(json.exitCode, 1, message);
+    assert.equal(json.stderr, "", message);
+    assert.equal(JSON.parse(json.stdout).message, message);
+  }
+});
+
+// Every rule is anchored at the message's start, so wording that only contains a rule's words, as
+// publisher-chosen text can, prints unchanged.
+test("refusal wording is rewritten only where a rule matches from the message's start", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  const message = 'manifest entry "digest mismatch for x.json" is missing';
+  const result = await runVerifierCli(["bundle"], {
+    verify: async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); },
+  });
+  assert.equal(result.stderr, `colophon-check: ${message}\n`);
 });
 
 test("freeze-repo failures keep identifiers in --json and alias them for a human", async () => {
@@ -1605,7 +1716,11 @@ test("the caveat enumerates the disclosed closure's eighth check (issue #3691)",
   });
   assert.match(output, /^Recomputed: 8 of 8 checks passed$/m);
   const caveat = caveatOf(output);
-  assert.match(caveat, /the disclosure specification/);
+  // Issue #5251: the caveat names each subject by its section 5 name.
+  assert.match(caveat, /what was pinned/);
+  assert.doesNotMatch(caveat, /disclosure specification/);
+  assert.match(caveat, /the result/);
+  assert.doesNotMatch(caveat, /the report/);
   assert.match(caveat, /timestamp proof well-formedness/);
   assert.doesNotMatch(caveat, /undefined/);
 });

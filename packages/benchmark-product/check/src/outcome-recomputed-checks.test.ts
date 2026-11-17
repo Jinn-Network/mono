@@ -37,7 +37,7 @@ describe("describeRecomputedChecks", () => {
 
   test("renders a real six-check closure unchanged", () => {
     expect(describeRecomputedChecks(outcomeOf(V4_CHECKS.map((check) => ({ check, state: "passed" })))))
-      .toBe("the bundle's integrity, evidence closure, signing trust, calculations, the report, and claim consistency");
+      .toBe("the bundle's integrity, evidence closure, signing trust, calculations, the result, and claim consistency");
   });
 
   test("still leaves a deferred check out", () => {

@@ -83,7 +83,7 @@
     },
     "human": {
       "exitCode": 0,
-      "stdout": "Recomputed: 6 of 6 checks passed\nBundle: sha256:de045873c91e87c7b96e25841450aee46c0fe6a2936831aefa53bae421aed87a\nFormat: benchmark-product-public-bundle/2\nRun: 5a640cbf3b60afee34b360cd1120823424d22e2c673c0db1c3bb58b557c11cbf\n\nNot checked by this tool: whether the machine that produced this bundle was\nhonest, and whether the compared identities are independent parties. What is\nrecomputed is the bundle's integrity, evidence closure, signing trust,\ncalculations, the report, and claim consistency — against the bytes the\nbundle carries, nothing else.\n\nmanifest                  passed       every listed file is here, unaltered\nevidence-closure          passed       every run's evidence is carried here\ntrust                     passed       the signing keys match the identities\nmatrix-rederivation       passed       the run tally follows from the evidence\nreport-verification       passed       the result follows from the runs\nclaim-consistency         passed       the claim agrees with the records here\n\nSigned by\n  publisher · 1 key\n    key sha256:d0aa1595b43cf61e9dfafa456d0b81b92a5aaf53de3627139ca1ab016a9ccda4 — no domain bound\n  automated grader — same operator · 1 key\n\nNo files were uploaded.\nProtocol identifiers the protocol spec release serves resolve to their\ndocuments; the rest are names, not addresses. This verifier fetches nothing\nfrom them. Checks run against the exact platform bytes installed from npm.\n",
+      "stdout": "Recomputed: 6 of 6 checks passed\nBundle: sha256:de045873c91e87c7b96e25841450aee46c0fe6a2936831aefa53bae421aed87a\nFormat: benchmark-product-public-bundle/2\nRun: 5a640cbf3b60afee34b360cd1120823424d22e2c673c0db1c3bb58b557c11cbf\n\nNot checked by this tool: whether the machine that produced this bundle was\nhonest, and whether the compared identities are independent parties. What is\nrecomputed is the bundle's integrity, evidence closure, signing trust,\ncalculations, the result, and claim consistency — against the bytes the\nbundle carries, nothing else.\n\nmanifest                  passed       every listed file is here, unaltered\nevidence-closure          passed       every run's evidence is carried here\ntrust                     passed       the signing keys match the identities\nmatrix-rederivation       passed       the run tally follows from the evidence\nreport-verification       passed       the result follows from the runs\nclaim-consistency         passed       the claim agrees with the records here\n\nSigned by\n  publisher · 1 key\n    key sha256:d0aa1595b43cf61e9dfafa456d0b81b92a5aaf53de3627139ca1ab016a9ccda4 — no domain bound\n  automated grader — same operator · 1 key\n\nNo files were uploaded.\nProtocol identifiers the protocol spec release serves resolve to their\ndocuments; the rest are names, not addresses. This verifier fetches nothing\nfrom them. Checks run against the exact platform bytes installed from npm.\n",
       "stderr": ""
     }
   },
@@ -123,7 +123,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: claim package headline.baseline.passRate is not the exact projection of verified facts\n"
+      "stderr": "colophon-check: the claim's field headline.baseline.passRate does not agree with the records here\n"
     }
   },
   "kit/tampered/claim-text-tampered": {
@@ -162,7 +162,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: claim package verification.trustRoot is not the exact projection of verified facts\n"
+      "stderr": "colophon-check: the claim's field verification.trustRoot does not agree with the records here\n"
     }
   },
   "kit/tampered/envelope-payload-malleated": {
@@ -201,7 +201,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: report-envelope: invalid DSSE envelope: TrustCoreError: DSSE envelope payload is not strict standard or URL-safe base64.\n"
+      "stderr": "colophon-check: report-envelope: the signed result is not valid DSSE: payload is not strict standard or URL-safe base64.\n"
     }
   },
   "kit/tampered/file-truncated": {
@@ -279,7 +279,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: digest mismatch for \"share.txt\"\n"
+      "stderr": "colophon-check: fingerprint mismatch for \"share.txt\"\n"
     }
   },
   "kit/tampered/manifest-length-mismatch": {
@@ -396,7 +396,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: evidence record digest mismatch\n"
+      "stderr": "colophon-check: evidence file fingerprint mismatch\n"
     }
   },
   "kit/tampered/record-substituted": {
@@ -552,7 +552,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: report-recompute: recomputed results do not match the sealed Report results\n"
+      "stderr": "colophon-check: report-recompute: the recomputed result does not match the sealed result\n"
     }
   },
   "kit/tampered/trust-key-swapped": {
@@ -591,7 +591,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: Report author/keyId/didKey are not derived from the bundled Report SPKI\n"
+      "stderr": "colophon-check: the result's author/keyId/didKey are not derived from its bundled signing SPKI\n"
     }
   },
   "kit/tampered/verdict-signature-grafted-resigned": {
@@ -630,7 +630,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: matrix-rederivation: re-derived digest sha256:7db9baa3f7740e35815840933e9176e178fe5a600e0a4b57fa7969780c146c80 !== received sha256:16bfe298a7deef8688e266841f083883743505918857df3cc7af7c6cddb2f4ca\n"
+      "stderr": "colophon-check: matrix-rederivation: re-derived fingerprint sha256:7db9baa3f7740e35815840933e9176e178fe5a600e0a4b57fa7969780c146c80 !== received sha256:16bfe298a7deef8688e266841f083883743505918857df3cc7af7c6cddb2f4ca\n"
     }
   },
   "trust/report-key-is-not-spki": {
@@ -747,7 +747,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: Report author/keyId/didKey are not derived from the bundled Report SPKI\n"
+      "stderr": "colophon-check: the result's author/keyId/didKey are not derived from its bundled signing SPKI\n"
     }
   },
   "trust/report-key-id-differs-from-the-derived-did-key": {
@@ -786,7 +786,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: Report author/keyId/didKey are not derived from the bundled Report SPKI\n"
+      "stderr": "colophon-check: the result's author/keyId/didKey are not derived from its bundled signing SPKI\n"
     }
   },
   "trust/report-did-key-alone-differs-from-the-derived-did-key": {
@@ -825,7 +825,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: Report author/keyId/didKey are not derived from the bundled Report SPKI\n"
+      "stderr": "colophon-check: the result's author/keyId/didKey are not derived from its bundled signing SPKI\n"
     }
   },
   "trust/report-author-alone-differs-from-the-report": {
@@ -864,7 +864,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: Report author/keyId/didKey are not derived from the bundled Report SPKI\n"
+      "stderr": "colophon-check: the result's author/keyId/didKey are not derived from its bundled signing SPKI\n"
     }
   },
   "trust/report-key-spelled-url-safe-is-accepted": {
@@ -951,7 +951,7 @@
     },
     "human": {
       "exitCode": 0,
-      "stdout": "Recomputed: 6 of 6 checks passed\nBundle: sha256:aa8603b4f3fa37e74edc7fb45b4ebea3f88ee22fde02d198168837a112af49e8\nFormat: benchmark-product-public-bundle/2\nRun: 5a640cbf3b60afee34b360cd1120823424d22e2c673c0db1c3bb58b557c11cbf\n\nNot checked by this tool: whether the machine that produced this bundle was\nhonest, and whether the compared identities are independent parties. What is\nrecomputed is the bundle's integrity, evidence closure, signing trust,\ncalculations, the report, and claim consistency — against the bytes the\nbundle carries, nothing else.\n\nmanifest                  passed       every listed file is here, unaltered\nevidence-closure          passed       every run's evidence is carried here\ntrust                     passed       the signing keys match the identities\nmatrix-rederivation       passed       the run tally follows from the evidence\nreport-verification       passed       the result follows from the runs\nclaim-consistency         passed       the claim agrees with the records here\n\nSigned by\n  publisher · 1 key\n    key sha256:d0aa1595b43cf61e9dfafa456d0b81b92a5aaf53de3627139ca1ab016a9ccda4 — no domain bound\n  automated grader — same operator · 1 key\n\nNo files were uploaded.\nProtocol identifiers the protocol spec release serves resolve to their\ndocuments; the rest are names, not addresses. This verifier fetches nothing\nfrom them. Checks run against the exact platform bytes installed from npm.\n",
+      "stdout": "Recomputed: 6 of 6 checks passed\nBundle: sha256:aa8603b4f3fa37e74edc7fb45b4ebea3f88ee22fde02d198168837a112af49e8\nFormat: benchmark-product-public-bundle/2\nRun: 5a640cbf3b60afee34b360cd1120823424d22e2c673c0db1c3bb58b557c11cbf\n\nNot checked by this tool: whether the machine that produced this bundle was\nhonest, and whether the compared identities are independent parties. What is\nrecomputed is the bundle's integrity, evidence closure, signing trust,\ncalculations, the result, and claim consistency — against the bytes the\nbundle carries, nothing else.\n\nmanifest                  passed       every listed file is here, unaltered\nevidence-closure          passed       every run's evidence is carried here\ntrust                     passed       the signing keys match the identities\nmatrix-rederivation       passed       the run tally follows from the evidence\nreport-verification       passed       the result follows from the runs\nclaim-consistency         passed       the claim agrees with the records here\n\nSigned by\n  publisher · 1 key\n    key sha256:d0aa1595b43cf61e9dfafa456d0b81b92a5aaf53de3627139ca1ab016a9ccda4 — no domain bound\n  automated grader — same operator · 1 key\n\nNo files were uploaded.\nProtocol identifiers the protocol spec release serves resolve to their\ndocuments; the rest are names, not addresses. This verifier fetches nothing\nfrom them. Checks run against the exact platform bytes installed from npm.\n",
       "stderr": ""
     }
   },
@@ -1069,7 +1069,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: evaluator <identifier: see --json> keyId is not derived from its SPKI\n"
+      "stderr": "colophon-check: judge <identifier: see --json> keyId is not derived from its SPKI\n"
     }
   },
   "trust/evaluator-named-twice": {
@@ -1147,7 +1147,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: evaluator trust set must exactly equal Matrix-referenced evaluators\n"
+      "stderr": "colophon-check: the trusted judges must be exactly the judges the runs reference\n"
     }
   },
   "trust/one-spki-under-two-identities": {
@@ -1264,7 +1264,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 evaluator mismatch\n"
+      "stderr": "colophon-check: verdict 01095a2187cb4d177eff622d8076c5c91b892585dcaa89c6eb87de5648b8bf71 judge mismatch\n"
     }
   },
   "evidence-closure/verdict-catalog-is-one-short": {
@@ -1303,7 +1303,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: verdict catalog does not match Matrix verdict closure\n"
+      "stderr": "colophon-check: verdicts.json does not list exactly the verdicts the runs reference\n"
     }
   },
   "anchored-bundle/dangling-anchor": {
@@ -1342,7 +1342,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix\n"
+      "stderr": "colophon-check: carried timestamp proof is invalid: the fingerprint it covers, 3333333333333333333333333333333333333333333333333333333333333333, is neither this bundle's sealed run.json nor its sealed matrix.json\n"
     }
   },
   "anchored-bundle/two-dangling-anchors": {
@@ -1381,7 +1381,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: carried anchor is invalid: the anchored digest 3333333333333333333333333333333333333333333333333333333333333333 is neither this bundle's sealed Run nor its sealed Matrix\n"
+      "stderr": "colophon-check: carried timestamp proof is invalid: the fingerprint it covers, 3333333333333333333333333333333333333333333333333333333333333333, is neither this bundle's sealed run.json nor its sealed matrix.json\n"
     }
   },
   "anchored-bundle/anchor-file-is-not-named-by-its-digest": {
@@ -1420,7 +1420,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: anchor record digest mismatch\n"
+      "stderr": "colophon-check: timestamp proof fingerprint mismatch\n"
     }
   },
   "anchored-bundle/anchor-over-the-sealed-run": {
@@ -1459,7 +1459,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: claim package anchors is not the exact projection of verified facts\n"
+      "stderr": "colophon-check: the claim's field anchors does not agree with the records here\n"
     }
   },
   "report-envelope/signed-by-another-key": {
@@ -1576,7 +1576,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: claim package records.reportEnvelopeSha256 is not the exact projection of verified facts\n"
+      "stderr": "colophon-check: the claim's field records.reportEnvelopeSha256 does not agree with the records here\n"
     }
   },
   "evidence-native-signature/valid-signature": {
@@ -1615,7 +1615,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: Matrix v2 failed deterministic assembly-3.0 replay\n"
+      "stderr": "colophon-check: the runs do not follow from a deterministic assembly-3.0 replay of the evidence\n"
     }
   },
   "evidence-native-signature/flipped-signature": {
@@ -2122,7 +2122,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid\n"
+      "stderr": "colophon-check: binary admission replay failed: resolutions.0.reviews.0: reviewer signature or judge/key binding is invalid\n"
     }
   },
   "admission-reviewer-signature/signed-by-another-key": {
@@ -2161,7 +2161,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid\n"
+      "stderr": "colophon-check: binary admission replay failed: resolutions.0.reviews.0: reviewer signature or judge/key binding is invalid\n"
     }
   },
   "admission-reviewer-signature/key-id-is-not-the-reviewer-key": {
@@ -2200,7 +2200,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid\n"
+      "stderr": "colophon-check: binary admission replay failed: resolutions.0.reviews.0: reviewer signature or judge/key binding is invalid\n"
     }
   },
   "admission-reviewer-signature/evaluator-carries-no-key": {
@@ -2239,7 +2239,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: binary admission replay failed: resolutions.0.reviews.0: reviewer signature or evaluator/key binding is invalid\n"
+      "stderr": "colophon-check: binary admission replay failed: resolutions.0.reviews.0: reviewer signature or judge/key binding is invalid\n"
     }
   },
   "admission-reviewer-signature/two-signatures": {
@@ -2278,7 +2278,7 @@
     "human": {
       "exitCode": 1,
       "stdout": "",
-      "stderr": "colophon-check: binary admission replay failed: resolutions.0.reviews.0: review verdict must be one Result Evaluation envelope with one signature\n"
+      "stderr": "colophon-check: binary admission replay failed: resolutions.0.reviews.0: review verdict must be one DSSE-signed Result Evaluation with one signature\n"
     }
   },
   "report-envelope-signatures/golden-envelope": {

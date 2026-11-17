@@ -184,7 +184,7 @@ Run: <run-sha256>
 Not checked by this tool: whether the machine that produced this bundle was
 honest, and whether the compared identities are independent parties. What is
 recomputed is the bundle's integrity, evidence closure, signing trust,
-calculations, the report, and claim consistency — against the bytes the
+calculations, the result, and claim consistency — against the bytes the
 bundle carries, nothing else.
 
 manifest                  passed       every listed file is here, unaltered

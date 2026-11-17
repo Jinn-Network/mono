@@ -1,9 +1,9 @@
 # Reader-Facing Vocabulary — Inherited Platform Terms Mapped to Reader-Expected Names
 
-- **Version:** 1.12
+- **Version:** 1.13
 - **Date:** 2026-09-02 (v1.1: 2026-09-03; v1.2: 2026-09-04; v1.3: 2026-09-12; v1.4: 2026-09-16;
   v1.5: 2026-09-17; v1.6: 2026-09-18; v1.7: 2026-09-19; v1.8: 2026-09-24; v1.9: 2026-09-26;
-  v1.10: 2026-09-29; v1.11: 2026-11-14; v1.12: 2026-11-14)
+  v1.10: 2026-09-29; v1.11: 2026-11-14; v1.12: 2026-11-14; v1.13: 2026-11-17)
 - **Author:** Jinn contributor
 - **Shape:** `design` (output is a naming spec, not code)
 - **Issue:** #2987
@@ -106,6 +106,21 @@
   that release serves whole, so *names, not addresses* was true only of the rest. The sentence now
   says served identifiers resolve to their documents and the rest are names, still without
   naming the origin. The ruling stays *keep*. No disposition changes.
+- **v1.13** (#5251): rules the reader tool's refusal lines and two subjects of its
+  recomputed-checks caveat, which v1.11 left open. A refusal reaches a reader as one stderr line
+  and a script as the `--json` `message` value, and the two may now differ. The stderr line follows §5:
+  it is the reader tool's human output, which §1 scopes in and the *Usage text* row already
+  reaches. The `message` value keeps the refusing module's words byte for byte, and so does the
+  error a library caller catches: the conformance kit's `expectedMessagePattern` pins that value
+  for its fourteen tampered cases, in a manifest the kit's generator must reproduce byte for byte,
+  and tests in the product and the platform packages assert it. So the value is **contract**
+  under §2, as the `--json` value `declared-but-absent` already is, and the new *Refusal lines*
+  row applies that split to every refusal. A field path, member path, fingerprint, identifier or
+  check label in a refusal is printed as written (§3: shown, not named), so a claim field whose
+  name is a contract spelling (`anchors`) still reaches a reader as written. Two new rows rename
+  the caveat's `the report` and `the disclosure specification` to *the result* and *what was
+  pinned*, the names the check-name glosses beneath it already use. §7 records which refusals
+  are reworded so far. No earlier disposition changes.
 
 ## 1. Scope
 
@@ -173,7 +188,8 @@ belongs to a bundle-format revision and to nothing smaller:
   `BENCHMARKING_METHOD_IDS`, `packages/benchmarking/records/src/identifiers.ts:99`), sealed as
   `method.id` alongside `method.version` — and enum values (`two-human-unanimous`,
   `operator-only`, `screened-operator-sampled`, `complete`/`partial`/`cancelled`);
-- `--json` output keys, the package name `@colophon-claims/check` (and the permanent
+- `--json` output keys and a refusal's `message` value (§4.2, *Refusal lines*), the package
+  name `@colophon-claims/check` (and the permanent
   passthrough alias `@colophon-claims/verify`), and the command name `colophon-check`
   (and the alias binary `colophon-verify`). Issue #4188: a freshly emitted instruction
   prints the new name; already-sealed bundles keep the old name as contract because they
@@ -357,7 +373,8 @@ sub-table. The one row that heads a sealed value — the row header, which *is* 
 ### 4.2 Reader tool output (`colophon-verify` human-readable stdout)
 
 Every row is **presentation** except the two marked **Contract** — the check-name strings and
-the `--json` keys — which are ruled *keep* for that reason.
+the `--json` keys — which are ruled *keep* for that reason. The *Refusal lines* row is split: its
+stderr line is presentation, and the `--json` `message` value it shares is contract.
 
 Rows whose target has moved since v1.0 are anchored to the exported or `const` name that
 carries the string, not to a line number: every line pointer in this section had rotted by
@@ -382,10 +399,13 @@ rows that needed it, not retrofitted across the document.
 | Artifact content … not fetched | keep | — | Already reader-shaped, and the caveat under it is exemplary. |
 | freeze repository | keep | — | |
 | No files were uploaded. | keep | — | |
-| `--json` keys (`ok`, `code`, `message`, `verifierVersion`, `supportedFormats`, …) | keep | — | **Contract.** Machine surface; not a reader surface. |
+| `--json` keys (`ok`, `code`, `message`, `verifierVersion`, `supportedFormats`, …) | keep | — | **Contract.** Machine surface; not a reader surface. A refusal's `message` value is contract too: see *Refusal lines* below. |
 | `Not checked by this tool: whether the machine that produced this bundle was honest, and whether the compared identities are independent parties. What is recomputed is …` | keep | — | The `caveats` block (`cli.ts`, in `renderVerifiedBundle`). A rewrite in two passes, not a moved line: the hand-written five-check list closing with *It does not prove…* that this row once quoted no longer exists. #2982 inverted the paragraph — deleted the trailing *This checks … It does not prove …* and put the limits first, beneath the verdict block (the `Recomputed` row above). #3691 then replaced the remaining hand-written enumeration with `describeRecomputedChecks(outcome)`: that list had dropped `trust` and pinned one lineage's closure, naming five subjects beneath a verdict reading `of 6`, `of 7` or `of 8` — one check behind the base closure, two or three behind the anchored and disclosed ones. The enumeration is glossed from `CHECK_SUBJECTS` (`outcome.ts`), keyed by the check union and derived from the same outcome the denominator is, so it cannot undercount its own verdict. Ruling unchanged — keep; "evidence closure" is a check name, glossed by the row above rather than renamed. |
+| `the report` | rename | the result | The `report-verification` subject in the caveat's list of what is recomputed (`CHECK_SUBJECTS`, `outcome.ts`). The check-name gloss a few lines below it already reads *the result follows from the runs*, so one output gave one concept two names. |
+| `the disclosure specification` | rename | what was pinned | The `disclosure-specification` subject in the same list. §5 hides *disclosure specification*; what the check covers is what was pinned, the name its gloss already uses (*what was pinned is recorded and matches*). The check name itself is contract and stays, glossed. |
 | `Checks run against the exact platform bytes installed from npm.` | keep | — | `PLATFORM_BYTES_SENTENCE`. The reserved noun this row deferred on is already gone: #2982 replaced the verdict-surface *Verification uses …* with the verb-family it ruled, and #3675 then replaced the shortened `usage()` copy — which had kept the pre-#2982 wording — with the same `const`. There is no separate shortened form any more either: de-duplicating the sentence was the other half of #3675's fix, the two copies having drifted apart while both were hand-maintained, and one `const` has fed the verdict surface and `usage()` alike ever since. The wrapper that carries it to both today, `IDENTIFIER_DISCLOSURE`, arrived later, with #2981's origin-free rewrite of the row below. |
 | `Protocol identifiers the protocol spec release serves resolve to their documents; the rest are names, not addresses. This verifier fetches nothing from them.` | keep | — | `IDENTIFIER_DISCLOSURE`. Reworded twice, never re-ruled. The first string named the `https://spec.jinn.network/…` origin and disclosed that it was not hosted; the second declined to hand a reader an unresolvable origin and called every protocol identifier a name, not an address; the current one (#4894) tells the identifiers the spec release serves, which resolve, from the rest, which are names, still without naming the origin. Ruling unchanged — keep; both halves load-bearing. This constant also carries the platform-bytes sentence in the row above, so those two rows now describe one merged string. |
+| Refusal lines (`colophon-check: …` on stderr) | rename where §5 renames or hides, human line only | — | One line per refusal, worded in `humanRefusalDetail` (`cli.ts`). The line follows §5: it is the reader tool's human output, and a reader who runs the tool on a refused bundle meets nothing else. The same refusal's `--json` `message` value keeps the refusing module's words byte for byte, and so does the error a library caller catches: the conformance kit's `expectedMessagePattern` pins that value, and tests in the product and the platform packages assert it, so it is contract (§2). This is the `declared-but-absent` split applied to every refusal. A field path, member path, fingerprint, identifier or check label (`matrix-rederivation:`) is printed as written (§3: shown, not named), so a claim field named by a contract spelling still prints that spelling, as in *the claim's field anchors does not agree with the records here*. §7 records which refusals are reworded so far. |
 | Usage text | rename where §4.1 renames | — | Follows the same glossary. Reaches the usage and error text in full, `usage()` included; the three closing-paragraph rows above are ruled explicitly so that reach is not left to inference. |
 
 The gloss column stops at `colophon-verify`. The product CLI's `colophon bundle verify` line
@@ -516,6 +536,16 @@ reissue, no reader-visible identifier moves. Each is one issue-shaped unit, in t
 No external condition gates any of the five — (2)'s only one, #2985, has closed — so the order
 above is the whole of their sequencing. All five adopt **`recompute`**, the verb #2982 ruled,
 rather than minting one.
+
+**Refusal lines the characterization suite does not reach.** §4.2's *Refusal lines* row (v1.13)
+reaches every refusal the reader prints, but #5251 reworded two sets only. One is every refusal
+the characterization suite pins (`check/src/characterization/testing/checker-outputs.expected.json`)
+that used a word §5 hides or renames, since those are the refusals the conformance test (5)
+reads. The other is the rest of the timestamp-proof refusal: its lead, the reasons
+`anchor/check.ts` words, and `evaluateAnchors`'s missing-verifier reason. Any other refusal that
+uses such a word still prints as the refusing module wrote it. A characterization case that
+reaches one puts its line in front of the conformance test, which then fails until the line is
+reworded in `humanRefusalDetail` or recorded with an owner.
 
 **Contract renames — queued to a bundle-format revision, not scheduled here.** Nothing in §4
 requires one; every ruling above is reachable through presentation. The queue exists so the
