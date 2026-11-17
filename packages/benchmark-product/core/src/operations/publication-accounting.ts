@@ -25,8 +25,7 @@ import { buildBenchmarkAccounting, verifyBenchmarkAccounting, type PublicationCh
 import { assembleMatrixV2, verifyMatrixV2 } from "@jinn-network/benchmarking-run";
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
-import { createDiscoverySourceAnnouncementPort } from "@jinn-network/record-publication";
-import { executePublicationPlan, type OriginVerificationPort, type PublicationAnnouncementPort, type PublicationArtifact, type PublicationFaultInjector, type PublicationPlan, type PublicationRecord } from "@jinn-network/record-publication";
+import { executePublicationPlan, type OriginVerificationPort, type PublicationArtifact, type PublicationFaultInjector, type PublicationPlan, type PublicationRecord } from "@jinn-network/record-publication";
 import { DELIVERY_MEDIA_TYPE, SUBMISSION_MEDIA_TYPE, DeliveryRecordSchema, SubmissionRecordSchema } from "@jinn-network/task-execution-protocol";
 import { refuse } from "../errors.js";
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
@@ -34,7 +33,7 @@ import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receip
 import { foldRunJournal, foldRunJournalLineage, readRunJournalEntries, type RunJournalEntry } from "../run/journal.js";
 import { readPublicationOrigin, requireWorkspaceAuthorship, recordWorkspaceAuthorship, WORKSPACE_AUTHORSHIP_ROLE } from "../run/publication-authority.js";
 import { assessPublicationCompatibility } from "../run/publication-compatibility.js";
-import { createWorkspacePublicationJournal, createWorkspacePublicationSource, publicArchiveUrl, recordPath, withWorkspacePublicationSourceLock, type WorkspacePublicationSource } from "../run/publication-source.js";
+import { createWorkspacePublicationJournal, createWorkspacePublicationSource, publicArchiveUrl, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
 import { acquirePublicationLock } from "../run/publication-lock.js";
 import { requireRunState, writeRunState } from "../run/state.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
@@ -48,7 +47,7 @@ import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
-import { timestampAfter } from "./publication-report-timestamp.js";
+import { announceAfterServedHead, timestampAfter } from "./publication-report-timestamp.js";
 
 export interface PublicationAccountingInput { readonly draftId: string; }
 export interface PublicationAccountingDeps {
@@ -93,29 +92,6 @@ async function probeArtifactExact(base: string, digest: `sha256:${string}`, byte
   if (observed.length !== bytes.length || !observed.every((value, index) => value === bytes[index])) {
     throw new Error(`public accounting artifact probe did not return exact bytes for ${digest}`);
   }
-}
-/**
- * The announcement port for accounting's plans, used under the source lock: a plan's time is the
- * earliest a record is announced, not the exact time (#5348, #5349). Every retry replays the plan,
- * but the head may have passed a planned time since it was planned: through entry anchors, which
- * each release of the source lock announces at one millisecond after the head and on, or through
- * another draft. The writer refuses an append that does not strictly advance the head, so
- * announcing at exactly that time could never succeed. A record the source already holds under the
- * plan's announcement id is reused without a new append, so it replays as it was; any other is
- * announced at its planned time, or one millisecond after the served head once the head has
- * reached that time.
- */
-function announceAfterServedHead(source: WorkspacePublicationSource): PublicationAnnouncementPort {
-  const announcer = createDiscoverySourceAnnouncementPort({ writer: source.writer });
-  return { async announce(value) {
-    const announced = (await source.writer.readState())?.announcements[value.idempotencyKey];
-    if (announced !== undefined) {
-      if (announced.receipt.record?.digest !== value.record.digest) throw new Error(`source announcement ${value.idempotencyKey} names a different record than ${value.record.id}`);
-      return announced.receipt;
-    }
-    const announcementTimestamp = timestampAfter(value.record.announcementTimestamp!, (await source.head.getExact())?.issuedAt, "publication.accounting.announcedAt");
-    return announcer.announce({ ...value, record: { ...value.record, announcementTimestamp } });
-  } };
 }
 function receiptPosition(source: { agent: string; name: string }, receipt: Receipt) {
   return { kind: "record-discovery" as const, source, position: { sequence: receipt.sequence, entry: receipt.entryDigest } };
@@ -177,7 +153,7 @@ async function publishInputs(input: {
         authority: { async authorizeAnnouncement({ record }) {
           requireWorkspaceAuthorship({ workspaceDir: input.workspaceDir, recordSha256: record.digest.slice(7), recordKind: record.kind, author: input.owner });
         } },
-        announce: announceAfterServedHead(source),
+        announce: announceAfterServedHead(source, "publication.accounting.announcedAt"),
         faults: input.faults,
       });
       for (const member of members) {
@@ -558,7 +534,7 @@ export function publicationAccounting(
         // The head can pass these records' planned times between the input hold and this one (#5348):
         // releasing the input hold announces an entry anchor per input appended, and another draft
         // can announce. Under this lock only this hold's own appends move the head.
-        const announcer = announceAfterServedHead(source);
+        const announcer = announceAfterServedHead(source, "publication.accounting.announcedAt");
         await executePublicationPlan(plan, {
           objects: source.artifactStore, journal: createWorkspacePublicationJournal(context.workspaceDir, input.draftId, "accounting"),
           authority: { async authorizeAnnouncement({ record }) { requireWorkspaceAuthorship({ workspaceDir: context.workspaceDir, recordSha256: record.digest.slice(7), recordKind: record.kind, author: state.owner }); } },

@@ -11,12 +11,10 @@ import {
   readRunPublicationExtension,
 } from "@jinn-network/benchmarking-records";
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
-import { createDiscoverySourceAnnouncementPort } from "@jinn-network/record-publication";
 import {
   executePublicationPlan,
   sha256,
   type OriginVerificationPort,
-  type PublicationAnnouncementPort,
   type PublicationArtifact,
   type PublicationFaultInjector,
   type PublicationPlan,
@@ -39,7 +37,6 @@ import {
   publicArchiveUrl,
   recordPath,
   withWorkspacePublicationSourceLock,
-  type WorkspacePublicationSource,
 } from "../run/publication-source.js";
 import { acquirePublicationLock } from "../run/publication-lock.js";
 import { refreshWorkspacePublicationLockIndex } from "../run/publication-lock-index.js";
@@ -51,7 +48,7 @@ import {
 import { requireRunState, writeRunState } from "../run/state.js";
 import type { OperationContext } from "./context.js";
 import { operateAsync } from "./operate-async.js";
-import { timestampAfter } from "./publication-report-timestamp.js";
+import { announceAfterServedHead, timestampAfter } from "./publication-report-timestamp.js";
 import type { OperationResult } from "./result.js";
 
 export interface PublicationConfigureInput {
@@ -106,30 +103,6 @@ async function probeArtifactExact(base: string, digest: `sha256:${string}`, byte
   if (sha256(observed) !== digest || observed.length !== bytes.length || !observed.every((byte, index) => byte === bytes[index])) {
     throw new Error("public artifact probe did not return the exact stored bytes");
   }
-}
-
-/**
- * The registration plan's announcement port, under the source lock (#5369). Each record's planned
- * time is the earliest it is announced, not the exact time. A retry replays the plan its first
- * attempt froze, and the head can pass a planned time between the attempts: the anchors over the
- * entries an attempt appended are announced by the next holder of the source lock that finishes
- * its work, at one millisecond after the head and on, and another draft can announce. A record the
- * source already holds under the plan's announcement id is reused without a new append, so it
- * replays exactly as it was; any other is announced at its planned time, or one millisecond after
- * the served head once the head has reached that time. Under the lock only this hold's own appends
- * move the head, so when nothing moved it every record is announced at its planned time.
- */
-function announceAfterServedHead(source: WorkspacePublicationSource): PublicationAnnouncementPort {
-  const announcer = createDiscoverySourceAnnouncementPort({ writer: source.writer });
-  return { async announce(value) {
-    const announced = (await source.writer.readState())?.announcements[value.idempotencyKey];
-    if (announced !== undefined) {
-      if (announced.receipt.record?.digest !== value.record.digest) throw new Error(`source announcement ${value.idempotencyKey} names a different record than ${value.record.id}`);
-      return announced.receipt;
-    }
-    const announcementTimestamp = timestampAfter(value.record.announcementTimestamp!, (await source.head.getExact())?.issuedAt, "publication.registration.announcedAt");
-    return announcer.announce({ ...value, record: { ...value.record, announcementTimestamp } });
-  } };
 }
 
 function artifact(id: string, role: string, digestHex: string, bytes: Uint8Array, mediaType: string, dependsOn: readonly string[] = []): PublicationArtifact {
@@ -411,7 +384,9 @@ export function publicationRegister(
         refuse("record-integrity", `runs.${input.draftId}.publication.origin`, "foreign registration dependencies require an injected exact origin verifier");
       }
       let receipt: { sequence: string; entryDigest: `sha256:${string}` } | undefined;
-      const announcement = announceAfterServedHead(source);
+      // Each record's planned time is the earliest it is announced, not the exact time (#5369): a
+      // retry replays this plan, and the head can pass a planned time between attempts.
+      const announcement = announceAfterServedHead(source, "publication.registration.announcedAt");
       await withWorkspacePublicationSourceLock(context.workspaceDir, async () => {
         await source.writer.recover();
         // The stage time is frozen here, under the source lock, strictly after the head served now
