@@ -11,12 +11,20 @@ import {
   parseMatrix,
   parseRun,
 } from "@jinn-network/benchmarking-records";
-import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
+import { RECORD_KINDS, type SourceHead } from "@jinn-network/record-discovery-protocol";
 import { DELIVERY_MEDIA_TYPE, TASK_EXECUTION_PROTOCOL_URI, sealDelivery, sealSubmission } from "@jinn-network/task-execution-protocol";
 import { appendRunJournalEntry } from "../run/journal.js";
 import { writeCancelMarker } from "../run/cancel-marker.js";
 import { recordPublicationOrigin, recordWorkspaceAuthorship } from "../run/publication-authority.js";
-import { createWorkspacePublicationHttpHandler, createWorkspacePublicationSource, recordPath } from "../run/publication-source.js";
+import { acquirePublicationLock } from "../run/publication-lock.js";
+import {
+  createWorkspacePublicationHttpHandler,
+  createWorkspacePublicationSource,
+  recordPath,
+  refreshWorkspacePublicationHead,
+  withWorkspacePublicationSourceLock,
+  type WorkspacePublicationHeadRefresh,
+} from "../run/publication-source.js";
 import { readRunState, writeRunState } from "../run/state.js";
 import {
   HARBOR_CORRELATION_ROLE,
@@ -263,6 +271,72 @@ describe("publication.accounting operation", () => {
     const after = Object.values((await source.writer.readState())!.announcements).find((entry) => entry.receipt.record?.digest === `sha256:${submissionSha256}`)!.receipt;
     expect(after.entryDigest).toBe(before.entryDigest);
     expect(readRunState(workspaceDir, "draft-1")!.publication!.accounting.announcedAt).toBe(frozenAt);
+  });
+
+  // #5334. Accounting reads its time when the command starts, then waits for the draft lock and
+  // enumerates and verifies every input before its first announcement. The writer refuses an
+  // append that does not strictly advance the served head, so a head moved past that time in
+  // between must not leave the stage unable to announce. The held draft lock puts the move inside
+  // that phase deterministically: accounting has read its time and is waiting.
+  test.each([
+    "the idle-head heartbeat re-signs the source head",
+    "another announcement lands on the source",
+  ] as const)("finishes when %s after it has read its time and before it announces (#5334)", async (interleaving) => {
+    const now = clock();
+    const fixture = await registeredClosed(now);
+    const submissionSha256 = capture(fixture.runSha256, fixture.cells[0]!);
+    const draftLock = await acquirePublicationLock(workspaceDir, "draft-1");
+    const pending = publicationAccounting(context(now), { draftId: "draft-1" });
+    let passed: SourceHead;
+    try {
+      if (interleaving === "the idle-head heartbeat re-signs the source head") {
+        // Registration signed the head at the fixture's 2026-08-13 clock, so it is past half its
+        // window and the heartbeat re-signs it at this host's clock, far after accounting's time.
+        expect((await refreshWorkspacePublicationHead(workspaceDir, "colophon-benchmarks")).status).toBe("refreshed");
+      } else {
+        const bytes = new TextEncoder().encode("another draft's record");
+        await withWorkspacePublicationSourceLock(workspaceDir, async () => {
+          const source = createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks");
+          await source.writer.recover();
+          await source.writer.append({
+            timestamp: new Date().toISOString(),
+            announcement: { announcementId: "another-draft", action: "available", record: { kind: RECORD_KINDS.task, digest: `sha256:${sha256Hex(bytes)}`, mediaType: "text/plain" } },
+            record: { bytes, contentType: "text/plain" },
+          });
+        });
+      }
+    } finally {
+      // Read before the release: once accounting holds the draft lock it announces and moves the head.
+      passed = (await createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks").head.getExact())!;
+      draftLock.release();
+    }
+
+    const result = await pending;
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    const state = readRunState(workspaceDir, "draft-1")!;
+    expect(state.publication!.accounting.state).toBe("complete");
+    expect(state.publication!.matrixV2.state).toBe("complete");
+    // The frozen time is strictly after the head served when the stage froze it.
+    expect(Date.parse(state.publication!.accounting.announcedAt!)).toBeGreaterThan(Date.parse(passed.issuedAt));
+    const durable = (await createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks").writer.readState())!;
+    const input = Object.values(durable.announcements).find((entry) => entry.receipt.record?.digest === `sha256:${submissionSha256}`);
+    expect(input).toBeDefined();
+    expect(input!.receipt.sequence > passed.sequence).toBe(true);
+  });
+
+  // The other half of #5334: once accounting has frozen its time, the heartbeat leaves the head
+  // alone until the stage has announced, and picks it up again after.
+  test("withholds the idle-head heartbeat from its freeze until it has announced (#5334)", async () => {
+    const now = clock();
+    const fixture = await registeredClosed(now);
+    capture(fixture.runSha256, fixture.cells[0]!);
+    let during: WorkspacePublicationHeadRefresh | undefined;
+    const result = await publicationAccounting(context(now), { draftId: "draft-1" }, { afterInputsBeforeCutoff: async () => {
+      during = await refreshWorkspacePublicationHead(workspaceDir, "colophon-benchmarks");
+    } });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(during).toEqual({ status: "withheld", drafts: ["draft-1"] });
+    expect((await refreshWorkspacePublicationHead(workspaceDir, "colophon-benchmarks")).status).toBe("refreshed");
   });
 
   test("keeps Matrix v2 resumable when a writer-owned scope record becomes unavailable", async () => {
