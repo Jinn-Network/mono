@@ -60,6 +60,8 @@ export interface PublicationAccountingDeps {
   readonly transformAccountingScope?: (stream: AccountingScopeStream) => AccountingScopeStream;
   /** Test-only crash seam in the Accounting and Matrix v2 plan: after each action, before its journal checkpoint. */
   readonly recordPlanFaults?: PublicationFaultInjector;
+  /** Test-only crash seam in the input plan: after each action, before its journal checkpoint. */
+  readonly inputPlanFaults?: PublicationFaultInjector;
 }
 export interface PublicationAccountingResult {
   readonly accountingSha256: string;
@@ -126,6 +128,7 @@ async function publishInputs(input: {
   supportMembers: readonly PublicationMember[];
   verifyOrigin?: OriginVerificationPort;
   owner: string;
+  faults?: PublicationFaultInjector;
 }): Promise<{ source: { agent: string; name: string }; cutoff: Receipt }> {
   return withWorkspacePublicationSourceLock(input.workspaceDir, async () => {
     const source = createWorkspacePublicationSource(input.workspaceDir, input.sourceName);
@@ -152,6 +155,7 @@ async function publishInputs(input: {
           requireWorkspaceAuthorship({ workspaceDir: input.workspaceDir, recordSha256: record.digest.slice(7), recordKind: record.kind, author: input.owner });
         } },
         announce: createDiscoverySourceAnnouncementPort({ writer: source.writer }),
+        faults: input.faults,
       });
       for (const member of members) {
         if ("kind" in member && member.actions.includes("announce")) await probeExact(input.publicBaseUrl, member.digest, member.bytes);
@@ -382,6 +386,7 @@ export function publicationAccounting(
             return announcedAt;
           },
           dispatches, supportMembers: [...supportMembers.values()], verifyOrigin: deps.verifyOrigin, owner: state.owner,
+          faults: deps.inputPlanFaults,
         })
         : { source: createWorkspacePublicationSource(context.workspaceDir, publication.source.name).source, cutoff: { sequence: publication.accounting.sourceCutoff!.sourceSequence, entryDigest: `sha256:${publication.accounting.sourceCutoff!.entrySha256}` as const } };
       publication = state.publication!;
