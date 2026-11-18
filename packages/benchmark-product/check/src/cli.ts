@@ -140,6 +140,36 @@ function admissionRefusal(tail: string, wording: string): readonly [RegExp, stri
   return [new RegExp(`^((?:binary admission replay failed: )?(?:${FIELD_PATH}: )+)${tail}$`, "u"), `$1${wording}`];
 }
 
+/** A code or check label a platform refusal leads with (`binary-record-malformed`): no space. */
+const LABEL = String.raw`[a-z]+(?:-[a-z]+)*`;
+
+/** A platform method-input refusal as the result's recomputation carries it:
+ * `report-recompute: MethodInputError: <code>: <record>: `. */
+const METHOD_INPUT = String.raw`report-recompute: MethodInputError: ${LABEL}: \S+: `;
+
+/** A rule for a method-input refusal: the lead, the code and the record are kept as written
+ * (`$1`), and `tail`, the platform module's fixed words, is reworded. */
+function methodInputRefusal(tail: string, wording: string): readonly [RegExp, string] {
+  return [new RegExp(`^(${METHOD_INPUT})${tail}$`, "u"), `$1${wording}`];
+}
+
+/** The same for the binary-instrument reduction: `report-recompute: BinaryInstrumentReductionError: <code>: `. */
+function reductionRefusal(tail: string, wording: string): readonly [RegExp, string] {
+  return [new RegExp(`^(report-recompute: BinaryInstrumentReductionError: ${LABEL}: )${tail}$`, "u"), `$1${wording}`];
+}
+
+/**
+ * A rule for one item of a list a refusal joins with `; ` (a validation's issues, a parse failure's
+ * issues), reworded wherever it appears in the list, as often as it appears. The first match must
+ * start the message with `lead`; each later one must start where the one before ended (`y`), at the
+ * `; ` after it, so the rule rewrites only inside a list a message starts with. The items between
+ * (`$2`) are kept as written, and the item's own captures start at `$3`. An item holds no `;`, so the
+ * matches together scan the message once.
+ */
+function listItem(lead: string, item: string, wording: string): readonly [RegExp, string] {
+  return [new RegExp(`(^${lead}|(?<=.); )((?:[^;]*; )*?)${item}(?=; |$)`, "guy"), `$1$2${wording}`];
+}
+
 /**
  * The reader-facing vocabulary spec's refusal-lines row (section 4.2, #5251): the human line names
  * each concept by its section 5 name, while `--json` keeps the refusing module's `message` byte for
@@ -159,6 +189,15 @@ function admissionRefusal(tail: string, wording: string): readonly [RegExp, stri
  * renames unless a rule here rewords it or the test records why it stays. The admission replay's
  * rules (`admissionRefusal`) start from the field paths the replay prefixes, which hold no space,
  * and a rule that leads with a run's `cellKey` starts from the fingerprint that opens it.
+ *
+ * The rules below the `Issue #5373` comment do the same for text the `@jinn-network/*` platform
+ * packages write and for the check package's own schema issue messages, where the inventory reaches
+ * a refusal line with them. The platform packages' messages are not edited: their words are contract
+ * in `--json` and in the errors their callers catch, so the reader rewords them here, at its own
+ * boundary. A rule for a method input or the binary reduction starts from the lead the result's
+ * recomputation prints (`methodInputRefusal`, `reductionRefusal`), and a rule for one item of a list
+ * a refusal joins with `; ` (`listItem`) rewords that item wherever it stands, but only inside a
+ * list the message starts with.
  */
 const READER_WORDING: readonly (readonly [RegExp, string])[] = [
   [/^Matrix v2 failed deterministic assembly-3\.0 replay$/u,
@@ -319,6 +358,148 @@ const READER_WORDING: readonly (readonly [RegExp, string])[] = [
   [/^verdict envelope carries /u, "the signed verdict carries "],
   [/^(this bundle declares the "task-selection" capability, but its sealed Run carries no task-selection\/v1) declaration( for it to state)$/u,
     "$1$2"],
+
+  // Issue #5373. Text the platform packages write and the check package's own schema issue
+  // messages, where the inventory reaches a refusal line with them: bare, inside the wrapper that
+  // carries them (`carried timestamp proof is invalid: `), or as the detail the result's
+  // recomputation reports (`report-recompute: <error class>: `). Paths, codes, fingerprints and
+  // identifiers are printed as written.
+
+  // DSSE-signed records, as trust-core's decoder refuses them.
+  [new RegExp(String.raw`^((?:report-recompute: (?:MethodInputError: ${LABEL}: \S+: )?TrustCoreError: )?)(?:A )?DSSE envelope (must |requires )`, "u"), "$1the DSSE-signed record $2"],
+  [new RegExp(String.raw`^((?:report-recompute: (?:MethodInputError: ${LABEL}: \S+: )?TrustCoreError: )?)DSSE envelope (payloadType |payload |signature |bytes )`, "u"), "$1the DSSE-signed record's $2"],
+  [/^(report-envelope: the signed result is not valid DSSE: )A DSSE envelope requires at least one signature\.$/u, "$1it carries no signature."],
+
+  // Timestamp proofs, as trust-core's encoding check and proof verifiers refuse them.
+  [/^((?:carried timestamp proof is invalid: not the exact sealed encoding of a conforming AnchorEvidence record|the timestamp proof is not the exact sealed encoding of a conforming AnchorEvidence): )Anchor-evidence bytes /u,
+    "$1its bytes "],
+  [/^(carried timestamp proof is invalid: (?:ESSCertIDv2\.hashAlgorithm|SignerInfo\.digestAlgorithm) names )digest algorithm /u, "$1hash algorithm "],
+  [/^(carried timestamp proof is invalid: RSASSA-PSS carries no parameters, so its )digest( defaults to SHA-1 )/u, "$1hash$2"],
+  [/^(carried timestamp proof is invalid: The file )digest( operation is )/u, "$1hash$2"],
+  [/^(carried timestamp proof is invalid: The messageDigest attribute is not the )digest( of eContent )/u, "$1hash$2"],
+  [/^(carried timestamp proof is invalid: TSTInfo\.tsa is not among the )signer certificate's subject names /u,
+    "$1names the signer certificate is issued to "],
+  [/^(carried timestamp proof is invalid: The proof is detached from \S+, not from )the subject /u, "$1the covered record's fingerprint "],
+  [/^(carried timestamp proof is invalid: )The subject digest is not 64 hex characters\.$/u, "$1The covered record's fingerprint is not 64 hex characters."],
+  [/^(carried timestamp proof is invalid: messageImprint\.hashAlgorithm is \S+; )the caller's subject digest is a SHA-256( and cannot be compared to it )/u,
+    "$1the covered record's fingerprint is a SHA-256 hash$2"],
+  [/^(carried timestamp proof is invalid: messageImprint\.hashedMessage is not )the subject digest /u, "$1the covered record's fingerprint "],
+
+  // A run's key and the expected runs, as the records package reads them.
+  [/^(malformed cellKey )task digest( \(must be 64 lowercase hex digits\): )/u, "$1task fingerprint$2"],
+  [/^(malformed cellKey )replicate( \(must be )/u, "$1repeat$2"],
+  [/^expected cell set exceeds MAX_MATERIALIZED_CELLS \((\S+?)\): /u, "the expected set of runs exceeds the cap of $1 runs: "],
+  [/^expected cell cardinality exceeds (Number\.MAX_SAFE_INTEGER: )/u, "the expected number of runs exceeds $1"],
+  [/^(Benchmark item's task descriptor lacks )a sha256 digest( \(schema invariant violated\))$/u, "$1a fingerprint$2"],
+
+  // Evidence-native bundles (`claim-package/3`), as the evidence package checks them.
+  [/^(\S+) digest does not match its exact descriptor$/u, "$1 fingerprint does not match its exact descriptor"],
+  [/^claim-package\/3 evidence closure differs from records\/$/u, "the claim's evidence closure differs from records/"],
+  [/^claim-package\/3 is inconsistent with the exact evidence-native chain$/u, "the claim is inconsistent with the exact evidence-native chain"],
+  [/^report\.json differs from the signed Report v3 payload$/u, "report.json differs from the signed v3 result's payload"],
+  [/^Report v3 signature is invalid or unbound$/u, "the v3 result's signature is invalid or unbound"],
+  [/^Report v3 envelope has the wrong payload type$/u, "the signed v3 result has the wrong payload type"],
+  [/^Report v2 must subject the exact Matrix v2 bytes$/u, "the v2 result must name the exact v2 matrix.json bytes as its input"],
+
+  // The runs re-derived, and the run checks, as the run package reports them.
+  [/^(matrix-rederivation: )exact matrix bytes are required for verifyMatrix$/u, "$1the exact bytes of matrix.json are required for verifyMatrix"],
+  [/^(matrix-rederivation: )re-derived matrix bytes diverge (at offset \d+|in length)$/u,
+    "$1the runs re-derived from the evidence diverge from matrix.json $2"],
+  [/^(evaluator-independence: )evaluator Agent IRI is not distinct from solver$/u, "$1judge Agent IRI is not distinct from solver"],
+  [/^(evaluator-independence: )solver or evaluator unresolved \(fail-closed\)$/u, "$1solver or judge unresolved (fail-closed)"],
+  [/^(verdict-spec-match: verdict lacks a )digest-shaped evaluationSpecification and task has no pinned digest$/u,
+    "$1fingerprint-shaped evaluationSpecification and task has no pinned fingerprint"],
+
+  // The result, as the aggregate package verifies and recomputes it.
+  [/^(report-authenticity: )Report envelope has no signer keyid to bind to author$/u, "$1the signed result has no signer keyid to bind to author"],
+  [/^(report-envelope: )Report payload bytes are not the exact canonical encoding$/u, "$1the result's payload bytes are not the exact canonical encoding"],
+  [/^(report-envelope: )invalid Report payload: /u, "$1invalid result payload: "],
+  [/^(report-recompute: )exact subject bytes\/order do not match the sealed Report subjects$/u,
+    "$1the exact matrix.json bytes, in order, do not match the runs the sealed result names"],
+  [/^(disclosures-faithfulness: )recomputed per-subject disclosures do not match the exact subject bytes\/order$/u,
+    "$1what was pinned, recomputed from the exact matrix.json bytes in order, does not match the sealed result"],
+  [/^((?:report-recompute|disclosures-faithfulness): Error: )subject (\S+) is not a valid Matrix: /u, "$1matrix.json $2 is not valid: "],
+  [/^((?:report-recompute|disclosures-faithfulness): Error: )subject (\S+) is not the exact canonical Matrix encoding$/u,
+    "$1matrix.json $2 is not in exact canonical encoding"],
+  [/^(benchmark-comparability: )subjects resolve to distinct Benchmark digests: /u, "$1the result's runs resolve to distinct Benchmark fingerprints: "],
+  [/^(benchmark-comparability: version-robust result does not disclose exact paired Task )digests$/u, "$1fingerprints"],
+  [/^(benchmark-comparability: version-robust cross-Benchmark result has no exact shared Task-)digest( pairing)$/u, "$1fingerprint$2"],
+  [/^(benchmark-comparability: version-robust cross-Benchmark results must disclose one identical Task-)digest pairing per subject$/u,
+    "$1fingerprint pairing for each set of runs"],
+  [/^(benchmark-comparability: version-robust pairing includes a Task )digest not shared by every subject$/u,
+    "$1fingerprint not shared by every set of runs"],
+  [/^(report-recompute: Error: method subjectSha256 is not an exact )lowercase sha256: /u, "$1fingerprint in lowercase hex: "],
+  [/^(report-recompute: Error: method subjectSha256 \S+ does not match )canonical Matrix digest /u, "$1the canonical matrix.json fingerprint "],
+  [/^(report-recompute: Error: )method subject identity is duplicated: /u, "$1the method is given the same matrix.json twice: "],
+  [/^(report-recompute: Error: clean-subset@1: delegate did not preserve the )restricted subject identity$/u, "$1identity of the restricted runs"],
+  [new RegExp(String.raw`^(report-recompute: (?:MethodInputError: ${LABEL}: \S+: )?Error: entry previous must be null or an exact )lowercase sha256 digest$`, "u"), "$1fingerprint in lowercase hex"],
+  [new RegExp(String.raw`^(report-recompute: (?:MethodInputError: ${LABEL}: \S+: )?Error: signed entry does not announce the requested Benchmark )digest$`, "u"), "$1fingerprint"],
+  [/^(report-recompute: Error: )instrument arm ids must be unique$/u, "$1the judges' configuration ids must be unique"],
+  [/^(report-recompute: Error: )invalid instrument digest for /u, "$1invalid judge fingerprint for configuration "],
+  listItem(String.raw`report-recompute: (?:Error: )?invalid (?:\S+ )?parameters: `,
+    `parameters "baseline" and "candidate" must name distinct arms`, `parameters "baseline" and "candidate" must name distinct configurations`),
+  listItem(String.raw`(?:report|claim-package)\.json: invalid binary qualification: `,
+    "qualification cell keys must be unique across item groups", "qualification runs must be unique across item groups"),
+  listItem(String.raw`(?:report|claim-package)\.json: invalid binary qualification: `,
+    String.raw`qualification task (\S+) must carry exactly one group for every arm`, "qualification task $3 must carry exactly one group for every configuration"),
+  listItem(String.raw`(?:report|claim-package)\.json: invalid binary qualification: `,
+    String.raw`qualification\.arms must bind distinct instruments per arm`, "qualification.arms must bind a distinct judge for each configuration"),
+  listItem(String.raw`(?:report|claim-package)\.json: invalid binary qualification: `,
+    String.raw`qualification\.arms must contain two or more arms`, "qualification.arms must contain two or more configurations"),
+  listItem(String.raw`(?:report|claim-package)\.json: invalid binary qualification: `,
+    String.raw`qualification\.conflicted contains an unknown cell key`, "qualification.conflicted contains an unknown run"),
+
+  // Method inputs, as the binary-instrument method resolves them for the recomputation.
+  methodInputRefusal("resolver returned no exact signed Discovery Entry envelope bytes", "resolver returned no exact DSSE-signed Discovery Entry bytes"),
+  methodInputRefusal("verification proof does not bind the exact source, entry chain, head anchor, and derived time",
+    "verification proof does not bind the exact source, entry chain, timestamp proof of the head, and derived time"),
+  methodInputRefusal("Result Evaluation does not bind the exact Matrix Task", "Result Evaluation does not bind the exact Task its run names"),
+  methodInputRefusal("parser-invalid output does not match the sealed instrument policy",
+    "the decision on an answer that could not be read does not match the sealed judge record's policy"),
+  methodInputRefusal("signed instrument drifts from the Run arm pin", "the signed judge drifts from the Run configuration's judge pin"),
+  methodInputRefusal(String.raw`sole Result Evaluation is reused across Matrix cells (\S+) and (\S+)`, "sole Result Evaluation is reused across runs $2 and $3"),
+  methodInputRefusal("EvaluationSpec drifts from the frozen binary evaluator contract", "EvaluationSpec drifts from the frozen binary judge contract"),
+  methodInputRefusal("EvaluationSpec grader digest is not the frozen binary evaluator semantics",
+    "EvaluationSpec grader fingerprint is not the frozen binary judge semantics"),
+  methodInputRefusal("Run arms do not exactly cover Matrix arms", "the sealed Run's configurations do not exactly cover matrix.json's configurations"),
+  methodInputRefusal("Task must remain arm-neutral and cannot pin an instrument", "Task must remain configuration-neutral and cannot pin a judge"),
+  methodInputRefusal("binary-instrument@1 requires distinct instruments across arms", "binary-instrument@1 requires a distinct judge for each configuration"),
+  methodInputRefusal("binary-instrument@1 requires two or more matching, distinct Run and Matrix arms",
+    "binary-instrument@1 requires two or more distinct configurations, matching between the sealed Run and matrix.json"),
+  methodInputRefusal("judge observation drifts from its exact Matrix cell or semantic request", "judge observation drifts from its exact run or semantic request"),
+  methodInputRefusal("judge observation limitations are not the frozen per-profile disclosure",
+    "judge observation limitations are not the frozen per-profile limitations"),
+  methodInputRefusal("judge observation cannot resolve its instrument's declared model", "judge observation cannot resolve its judge record's declared model"),
+  methodInputRefusal(String.raw`instrument generation drifts from the frozen (\S+) call policy`, "the judge record's generation drifts from the frozen $2 call policy"),
+  methodInputRefusal("instrument identity does not match the Run arm", "the judge record's identity does not match its Run configuration"),
+  methodInputRefusal(String.raw`instrument prompt digest does not match its message templates`, "the judge record's prompt fingerprint does not match its message templates"),
+  [new RegExp(String.raw`^(${METHOD_INPUT})instrument (?=has |must )`, "u"), "$1the judge record "],
+  [new RegExp(String.raw`^(${METHOD_INPUT})instrument (?=field |generation |literal |message |parser |prompt |response |invalidOutputDecision )`, "u"),
+    "$1the judge record's "],
+  [new RegExp(String.raw`^(${METHOD_INPUT})arm (\S+) instrument (?=bytes |requires |is not |must be |is outside )`, "u"), "$1configuration $2's judge record "],
+  [new RegExp(String.raw`^(${METHOD_INPUT})Run arm (\S+) instrument pin (?=must be )`, "u"), "$1Run configuration $2's judge pin "],
+  [new RegExp(String.raw`^(${METHOD_INPUT})analysis-context\.json digest (?=must carry |has an unsupported )`, "u"), "$1analysis-context.json's fingerprint field "],
+  [new RegExp(String.raw`^(${METHOD_INPUT})invalid DSSE envelope: (?:TrustCoreError: )?(?:A )?(?:DSSE envelope )?`, "u"), "$1not valid DSSE: "],
+  methodInputRefusal(String.raw`([^:]+?) must carry one lowercase sha256 digest`, "$2 must carry one fingerprint in lowercase hex"),
+  methodInputRefusal(String.raw`([^:]+?) must carry one exact lowercase sha256 digest`, "$2 must carry one exact fingerprint in lowercase hex"),
+  methodInputRefusal(String.raw`(\S+) must be a strictly sorted unique pair of sha256 digests`, "$2 must be a strictly sorted unique pair of fingerprints"),
+
+  // The binary-instrument reduction, as the recomputation reports it.
+  reductionRefusal("contexts must name every and only Matrix Task exactly once", "contexts must name every and only Task in matrix.json exactly once"),
+  reductionRefusal(String.raw`Matrix repeats (\S+)`, "matrix.json repeats $2"),
+  reductionRefusal(String.raw`Matrix is not the exact task x arm x 1\.\.(\S+) cell set`, "matrix.json is not the exact task x configuration x 1..$2 set of runs"),
+  reductionRefusal(String.raw`(\S+) does not carry arm (\S+)'s expected instrument`, "$2 does not carry configuration $3's expected judge"),
+  reductionRefusal(String.raw`duplicate instrument for arm (\S+)`, "duplicate judge for configuration $2"),
+  reductionRefusal("instruments must name every and only Matrix arm exactly once", "judges must name every and only configuration in matrix.json exactly once"),
+  reductionRefusal("Matrix must contain at least one cell", "matrix.json must contain at least one run"),
+  reductionRefusal(String.raw`cell (\S+) without a sole valid verdict carries a parsed evaluation`, "run $2 without a sole valid verdict carries a parsed evaluation"),
+  reductionRefusal(String.raw`non-judged cell (\S+) carries a parsed evaluation`, "non-judged run $2 carries a parsed evaluation"),
+  reductionRefusal(String.raw`parsed input names non-Matrix cell (\S+)`, "parsed input names $2, a run matrix.json does not carry"),
+  reductionRefusal(String.raw`(\S+) parsed (\S+), Matrix names (\S+)`, "$2 parsed $3, matrix.json names $4"),
+
+  // The check package's own schema issue messages, as the admission replay prints a parse failure.
+  listItem(String.raw`(?:binary admission replay failed: )?${FIELD_PATH}: `, String.raw`((?:${FIELD_PATH}|\(root\)): )digest references must be sorted and unique`,
+    "$3fingerprint references must be sorted and unique"),
 ];
 
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/gu;

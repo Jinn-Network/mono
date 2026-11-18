@@ -38,7 +38,8 @@
  *   `checker-outputs.test.ts`, plus the operational refusals and the two notes). Every flag the
  *   usage text lists is mapped to the rendering that covers its output (`CLI_FLAGS`). Every other
  *   refusal template the reader's modules write is read from their source and ruled in the last
- *   section of this file (#5299).
+ *   section of this file (#5299), with the text the platform packages and the check package's own
+ *   schemas write where it reaches a refusal line (#5373).
  *
  * Not covered: `--json` output (contract, spec section 2), the product CLI and web app (outside the
  * spec's section 1 scope; see the note on `REPORT_ASSETS` for section 4.2's v1.14 ruling on their
@@ -78,7 +79,7 @@ import { domainBindingProof, type VerifiedDomainBinding } from "./identity/domai
 import { BUNDLE_V10_FORMAT, SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
 import type { PublicBundleSigner } from "./signers.js";
 import { goldenInput } from "./testing/golden-asset-input.js";
-import { refusalTemplateInventory, type RefusalTemplate } from "./testing/refusal-templates.js";
+import { isPlatformModule, refusalTemplateInventory, type RefusalTemplate } from "./testing/refusal-templates.js";
 import type { PublicBundleVerificationResult, VerifiedPublicBundleSnapshot } from "./verify.js";
 
 // ---------------------------------------------------------------------------
@@ -2045,18 +2046,22 @@ describe("reader-facing strings", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Refusal templates the characterization suite does not reach (#5299)
+// Refusal templates the characterization suite does not reach (#5299, #5373)
 // ---------------------------------------------------------------------------
 
 /**
  * Spec section 4.2's *Refusal lines* row reaches every refusal the reader prints, but the stderr
  * surface above reads only the refusals the characterization suite pins. `refusalTemplateInventory`
- * reads every refusal template the reader's own modules write, from their source, and each message a
- * template can produce is sent through the CLI's human path and scanned like any other stderr line.
- * A template whose human line still carries a word section 5 hides or renames is either reworded by a
- * rule in `humanRefusalDetail` (`READER_WORDING` in `cli.ts`) or recorded below with its reason, so a
- * new template that carries one fails here until it is ruled. The same messages are run with
- * `--json`, which must print each byte for byte (spec section 2: the `message` value is contract).
+ * reads, from source, every refusal template the code `runVerifierCli` reaches writes: the reader's
+ * own modules, the `@jinn-network/*` platform packages they call, the strings those packages return
+ * as a result's `detail` or `reason`, and the check package's own schema issue messages a refusal
+ * prints (#5373). It follows each message to the lines it reaches the reader as, through every
+ * wrapper on the way, and each line is sent through the CLI's human path and scanned like any other
+ * stderr line. A template whose human line still carries a word section 5 hides or renames is either
+ * reworded by a rule in `humanRefusalDetail` (`READER_WORDING` in `cli.ts`) or recorded below with
+ * its reason, so a new template that carries one fails here until it is ruled. The same messages are
+ * run with `--json`, which must print each byte for byte (spec section 2: the `message` value is
+ * contract).
  *
  * To see the whole inventory, each template with its status and human line:
  *
@@ -2067,11 +2072,17 @@ describe("reader-facing strings", () => {
  */
 const REFUSAL_REASONS = {
   "field name":
-    "It names a field of a sealed record (`arms`, `conflicted`, `cellKey`, a Result Evaluation's `subject`) as written."
-    + " Section 4.2's Refusal lines row prints a field path as written, and section 2 makes field names contract.",
+    "It names a field of a sealed record (`arms`, `conflicted`, `cellKey`, a Result Evaluation's `subject`), or of the"
+    + " input a platform method reads from one (`cells[0]`, `instruments[0]`), as written. Section 4.2's Refusal lines"
+    + " row prints a field path as written, and section 2 makes field names contract. A pattern the line prints"
+    + " after the field (`sha256:<64 lowercase hex>`) is printed as written too.",
   "printed pattern":
-    "It prints, as written, the pattern a sealed value must match (`^sha256:[0-9a-f]{64}$`), which shows the value's"
-    + " form rather than naming a concept.",
+    "It prints, as written, the pattern a sealed value must match (`^sha256:[0-9a-f]{64}$`,"
+    + " `sha256:<64 lowercase hex>`), which shows the value's form rather than naming a concept.",
+  "hash algorithm":
+    "It names the hash algorithm (`SHA-256`) a timestamp proof's own encoding uses, or the floor an algorithm"
+    + " falls below, and the line cannot say what failed without it. Section 4.1 keeps SHA-256 where the algorithm"
+    + " is the point.",
   "signature check":
     "`verify` here is a cryptographic check of a signature or a carried proof, not recomputing the bundle's checks:"
     + " the sense section 4.2 keeps in `do not verify this timestamp proof`.",
@@ -2097,6 +2108,15 @@ interface RecordedRefusal {
 const JUDGE = "second name · judge";
 const CONFIGURATION = "second name · configuration";
 const CONFLICTED = "second name · runs the judges disagreed on";
+const FINGERPRINT = "second name · fingerprint";
+const RUN = "second name · run";
+const SUBJECT = "hidden term · subject";
+const RECOMPUTE = "second name · recompute";
+const BINARY_METHOD = "benchmarking/aggregate/src/binary-instrument-method.ts";
+const BINARY_REDUCTION = "benchmarking/aggregate/src/binary-instrument.ts";
+const METHOD_REGISTRY = "benchmarking/aggregate/src/registry.ts";
+const OTS_VERIFY = "trust/core/src/timestamp/ots-verify.ts";
+const RFC3161_VERIFY = "trust/core/src/timestamp/rfc3161-verify.ts";
 
 /** Every refusal template whose human line still carries a word section 5 hides or renames. */
 const RECORDED_REFUSALS: readonly RecordedRefusal[] = [
@@ -2172,6 +2192,70 @@ const RECORDED_REFUSALS: readonly RecordedRefusal[] = [
     template: "comparison public assets require the verifier-derived comparison projection",
     carries: ["hidden term · projection"], reason: "unreachable",
   },
+
+  // #5373: text the platform packages write, where it reaches a refusal line. A platform template
+  // a call in `verify.ts` fills through its forwarding parameter is recorded under `verify.ts`.
+  { module: BINARY_METHOD, template: "binary-record-malformed: sha256:${evaluationSpecSha256}: EvaluationSpec.familyBlock.parser.digest must be sha256:<64 lowercase hex>", carries: [FINGERPRINT], reason: "printed pattern" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: sha256:${analysisSha256}: analysisContext.itemSha256 must be sha256:<64 lowercase hex>", carries: [FINGERPRINT], reason: "printed pattern" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: sha256:${analysisSha256}: analysisContext.labelResolutionSha256 must be sha256:<64 lowercase hex>", carries: [FINGERPRINT], reason: "printed pattern" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: ${labelResolutionWire}: labelResolution.itemSha256 must be sha256:<64 lowercase hex>", carries: [FINGERPRINT], reason: "printed pattern" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: ${labelResolutionWire}: labelResolution.humanReviewEvaluationSpecSha256 must be sha256:<64 lowercase hex>", carries: [FINGERPRINT], reason: "printed pattern" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: ${labelResolutionWire}: reviewerRosterSha256 must be sha256:<64 lowercase hex>", carries: [FINGERPRINT], reason: "printed pattern" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: ${labelResolutionWire}: revealReceiptSha256 must be sha256:<64 lowercase hex>", carries: [FINGERPRINT], reason: "printed pattern" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: ${labelResolutionWire}: operatorAssertionSha256 must be sha256:<64 lowercase hex>", carries: [FINGERPRINT], reason: "printed pattern" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: ${labelResolutionWire}: screeningTableSha256 must be sha256:<64 lowercase hex>", carries: [FINGERPRINT], reason: "printed pattern" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: ${labelResolutionWire}: screeningRevealReceiptSha256 must be sha256:<64 lowercase hex>", carries: [FINGERPRINT], reason: "printed pattern" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: sha256:${matrix.run.digest.sha256}: Run arm ${arm.armId} instrument pin must be sha256:<64 lowercase hex>", carries: [FINGERPRINT], reason: "printed pattern" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: ${instrumentWire}: instrument.promptTemplateSha256 must be sha256:<64 lowercase hex>", carries: [FINGERPRINT], reason: "printed pattern" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: sha256:${observationMaterial.sha256}: judge observation provider eventSha256 must be sha256:<64 lowercase hex>", carries: [FINGERPRINT], reason: "printed pattern" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: sha256:${taskDigest}: Task.payload.provenance.sourceCommitment must be sha256:<64 lowercase hex>", carries: [FINGERPRINT], reason: "printed pattern" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: sha256:${taskDigest}: Task.network.jinn.binary-judgment.item-sha256 must be sha256:<64 lowercase hex>", carries: [FINGERPRINT], reason: "printed pattern" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: sha256:${taskDigest}: Task.payload.sources[${index}].digest is required", carries: [FINGERPRINT], reason: "field name" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: sha256:${taskDigest}: Task.payload.sources[${index}].digest has an unsupported field set", carries: [FINGERPRINT], reason: "field name" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: sha256:${taskDigest}: Task.payload.sources[${index}].digest must carry one lowercase sha256 digest", carries: [FINGERPRINT], reason: "field name" },
+  { module: BINARY_METHOD, template: "verdict-record-malformed: ${verdictDigest}: Result Evaluation Task subject binding is invalid", carries: [SUBJECT], reason: "field name" },
+  { module: BINARY_METHOD, template: "binary-binding-mismatch: ${verdictDigest}: Result Evaluation subject-name crosswalk is not exact", carries: [SUBJECT], reason: "field name" },
+  { module: BINARY_METHOD, template: "verdict-record-malformed: ${verdictDigest}: subject must be non-empty", carries: [SUBJECT], reason: "field name" },
+  { module: BINARY_METHOD, template: "verdict-record-malformed: ${verdictDigest}: every subject must carry a non-empty name", carries: [SUBJECT], reason: "field name" },
+  { module: BINARY_METHOD, template: "verdict-record-malformed: ${verdictDigest}: every subject must carry one exact lowercase sha256 digest", carries: [SUBJECT], reason: "field name" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: ${verdictDigest}: Task subject digest must carry one lowercase sha256 digest", carries: [SUBJECT, FINGERPRINT], reason: "field name" },
+  { module: BINARY_METHOD, template: "binary-binding-mismatch: ${verdictDigest}: Result Evaluation must name exactly one judge-response subject", carries: [SUBJECT], reason: "field name" },
+  { module: BINARY_METHOD, template: "binary-binding-mismatch: ${verdictDigest}: Result Evaluation must name exactly one judge-observation subject", carries: [SUBJECT], reason: "field name" },
+  { module: BINARY_METHOD, template: "binary-binding-mismatch: ${verdictDigest}: Result Evaluation must name exactly one inspect-log subject", carries: [SUBJECT], reason: "field name" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: ${verdictDigest}: Task subject digest has an unsupported field set", carries: [SUBJECT, FINGERPRINT], reason: "field name" },
+  { module: BINARY_METHOD, template: "binary-record-malformed: ${verdictDigest}: measurement labelResolutionSha256 must be sha256:<64 lowercase hex>", carries: [FINGERPRINT], reason: "printed pattern" },
+  { module: BINARY_REDUCTION, template: "unsupported-vocabulary: instruments[${index}].armId must be non-empty text", carries: [CONFIGURATION, JUDGE], reason: "field name" },
+  { module: BINARY_REDUCTION, template: "unsupported-vocabulary: instruments[${index}].instrumentSha256 must be 64 lowercase hexadecimal characters", carries: [JUDGE], reason: "field name" },
+  { module: BINARY_REDUCTION, template: "unsupported-vocabulary: cells[${index}] must be a parsed cell input", carries: [RUN], reason: "field name" },
+  { module: BINARY_REDUCTION, template: "unsupported-vocabulary: cells[${index}].cellKey must be non-empty text", carries: [RUN], reason: "field name" },
+  { module: BINARY_REDUCTION, template: "unsupported-vocabulary: cells[${index}].verdictDigest must be sha256:<64 lowercase hex>", carries: [FINGERPRINT, RUN], reason: "field name" },
+  { module: BINARY_REDUCTION, template: "unsupported-vocabulary: cells[${index}].verdict is unsupported", carries: [RUN], reason: "field name" },
+  { module: BINARY_REDUCTION, template: "unsupported-vocabulary: cells[${index}].judgeDecision must be null for an inconclusive evaluation", carries: [RUN], reason: "field name" },
+  { module: BINARY_REDUCTION, template: "unsupported-vocabulary: cells[${index}].judgeDecision must be ACCEPT or REJECT for a decisive evaluation", carries: [RUN], reason: "field name" },
+  { module: BINARY_REDUCTION, template: "unsupported-vocabulary: cells[${index}].parseValid must be boolean", carries: [RUN], reason: "field name" },
+  { module: BINARY_REDUCTION, template: "unsupported-vocabulary: cells[${index}].instrumentSha256 must be 64 lowercase hexadecimal characters", carries: [RUN], reason: "field name" },
+  { module: BINARY_REDUCTION, template: "unsupported-vocabulary: cells[${index}].context must be an item context", carries: [RUN], reason: "field name" },
+  { module: BINARY_REDUCTION, template: "unsupported-vocabulary: cells[${index}].context.truthLabel must be CORRECT or WRONG", carries: [RUN], reason: "field name" },
+  { module: BINARY_REDUCTION, template: "unsupported-vocabulary: cells[${index}].context.stratum is not in the sealed stratum vocabulary", carries: [RUN], reason: "field name" },
+  { module: BINARY_REDUCTION, template: "unsupported-vocabulary: cells[${index}].context.candidateClass must be non-empty text", carries: [RUN], reason: "field name" },
+  { module: BINARY_REDUCTION, template: "unsupported-vocabulary: cells[${index}].context.analysisContextSha256 must be 64 lowercase hexadecimal characters", carries: [RUN], reason: "field name" },
+  { module: BINARY_REDUCTION, template: "unsupported-vocabulary: cells[${index}].context.labelResolutionSha256 must be 64 lowercase hexadecimal characters", carries: [RUN], reason: "field name" },
+  { module: METHOD_REGISTRY, template: "verdict-record-malformed: ${digest}: subject must be non-empty", carries: [SUBJECT], reason: "field name" },
+  { module: METHOD_REGISTRY, template: "verdict-record-malformed: ${digest}: every subject must carry a non-empty name", carries: [SUBJECT], reason: "field name" },
+  { module: METHOD_REGISTRY, template: "verdict-record-malformed: ${digest}: every subject must carry one exact lowercase sha256 digest", carries: [SUBJECT], reason: "field name" },
+  { module: OTS_VERIFY, template: "Operation 0x${tag.toString(16).padStart(2, \"0\")} is below this profile's SHA-256 algorithm floor.", carries: [FINGERPRINT], reason: "hash algorithm" },
+  { module: OTS_VERIFY, template: "The file digest operation is 0x${digestOperation.toString(16).padStart(2, \"0\")}; this profile admits SHA-256 (0x08) only.", carries: [FINGERPRINT], reason: "hash algorithm" },
+  { module: RFC3161_VERIFY, template: "ESSCertIDv2.hashAlgorithm is ${algorithm.oid}, outside the SHA-256 family (§6.1 rule 6).", carries: [FINGERPRINT], reason: "hash algorithm" },
+  { module: RFC3161_VERIFY, template: "RSASSA-PSS-params.hashAlgorithm is ${algorithm.oid}, below the SHA-256 family floor (§6.1 rule 5).", carries: [FINGERPRINT], reason: "hash algorithm" },
+  { module: RFC3161_VERIFY, template: "messageImprint.hashAlgorithm is ${tstInfo.imprintAlgorithmOid}, below the SHA-256 family floor (§6.1 rule 5).", carries: [FINGERPRINT], reason: "hash algorithm" },
+  { module: RFC3161_VERIFY, template: "SignerInfo.digestAlgorithm is ${signerInfo.digestAlgorithm.oid}, below the SHA-256 family floor (§6.1 rule 5).", carries: [FINGERPRINT], reason: "hash algorithm" },
+  { module: RFC3161_VERIFY, template: "messageImprint.hashAlgorithm is ${tstInfo.imprintAlgorithmOid}; the caller's subject digest is a SHA-256 and cannot be compared to it (§6.1 rule 12).", carries: [FINGERPRINT], reason: "hash algorithm" },
+  { module: RFC3161_VERIFY, template: "The SignerInfo signature does not verify over signedAttrs (§6.1 rule 8).", carries: [RECOMPUTE], reason: "signature check" },
+  { module: "verify.ts", template: "malformed cellKey (expected 3 \"/\"-delimited parts): ${edge.cellKey}", carries: [RUN], reason: "field name" },
+  { module: "verify.ts", template: "malformed cellKey task digest (must be 64 lowercase hex digits): ${edge.cellKey}", carries: [RUN], reason: "field name" },
+  { module: "verify.ts", template: "malformed cellKey armId (must match [A-Za-z0-9_-]{1,64}): ${edge.cellKey}", carries: [CONFIGURATION, RUN], reason: "field name" },
+  { module: "verify.ts", template: "malformed cellKey replicate (must be 1-based minimal decimal): ${edge.cellKey}", carries: [RUN], reason: "field name" },
+  { module: "verify.ts", template: "malformed cellKey replicate (must be a positive safe integer): ${edge.cellKey}", carries: [RUN], reason: "field name" },
 ];
 
 /** One message a template can produce, as the reader's two outputs print it. */
@@ -2274,6 +2358,7 @@ function printInventory(lines: readonly InventoryLine[]): string {
 describe("refusal templates the reader's modules write", () => {
   const byTemplate = (module: string, template: string): RefusalTemplate | undefined =>
     REFUSAL_INVENTORY.templates.find((entry) => entry.module === module && entry.template === template);
+  const hex = "a".repeat(64);
 
   test("the walk reads the reader's modules and finds every kind of throw site", () => {
     for (const module of ["cli.ts", "verify.ts", "manifest.ts", "anchor/check.ts", "admission/verification.ts", "profile/claim.ts"]) {
@@ -2295,6 +2380,49 @@ describe("refusal templates the reader's modules write", () => {
       .toContain("binary admission replay failed: screeningTable.rows: v2 table must cover all 664 pool item digests in sorted order");
   });
 
+  // #5373: the platform packages the reader's modules call, read from their source.
+  test("the walk reads the platform packages' source, and every platform import resolves to it", () => {
+    // An import that resolved to no source (an unbuilt package) would end the walk there, silently.
+    expect(REFUSAL_INVENTORY.unreadImports).toEqual([]);
+    for (const module of ["trust/core/src/dsse.ts", "benchmarking/aggregate/src/report.ts", "benchmarking/aggregate/src/binary-instrument-method.ts"]) {
+      expect(REFUSAL_INVENTORY.modules, module).toContain(module);
+      expect(isPlatformModule(module), module).toBe(true);
+    }
+    expect(isPlatformModule("verify.ts")).toBe(false);
+    // Thrown by a platform package and uncaught on the way to the reader: printed bare.
+    expect(byTemplate("trust/core/src/dsse.ts", "DSSE envelope payloadType must be a string.")?.messages)
+      .toContain("DSSE envelope payloadType must be a string.");
+    // Caught by a platform function and returned as `detail`, which `verify.ts` prints after the check
+    // it names; `String(cause)` puts the error's class name in front.
+    expect(byTemplate("benchmarking/aggregate/src/binary-instrument-method.ts", "binary-binding-mismatch: sha256:${matrix.run.digest.sha256}: Run arms do not exactly cover Matrix arms")?.messages)
+      .toEqual([`report-recompute: MethodInputError: binary-binding-mismatch: sha256:${hex}: Run arms do not exactly cover Matrix arms`]);
+    // A string a platform function returns as `detail` without throwing it.
+    const returned = byTemplate("benchmarking/aggregate/src/report.ts", "Report payload bytes are not the exact canonical encoding");
+    expect(returned?.kind).toBe("data");
+    expect(returned?.messages).toEqual(["report-envelope: Report payload bytes are not the exact canonical encoding"]);
+  });
+
+  test("the check package's own schema issue messages are read where a refusal prints a parse failure", () => {
+    const issue = byTemplate("admission/contracts.ts", "digest references must be sorted and unique");
+    expect(issue?.kind).toBe("schema");
+    // The admission replay prints each issue as `<path>: <message>`, behind the record's path.
+    expect(issue?.messages).toContain("binary admission replay failed: admissionManifest: (root): digest references must be sorted and unique");
+    expect(issue?.messages).toContain("binary admission replay failed: replacementLedger: x: digest references must be sorted and unique");
+  });
+
+  test("a message caught by a wrapper that also prints its function's parameter is followed through it", () => {
+    // `resolveRun` wraps what parsing throws as `new MethodInputError("run-record-malformed", digest, String(cause))`.
+    expect(byTemplate("benchmarking/aggregate/src/resolved-inputs.ts", "Run bytes are not canonical")?.messages)
+      .toContain(`report-recompute: MethodInputError: run-record-malformed: ${hex}: Error: Run bytes are not canonical`);
+  });
+
+  test("a template every path catches before a line prints is listed apart, and not scanned", () => {
+    // `resolveExactRecord` throws it, and the admission replay's only call of that port swallows it.
+    const swallowed = REFUSAL_INVENTORY.caught.find((entry) => entry.module === "verify.ts" && entry.template === "bundle record ${digest} is missing");
+    expect(swallowed?.messages).toEqual([]);
+    expect(byTemplate("verify.ts", "bundle record ${digest} is missing")).toBeUndefined();
+  });
+
   test("every template whose line carries a word section 5 hides or renames is reworded by a rule or recorded with a reason", async () => {
     const lines = await Promise.all(REFUSAL_INVENTORY.templates.map(inventoryLine));
     if (process.env["REFUSAL_INVENTORY_PRINT"] === "1") console.log(printInventory(lines));
@@ -2304,12 +2432,27 @@ describe("refusal templates the reader's modules write", () => {
 
   test("a new template that carries a hidden term fails until it is ruled", async () => {
     const lines = await Promise.all(REFUSAL_INVENTORY.templates.map(inventoryLine));
-    const added = await inventoryLine({
-      module: "verify.ts", line: 1, template: "the Matrix is not sealed", wraps: false, messages: ["the Matrix is not sealed"],
-    });
-    expect(added.status).toBe("carries");
-    expect(refusalLedgerDifferences([...lines, added], RECORDED_REFUSALS))
-      .toEqual(['unruled refusal template (reword it in humanRefusalDetail or record its reason): verify.ts · the Matrix is not sealed carries ["hidden term · Matrix"]']);
+    const added = await Promise.all([
+      { module: "verify.ts", line: 1, template: "the Matrix is not sealed", wraps: false, kind: "thrown", messages: ["the Matrix is not sealed"] },
+      // A platform package's, as the recomputation carries it (#5373).
+      {
+        module: "benchmarking/aggregate/src/report.ts", line: 1, template: "subject cell set is empty", wraps: false, kind: "thrown",
+        messages: ["report-recompute: Error: subject cell set is empty"],
+      },
+      // A printed schema issue message (#5373).
+      {
+        module: "admission/contracts.ts", line: 1, template: "evaluator digests must be unique", wraps: false, kind: "schema",
+        messages: ["binary admission replay failed: admissionManifest: (root): evaluator digests must be unique"],
+      },
+    ].map((template) => inventoryLine(template as RefusalTemplate)));
+    for (const line of added) expect(line.status, line.template.template).toBe("carries");
+    expect(refusalLedgerDifferences([...lines, ...added], RECORDED_REFUSALS)).toEqual([
+      'unruled refusal template (reword it in humanRefusalDetail or record its reason): verify.ts · the Matrix is not sealed carries ["hidden term · Matrix"]',
+      "unruled refusal template (reword it in humanRefusalDetail or record its reason): benchmarking/aggregate/src/report.ts · subject cell set is empty carries"
+        + ' ["hidden term · subject","second name · run"]',
+      "unruled refusal template (reword it in humanRefusalDetail or record its reason): admission/contracts.ts · evaluator digests must be unique carries"
+        + ' ["second name · fingerprint","second name · judge"]',
+    ]);
   });
 
   test("--json prints every message byte for byte, and the human line is one stderr line", async () => {
