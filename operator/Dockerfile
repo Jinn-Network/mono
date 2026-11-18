@@ -81,6 +81,11 @@ COPY packages/discovery/sources/evidence-journal/package.json ./packages/discove
 COPY packages/task-execution/testing/package.json ./packages/task-execution/testing/
 COPY packages/evidence/offer/package.json ./packages/evidence/offer/
 COPY packages/discovery/facts/offers/package.json ./packages/discovery/facts/offers/
+# onnxruntime-node's postinstall downloads optional CUDA libraries from the
+# ONNX Runtime release page, which now returns 404 and fails the install. The
+# CPU runtime ships inside the npm package, so skipping the download loses nothing.
+ENV ONNXRUNTIME_NODE_INSTALL=skip
+ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
 RUN corepack enable && cd operator && yarn install --immutable
 
 # Copy portal-package sources before the client build; `yarn build` builds them
