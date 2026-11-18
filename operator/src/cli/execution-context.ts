@@ -23,7 +23,7 @@ import { createClients } from '../adapters/mech/safe.js';
 import { createDirectSafeBroadcaster } from '../adapters/mech/direct-safe-broadcaster.js';
 import { Store } from '../store/store.js';
 import type { BuildEnvelopeInput } from '../errors/envelope.js';
-import { resolveCliPassword } from './password.js';
+import { resolveCliPassword, type ResolvedCliPassword } from './password.js';
 import { checkDaemonGuard, daemonGuardEnvelope } from './daemon-guard.js';
 
 export type NetworkChain = 'base' | 'base-sepolia';
@@ -63,6 +63,12 @@ export function pickPrimaryMechService(services: ServiceState[]): ServiceState |
 export type CreateCliExecutionContextOptions = {
   argv?: string[];
   env?: NodeJS.ProcessEnv;
+  /**
+   * A keystore password the caller has already resolved. When set it is used as is and `argv` is
+   * not scanned for `--password-fd`, so a caller that read the descriptor itself does not make
+   * this function read it a second time (a second read comes back empty, #5408).
+   */
+  password?: string;
 };
 
 async function buildCliSignerContext(
@@ -88,7 +94,9 @@ async function buildCliSignerContext(
     };
   }
   const config = loadConfig(configPath);
-  const pw = resolveCliPassword(opts.argv, env, { earningDir: config.earningDir });
+  const pw: ResolvedCliPassword = opts.password !== undefined
+    ? { ok: true, password: opts.password, source: 'fd' }
+    : resolveCliPassword(opts.argv, env, { earningDir: config.earningDir });
   if (!pw.ok) {
     return {
       ok: false,
