@@ -110,7 +110,7 @@ function verbArgv(h: Harness, verb: Verb): string[] {
   }
 }
 
-const BOOLEAN_FLAGS: ReadonlySet<string> = new Set(['execute', 'dry-run', 'resubmit-anchor', 'json', 'human', 'help']);
+const BOOLEAN_FLAGS: ReadonlySet<string> = new Set(['execute', 'dry-run', 'resubmit-anchor', 'fresh-anchor', 'json', 'human', 'help']);
 
 /** The flag as an operator would pass it, with a well-formed value where it takes one. */
 function flagArgs(h: Harness, flag: string): string[] {

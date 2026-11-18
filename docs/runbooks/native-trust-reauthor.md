@@ -61,13 +61,12 @@ It is already idempotent on custody and requires no new tooling. Specifically:
 
 What the re-run does produce: fresh EIP-191 ceremony signatures and a rewritten `trust.json`.
 Whether it also produces a **new on-chain anchor transaction** depends on the choice below, and
-the default is that it does not: unless the receipt is moved aside, `reusableAnchor` matches and
-`session.submit` is never called (`operator/src/cli/commands/ceremony.ts:976`, `:985`), so the
-signatures are over the **original** anchor's block time — `validFrom` is assigned straight from
-the reused locator (`:1029`) and handed to `authorBindings` as both `validFrom` and `issuedAt`
-(`:1030-1036`, `:741`), which is what §6 law 2 requires be the same verbatim string. A new
-transaction is sent only when the run receipt is moved aside as well. Read the next section
-before running anything.
+the default is that it does not: unless `init` is given `--fresh-anchor`, `reusableAnchor`
+matches and `session.submit` is never called (`operator/src/cli/commands/ceremony.ts:976`,
+`:985`), so the signatures are over the **original** anchor's block time — `validFrom` is assigned
+straight from the reused locator (`:1029`) and handed to `authorBindings` as both `validFrom` and
+`issuedAt` (`:1030-1036`, `:741`), which is what §6 law 2 requires be the same verbatim string. A
+new transaction is sent only with `--fresh-anchor`. Read the next section before running anything.
 
 ### Reuse or mint: state the choice, record the reason
 
@@ -96,14 +95,22 @@ re-run recomputes the identical digest, `reusableAnchor` matches it (`:333-349`)
 ceremony resumes onto the **already-mined** anchor. The run does say so, on both surfaces —
 `ceremony_anchor_reused` and `anchor reused <hash> at <time> (from a previous run's receipt)`
 (`:1002`, `:1010`) — so this is not silent. Nothing refuses it either. Reuse is therefore also
-what happens to an operator who moves the catalog and forgets the receipt, which is why it must
-be taken as a decision and recorded as one. Its benefit is that it preserves the original
+what happens to an operator who moves the catalog and does not pass `--fresh-anchor`, which is why
+it must be taken as a decision and recorded as one. Its benefit is that it preserves the original
 `validFrom` and effective window, so there is no coverage gap at all; its cost is retroactivity,
 the *widened* scope claimed back over evidence signed before the widening, including evidence a
 verifier refused at the time for want of that very scope.
 
-**Taking the fresh anchor.** Move `<dir>/ceremony/receipt.json` aside as well as the catalog, so
-that `reusableAnchor` finds nothing. The re-authored bindings then carry the new anchor's block
+**Taking the fresh anchor.** Pass `--fresh-anchor` to `init` and leave
+`<dir>/ceremony/receipt.json` where it is. `init` then sends a new anchor even when the run receipt
+names one for the same key set, and records it in the run receipt, which keeps every anchor and
+catalog it recorded before (`earlierAnchors`). If that run is interrupted after it sends the anchor,
+re-run it without `--fresh-anchor`: the run receipt then names the anchor it sent, and `init`
+resumes onto it. With the flag, the re-run sends another anchor, and every re-authored binding takes
+that later anchor's block time. Do not move the run receipt aside to get the fresh anchor: it
+names every anchor under which `init` or `join` bound the keys in `<dir>/identity`, which the
+rotated-family refusal reads (see "Revocations carry forward" below), and the next `init` writes a
+receipt that names only its own anchor. The re-authored bindings then carry the new anchor's block
 time and the widened scope is claimed only from the moment it was widened. The cost is a
 coverage gap between the old anchor time and the new one, and the gap is **wholesale**: because
 the re-author rewrites the catalog and §6 law 2 gives *every* re-authored binding the new
@@ -119,9 +126,9 @@ preimage it stops being a judgment and becomes a mechanism. Until that document 
 currently ratified `ceremony-anchor/v1` still carries ceremony spec §3.2b's MUSTs above — state
 the choice, record the reason — so record one whichever anchor you take.
 
-Under the proposed rule, moving the receipt aside stops being optional, which would put the
-following footgun on the on-path procedure rather than beside it. Read it before moving
-anything, whichever anchor you take.
+Under the proposed rule, the fresh anchor stops being optional. Taking it with `--fresh-anchor`
+leaves the run receipt in place; moving the receipt aside instead loses the anchors it records and
+meets the following footgun as well. Read it before moving anything, whichever anchor you take.
 
   > **Before moving the receipt aside, confirm the native config carries `agentIri` — and
   > `admissionAgent`, if this operator provisions admission.** The receipt is the *fallback*
@@ -134,8 +141,8 @@ anything, whichever anchor you take.
   > write-back never completed. There the receipt is the *only* record of the Agent IRI, and
   > moving it aside destroys it. Copy it somewhere, do not delete it.
 
-Because making that step mandatory promotes this failure onto the on-path procedure, the proposed
-ruling carries one implementation requirement with it — a refusal on the re-author path when the
+The proposed ruling, written when moving the receipt aside was the way to take the fresh anchor,
+carries one implementation requirement with it — a refusal on the re-author path when the
 Agent IRI is recoverable from neither the native config nor an accessible receipt, rather than a
 silent re-mint. It is specified at
 [`spec/2026-09-09-recoverable-binding-anchor.md`](../../spec/2026-09-09-recoverable-binding-anchor.md)
@@ -150,8 +157,8 @@ rather than on its adoption.
   anchor the catalog is standing on; without it a reuse re-author's record does not say;
 - the **reason** for the anchor you took. Ceremony spec §3.2b's MUST is unretired: the proposed
   ruling would replace it with fixed contents only once adopted, so until then write it;
-- explicitly whether the receipt was moved aside, since that single act is what decides which
-  anchor you got.
+- explicitly whether `init` ran with `--fresh-anchor` and the run receipt in place, since that is
+  what decides which anchor you got.
 
 If you minted fresh, add the three items that presuppose one — the rest of what
 [`spec/2026-09-09-recoverable-binding-anchor.md`](../../spec/2026-09-09-recoverable-binding-anchor.md)
@@ -199,6 +206,10 @@ revocations as `carriedRevocations`.
 
 - it would replace a catalog and `--previous-catalog` is missing: its run receipt shows it sealed a
   catalog at `--catalog`, or `<dir>/ceremony/rotation.json` exists;
+- `<dir>/ceremony/receipt.json` exists but cannot be read as a run receipt, or its `earlierAnchors`
+  is not a list of `anchorDigest` and `catalogPath` entries (`run-receipt-unreadable`). It names the
+  anchors the rotated-family refusal below reads, so `init` refuses, naming it, before it opens any
+  store, rather than take it for no record. `join` refuses it the same way;
 - the replaced catalog cannot be read, or a revocation in it relies on an anchor it does not
   declare (the refusal names the revocation);
 - the re-author declares an anchor a carried record relies on differently from the replaced catalog,
@@ -220,7 +231,10 @@ revocations as `carriedRevocations`.
     and the earlier ones in `earlierAnchors`, which each run that replaces those fields carries
     forward. A revocation, in one of those catalogs or in `--previous-catalog`, of a binding under
     one of those anchors for a role only one family holds shows that family rotated, wherever its
-    rotated store now sits and whatever it is called;
+    rotated store now sits and whatever it is called. A catalog no longer at the path the run
+    receipt records is not read. Moving the run receipt aside drops every anchor it records, and the
+    Agent IRIs a re-run falls back to: the next `init` or `join` writes a receipt that names only its
+    own anchor;
 - no record shows a rotation of a family it would bind, but the config's `identityStores` names a
   store other than `<dir>/identity/<family>.enc.json` for it (`store-elsewhere`): `init` would
   replace a store it did not provision.

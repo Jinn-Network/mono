@@ -105,6 +105,7 @@ const OPTIONS = {
   store: { type: 'string' as const },
   'finality-timeout-ms': { type: 'string' as const },
   'resubmit-anchor': { type: 'boolean' as const, default: false },
+  'fresh-anchor': { type: 'boolean' as const, default: false },
   'retiring-store': { type: 'string' as const, multiple: true as const },
   'dry-run': { type: 'boolean' as const, default: false },
   execute: { type: 'boolean' as const, default: false },
@@ -140,6 +141,7 @@ export const CEREMONY_FLAG_VERBS = {
   'service-index': ['init', 'join', 'rotate'],
   'finality-timeout-ms': ['init', 'join', 'rotate'],
   'resubmit-anchor': ['rotate'],
+  'fresh-anchor': ['init'],
   'retiring-store': ['rotate'],
   execute: ['init', 'join', 'rotate'],
   'dry-run': ['init', 'join', 'rotate'],
@@ -399,7 +401,8 @@ interface CeremonyReceipt {
    * Each init or join that submits a new anchor rewrites the receipt, and its anchor covers only the
    * families that run bound, so without these the receipt would lose the anchor under which an
    * earlier run bound a family a rotation then retired, and the catalog that revokes it. Optional: a
-   * receipt without it reads as one that names only the fields above.
+   * receipt without it, as one written before it was recorded, reads as one that names only the fields
+   * above.
    */
   readonly earlierAnchors?: readonly EarlierAnchor[];
 }
@@ -410,28 +413,79 @@ interface EarlierAnchor {
   readonly catalogPath?: string;
 }
 
-/** The receipt's earlier anchors, each checked field by field: the receipt is an operator-writable file. */
+/** The receipt's earlier anchors: none for a receipt that records none. */
 function earlierAnchorsOf(receipt: CeremonyReceipt | undefined): readonly EarlierAnchor[] {
-  const entries: unknown = receipt?.earlierAnchors;
-  if (!Array.isArray(entries)) return [];
-  return entries.flatMap((entry: unknown) => {
-    if (entry === null || typeof entry !== 'object') return [];
-    const { anchorDigest, catalogPath } = entry as Record<string, unknown>;
-    return typeof anchorDigest === 'string' && (catalogPath === undefined || typeof catalogPath === 'string')
-      ? [{ anchorDigest, ...(catalogPath === undefined ? {} : { catalogPath }) }]
-      : [];
-  });
+  return receipt?.earlierAnchors ?? [];
 }
 
-function readReceipt(dir: string): CeremonyReceipt | undefined {
-  const path = receiptPath(dir);
-  if (!existsSync(path)) return undefined;
+/**
+ * The receipt's shape, checked field by field: the receipt is an operator-writable file, and each
+ * field init and join decide on must be one they can rely on. The anchor locator is checked where it
+ * is read (`recordedLocator`).
+ */
+function isCeremonyReceipt(value: unknown): value is CeremonyReceipt {
+  const isObject = (field: unknown): field is Record<string, unknown> =>
+    field !== null && typeof field === 'object' && !Array.isArray(field);
+  const isOptionalString = (field: unknown): boolean => field === undefined || typeof field === 'string';
+  return isObject(value)
+    && typeof value.agentIri === 'string' && value.agentIri.length > 0
+    && isOptionalString(value.admissionAgent)
+    && isOptionalString(value.catalogPath)
+    && isOptionalString(value.policyGenesisDigest)
+    && isOptionalString(value.anchorDigest)
+    && (value.earlierAnchors === undefined || (Array.isArray(value.earlierAnchors)
+      && value.earlierAnchors.every((entry: unknown) =>
+        isObject(entry) && typeof entry.anchorDigest === 'string' && isOptionalString(entry.catalogPath))));
+}
+
+/** The receipt at `path`, or `undefined` when it cannot be read as one. */
+function parseReceipt(path: string): CeremonyReceipt | undefined {
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as CeremonyReceipt;
-    return typeof parsed.agentIri === 'string' && parsed.agentIri.length > 0 ? parsed : undefined;
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
+    return isCeremonyReceipt(parsed) ? parsed : undefined;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The receipt, `undefined` when none exists, and a throw when one exists but cannot be read: read as
+ * no record, it would lose every anchor it names, and a write over it would drop them for good. init
+ * and join refuse such a receipt before they open any store or send any anchor
+ * (`refuseUnreadableReceipt`).
+ */
+function readReceipt(dir: string): CeremonyReceipt | undefined {
+  const path = receiptPath(dir);
+  if (!existsSync(path)) return undefined;
+  const receipt = parseReceipt(path);
+  if (receipt === undefined) throw new Error(`${path} exists but cannot be read as a run receipt`);
+  return receipt;
+}
+
+/**
+ * Refuses, naming it, a run receipt that exists but cannot be read, before init or join opens any
+ * store or sends any anchor. It names every anchor under which init or join bound the keys in
+ * `<dir>/identity`, which the rotated-family refusal reads (`familiesRevokedIn`), and the Agent IRIs a
+ * re-run reuses, so reading it as no record would take a rotated family for an unrotated one.
+ */
+function refuseUnreadableReceipt(ctx: CommandContext, input: {
+  readonly verb: 'init' | 'join';
+  readonly dir: string;
+}): void {
+  const path = receiptPath(input.dir);
+  if (!existsSync(path) || parseReceipt(path) !== undefined) return;
+  const message = `${path} exists but cannot be read as a run receipt, so ${input.verb} cannot tell under which `
+    + `anchors init or join bound the keys in ${join(input.dir, 'identity')}, or which of them a rotation retired, `
+    + 'and refuses rather than guess.';
+  emitEnvelope({
+    code: 'invalid_invocation',
+    message,
+    hint: `Restore ${path} as init or join wrote it: it names every anchor under which they bound those keys, `
+      + 'with the catalog each bound them in.',
+    exampleCli: EXAMPLE_CLI,
+    details: { feature: 'ceremony', state: 'run-receipt-unreadable', sideEffects: false },
+  }, { writer: ctx.writer, exit: ctx.exit });
+  throw new CeremonyRefusal(message);
 }
 
 /**
@@ -957,6 +1011,7 @@ function resolveAuthorityStore(ctx: CommandContext, parsed: Parsed, dir: string)
 
 async function buildProvisionPlan(input: {
   readonly ctx: CommandContext;
+  readonly verb: 'init' | 'join';
   readonly parsed: Parsed;
   readonly deps: CeremonyCommandDeps;
 }): Promise<ProvisionPlan> {
@@ -972,6 +1027,8 @@ async function buildProvisionPlan(input: {
   if (serviceIndex !== undefined && (!Number.isInteger(serviceIndex) || serviceIndex < 1)) {
     invalid(ctx, `--service-index must be a positive integer, got "${serviceIndexRaw}"`);
   }
+
+  refuseUnreadableReceipt(ctx, { verb: input.verb, dir });
 
   let custody: CeremonyChainCustody;
   try {
@@ -1260,7 +1317,7 @@ function refuseConfigWriteBackPending(input: {
 async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyCommandDeps): Promise<void> {
   const execute = resolveExecute(ctx, parsed);
   const progress = progressWriter(ctx, parsed);
-  const plan = await buildProvisionPlan({ ctx, parsed, deps });
+  const plan = await buildProvisionPlan({ ctx, verb: 'init', parsed, deps });
   const rpcUrl = parsed.values['rpc-url'];
   await assertSafeOwnership(ctx, deps, plan, rpcUrl);
 
@@ -1414,7 +1471,12 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
     safeAddress: plan.custody.safeAddress,
     keys: [...signers.values()].map(({ role, keyId }) => ({ role, keyId })),
   });
-  const reusedAnchor = reusableAnchor(readReceipt(plan.dir), anchorDigest);
+  // --fresh-anchor: a new anchor in place of the one the run receipt records for this key set. The
+  // receipt stays where it is, so the anchors it records are carried forward, which moving it aside
+  // to get a fresh anchor would lose.
+  const reusedAnchor = parsed.values['fresh-anchor'] === true
+    ? undefined
+    : reusableAnchor(readReceipt(plan.dir), anchorDigest);
   const session = await deps.openAnchorSession({
     dir: plan.dir,
     serviceIndex: plan.custody.serviceIndex,
@@ -1561,7 +1623,7 @@ async function runJoin(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
     );
   }
 
-  const plan = await buildProvisionPlan({ ctx, parsed, deps });
+  const plan = await buildProvisionPlan({ ctx, verb: 'join', parsed, deps });
   const rpcUrl = parsed.values['rpc-url'];
   await assertSafeOwnership(ctx, deps, plan, rpcUrl);
 
@@ -3022,6 +3084,10 @@ Status:
   during the finality wait — the only long window in the ceremony — is re-run with the same command:
   it REUSES that anchor and those IRIs rather than minting a second identity and spending gas twice.
   After the catalog is sealed, a re-run refuses instead, and names the config keys still outstanding.
+  A re-author (RE-AUTHORING below) that recomputes the anchor digest the run receipt names reuses
+  that anchor too; init --fresh-anchor sends a new one instead and keeps the run receipt, so every
+  anchor it records stays recorded (see STORES). Resume a --fresh-anchor run interrupted after its
+  anchor was sent without --fresh-anchor: with it, the re-run sends another anchor.
 
   RE-AUTHORING. To seal a catalog again over the same directory, move it aside and run init with
   --previous-catalog <where it went>. Every revocation it holds is carried into the new catalog
@@ -3047,8 +3113,12 @@ Status:
   catalog each bound them in, and a revocation there, in join's --catalog or in init's
   --previous-catalog, of a binding under one of those anchors for a role only one family holds
   shows that family rotated, wherever its rotated store now sits and whatever it is called. No store
-  is opened to read them. A rotation.json that cannot be read is refused too
-  (rotation-receipt-unreadable), rather than taken for no rotation. A rotated family cannot be
+  is opened to read them. A catalog no longer at the path the run receipt records is not read.
+  Moving the run receipt aside drops every anchor it records, and the Agent IRIs a re-run falls back
+  to: the next init or join writes a receipt that names only its own anchor. A run receipt that
+  cannot be read, or whose earlierAnchors is not a list of anchorDigest and catalogPath entries, is
+  refused, naming it (run-receipt-unreadable), as is a rotation.json that cannot be read
+  (rotation-receipt-unreadable), rather than taken for no record. A rotated family cannot be
   re-authored by init or added to another catalog by join. When no record shows a rotation of a
   family but identityStores names another store for it, both refuse as well (store-elsewhere),
   since they would replace a store they did not provision.
@@ -3119,6 +3189,8 @@ Options (a flag marked "<verbs> only" is taken by those verbs alone, and any oth
   --catalog <path>           Trust catalog path (default <dir>/trust.json; required for join). rotate
                              and show default to the config's trustRootsPath when it names one.
   --previous-catalog <path>  init only: the catalog a re-author replaces (see RE-AUTHORING above)
+  --fresh-anchor             init only: send a new anchor even when the run receipt names one for the
+                             same key set, keeping the receipt (see RESUMABLE above)
   --genesis <digest>         join only: the sha256 genesis digest init printed. The pin is what makes
                              a join a join rather than an unnoticed fork onto a different catalog.
   --store <path>             show only: additionally list an identity store's role -> did:key ids

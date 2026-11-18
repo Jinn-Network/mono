@@ -1,12 +1,15 @@
 # Native Identity Ceremony — production trust-artifact provisioning
 
-**Version:** 0.14 (one `rotate --execute` at a time holds an operator directory, after issue #5366:
-§4.5 adds the rotate lock, `<dir>/ceremony/rotate.lock`, says how a lock left by a killed run is
-taken over, and states that a new rotation takes no keys from a store that appears at its new
-store's path after its checks. v0.13 states the refusal of a run with nothing left to finish as
-`rotate` applies it, after issue #5365: the run refuses when every binding of the named stores' keys
-is revoked already, not when one named store's are. v0.12 made a new rotation never take an existing
-store as its new one, after issue #5345:
+**Version:** 0.15 (§3.2b and §6 law 1 name `init --fresh-anchor` as the act that takes a fresh
+anchor on a re-author, after issue #5377: it keeps the run receipt and the anchors it records, which
+moving the receipt aside drops, and a run interrupted after its anchor was sent resumes onto that
+anchor when re-run without the flag. v0.14: one `rotate --execute` at a time holds an operator
+directory, after issue #5366: §4.5 adds the rotate lock, `<dir>/ceremony/rotate.lock`, says how a
+lock left by a killed run is taken over, and states that a new rotation takes no keys from a store
+that appears at its new store's path after its checks. v0.13 states the refusal of a run with
+nothing left to finish as `rotate` applies it, after issue #5365: the run refuses when every binding
+of the named stores' keys is revoked already, not when one named store's are. v0.12 made a new
+rotation never take an existing store as its new one, after issue #5345:
 §4.5 names the store a rotation mints, refuses (`new-store-exists`) when a file is already at that
 path, as one started in the same second as the last would find, and states that a new rotation never
 skips a family. v0.11 let a rotation whose receipt was lost after its config repoint be finished,
@@ -739,8 +742,13 @@ anchor already commits to exactly this tuple and there is no evidentiary reason 
 second. Reuse is not automatically correct, and it is also what happens by default: `init`
 refuses outright while the catalog exists (`operator/src/cli/commands/ceremony.ts:949-965`), and
 the only way past that guard leaves the run receipt in place, so `reusableAnchor` (`:333-349`)
-resumes onto the already-mined anchor unless the receipt is moved aside too. The runbook states
-this and both options' costs. They differ semantically. Reuse preserves
+resumes onto the already-mined anchor unless `init` is given `--fresh-anchor`. That flag sends a new
+anchor and keeps the run receipt, which records every anchor under which `init` or `join` bound the
+operator's keys, the record both read to refuse binding a family a rotation retired. Moving the
+receipt aside also prevents reuse, but drops every anchor it records. A `--fresh-anchor` run
+interrupted after its anchor was sent resumes onto that anchor when re-run without the flag; with
+it, the re-run sends another. The runbook states this and both options' costs. They differ
+semantically. Reuse preserves
 the original `validFrom` and effective window, so the *widened* scope is claimed retroactively
 over evidence signed before the widening; a fresh anchor refuses that retroactivity at the cost
 of a coverage gap between the old anchor time and the new one, and that gap is wholesale: the
@@ -1256,7 +1264,8 @@ per-relationship model has no consumer, and would multiply the §6 sequencing pe
    already-mined transaction rather than orphaning it. That is not merely the interrupted-run
    case: `init` refuses outright while the catalog exists (`:949-965`), and the only way past
    that guard leaves the run receipt in place, so a re-author reuses automatically too unless
-   the receipt is moved aside. **The one act that MUST NOT reuse is a rebind**, whose anchor is
+   `init` is given `--fresh-anchor` (moving the receipt aside also prevents reuse, and drops every
+   anchor the receipt records). **The one act that MUST NOT reuse is a rebind**, whose anchor is
    always freshly submitted (§3.2b) — the narrow rebind preimage makes a cross-act collision
    reachable, and reuse would date the replacement binding to the anchor of the binding it
    replaces. A rebind interrupted after its anchor was submitted, resuming onto the locator its own
