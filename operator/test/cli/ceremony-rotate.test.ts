@@ -86,6 +86,9 @@ const storesOpened = vi.hoisted(() => [] as string[]);
 /** Armed for one call: the next `planRevocation` returns its plan only once `pause` settles. */
 const afterPlanRevocation = vi.hoisted(() => ({ pause: undefined as (() => Promise<void>) | undefined }));
 
+/** Armed for one call: the next finality wait starts only once `pause` settles, and throws if it rejects. */
+const beforeFinalityWait = { pause: undefined as (() => Promise<void>) | undefined };
+
 vi.mock('@jinn-network/trust-authoring', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@jinn-network/trust-authoring')>();
   const openRoleSigners: typeof actual.openRoleSigners = async (input) => {
@@ -168,6 +171,9 @@ function harness(options: HarnessOptions = {}) {
           };
         },
         async waitForFinalized(input) {
+          const { pause } = beforeFinalityWait;
+          beforeFinalityWait.pause = undefined;
+          await pause?.();
           finalityWaits += 1;
           calls.push('waitForFinalized');
           if (finalityWaits === interruptAt) throw new Error(`killed during the ${options.interruptWait} finality wait`);
@@ -2077,5 +2083,267 @@ describe('ceremony rotate, one run at a time on an operator directory (#5366)', 
     expect(existsSync(join(h.dir, 'ceremony', 'rotation.json'))).toBe(false);
     expect(readdirSync(join(h.dir, 'identity')).sort()).toEqual([...stores, basename(appeared!)].sort());
     expect(readFileSync(appeared!)).toEqual(readFileSync(retiringStore));
+  });
+});
+
+describe('ceremony init and join, and rotate, one run at a time on an operator directory (#5385)', () => {
+  const lockPathOf = (h: Harness) => join(h.dir, 'ceremony', 'rotate.lock');
+  const rotateArgv = (h: Harness) => ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute'];
+  type Family = Parameters<typeof orderedRolesForSet>[0];
+  type Catalog = { readonly path: string; readonly genesis: string };
+
+  afterEach(() => {
+    beforeFinalityWait.pause = undefined;
+    afterPlanRevocation.pause = undefined;
+  });
+
+  /** A second catalog at another path, sealed by another operator under the same catalog authority. */
+  async function secondCatalog(h: Harness): Promise<Catalog> {
+    const otherDir = join(h.home, '.jinn-operator-b');
+    mkdirSync(otherDir, { recursive: true });
+    const init = await run(h, [
+      'init', '--dir', otherDir, '--role-sets', 'requester,admission,solver', '--authority-store', h.authorityStore,
+      '--execute',
+    ]);
+    expect(init.kind).toBe('ceremony_init_complete');
+    return { path: join(otherDir, 'trust.json'), genesis: String(init.policyGenesisDigest) };
+  }
+
+  /** A join of this operator's requester and solver families into the second catalog. */
+  const joinArgv = (h: Harness, second: Catalog, extra: readonly string[] = ['--execute']) => [
+    'join', '--dir', h.dir, '--role-sets', 'requester,solver', '--catalog', second.path, '--genesis', second.genesis,
+    '--authority-store', h.authorityStore, ...extra,
+  ];
+
+  /** A re-author of this operator into a new catalog that replaces the live one. */
+  const initArgv = (h: Harness, extra: readonly string[] = ['--execute']) => [
+    'init', '--dir', h.dir, '--role-sets', 'requester,admission,solver', '--catalog', join(h.home, 'reauthored', 'trust.json'),
+    '--previous-catalog', h.catalogPath, '--authority-store', h.authorityStore, ...extra,
+  ];
+
+  /** A run's last envelope, or what it threw. */
+  async function outcome(pending: Promise<Record<string, unknown>>): Promise<Record<string, unknown>> {
+    try {
+      return await pending;
+    } catch (error) {
+      return { thrown: String(error) };
+    }
+  }
+
+  async function keyIdsIn(storePath: string, family: Family): Promise<string[]> {
+    const signers = await openRoleSigners({
+      storePath, password: PASSWORD, ownedRoles: orderedRolesForSet(family), create: false,
+    });
+    return [...signers.values()].map(({ keyId }) => keyId).sort();
+  }
+
+  /** Each key a catalog binds, and whether that catalog revokes the binding. */
+  function bindingsIn(path: string): { readonly key: string; readonly revoked: boolean }[] {
+    const file = JSON.parse(readFileSync(path, 'utf-8')) as {
+      bindings: { digest: string; envelope: string }[];
+      revocations?: { envelope: string }[];
+    };
+    const revoked = new Set((file.revocations ?? []).map(({ envelope }) =>
+      validateRevocation(new Uint8Array(Buffer.from(envelope, 'base64'))).value!.target));
+    return file.bindings.map(({ digest, envelope }) => ({
+      key: validateKeyBinding(new Uint8Array(Buffer.from(envelope, 'base64'))).value!.key.didKey,
+      revoked: revoked.has(digest),
+    }));
+  }
+
+  /**
+   * No key a rotation retired (one any of `catalogs` revokes) is bound, unrevoked, in another of them,
+   * or held by a store the config names: what an init or join alongside the rotation would leave.
+   */
+  async function expectNoRetiredKeyBound(h: Harness, catalogs: readonly string[]): Promise<void> {
+    const all = catalogs.flatMap((path) => bindingsIn(path));
+    const retired = new Set(all.filter(({ revoked }) => revoked).map(({ key }) => key));
+    expect(all.filter(({ key, revoked }) => !revoked && retired.has(key)).map(({ key }) => key)).toEqual([]);
+    for (const [family, storePath] of Object.entries(config(h).identityStores)) {
+      // eslint-disable-next-line no-await-in-loop -- bounded (≤4 families).
+      for (const key of await keyIdsIn(storePath, family as Family)) expect(retired.has(key), `${family} ${key}`).toBe(false);
+    }
+  }
+
+  const rotatedStores = (h: Harness) => readdirSync(join(h.dir, 'identity')).filter((name) => name.includes('.rotated-'));
+
+  it('lets exactly one of a join and a rotate started together on one operator directory proceed, and refuses the other before it reads anything, naming the run that holds it', async () => {
+    const h = await provisioned();
+    const second = await secondCatalog(h);
+    const catalog = readFileSync(h.catalogPath);
+    const submissions = h.submitted.length;
+
+    const [joined, rotated] = await Promise.all([
+      outcome(run(h, joinArgv(h, second))),
+      outcome(run(h, rotateArgv(h))),
+    ]);
+
+    // The join started first, so it holds the directory and the rotate refuses.
+    expect(joined.kind).toBe('ceremony_join_complete');
+    expect(rotated).toMatchObject({
+      code: 'invalid_invocation',
+      details: {
+        state: 'provisioning-in-progress',
+        sideEffects: false,
+        lock: lockPathOf(h),
+        holder: { verb: 'join', pid: process.pid, host: hostname() },
+      },
+    });
+    const { startedAt } = (rotated.details as { holder: { startedAt: string } }).holder;
+    expect(String(rotated.message)).toContain(
+      `another jinn ceremony join --execute holds ${h.dir}: process ${process.pid} on ${hostname()}, started ${startedAt}`,
+    );
+    expect(String(rotated.message)).toContain('so rotate refuses before it reads, mints, anchors or writes anything');
+    expect(String(rotated.hint)).toContain(lockPathOf(h));
+    // The join's anchor alone: the rotate minted no store, recorded no rotation and revoked nothing.
+    expect(h.submitted).toHaveLength(submissions + 1);
+    expect(rotatedStores(h)).toEqual([]);
+    expect(existsSync(join(h.dir, 'ceremony', 'rotation.json'))).toBe(false);
+    expect(readFileSync(h.catalogPath)).toEqual(catalog);
+    await expectNoRetiredKeyBound(h, [h.catalogPath, second.path]);
+    expect(existsSync(lockPathOf(h))).toBe(false);
+  });
+
+  it('refuses a rotate started while a join on the same directory waits for its anchor, so the join never binds keys the rotation retires', async () => {
+    const h = await provisioned();
+    const second = await secondCatalog(h);
+    const catalog = readFileSync(h.catalogPath);
+    // The join stops in its finality wait: its anchor is sent, its catalog and config not yet written.
+    let resume!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      beforeFinalityWait.pause = () => {
+        resolve();
+        return new Promise<void>((go) => { resume = go; });
+      };
+    });
+    const joining = outcome(run(h, joinArgv(h, second)));
+    await waiting;
+    const configBytes = readFileSync(h.configPath);
+    const submissions = h.submitted.length;
+
+    const rotated = await outcome(run(h, rotateArgv(h)));
+    const configAtRefusal = readFileSync(h.configPath);
+    resume();
+    const joined = await joining;
+
+    expect(rotated).toMatchObject({
+      code: 'invalid_invocation',
+      details: { state: 'provisioning-in-progress', sideEffects: false, lock: lockPathOf(h), holder: { verb: 'join' } },
+    });
+    expect(joined.kind).toBe('ceremony_join_complete');
+    expect(configAtRefusal).toEqual(configBytes);
+    expect(h.submitted).toHaveLength(submissions);
+    expect(rotatedStores(h)).toEqual([]);
+    expect(readFileSync(h.catalogPath)).toEqual(catalog);
+    await expectNoRetiredKeyBound(h, [h.catalogPath, second.path]);
+  });
+
+  it('refuses a join or an init started while a rotate holds the directory, before it opens a store, sends an anchor or writes anything', async () => {
+    const h = await provisioned();
+    const second = await secondCatalog(h);
+    const retiringStore = config(h).identityStores.solver!;
+    // The rotate stops once it has planned the revocation, before it records its rotation, so nothing
+    // on disk yet says a rotation is under way.
+    let resume!: () => void;
+    const planned = new Promise<void>((resolve) => {
+      afterPlanRevocation.pause = () => {
+        resolve();
+        return new Promise<void>((go) => { resume = go; });
+      };
+    });
+    const rotating = outcome(run(h, rotateArgv(h)));
+    await planned;
+    const opened = storesOpened.length;
+    const sessions = h.calls.filter((call) => call === 'openAnchorSession').length;
+    const submissions = h.submitted.length;
+    const files = [h.configPath, h.catalogPath, second.path, join(h.dir, 'ceremony', 'receipt.json')];
+    const bytes = files.map((path) => readFileSync(path));
+
+    const joined = await outcome(run(h, joinArgv(h, second)));
+    const initialized = await outcome(run(h, initArgv(h)));
+
+    for (const [verb, refusal] of [['join', joined], ['init', initialized]] as const) {
+      expect(refusal).toMatchObject({
+        code: 'invalid_invocation',
+        details: {
+          state: 'rotation-in-progress',
+          sideEffects: false,
+          lock: lockPathOf(h),
+          holder: { verb: 'rotate', pid: process.pid, host: hostname() },
+        },
+      });
+      expect(String(refusal.message)).toContain(
+        `another jinn ceremony rotate --execute holds ${h.dir}: process ${process.pid} on ${hostname()}, started `,
+      );
+      expect(String(refusal.message)).toContain(`so ${verb} refuses before it reads, mints, anchors or writes anything`);
+    }
+    expect(storesOpened).toHaveLength(opened);
+    expect(h.calls.filter((call) => call === 'openAnchorSession')).toHaveLength(sessions);
+    expect(h.submitted).toHaveLength(submissions);
+    expect(files.map((path) => readFileSync(path))).toEqual(bytes);
+    expect(existsSync(join(h.home, 'reauthored'))).toBe(false);
+
+    resume();
+    expect((await rotating).kind).toBe('ceremony_rotate_complete');
+    expect(config(h).identityStores.solver).not.toBe(retiringStore);
+    await expectNoRetiredKeyBound(h, [h.catalogPath, second.path]);
+  });
+
+  it.each(['init', 'join'] as const)('refuses while the process a lock a killed %s left names is running, says how to clear it, and takes it over once that process is gone; a plan takes no lock', async (verb) => {
+    const h = await provisioned();
+    const second = await secondCatalog(h);
+    const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    try {
+      const startedAt = '2026-11-18T10:00:00.000Z';
+      writeFileSync(lockPathOf(h), `${JSON.stringify({ pid: holder.pid, host: hostname(), startedAt, token: 'left-behind', verb })}\n`);
+      const submissions = h.submitted.length;
+      const configBytes = readFileSync(h.configPath);
+
+      for (const argv of [rotateArgv(h), joinArgv(h, second), initArgv(h)]) {
+        // eslint-disable-next-line no-await-in-loop -- each run refuses against the same lock.
+        const refusal = await run(h, argv);
+        expect(refusal, argv[0]).toMatchObject({
+          code: 'invalid_invocation',
+          details: { state: 'provisioning-in-progress', sideEffects: false, holder: { verb, pid: holder.pid } },
+        });
+        expect(String(refusal.message)).toContain(
+          `another jinn ceremony ${verb} --execute holds ${h.dir}: process ${holder.pid} on ${hostname()}, started ${startedAt}`,
+        );
+        expect(String(refusal.hint)).toContain(`remove ${lockPathOf(h)}`);
+      }
+      expect(h.submitted).toHaveLength(submissions);
+      expect(readFileSync(h.configPath)).toEqual(configBytes);
+      // The plans read only and take no lock.
+      expect((await run(h, joinArgv(h, second, []))).kind).toBe('ceremony_join_plan');
+      expect((await run(h, initArgv(h, []))).kind).toBe('ceremony_init_plan');
+      expect(existsSync(lockPathOf(h))).toBe(true);
+    } finally {
+      holder.kill('SIGKILL');
+      await once(holder, 'exit');
+    }
+
+    expect((await run(h, joinArgv(h, second))).kind).toBe('ceremony_join_complete');
+    expect(readdirSync(join(h.dir, 'ceremony')).sort()).toEqual(['receipt.json']);
+  });
+
+  it('releases the lock however a join ends: before a refusal exits, when it is interrupted, and when it completes', async () => {
+    const h = await provisioned();
+    const second = await secondCatalog(h);
+    const lockAtExit: boolean[] = [];
+
+    const refusal = await run(
+      h,
+      joinArgv(h, { ...second, genesis: `sha256:${'0'.repeat(64)}` }),
+      () => { lockAtExit.push(existsSync(lockPathOf(h))); },
+    );
+
+    expect(String(refusal.message)).toContain('does not match the catalog');
+    // In production a refusal exits the process right there, so no `finally` would release it.
+    expect(lockAtExit).toEqual([false]);
+    beforeFinalityWait.pause = () => Promise.reject(new Error('killed during the join finality wait'));
+    await expect(run(h, joinArgv(h, second))).rejects.toThrow(/killed during the join finality wait/u);
+    expect(existsSync(lockPathOf(h))).toBe(false);
+    expect((await run(h, joinArgv(h, second))).kind).toBe('ceremony_join_complete');
+    expect(readdirSync(join(h.dir, 'ceremony')).sort()).toEqual(['receipt.json']);
   });
 });
