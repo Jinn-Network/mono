@@ -69,6 +69,7 @@ on:
       - "packages/trust/testing/**"
       - ".github/scripts/benchmark-product-package-inventory.test.mjs"
       - ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      - ".github/scripts/benchmark-product-next-pin-parity.test.mjs"
       - ".github/scripts/benchmark-product-packed-types.test.mjs"
       - ".github/scripts/colophon-publish-manifest.mjs"
       - ".github/scripts/colophon-publish-manifest.test.mjs"
@@ -137,6 +138,7 @@ on:
       - "packages/trust/testing/**"
       - ".github/scripts/benchmark-product-package-inventory.test.mjs"
       - ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      - ".github/scripts/benchmark-product-next-pin-parity.test.mjs"
       - ".github/scripts/benchmark-product-packed-types.test.mjs"
       - ".github/scripts/colophon-publish-manifest.mjs"
       - ".github/scripts/colophon-publish-manifest.test.mjs"
@@ -182,6 +184,8 @@ jobs:
         run: node --test .github/scripts/benchmark-product-package-inventory.test.mjs
       - name: Verify source boundaries
         run: node --test .github/scripts/benchmark-product-source-boundaries.test.mjs
+      - name: Verify the CLI and web pin one Next.js version
+        run: node --test .github/scripts/benchmark-product-next-pin-parity.test.mjs
       - name: Verify first-cut Colophon publish pin and Increment 1 catalog
         run: node --test .github/scripts/colophon-publish-manifest.test.mjs
 
