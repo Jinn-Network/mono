@@ -11,12 +11,12 @@ import {
   readRunPublicationExtension,
 } from "@jinn-network/benchmarking-records";
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
-import { createDiscoverySourceAnnouncementPort } from "@jinn-network/record-publication";
 import {
   executePublicationPlan,
   sha256,
   type OriginVerificationPort,
   type PublicationArtifact,
+  type PublicationFaultInjector,
   type PublicationPlan,
   type PublicationRecord,
 } from "@jinn-network/record-publication";
@@ -48,7 +48,7 @@ import {
 import { requireRunState, writeRunState } from "../run/state.js";
 import type { OperationContext } from "./context.js";
 import { operateAsync } from "./operate-async.js";
-import { timestampAfter } from "./publication-report-timestamp.js";
+import { announceAfterServedHead, timestampAfter } from "./publication-report-timestamp.js";
 import type { OperationResult } from "./result.js";
 
 export interface PublicationConfigureInput {
@@ -79,6 +79,8 @@ export interface PublicationRegisterDeps {
   readonly verifyOrigin?: OriginVerificationPort;
   /** Test-only crash seam after the completed registration plan is publicly probed, before its RunState checkpoint. */
   readonly afterPlanBeforeCheckpoint?: () => Promise<void>;
+  /** Test-only crash seam in the registration plan: after each action, before its journal checkpoint. */
+  readonly planFaults?: PublicationFaultInjector;
 }
 
 async function probeExact(base: string, digest: `sha256:${string}`, bytes: Uint8Array): Promise<void> {
@@ -382,7 +384,9 @@ export function publicationRegister(
         refuse("record-integrity", `runs.${input.draftId}.publication.origin`, "foreign registration dependencies require an injected exact origin verifier");
       }
       let receipt: { sequence: string; entryDigest: `sha256:${string}` } | undefined;
-      const announcement = createDiscoverySourceAnnouncementPort({ writer: source.writer });
+      // Each record's planned time is the earliest it is announced, not the exact time (#5369): a
+      // retry replays this plan, and the head can pass a planned time between attempts.
+      const announcement = announceAfterServedHead(source, "publication.registration.announcedAt");
       await withWorkspacePublicationSourceLock(context.workspaceDir, async () => {
         await source.writer.recover();
         // The stage time is frozen here, under the source lock, strictly after the head served now
@@ -434,6 +438,7 @@ export function publicationRegister(
             receipt = durable;
             return durable;
           } },
+          faults: deps.planFaults,
         });
       });
       // A completed executor journal can be replayed without calling announce, so recover the

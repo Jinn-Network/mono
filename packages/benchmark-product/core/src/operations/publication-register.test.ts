@@ -1,13 +1,18 @@
 import { createServer, type Server } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { BENCHMARK_RECORD_KIND, RUN_RECORD_KIND, parseBenchmark, parseRun, sealRun } from "@jinn-network/benchmarking-records";
 import { RECORD_KINDS, type SourceHead } from "@jinn-network/record-discovery-protocol";
+import type { DurablePublishedAnnouncement } from "@jinn-network/record-discovery-serve";
 import type { PublicationRecord } from "@jinn-network/record-publication";
-import { TASK_EXECUTION_PROTOCOL_URI, TaskSpecificationSchema } from "@jinn-network/task-execution-protocol";
+import { TASK_EXECUTION_PROTOCOL_URI, TASK_MEDIA_TYPE, TaskSpecificationSchema } from "@jinn-network/task-execution-protocol";
+import { RFC3161_TSA_ANCHOR_PROFILE } from "@jinn-network/trust-core";
+import { createFixtureAuthority, KIT_AUTHORITY_SEED } from "@jinn-network/trust-testing";
+import { atomicWriteFileSync } from "../fs/atomic.js";
 import { buildSampleBenchmark } from "../intake/sample.js";
+import { readEntryAnchorLedger } from "../run/entry-anchor-ledger.js";
 import { acquirePublicationLock } from "../run/publication-lock.js";
 import {
   createWorkspacePublicationHttpHandler,
@@ -17,6 +22,7 @@ import {
 } from "../run/publication-source.js";
 import { recordPublicationOrigin, recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import { readRunState, writeRunState } from "../run/state.js";
+import { workspaceMetadataPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { armAdd } from "./arms.js";
 import { authorityGrant } from "./authority-ops.js";
@@ -376,6 +382,113 @@ describe("registration's frozen announcement time and the idle-head heartbeat (#
     });
     expect(retried.ok, JSON.stringify(retried)).toBe(true);
     expect(readRunState(workspaceDir, "draft-1")!.publication!.registration).toMatchObject({ state: "complete", announcedAt: frozen.announcedAt });
+    expect((await refreshWorkspacePublicationHead(workspaceDir, SOURCE_NAME)).status).toBe("refreshed");
+  });
+});
+
+describe("a registration retry after a partial announcement (#5369)", () => {
+  const SOURCE_NAME = "colophon-benchmarks";
+  const anchorAuthority = createFixtureAuthority(KIT_AUTHORITY_SEED);
+
+  /**
+   * Configures an RFC 3161 entry anchor provider for this workspace, answered in process. Each
+   * substantive append on the source then obtains an anchor, and the next holder of the source lock
+   * that finishes its work announces it on its own entry at one millisecond after the head.
+   */
+  function configureEntryAnchoring(): void {
+    const path = workspaceMetadataPath(workspaceDir);
+    atomicWriteFileSync(path, JSON.stringify({
+      ...JSON.parse(readFileSync(path, "utf8")),
+      anchoring: [{ providerProfile: RFC3161_TSA_ANCHOR_PROFILE, endpoint: "https://timestamp.invalid/tsr" }],
+    }, null, 2));
+    createWorkspacePublicationSource(workspaceDir, SOURCE_NAME, { sources: { [RFC3161_TSA_ANCHOR_PROFILE]: {
+      profile: RFC3161_TSA_ANCHOR_PROFILE,
+      // After every entry this fixture's clock produces, so the entry-anchor skew check accepts it.
+      async obtainProof({ subjectSha256 }: { subjectSha256: string }) {
+        return anchorAuthority.mintTimeStampToken({ subjectSha256, genTime: "20260813130000Z" }).tokenDer;
+      },
+    } } });
+  }
+
+  /** Another draft's record, announced one minute after the served head. */
+  async function announceAnotherDraft(): Promise<{ readonly sequence: string }> {
+    const bytes = new TextEncoder().encode("another draft's record");
+    return withWorkspacePublicationSourceLock(workspaceDir, async () => {
+      const source = createWorkspacePublicationSource(workspaceDir, SOURCE_NAME);
+      await source.writer.recover();
+      return source.writer.append({
+        timestamp: new Date(Date.parse((await source.head.getExact())!.issuedAt) + 60_000).toISOString(),
+        announcement: { announcementId: "another-draft", action: "available", record: { kind: RECORD_KINDS.task, digest: `sha256:${sha256Hex(bytes)}`, mediaType: "text/plain" } },
+        record: { bytes, contentType: "text/plain" },
+      });
+    });
+  }
+
+  /** The `timestamp` of the signed entry a receipt names, read from its archive page. */
+  async function entryTimestamp(receipt: DurablePublishedAnnouncement["receipt"]): Promise<string> {
+    const page = await createWorkspacePublicationSource(workspaceDir, SOURCE_NAME).archiveStore.getExact(receipt.page);
+    const entries = (JSON.parse(new TextDecoder().decode(page!)) as { entries: { entry: { sequence: string; timestamp: string } }[] }).entries;
+    return entries.find(({ entry }) => entry.sequence === receipt.sequence)!.entry.timestamp;
+  }
+
+  // Registration announces its Tasks, Benchmark and Run at its frozen time plus 0, 1, 2
+  // milliseconds and so on. The first attempt stops after its first Task append, before the plan
+  // journal records it, so the retry asks to announce that Task again. Between the attempts the
+  // head reaches the time planned for the second Task: with entry anchoring configured, the
+  // heartbeat's withheld check releases the source lock, which announces the pending anchor over
+  // the first Task's entry at one millisecond after it; or another draft announces.
+  test.each([
+    "the heartbeat announces the pending entry anchor",
+    "another draft announces",
+  ] as const)("finishes after it stopped after its first Task append and %s", async (move) => {
+    const now = clock();
+    const runSha256 = await lockedSample(now);
+    const base = await serveWorkspace();
+    expect((await publicationConfigure(context(now), { draftId: "draft-1", publicBaseUrl: base })).ok).toBe(true);
+    if (move === "the heartbeat announces the pending entry anchor") configureEntryAnchoring();
+
+    let announces = 0;
+    const first = await publicationRegister(context(now), { draftId: "draft-1" }, { planFaults: { async at({ action }) {
+      if (action === "announce" && ++announces === 1) throw new Error("fixture stop after the first Task append");
+    } } });
+    expect(first.ok).toBe(false);
+    expect(announces).toBe(1);
+    const frozen = readRunState(workspaceDir, "draft-1")!.publication!.registration;
+    expect(frozen).toMatchObject({ state: "in-progress", announcedAt: expect.any(String) });
+    const source = createWorkspacePublicationSource(workspaceDir, SOURCE_NAME);
+    const partial = Object.entries((await source.writer.readState())!.announcements);
+    expect(partial).toHaveLength(1);
+    const [taskId, task] = partial[0]!;
+    expect(task.receipt.record?.contentType).toBe(TASK_MEDIA_TYPE);
+    const taskAt = await entryTimestamp(task.receipt);
+    expect(taskAt).toBe(frozen.announcedAt);
+
+    let moved: string;
+    if (move === "the heartbeat announces the pending entry anchor") {
+      expect(await refreshWorkspacePublicationHead(workspaceDir, SOURCE_NAME)).toEqual({ status: "withheld", drafts: ["draft-1"] });
+      const anchorId = readEntryAnchorLedger(workspaceDir, source.source.agent, SOURCE_NAME).rows
+        .find((row) => row.sequence === task.receipt.sequence)?.announcedAnnouncementId;
+      expect(anchorId).toBeDefined();
+      moved = (await source.writer.readState())!.announcements[anchorId!]!.receipt.sequence;
+    } else {
+      moved = (await announceAnotherDraft()).sequence;
+    }
+    // The head has reached the time planned for the second Task.
+    expect(Date.parse((await source.head.getExact())!.issuedAt)).toBeGreaterThanOrEqual(Date.parse(taskAt) + 1);
+
+    const retried = await publicationRegister(context(now), { draftId: "draft-1" });
+    expect(retried.ok, JSON.stringify(retried)).toBe(true);
+    // The Task already announced keeps its one entry, with the same bytes and timestamp.
+    const after = (await source.writer.readState())!;
+    expect(after.announcements[taskId]).toEqual(task);
+    expect(Object.values(after.announcements).filter((entry) => entry.receipt.record?.digest === task.receipt.record!.digest)).toHaveLength(1);
+    expect(await entryTimestamp(after.announcements[taskId]!.receipt)).toBe(taskAt);
+    // Registration completed at its frozen time, its Run entry after the move.
+    const registration = readRunState(workspaceDir, "draft-1")!.publication!.registration;
+    expect(registration).toMatchObject({ state: "complete", announcedAt: frozen.announcedAt });
+    const run = Object.values(after.announcements).find((entry) => entry.receipt.record?.digest === `sha256:${runSha256}`)!.receipt;
+    expect(registration.receipt).toEqual({ sourceSequence: run.sequence, entrySha256: run.entryDigest.slice(7) });
+    expect(run.sequence > moved).toBe(true);
     expect((await refreshWorkspacePublicationHead(workspaceDir, SOURCE_NAME)).status).toBe("refreshed");
   });
 });
