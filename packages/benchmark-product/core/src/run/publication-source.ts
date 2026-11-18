@@ -418,80 +418,42 @@ export async function refreshWorkspacePublicationWellKnown(
   }, onContended);
 }
 
-/**
- * What one heartbeat did for the workspace source's head (#4187): the durable writer's own
- * outcome, or `withheld` when a run holds a frozen announcement time the re-sign would overtake.
- */
-export type WorkspacePublicationHeadRefresh =
-  | IdleHeadRefreshOutcome
-  | { readonly status: "withheld"; readonly drafts: readonly string[] };
-
-/**
- * Drafts whose publication stage may still announce at a time it froze earlier.
- *
- * Each stage freezes `announcedAt` once, when it marks itself `in-progress`, so a retry replays the
- * identical plan and announces at that instant or just after it. The writer refuses any append
- * that does not strictly advance the served head. A head re-signed after a stage froze its time
- * and before it announced would therefore carry an `issuedAt` the stage could never pass, and the
- * stage could no longer finish. Each stage freezes where this check cannot miss it:
- *
- * - Registration (#5347), accounting (#5334) and Report freeze under the source lock this
- *   heartbeat also holds, strictly after the `issuedAt` of the head served then. A re-sign
- *   therefore lands before the freeze, which the frozen time passes, or finds the stage
- *   `in-progress` here. Registration and Report make every announcement in that same hold.
- *   Accounting announces its inputs in that hold and its own records in a later one.
- * - Matrix v2 takes accounting's frozen time and marks itself `in-progress` while accounting
- *   already is.
- *
- * A stage that froze its time and then failed before it announced stays `in-progress` and its
- * retry reuses that time, so the check holds the head back until the stage has finished. The
- * heartbeat design does not cover this; it is the Colophon form of the floor coupling that design
- * states for the operator's requester leg (its §5.4).
- *
- * Conservative by construction: a run naming another source is skipped, but a run document that
- * cannot be read is reported, because it may hold exactly such a stage. Withholding leaves the
- * head to lapse as it did before the heartbeat existed, which is never worse than today.
- */
-function draftsHoldingFrozenAnnouncementTimes(workspaceDir: string, sourceName: string): readonly string[] {
-  let files: readonly string[];
-  try { files = readdirSync(runsDir(workspaceDir)); } catch { return []; }
-  const drafts: string[] = [];
-  for (const file of files) {
-    // The same RunState file selection `resolveWorkspacePublicationSourceName` makes below.
-    if (!file.endsWith(".json") || file.endsWith(".cancel-requested.json")) continue;
-    const draftId = file.slice(0, -".json".length);
-    // Read loosely, as that name resolution does: only the source name and stage states count.
-    type StageView = { readonly state?: unknown } | undefined;
-    type PublicationView = {
-      readonly source?: { readonly name?: unknown };
-      readonly registration?: StageView;
-      readonly accounting?: StageView;
-      readonly matrixV2?: StageView;
-      readonly report?: StageView;
-    } | null | undefined;
-    let publication: PublicationView;
-    try {
-      const bytes = readFileIfExistsSync(runStatePath(workspaceDir, draftId));
-      if (bytes === undefined) continue;
-      publication = (JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as { publication?: PublicationView } | null)?.publication;
-    } catch {
-      drafts.push(draftId);
-      continue;
-    }
-    if (publication === undefined || publication === null) continue;
-    const name = publication.source?.name;
-    if (typeof name === "string" && name !== sourceName) continue;
-    const stages = [publication.registration, publication.accounting, publication.matrixV2, publication.report];
-    if (stages.some((stage) => stage?.state === "in-progress")) drafts.push(draftId);
-  }
-  return drafts.sort();
-}
+/** What one heartbeat did for the workspace source's head (#4187): the durable writer's own outcome. */
+export type WorkspacePublicationHeadRefresh = IdleHeadRefreshOutcome;
 
 /**
  * One idle-head heartbeat for this workspace's source (#4187): re-signs the served head at its
  * current position once no more than half of its window remains, so a reader that arrives while
  * the source has nothing new to announce never fetches a stale head. Taken under the source lock,
  * so it is serialized with every announcement exactly as announcements are with each other.
+ *
+ * It re-signs whatever state the workspace's runs are in, including while a publication stage is
+ * `in-progress` (#5389). The writer refuses any append that does not strictly advance the served
+ * head, and each stage freezes its `announcedAt` once and replays it on a retry. That frozen time
+ * is the earliest a record is announced, not the exact time: every stage announces through
+ * `announceAfterServedHead` or the same rule, so on a retry a record the source already holds is
+ * kept as it was and any other is announced at its planned time or one millisecond after the
+ * served head, whichever is later. What each stage does on a retry:
+ *
+ * - Registration freezes its time under this lock and makes every announcement in that hold
+ *   (#5347). A retry rebuilds the same plan at the stored time, reuses each Task, Benchmark or Run
+ *   the source holds under its announcement id, and announces the rest after the head (#5369).
+ * - Accounting freezes its time in its input hold under this lock (#5334). A retry reuses each
+ *   Submission the source already holds, found by digest, and appends any other at its planned
+ *   slot or after the head; its input plan of owned Deliveries, evidence and evaluations goes
+ *   through the same port (#5349). Its Accounting record is announced in a later hold through
+ *   that port (#5348).
+ * - Matrix v2 takes accounting's frozen time and is announced after the Accounting record, in the
+ *   same hold and through the same port.
+ * - Report freezes its time under this lock and announces its envelope in that hold through the
+ *   same port, under the id it has always been announced under (#5369).
+ *
+ * So a head re-signed while a stage is `in-progress`, between two attempts or between two holds
+ * of one attempt, is passed by that stage's next announcement, and the stage still finishes with
+ * its frozen time, plans and announcement ids unchanged. Each stage reads that floor from the
+ * served head this heartbeat re-signs, never from its own record of the head, which is the
+ * Colophon form of the floor coupling the heartbeat design states for the operator's requester leg
+ * (its §5.4).
  *
  * Never throws: a lock that cannot be acquired is `faulted` like any other failure, because the
  * caller is a loop and reports outcomes rather than exceptions.
@@ -503,8 +465,6 @@ export async function refreshWorkspacePublicationHead(
 ): Promise<WorkspacePublicationHeadRefresh> {
   try {
     return await withWorkspacePublicationSourceLock(workspaceDir, async () => {
-      const drafts = draftsHoldingFrozenAnnouncementTimes(workspaceDir, sourceName);
-      if (drafts.length > 0) return { status: "withheld", drafts };
       return createWorkspacePublicationSource(workspaceDir, sourceName).writer.refreshIdleHead();
     }, onContended);
   } catch (error) {
