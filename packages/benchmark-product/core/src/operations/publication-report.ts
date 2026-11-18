@@ -30,10 +30,10 @@ import {
 import { produceReportV2, verifyReportV2 } from "@jinn-network/benchmarking-aggregate";
 import { buildBenchmarkPublicationPlan, type PublicationArtifactInput, type PublicationRecordInput } from "@jinn-network/benchmarking-publication";
 import type { DurableSourceState } from "@jinn-network/record-discovery-serve";
-import { executePublicationPlan, type PublicationArtifact, type PublicationPlan, type PublicationRecord } from "@jinn-network/record-publication";
+import { executePublicationPlan, type PublicationArtifact, type PublicationFaultInjector, type PublicationPlan, type PublicationRecord } from "@jinn-network/record-publication";
 import { resolveAssurance } from "../domain/draft.js";
 import { refuse } from "../errors.js";
-import { timestampAfter } from "./publication-report-timestamp.js";
+import { announceAfterServedHead, timestampAfter } from "./publication-report-timestamp.js";
 import { primaryAnalysisPlanLength } from "../run/compile.js";
 import { buildMethodPorts } from "../report/ports.js";
 import { createReportDsseSigner, loadOrCreateReportSigningKey } from "../report/signing.js";
@@ -55,6 +55,8 @@ export interface PublicationReportInput { readonly draftId: string; }
 export interface PublicationReportDeps {
   /** Test-only crash seam after the durable source append, before the RunState checkpoint. */
   readonly afterAppendBeforeCheckpoint?: () => Promise<void>;
+  /** Test-only crash seam in the Report plan: after each action, before its journal checkpoint. */
+  readonly planFaults?: PublicationFaultInjector;
 }
 export interface PublicationReportResult {
   readonly reportPayloadSha256: string;
@@ -430,11 +432,11 @@ export function publicationReport(
             }
             requireWorkspaceAuthorship({ workspaceDir: context.workspaceDir, recordSha256, recordKind: REPORT_V2_RECORD_KIND, author: state.owner });
           } },
-          announce: { async announce(value) { return source.writer.append({
-            timestamp: value.record.announcementTimestamp!,
-            announcement: { announcementId: `benchmark-report-v2:${input.draftId}:${recordSha256}`, action: "available", record: { kind: value.record.kind, digest: value.record.digest, mediaType: value.record.mediaType } },
-            record: { bytes: value.record.bytes, contentType: value.record.mediaType },
-          }); } },
+          // The frozen time is the earliest the envelope is announced, not the exact time (#5369).
+          // A retry replays it, and another draft, or a pending entry anchor announced when another
+          // holder releases the source lock, can move the head past it between attempts.
+          announce: announceAfterServedHead(source, "publication.report.announcedAt", () => `benchmark-report-v2:${input.draftId}:${recordSha256}`),
+          faults: deps.planFaults,
       });
       await probeRecord(publicBaseUrl, recordSha256, produced.envelope, "signed Report v2");
       const receipt = await receiptFor(source, recordSha256);

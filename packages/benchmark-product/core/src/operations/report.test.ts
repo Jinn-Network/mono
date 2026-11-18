@@ -5,7 +5,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { BENCHMARKING_METHOD_IDS, BENCHMARKING_METHOD_VERSION, cellIdempotencyKey, parseBenchmarkAccounting, parseMatrix, parseReport, parseSignedReportRecord } from "@jinn-network/benchmarking-records";
 import { requirementsDigest } from "@jinn-network/benchmarking-local";
 import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
@@ -20,7 +20,7 @@ import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import { acquirePublicationLock } from "../run/publication-lock.js";
 import { readRunState, writeRunState } from "../run/state.js";
 import { additionalClaimPackagePath } from "../report/claim.js";
-import { createWorkspacePublicationHttpHandler, createWorkspacePublicationSource, recordPath } from "../run/publication-source.js";
+import { createWorkspacePublicationHttpHandler, createWorkspacePublicationSource, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
 import { claimPackageArtifactPath, draftPath, publicationDir, publicationServeRoot, publicBundlePath, publicBundlesDir, runStatePath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import {
@@ -779,6 +779,94 @@ describe("publication.report — signed Report v2", () => {
       payload: retried.result.reportPayloadSha256,
       record: retried.result.reportRecordSha256,
     });
+  }, 60_000);
+});
+
+describe("publication.report — a retry after the source head moved (#5369)", () => {
+  const SOURCE_NAME = "colophon-benchmarks";
+
+  /** Another draft's record, announced one minute after the served head. */
+  async function announceAnotherDraft(): Promise<{ readonly sequence: string }> {
+    const bytes = new TextEncoder().encode("another draft's record");
+    return withWorkspacePublicationSourceLock(workspaceDir, async () => {
+      const source = createWorkspacePublicationSource(workspaceDir, SOURCE_NAME);
+      await source.writer.recover();
+      return source.writer.append({
+        timestamp: new Date(Date.parse((await source.head.getExact())!.issuedAt) + 60_000).toISOString(),
+        announcement: { announcementId: "another-draft", action: "available", record: { kind: RECORD_KINDS.task, digest: `sha256:${sha256Hex(bytes)}`, mediaType: "text/plain" } },
+        record: { bytes, contentType: "text/plain" },
+      });
+    });
+  }
+
+  /** The `timestamp` of the signed entry a receipt names, read from its archive page. */
+  async function entryTimestamp(receipt: { readonly page: string; readonly sequence: string }): Promise<string> {
+    const page = await createWorkspacePublicationSource(workspaceDir, SOURCE_NAME).archiveStore.getExact(receipt.page);
+    const entries = (JSON.parse(new TextDecoder().decode(page!)) as { entries: { entry: { sequence: string; timestamp: string } }[] }).entries;
+    return entries.find(({ entry }) => entry.sequence === receipt.sequence)!.entry.timestamp;
+  }
+
+  // Report writes `in-progress` with its frozen time before its public payload probe. A probe that
+  // fails leaves that time frozen, and another draft announcing before the retry moves the head
+  // past it, so a retry that announces at exactly that time is refused.
+  test("finishes after its payload probe failed and another draft announced", async () => {
+    const clock = makeClock();
+    await setUpPublishedAccounting(clock);
+    const realFetch = globalThis.fetch;
+    const unavailable = vi.spyOn(globalThis, "fetch").mockImplementation(async (resource, init) => {
+      const url = resource instanceof Request ? resource.url : String(resource);
+      if (url.includes("/publication-artifacts/sha256/") && readRunState(workspaceDir, "draft-1")!.publication!.report.state === "in-progress") {
+        return new Response(null, { status: 503 });
+      }
+      return realFetch(resource, init);
+    });
+    let first: Awaited<ReturnType<typeof publicationReport>>;
+    try { first = await publicationReport(contextFor(clock), { draftId: "draft-1" }); } finally { unavailable.mockRestore(); }
+    expect(first.ok).toBe(false);
+    if (!first.ok) expect(first.error.detail).toMatch(/payload HEAD probe returned 503/);
+    const frozen = readRunState(workspaceDir, "draft-1")!.publication!.report;
+    expect(frozen).toMatchObject({ state: "in-progress", announcedAt: expect.any(String) });
+    const other = await announceAnotherDraft();
+    const source = createWorkspacePublicationSource(workspaceDir, SOURCE_NAME);
+    expect(Date.parse((await source.head.getExact())!.issuedAt)).toBeGreaterThan(Date.parse(frozen.announcedAt!));
+
+    const retried = await publicationReport(contextFor(clock), { draftId: "draft-1" });
+    expect(retried.ok, JSON.stringify(retried)).toBe(true);
+    const report = readRunState(workspaceDir, "draft-1")!.publication!.report;
+    expect(report).toMatchObject({ state: "complete", announcedAt: frozen.announcedAt });
+    expect(report.receipt!.sourceSequence > other.sequence).toBe(true);
+  }, 60_000);
+
+  // The plan stops after the envelope is appended and before its journal records it, so the retry
+  // asks to announce it again after another draft has moved the head past its time.
+  test("keeps the envelope already announced, with its bytes and timestamp, when the head moved after it", async () => {
+    const clock = makeClock();
+    await setUpPublishedAccounting(clock);
+    let faulted = false;
+    const first = await publicationReport(contextFor(clock), { draftId: "draft-1" }, { planFaults: { async at({ action }) {
+      if (action === "announce" && !faulted) { faulted = true; throw new Error("fixture stop after the Report append"); }
+    } } });
+    expect(first.ok).toBe(false);
+    expect(faulted).toBe(true);
+    const frozen = readRunState(workspaceDir, "draft-1")!.publication!.report;
+    expect(frozen.state).toBe("in-progress");
+    const source = createWorkspacePublicationSource(workspaceDir, SOURCE_NAME);
+    const partial = Object.entries((await source.writer.readState())!.announcements).filter(([id]) => id.startsWith("benchmark-report-v2:"));
+    expect(partial).toHaveLength(1);
+    const [envelopeId, envelope] = partial[0]!;
+    const envelopeAt = await entryTimestamp(envelope.receipt);
+    expect(envelopeAt).toBe(frozen.announcedAt);
+    await announceAnotherDraft();
+
+    const retried = await publicationReport(contextFor(clock), { draftId: "draft-1" });
+    expect(retried.ok, JSON.stringify(retried)).toBe(true);
+    if (!retried.ok) return;
+    const after = (await source.writer.readState())!;
+    expect(after.announcements[envelopeId]).toEqual(envelope);
+    expect(Object.values(after.announcements).filter((entry) => entry.receipt.record?.digest === envelope.receipt.record!.digest)).toHaveLength(1);
+    expect(await entryTimestamp(after.announcements[envelopeId]!.receipt)).toBe(envelopeAt);
+    expect(retried.result.receipt).toEqual({ sourceSequence: envelope.receipt.sequence, entrySha256: envelope.receipt.entryDigest.slice(7) });
+    expect(readRunState(workspaceDir, "draft-1")!.publication!.report).toMatchObject({ state: "complete", announcedAt: frozen.announcedAt });
   }, 60_000);
 });
 
