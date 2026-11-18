@@ -19,6 +19,13 @@ defaults:
   run:
     working-directory: packages/plugin
 
+# CPU-only. Skip the optional CUDA downloads of both onnxruntime-node installer
+# generations; their CPU binaries ship in the npm package (#5392,
+# .github/scripts/workflow-onnxruntime-skip.test.mjs).
+env:
+  ONNXRUNTIME_NODE_INSTALL: skip
+  ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
 jobs:
   check:
     name: Typecheck, Test & Build
