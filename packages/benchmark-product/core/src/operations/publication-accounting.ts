@@ -371,11 +371,10 @@ export function publicationAccounting(
       // every input is durable do we persist the immutable scope cutoff used to seal accounting.
       //
       // The stage time is frozen inside `publishInputs`, under the source lock and strictly after
-      // the head served then, not when this command started (#5334). The writer refuses an append
-      // that does not strictly advance the served head and a retry replays the frozen time, so a
-      // time read before the inputs phase, then passed by a head re-signed or another announcement
-      // during it, could never be announced. Under the lock the heartbeat either re-signed before
-      // the freeze, which the frozen time then passes, or sees this stage `in-progress` and withholds.
+      // the head served then, not when this command started (#5334). Every input and record is
+      // announced at its planned time or after the served head, whichever is later, so a head
+      // re-signed or moved by another announcement while this stage is `in-progress` is passed by
+      // the next announcement (#5348, #5349, #5389).
       const hadFrozenCutoff = publication.accounting.sourceCutoff !== undefined;
       const frozen = !hadFrozenCutoff
         ? await publishInputs({

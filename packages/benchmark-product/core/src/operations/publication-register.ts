@@ -391,11 +391,10 @@ export function publicationRegister(
         await source.writer.recover();
         // The stage time is frozen here, under the source lock, strictly after the head served now
         // and in the same lock hold as every registration announcement, not when the clock was read
-        // (#5347). The writer refuses an append that does not strictly advance the served head and
-        // a retry replays the frozen time, so a time frozen outside the lock, then passed by a head
-        // the heartbeat re-signed before it saw this stage `in-progress`, could never be announced.
-        // Under the lock the heartbeat either re-signed before the freeze, which the frozen time
-        // then passes, or sees this stage `in-progress` and withholds.
+        // (#5347). Every announcement goes through `announceAfterServedHead`, so a retry after the
+        // head moved, including a heartbeat re-sign while this stage is `in-progress` (#5389), is
+        // announced after the served head. Freezing here keeps a first attempt's records at exactly
+        // their planned times, because under the lock only this hold's own appends move the head.
         if (publication.registration.state === "not-started") {
           timestamp = timestampAfter(clockAt, (await source.head.getExact())?.issuedAt, "publication.registration.announcedAt");
           publication = { ...publication, registration: { ...publication.registration, state: "in-progress", announcedAt: timestamp, postHoc } };
