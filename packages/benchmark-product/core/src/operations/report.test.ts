@@ -12,16 +12,19 @@ import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
 import type { AttemptUri, DeliveryRef, ObservationSnapshot, SubmissionAck, SubmissionUri } from "@jinn-network/task-execution-backend";
 import { sealDelivery, type ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { deriveEvaluationTask } from "@jinn-network/task-execution-profiles";
-import { canonicalJsonBytes } from "@jinn-network/trust-core";
+import { canonicalJsonBytes, RFC3161_TSA_ANCHOR_PROFILE } from "@jinn-network/trust-core";
+import { createFixtureAuthority, KIT_AUTHORITY_SEED } from "@jinn-network/trust-testing";
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
+import { atomicWriteFileSync } from "../fs/atomic.js";
 import type { ProxiedBackend } from "../run/drive.js";
+import { readEntryAnchorLedger } from "../run/entry-anchor-ledger.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import { acquirePublicationLock } from "../run/publication-lock.js";
 import { readRunState, writeRunState } from "../run/state.js";
 import { additionalClaimPackagePath } from "../report/claim.js";
-import { createWorkspacePublicationHttpHandler, createWorkspacePublicationSource, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
-import { claimPackageArtifactPath, draftPath, publicationDir, publicationServeRoot, publicBundlePath, publicBundlesDir, runStatePath } from "../workspace/layout.js";
+import { createWorkspacePublicationHttpHandler, createWorkspacePublicationSource, recordPath, refreshWorkspacePublicationHead, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
+import { claimPackageArtifactPath, draftPath, publicationDir, publicationServeRoot, publicBundlePath, publicBundlesDir, runStatePath, workspaceMetadataPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import {
   APEX_SWE_DEV_ADAPTER_ID,
@@ -806,10 +809,46 @@ describe("publication.report — a retry after the source head moved (#5369)", (
     return entries.find(({ entry }) => entry.sequence === receipt.sequence)!.entry.timestamp;
   }
 
+  /** One heartbeat while Report is `in-progress` (#5389), which re-signs the head past its frozen time. */
+  async function resignWhileInProgress(): Promise<{ readonly sequence: string }> {
+    const report = readRunState(workspaceDir, "draft-1")!.publication!.report;
+    expect(report.state).toBe("in-progress");
+    const outcome = await refreshWorkspacePublicationHead(workspaceDir, SOURCE_NAME);
+    expect(outcome.status).toBe("refreshed");
+    if (outcome.status === "refreshed") expect(Date.parse(outcome.current.issuedAt)).toBeGreaterThan(Date.parse(report.announcedAt!));
+    return (await createWorkspacePublicationSource(workspaceDir, SOURCE_NAME).head.getExact())!;
+  }
+
+  const anchorAuthority = createFixtureAuthority(KIT_AUTHORITY_SEED);
+
+  /**
+   * Configures an RFC 3161 entry anchor provider for this workspace, answered in process. Each
+   * substantive append on the source then obtains an anchor, and the next holder of the source lock
+   * that finishes its work announces it on its own entry at one millisecond after the head.
+   */
+  function configureEntryAnchoring(): void {
+    const path = workspaceMetadataPath(workspaceDir);
+    atomicWriteFileSync(path, JSON.stringify({
+      ...JSON.parse(readFileSync(path, "utf8")),
+      anchoring: [{ providerProfile: RFC3161_TSA_ANCHOR_PROFILE, endpoint: "https://timestamp.invalid/tsr" }],
+    }, null, 2));
+    createWorkspacePublicationSource(workspaceDir, SOURCE_NAME, { sources: { [RFC3161_TSA_ANCHOR_PROFILE]: {
+      profile: RFC3161_TSA_ANCHOR_PROFILE,
+      // After every entry this fixture's clock gives the Report, so the entry-anchor skew check accepts it.
+      async obtainProof({ subjectSha256 }: { subjectSha256: string }) {
+        return anchorAuthority.mintTimeStampToken({ subjectSha256, genTime: "20260805010000Z" }).tokenDer;
+      },
+    } } });
+  }
+
   // Report writes `in-progress` with its frozen time before its public payload probe. A probe that
-  // fails leaves that time frozen, and another draft announcing before the retry moves the head
-  // past it, so a retry that announces at exactly that time is refused.
-  test("finishes after its payload probe failed and another draft announced", async () => {
+  // fails leaves that time frozen, and the head can move past it before the retry: the heartbeat
+  // re-signs it while Report is `in-progress` (#5389), or another draft announces. A retry that
+  // announced at exactly that time would be refused.
+  test.each([
+    "the heartbeat re-signed the head",
+    "another draft announced",
+  ] as const)("finishes after its payload probe failed and %s", async (move) => {
     const clock = makeClock();
     await setUpPublishedAccounting(clock);
     const realFetch = globalThis.fetch;
@@ -826,7 +865,7 @@ describe("publication.report — a retry after the source head moved (#5369)", (
     if (!first.ok) expect(first.error.detail).toMatch(/payload HEAD probe returned 503/);
     const frozen = readRunState(workspaceDir, "draft-1")!.publication!.report;
     expect(frozen).toMatchObject({ state: "in-progress", announcedAt: expect.any(String) });
-    const other = await announceAnotherDraft();
+    const other = move === "another draft announced" ? await announceAnotherDraft() : await resignWhileInProgress();
     const source = createWorkspacePublicationSource(workspaceDir, SOURCE_NAME);
     expect(Date.parse((await source.head.getExact())!.issuedAt)).toBeGreaterThan(Date.parse(frozen.announcedAt!));
 
@@ -838,10 +877,16 @@ describe("publication.report — a retry after the source head moved (#5369)", (
   }, 60_000);
 
   // The plan stops after the envelope is appended and before its journal records it, so the retry
-  // asks to announce it again after another draft has moved the head past its time.
-  test("keeps the envelope already announced, with its bytes and timestamp, when the head moved after it", async () => {
+  // asks to announce it again after the head has moved past its time: another draft announces, or,
+  // with entry anchoring configured, the heartbeat re-signs the head while Report is `in-progress`
+  // (#5389) and its release of the source lock announces the pending anchor over the envelope.
+  test.each([
+    "another draft announced",
+    "the heartbeat re-signed the head and announced the envelope's pending entry anchor",
+  ] as const)("keeps the envelope already announced, with its bytes and timestamp, when %s after it", async (move) => {
     const clock = makeClock();
     await setUpPublishedAccounting(clock);
+    if (move !== "another draft announced") configureEntryAnchoring();
     let faulted = false;
     const first = await publicationReport(contextFor(clock), { draftId: "draft-1" }, { planFaults: { async at({ action }) {
       if (action === "announce" && !faulted) { faulted = true; throw new Error("fixture stop after the Report append"); }
@@ -856,7 +901,15 @@ describe("publication.report — a retry after the source head moved (#5369)", (
     const [envelopeId, envelope] = partial[0]!;
     const envelopeAt = await entryTimestamp(envelope.receipt);
     expect(envelopeAt).toBe(frozen.announcedAt);
-    await announceAnotherDraft();
+    if (move === "another draft announced") {
+      await announceAnotherDraft();
+    } else {
+      const head = await resignWhileInProgress();
+      const anchorId = readEntryAnchorLedger(workspaceDir, source.source.agent, SOURCE_NAME).rows
+        .find((row) => row.sequence === envelope.receipt.sequence)?.announcedAnnouncementId;
+      expect(anchorId).toBeDefined();
+      expect(head.sequence).toBe((await source.writer.readState())!.announcements[anchorId!]!.receipt.sequence);
+    }
 
     const retried = await publicationReport(contextFor(clock), { draftId: "draft-1" });
     expect(retried.ok, JSON.stringify(retried)).toBe(true);
