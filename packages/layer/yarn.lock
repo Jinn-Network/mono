@@ -362,6 +362,9 @@ __metadata:
     better-sqlite3: "npm:^12.10.0"
     canonicalize: "npm:^3.0.0"
     zod: "npm:4.4.3"
+  dependenciesMeta:
+    "@lmoe/gliner-onnx":
+      optional: true
   languageName: node
   linkType: soft
 
@@ -2173,7 +2176,6 @@ __metadata:
     global-agent: "npm:^3.0.0"
     onnxruntime-common: "npm:1.21.0"
     tar: "npm:^7.0.1"
-  checksum: 10c0/7a2a7c3104da9c64fe9a2a9d04dce255aaabd337741c5369c0627575e03cd165b393f0e11c827ab352726d3f8493adc3ff842a60f135770038fb8d584500baa8
   conditions: (os=win32 | os=darwin | os=linux)
   languageName: node
   linkType: hard

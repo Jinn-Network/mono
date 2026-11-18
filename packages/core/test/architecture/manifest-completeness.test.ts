@@ -37,6 +37,7 @@ describe('core dependency manifest (#1833)', () => {
     const pkg = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf-8'));
     const declared = new Set([
       ...Object.keys(pkg.dependencies ?? {}),
+      ...Object.keys(pkg.optionalDependencies ?? {}),
       ...Object.keys(pkg.devDependencies ?? {}),
     ]);
     const builtins = new Set(builtinModules);
