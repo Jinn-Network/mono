@@ -2202,6 +2202,7 @@ describe('ceremony init and join, and rotate, one run at a time on an operator d
     expect(readFileSync(h.catalogPath)).toEqual(catalog);
     await expectNoRetiredKeyBound(h, [h.catalogPath, second.path]);
     expect(existsSync(lockPathOf(h))).toBe(false);
+    expect(createCeremonyCommand(h.deps).helpText).toContain('provisioning-in-progress');
   });
 
   it('refuses a rotate started while a join on the same directory waits for its anchor, so the join never binds keys the rotation retires', async () => {

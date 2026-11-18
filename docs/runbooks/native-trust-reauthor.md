@@ -223,7 +223,16 @@ revocations as `carriedRevocations`.
     rotated store now sits and whatever it is called;
 - no record shows a rotation of a family it would bind, but the config's `identityStores` names a
   store other than `<dir>/identity/<family>.enc.json` for it (`store-elsewhere`): `init` would
-  replace a store it did not provision.
+  replace a store it did not provision;
+- another `init --execute`, `join --execute` or `rotate --execute` holds `<dir>`
+  (`rotation-in-progress` while a rotate holds it, `provisioning-in-progress` while an `init` or
+  `join` does). Each of the three takes `<dir>/ceremony/rotate.lock` before it reads anything, so
+  `init` refuses before it opens any store, naming the verb, process, host and start time of the run
+  that holds the lock, and a rotation never retires keys an `init` beside it then binds. `join`
+  refuses the same way, and `rotate` refuses while an `init` or `join` holds the lock. A run that was
+  killed leaves its lock behind: the next run takes it over once that process no longer exists on
+  this host, and otherwise the refusal says to remove it when no `init`, `join` or `rotate` is
+  running. The plan takes no lock.
 
 A re-author after `jinn ceremony rotate` that names a rotated family meets the rotated-family
 refusal. `init` opens the stores at `<dir>/identity/<family>.enc.json`, not the stores

@@ -2059,12 +2059,17 @@ function newRotatedStorePath(ctx: CommandContext, input: {
 /**
  * The lock a `rotate --execute` run holds on its operator directory (#5366), from before it reads the
  * config or `rotation.json` until it ends. A run reads the receipt first and writes it only after its
- * checks, so two runs at once would each find no unfinished rotation and each start one. The plan
- * reads only and takes no lock.
+ * checks, so two runs at once would each find no unfinished rotation and each start one. An `init` or
+ * `join --execute` holds the same lock (#5385): it checks for a rotation once, early, and binds its
+ * keys minutes later, so a rotate started in between would retire keys it then binds. A plan reads
+ * only and takes no lock.
  */
 function rotationLockPath(dir: string): string {
   return join(dir, 'ceremony', 'rotate.lock');
 }
+
+/** The verbs whose `--execute` takes the lock. */
+type LockingVerb = 'init' | 'join' | 'rotate';
 
 /** The run that holds the lock, as it recorded itself. */
 interface RotationLockHolder {
@@ -2072,6 +2077,8 @@ interface RotationLockHolder {
   readonly host: string;
   readonly startedAt: string;
   readonly token: string;
+  /** Absent from a lock written before init and join took it, which only a rotate wrote. */
+  readonly verb?: LockingVerb;
 }
 
 function readRotationLockHolder(path: string): RotationLockHolder | undefined {
@@ -2079,6 +2086,7 @@ function readRotationLockHolder(path: string): RotationLockHolder | undefined {
     const value = JSON.parse(readFileSync(path, 'utf-8')) as Partial<RotationLockHolder>;
     return Number.isSafeInteger(value.pid) && (value.pid as number) > 0 && typeof value.host === 'string'
       && typeof value.startedAt === 'string' && typeof value.token === 'string'
+      && (value.verb === undefined || value.verb === 'init' || value.verb === 'join' || value.verb === 'rotate')
       ? value as RotationLockHolder
       : undefined;
   } catch {
@@ -2101,7 +2109,13 @@ function rotationLockHolderGone(holder: RotationLockHolder): boolean {
   }
 }
 
+/**
+ * Refuses `verb`, naming the run that holds the lock: `rotation-in-progress` while it is a rotate, or
+ * a run whose verb its record does not name (only a rotate wrote one before init and join took the
+ * lock), and `provisioning-in-progress` while it is an init or join.
+ */
 function refuseRotationLocked(ctx: CommandContext, input: {
+  readonly verb: LockingVerb;
   readonly dir: string;
   readonly path: string;
   readonly holder: RotationLockHolder | undefined;
@@ -2113,21 +2127,26 @@ function refuseRotationLocked(ctx: CommandContext, input: {
     : input.takeover === undefined
       ? runOf(input.holder)
       : `a run taking over the lock that ${runOf(input.holder)}, left behind`;
-  const message = `another jinn ceremony rotate --execute holds ${input.dir}: ${who}. Two rotations of one operator `
-    + 'directory at once would each mint and bind keys of their own, so rotate refuses before it reads, mints, '
-    + 'anchors or writes anything.';
+  const holding = input.takeover === undefined && input.holder?.verb !== undefined
+    ? `jinn ceremony ${input.holder.verb} --execute`
+    : 'jinn ceremony run';
+  const message = `another ${holding} holds ${input.dir}: ${who}. Two ceremony runs on one operator directory at `
+    + 'once could each mint and bind keys of their own, or bind the keys a rotation retires, so '
+    + `${input.verb} refuses before it reads, mints, anchors or writes anything.`;
   emitEnvelope({
     code: 'invalid_invocation',
     message,
-    hint: `Re-run once that run has finished. A run that was killed leaves its lock at ${input.path}, and rotate `
-      + 'takes it over by itself once the process the lock names no longer exists on this host. It cannot tell that '
-      + 'for a lock written on another host, or whose process number now belongs to another program: if no rotate '
-      + `is running on ${input.dir} and this refusal persists, remove `
+    hint: `Re-run once that run has finished. A run that was killed leaves its lock at ${input.path}, and the next `
+      + 'init, join or rotate --execute takes it over by itself once the process the lock names no longer exists on '
+      + 'this host. It cannot tell that for a lock written on another host, or whose process number now belongs to '
+      + `another program: if no init, join or rotate is running on ${input.dir} and this refusal persists, remove `
       + `${[input.path, input.takeover].filter(Boolean).join(' and ')} and re-run.`,
     exampleCli: EXAMPLE_CLI,
     details: {
       feature: 'ceremony',
-      state: 'rotation-in-progress',
+      state: input.holder?.verb === 'init' || input.holder?.verb === 'join'
+        ? 'provisioning-in-progress'
+        : 'rotation-in-progress',
       sideEffects: false,
       lock: input.path,
       holder: input.holder ?? null,
@@ -2137,8 +2156,8 @@ function refuseRotationLocked(ctx: CommandContext, input: {
 }
 
 /**
- * Takes the rotate lock on `dir`, or refuses (`rotation-in-progress`) naming the run that holds it,
- * and returns its release, which removes the lock only while it is still this run's.
+ * Takes the rotate lock on `dir` for a run of `verb`, recorded in the lock, or refuses naming the run
+ * that holds it, and returns its release, which removes the lock only while it is still this run's.
  *
  * As the run-finalization lock in `packages/benchmark-product/core` does, the record is written whole
  * to a file of this run's own and hard-linked into place, so the lock is never seen half written and
@@ -2150,11 +2169,13 @@ function refuseRotationLocked(ctx: CommandContext, input: {
  * A refusal exits through `ctx.exit`, which is `process.exit` in production and runs no `finally`, so
  * it first removes this run's record and the takeover file when this run created it.
  */
-function acquireRotationLock(ctx: CommandContext, dir: string): () => void {
+function acquireRotationLock(ctx: CommandContext, dir: string, verb: LockingVerb): () => void {
   const path = rotationLockPath(dir);
   const takeover = `${path}.takeover`;
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const own: RotationLockHolder = { pid: process.pid, host: hostname(), startedAt: new Date().toISOString(), token: randomUUID() };
+  const own: RotationLockHolder = {
+    pid: process.pid, host: hostname(), startedAt: new Date().toISOString(), token: randomUUID(), verb,
+  };
   const record = `${path}.${own.token}`;
   let ownsTakeover = false;
   const cleanUp = (): void => {
@@ -2176,16 +2197,16 @@ function acquireRotationLock(ctx: CommandContext, dir: string): () => void {
   try {
     if (!link()) {
       const holder = readRotationLockHolder(path);
-      if (holder === undefined || !rotationLockHolderGone(holder)) refuseRotationLocked(refusing, { dir, path, holder });
+      if (holder === undefined || !rotationLockHolderGone(holder)) refuseRotationLocked(refusing, { verb, dir, path, holder });
       try {
         writeFileSync(takeover, `${JSON.stringify(own)}\n`, { mode: 0o600, flag: 'wx' });
         ownsTakeover = true;
       } catch (cause) {
         if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') throw cause;
-        refuseRotationLocked(refusing, { dir, path, holder, takeover });
+        refuseRotationLocked(refusing, { verb, dir, path, holder, takeover });
       }
       if (readRotationLockHolder(path)?.token === holder.token) rmSync(path, { force: true });
-      if (!link()) refuseRotationLocked(refusing, { dir, path, holder: readRotationLockHolder(path) });
+      if (!link()) refuseRotationLocked(refusing, { verb, dir, path, holder: readRotationLockHolder(path) });
     }
   } finally {
     cleanUp();
@@ -2196,18 +2217,24 @@ function acquireRotationLock(ctx: CommandContext, dir: string): () => void {
 }
 
 /**
- * `rotate`, holding the operator directory's rotate lock (above) when it may take side effects. A
- * refusal exits through `ctx.exit`, which is `process.exit` in production and runs no `finally`, so
- * the lock is released before that exit as well as when the run returns or throws. A directory that
- * does not exist holds no rotation to race, and rotate refuses it.
+ * `init`, `join` or `rotate`, holding the operator directory's rotate lock (above) when it may take
+ * side effects, from before it reads the config, the catalog or a receipt. A refusal exits through
+ * `ctx.exit`, which is `process.exit` in production and runs no `finally`, so the lock is released
+ * before that exit as well as when the run returns or throws. A directory that does not exist holds
+ * no run to race, and each verb refuses it, having no earning state there to read.
  */
-async function runRotateLocked(ctx: CommandContext, parsed: Parsed, deps: CeremonyCommandDeps): Promise<void> {
-  if (!resolveExecute(ctx, parsed)) return runRotate(ctx, parsed, deps);
+async function runLocked(
+  ctx: CommandContext,
+  parsed: Parsed,
+  verb: LockingVerb,
+  run: (ctx: CommandContext) => Promise<void>,
+): Promise<void> {
+  if (!resolveExecute(ctx, parsed)) return run(ctx);
   const dir = resolveDir(ctx, parsed);
-  if (!existsSync(dir)) return runRotate(ctx, parsed, deps);
-  const release = acquireRotationLock(ctx, dir);
+  if (!existsSync(dir)) return run(ctx);
+  const release = acquireRotationLock(ctx, dir, verb);
   try {
-    return await runRotate({ ...ctx, exit: (code) => { release(); ctx.exit(code); } }, parsed, deps);
+    return await run({ ...ctx, exit: (code) => { release(); ctx.exit(code); } });
   } finally {
     release();
   }
@@ -3076,12 +3103,15 @@ Status:
   rotation never skips a family: it opens the store it retires and refuses unless the catalog binds
   each key there, so it never completes with nothing retired.
 
-  One \`rotate --execute\` at a time holds an operator directory. It takes <dir>/ceremony/rotate.lock
-  before it reads anything and removes it when it ends, so a second run refuses
-  (rotation-in-progress), naming the process that holds the lock, before anything is minted,
-  anchored or written. A run that was killed leaves its lock behind: the next run takes it over once
-  that process no longer exists on this host, and otherwise the refusal says to remove it when no
-  rotate is running. The plan takes no lock. A new rotation also takes no keys from a store that
+  One \`init --execute\`, \`join --execute\` or \`rotate --execute\` at a time holds an operator
+  directory. Each takes <dir>/ceremony/rotate.lock before it reads anything and removes it when it
+  ends, so another of them on that directory refuses before anything is minted, anchored or
+  written, naming the verb, process, host and start time of the run that holds the lock:
+  rotation-in-progress while a rotate holds it, provisioning-in-progress while an init or join
+  does. So an init or join never binds keys a rotation running beside it retires. A run that was
+  killed leaves its lock behind: the next run takes it over once that process no longer exists on
+  this host, and otherwise the refusal says to remove it when no init, join or rotate is running.
+  A plan takes no lock. A new rotation also takes no keys from a store that
   appears at its new store's path after it checked that path: it undoes what it wrote and refuses
   (new-store-exists).
 
@@ -3191,9 +3221,9 @@ Examples:
           }, { writer: ctx.writer, exit: ctx.exit });
         }
         if (verb === 'show') return await runShow(ctx, parsed, deps);
-        if (verb === 'init') return await runInit(ctx, parsed, deps);
-        if (verb === 'rotate') return await runRotateLocked(ctx, parsed, deps);
-        return await runJoin(ctx, parsed, deps);
+        if (verb === 'init') return await runLocked(ctx, parsed, verb, (locked) => runInit(locked, parsed, deps));
+        if (verb === 'rotate') return await runLocked(ctx, parsed, verb, (locked) => runRotate(locked, parsed, deps));
+        return await runLocked(ctx, parsed, verb, (locked) => runJoin(locked, parsed, deps));
       } catch (cause) {
         // The envelope and the exit code were already emitted at the refusal site; this only stops
         // the unwind from being reported a second time as a `fatal`.
