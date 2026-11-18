@@ -291,6 +291,26 @@ describe("authorCatalog", () => {
       anchors: [declaration(ANCHOR_B, "cd")],
     })).rejects.toThrow(/undeclared anchor/u);
   });
+
+  /** The catalog holds the envelope, so an entry's own `agent` and `keyId` must be the envelope's (#5411). */
+  it.each([
+    ["keyId", (entry: SealedBindingEntry, other: SealedBindingEntry) => ({ ...entry, keyId: other.keyId })],
+    ["agent", (entry: SealedBindingEntry) => ({ ...entry, agent: AGENT_B })],
+  ] as const)("refuses an entry whose %s is not its sealed envelope's, and writes nothing", async (_field, tamper) => {
+    const { root, authority, bindings } = await genesis();
+    const entries = [tamper(bindings[0]!, bindings[1]!), ...bindings.slice(1)];
+    const path = join(root, "misnamed.json");
+
+    await expect(authorCatalog({
+      path,
+      authority,
+      purposes: completePolicyPurposes({ roleAgents: entries.map(({ role, agent }) => ({ role, agent })) }),
+      refreshBy: REFRESH_BY,
+      bindings: entries,
+      anchors: [declaration(ANCHOR_A, "ab")],
+    })).rejects.toThrow(new RegExp(`binding ${bindings[0]!.digest} names key .* but its sealed envelope binds key`, "u"));
+    await expect(stat(path)).rejects.toThrow();
+  });
 });
 
 describe("appendOperator", () => {
@@ -490,6 +510,33 @@ describe("appendOperator", () => {
       newAnchor: declaration(ANCHOR_B, "cd"),
       refreshBy: REFRESH_BY,
     })).rejects.toBeInstanceOf(TrustAuthoringError);
+    await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  /** The catalog holds the envelope, so an entry's own `agent` and `keyId` must be the envelope's (#5411). */
+  it.each([
+    ["keyId", (entry: SealedBindingEntry, other: SealedBindingEntry) => ({ ...entry, keyId: other.keyId })],
+    ["agent", (entry: SealedBindingEntry) => ({ ...entry, agent: AGENT_A })],
+  ] as const)("refuses an entry whose %s is not its sealed envelope's, and writes nothing", async (_field, tamper) => {
+    const { root, path, authority } = await genesis();
+    const bBindings = await bindingsFor({
+      root,
+      label: "b-solver",
+      agent: AGENT_B,
+      roles: ["solver-delivery", "solver-settlement"],
+      anchorDigest: ANCHOR_B,
+      validFrom: TIME_B,
+    });
+    const before = await readFile(path);
+
+    await expect(appendOperator({
+      catalogPath: path,
+      authority,
+      newBindings: [tamper(bBindings[0]!, bBindings[1]!), bBindings[1]!],
+      newAnchor: declaration(ANCHOR_B, "cd"),
+      refreshBy: REFRESH_BY,
+    })).rejects.toThrow(new RegExp(`binding ${bBindings[0]!.digest} names key .* but its sealed envelope binds key`, "u"));
+    expect(await readFile(path)).toEqual(before);
     await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
@@ -1017,6 +1064,49 @@ describe("authorCatalog re-authoring a catalog that holds revocations", () => {
     await expect(stat(operator.path)).rejects.toThrow();
   });
 
+  /**
+   * Entries whose sealed envelopes bind the keys the rotation retired, to `agent`, while each entry's
+   * own `keyId` names a fresh key. The catalog holds the envelope, and a verifier reads the key and
+   * Agent from it, not from the entry.
+   */
+  async function misnamed(
+    operator: Awaited<ReturnType<typeof rotated>>,
+    agent: string,
+    anchorDigest: `sha256:${string}`,
+    validFrom: string,
+  ): Promise<readonly SealedBindingEntry[]> {
+    const family = (label: string) => bindingsFor({
+      root: operator.root, label, agent, roles: SOLVER_ROLES, anchorDigest, validFrom,
+    });
+    // The rotation's retiring store, opened again: the keys its revocations retired.
+    const retired = await family("a-solver");
+    const fresh = await family("fresh-solver");
+    return retired.map((entry, index) => ({ ...entry, keyId: fresh[index]!.keyId }));
+  }
+
+  it("refuses, naming the revocation, a binding whose envelope binds a retired key while its entry names a fresh one, whichever Agent, and writes nothing (#5411)", async () => {
+    const operator = await rotated();
+    const named = new RegExp(
+      `revocation (${operator.revocations.map(({ digest }) => digest).join("|")}) retired key did:key:`,
+      "u",
+    );
+
+    for (const agent of [AGENT_A, AGENT_B]) {
+      // eslint-disable-next-line no-await-in-loop -- each refusal is checked before the next.
+      const bindings = await misnamed(operator, agent, ANCHOR_A, TIME_A);
+      await expect(authorCatalog({
+        path: operator.path,
+        authority: operator.authority,
+        purposes: completePolicyPurposes({ roleAgents: bindings.map(({ role, agent }) => ({ role, agent })) }),
+        refreshBy: REFRESH_BY,
+        bindings,
+        anchors: [declaration(ANCHOR_A, "ab")],
+        previousCatalogPath: operator.previousPath,
+      })).rejects.toThrow(named);
+      await expect(stat(operator.path)).rejects.toThrow();
+    }
+  });
+
   it("names the keys a catalog's revocations retire, which assertNoRetiredKeyBound refuses for any Agent (#5372)", async () => {
     const operator = await rotated();
 
@@ -1063,6 +1153,30 @@ describe("authorCatalog re-authoring a catalog that holds revocations", () => {
       for (const agent of [AGENT_A, AGENT_B]) {
         // eslint-disable-next-line no-await-in-loop -- each refusal is checked before the next.
         await expect(join(operator, "a-solver", agent)).rejects.toThrow(named);
+      }
+
+      expect(await readFile(operator.previousPath)).toEqual(before);
+      await expect(stat(`${operator.previousPath}.lock`)).rejects.toThrow();
+    });
+
+    it("refuses, naming the revocation, a binding whose envelope binds a retired key while its entry names a fresh one, whichever Agent, and writes nothing (#5411)", async () => {
+      const operator = await rotated();
+      const named = new RegExp(
+        `revocation (${operator.revocations.map(({ digest }) => digest).join("|")}) retired key did:key:`,
+        "u",
+      );
+      const before = await readFile(operator.previousPath);
+
+      for (const agent of [AGENT_A, AGENT_B]) {
+        // eslint-disable-next-line no-await-in-loop -- each refusal is checked before the next.
+        const newBindings = await misnamed(operator, agent, ANCHOR_C, TIME_C);
+        await expect(appendOperator({
+          catalogPath: operator.previousPath,
+          authority: operator.authority,
+          newBindings,
+          newAnchor: declaration(ANCHOR_C, "77"),
+          refreshBy: REFRESH_BY,
+        })).rejects.toThrow(named);
       }
 
       expect(await readFile(operator.previousPath)).toEqual(before);
