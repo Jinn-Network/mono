@@ -527,10 +527,11 @@ describe('native-vertical refuses --password-fd (#5390)', () => {
       '--execute',
       '--password-fd', '0',
     ]);
-    ctx.env.JINN_NATIVE_VERTICAL_EXECUTE = '1';
-    ctx.env.JINN_PASSWORD = 'env-secret';
 
-    await mustNotRunDeps(events).run(ctx);
+    await mustNotRunDeps(events).run({
+      ...ctx,
+      env: { JINN_NATIVE_VERTICAL_EXECUTE: '1', JINN_PASSWORD: 'env-secret' },
+    });
 
     expectRefusal(io, events);
   });
@@ -552,9 +553,8 @@ describe('native-vertical refuses --password-fd (#5390)', () => {
       const { ctx, io } = context([
         'identity', '--store', store, '--roles', 'requester', '--create', '--password-fd', '0',
       ]);
-      ctx.env.JINN_PASSWORD = 'env-secret';
 
-      await mustNotRunDeps(events).run(ctx);
+      await mustNotRunDeps(events).run({ ...ctx, env: { JINN_PASSWORD: 'env-secret' } });
 
       expectRefusal(io, events);
       expect(existsSync(store)).toBe(false);

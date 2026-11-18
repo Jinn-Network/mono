@@ -205,7 +205,11 @@ describe('quickstart password resolution (#4087)', () => {
     });
 
     it.each([
-      ['an invalid descriptor', () => '--password-fd=', 'Missing or invalid value for --password-fd'],
+      [
+        'an invalid descriptor',
+        () => '--password-fd=',
+        'Missing or invalid value for --password-fd (expected a non-negative file descriptor)',
+      ],
       ['an empty descriptor', () => `--password-fd=${openPasswordFd('')}`, 'Password from --password-fd is empty.'],
     ])('refuses %s before any preflight, and generates and writes nothing', async (_label, flag, message) => {
       const earningDir = join(fakeHome, '.jinn-operator', 'earning');
