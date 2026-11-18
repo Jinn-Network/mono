@@ -366,9 +366,9 @@ const READER_WORDING: readonly (readonly [RegExp, string])[] = [
   // identifiers are printed as written.
 
   // DSSE-signed records, as trust-core's decoder refuses them.
-  [/^((?:report-recompute: TrustCoreError: )?)(?:A )?DSSE envelope (must |requires )/u, "$1the DSSE-signed record $2"],
-  [/^((?:report-recompute: TrustCoreError: )?)DSSE envelope (payloadType |payload |signature |bytes )/u, "$1the DSSE-signed record's $2"],
-  [/^(report-envelope: the signed result is not valid DSSE: )A DSSE envelope (?=requires at least one signature\.$)/u, "$1"],
+  [new RegExp(String.raw`^((?:report-recompute: (?:MethodInputError: ${LABEL}: \S+: )?TrustCoreError: )?)(?:A )?DSSE envelope (must |requires )`, "u"), "$1the DSSE-signed record $2"],
+  [new RegExp(String.raw`^((?:report-recompute: (?:MethodInputError: ${LABEL}: \S+: )?TrustCoreError: )?)DSSE envelope (payloadType |payload |signature |bytes )`, "u"), "$1the DSSE-signed record's $2"],
+  [/^(report-envelope: the signed result is not valid DSSE: )A DSSE envelope requires at least one signature\.$/u, "$1it carries no signature."],
 
   // Timestamp proofs, as trust-core's encoding check and proof verifiers refuse them.
   [/^((?:carried timestamp proof is invalid: not the exact sealed encoding of a conforming AnchorEvidence record|the timestamp proof is not the exact sealed encoding of a conforming AnchorEvidence): )Anchor-evidence bytes /u,
@@ -432,8 +432,8 @@ const READER_WORDING: readonly (readonly [RegExp, string])[] = [
   [/^(report-recompute: Error: method subjectSha256 \S+ does not match )canonical Matrix digest /u, "$1the canonical matrix.json fingerprint "],
   [/^(report-recompute: Error: )method subject identity is duplicated: /u, "$1the method is given the same matrix.json twice: "],
   [/^(report-recompute: Error: clean-subset@1: delegate did not preserve the )restricted subject identity$/u, "$1identity of the restricted runs"],
-  [/^(report-recompute: Error: entry previous must be null or an exact )lowercase sha256 digest$/u, "$1fingerprint in lowercase hex"],
-  [/^(report-recompute: Error: signed entry does not announce the requested Benchmark )digest$/u, "$1fingerprint"],
+  [new RegExp(String.raw`^(report-recompute: (?:MethodInputError: ${LABEL}: \S+: )?Error: entry previous must be null or an exact )lowercase sha256 digest$`, "u"), "$1fingerprint in lowercase hex"],
+  [new RegExp(String.raw`^(report-recompute: (?:MethodInputError: ${LABEL}: \S+: )?Error: signed entry does not announce the requested Benchmark )digest$`, "u"), "$1fingerprint"],
   [/^(report-recompute: Error: )instrument arm ids must be unique$/u, "$1the judges' configuration ids must be unique"],
   [/^(report-recompute: Error: )invalid instrument digest for /u, "$1invalid judge fingerprint for configuration "],
   listItem(String.raw`report-recompute: (?:Error: )?invalid (?:\S+ )?parameters: `,

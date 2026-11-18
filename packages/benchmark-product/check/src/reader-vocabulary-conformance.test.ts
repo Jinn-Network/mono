@@ -2410,6 +2410,12 @@ describe("refusal templates the reader's modules write", () => {
     expect(issue?.messages).toContain("binary admission replay failed: replacementLedger: x: digest references must be sorted and unique");
   });
 
+  test("a message caught by a wrapper that also prints its function's parameter is followed through it", () => {
+    // `resolveRun` wraps what parsing throws as `new MethodInputError("run-record-malformed", digest, String(cause))`.
+    expect(byTemplate("benchmarking/aggregate/src/resolved-inputs.ts", "Run bytes are not canonical")?.messages)
+      .toContain(`report-recompute: MethodInputError: run-record-malformed: ${hex}: Error: Run bytes are not canonical`);
+  });
+
   test("a template every path catches before a line prints is listed apart, and not scanned", () => {
     // `resolveExactRecord` throws it, and the admission replay's only call of that port swallows it.
     const swallowed = REFUSAL_INVENTORY.caught.find((entry) => entry.module === "verify.ts" && entry.template === "bundle record ${digest} is missing");

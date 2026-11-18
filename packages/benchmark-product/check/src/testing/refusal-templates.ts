@@ -60,7 +60,9 @@
  * What it does not read, each of which reaches a line only inside a template's hole: a string a
  * module returns other than as a property of a call's result (the reasons `anchor/check.ts` words), a
  * value a refusal reads by a longer path than `result.property`, and the schema library's own issue
- * text (`Invalid input`). A list a refusal joins (`a; b`) is probed one item at a time.
+ * text (`Invalid input`). A list a refusal joins (`a; b`) is probed one item at a time. A schema's
+ * `.parse()`, which throws its issue messages rather than returning them, is not followed either: a
+ * message only such a call throws reaches a line unscanned.
  */
 
 import { existsSync } from "node:fs";
@@ -931,9 +933,12 @@ export function refusalTemplateInventory(): RefusalInventory {
       const site = siteOf.get(node);
       if (site !== undefined) {
         for (const thrown of site.thrown) {
-          if (thrown.template.some(isParameterPart)) continue;
           if (!thrown.template.some((part) => isHolePart(part) && part.caught && part.node !== undefined && readsCaught(part.node, clause))) continue;
-          emit(site.node, { text: fill(thrown.template, message), name: thrown.name }, origin, hops + 1);
+          // A wrapper that also prints a parameter of its own function (`new MethodInputError(code,
+          // digest, String(cause))`) carries the caught message on too, the parameter printed as a
+          // value of its shape.
+          const wrapper = thrown.template.map((part) => (isParameterPart(part) ? { hole: parameterText(part), caught: false } : part));
+          emit(site.node, { text: fill(wrapper, message), name: thrown.name }, origin, hops + 1);
         }
       }
       // A returned alternative that does not carry the caught error is another branch's text.

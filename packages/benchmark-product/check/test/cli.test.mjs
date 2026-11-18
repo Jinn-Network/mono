@@ -1652,7 +1652,24 @@ const READER_WORDING_5373 = (() => {
     ["DSSE envelope bytes are not the exact producer encoding.", "the DSSE-signed record's bytes are not the exact producer encoding."],
     [
       "report-envelope: invalid DSSE envelope: TrustCoreError: A DSSE envelope requires at least one signature.",
-      "report-envelope: the signed result is not valid DSSE: requires at least one signature.",
+      "report-envelope: the signed result is not valid DSSE: it carries no signature.",
+    ],
+    // The same refusals, carried through a method-input wrapper that also prints its record.
+    [
+      `report-recompute: MethodInputError: anchored-announcement-malformed: sha256:${hex}: TrustCoreError: DSSE envelope payloadType must be a string.`,
+      `report-recompute: MethodInputError: anchored-announcement-malformed: sha256:${hex}: TrustCoreError: the DSSE-signed record's payloadType must be a string.`,
+    ],
+    [
+      `report-recompute: MethodInputError: anchored-announcement-malformed: sha256:${hex}: TrustCoreError: DSSE envelope requires at least one signature.`,
+      `report-recompute: MethodInputError: anchored-announcement-malformed: sha256:${hex}: TrustCoreError: the DSSE-signed record requires at least one signature.`,
+    ],
+    [
+      `report-recompute: MethodInputError: anchored-announcement-malformed: sha256:${hex}: Error: entry previous must be null or an exact lowercase sha256 digest`,
+      `report-recompute: MethodInputError: anchored-announcement-malformed: sha256:${hex}: Error: entry previous must be null or an exact fingerprint in lowercase hex`,
+    ],
+    [
+      `report-recompute: MethodInputError: anchored-announcement-malformed: sha256:${hex}: Error: signed entry does not announce the requested Benchmark digest`,
+      `report-recompute: MethodInputError: anchored-announcement-malformed: sha256:${hex}: Error: signed entry does not announce the requested Benchmark fingerprint`,
     ],
     [
       "anchor record is not the exact sealed encoding of a conforming AnchorEvidence: Anchor-evidence bytes are not the exact sealed encoding.",
