@@ -358,14 +358,14 @@ const HELP = `Usage:
   jinn solver-plugins show <source-or-path>
   jinn solver-plugins validate <source-or-path>
   jinn solver-plugins pack <path> [--out <file.tgz>]
-  jinn solver-plugins publish <source-or-path> [--builder-agent-id <id>]
-  jinn solver-plugins revoke <pluginCid> --reason <text> [--builder-agent-id <id>]
+  jinn solver-plugins publish <source-or-path> [--builder-agent-id <id>] [--password-fd <fd>]
+  jinn solver-plugins revoke <pluginCid> --reason <text> [--builder-agent-id <id>] [--password-fd <fd>]
 
-  jinn solver-plugins endorse <pluginCid> [--score N --score-decimals N --tag1 <s>]
-  jinn solver-plugins warn <pluginCid> --reason <text>
-  jinn solver-plugins block <pluginCid> --reason <text>
-  jinn solver-plugins review <pluginCid> --score N [--score-decimals N --tag1 <s>]
-  jinn solver-plugins respond <pluginCid> --feedback-index N --client <addr> --response-uri <uri>
+  jinn solver-plugins endorse <pluginCid> [--score N --score-decimals N --tag1 <s>] [--password-fd <fd>]
+  jinn solver-plugins warn <pluginCid> --reason <text> [--password-fd <fd>]
+  jinn solver-plugins block <pluginCid> --reason <text> [--password-fd <fd>]
+  jinn solver-plugins review <pluginCid> --score N [--score-decimals N --tag1 <s>] [--password-fd <fd>]
+  jinn solver-plugins respond <pluginCid> --feedback-index N --client <addr> --response-uri <uri> [--password-fd <fd>]
 
   jinn solver-plugins list-feedback <pluginCid> [--client <addr>] [--include-revoked]
   jinn solver-plugins discover [--solver-type <id>] [--builder <agentId>] [--include-revoked] [--limit N]
@@ -423,6 +423,7 @@ export function createSolverPluginsCommand(
           options: {
             'builder-agent-id': { type: 'string' },
             config: { type: 'string' },
+            'password-fd': { type: 'string' },
           },
         });
         const source = parsed.positionals[0];
@@ -455,6 +456,7 @@ export function createSolverPluginsCommand(
           options: {
             'builder-agent-id': { type: 'string' },
             config: { type: 'string' },
+            'password-fd': { type: 'string' },
             reason: { type: 'string' },
           },
         });
@@ -600,6 +602,7 @@ export function createSolverPluginsCommand(
           options: {
             reason: { type: 'string' },
             config: { type: 'string' },
+            'password-fd': { type: 'string' },
           },
         });
         const pluginCid = parsed.positionals[0];
@@ -631,6 +634,7 @@ export function createSolverPluginsCommand(
           options: {
             reason: { type: 'string' },
             config: { type: 'string' },
+            'password-fd': { type: 'string' },
           },
         });
         const pluginCid = parsed.positionals[0];
@@ -665,6 +669,7 @@ export function createSolverPluginsCommand(
             tag1: { type: 'string' },
             tag2: { type: 'string' },
             config: { type: 'string' },
+            'password-fd': { type: 'string' },
           },
         });
         const pluginCid = parsed.positionals[0];
@@ -715,6 +720,7 @@ export function createSolverPluginsCommand(
             client: { type: 'string' },
             'response-uri': { type: 'string' },
             config: { type: 'string' },
+            'password-fd': { type: 'string' },
           },
         });
         const pluginCid = parsed.positionals[0];
@@ -773,6 +779,7 @@ export function createSolverPluginsCommand(
             tag1: { type: 'string' },
             tag2: { type: 'string' },
             config: { type: 'string' },
+            'password-fd': { type: 'string' },
           },
         });
         const pluginCid = parsed.positionals[0];
