@@ -145,3 +145,46 @@ describe('runTasksLifecycle — deps injected', () => {
     expect(closed).toBe(1);
   });
 });
+
+/**
+ * #5390: the option table spreads COMMON_FLAGS, so `--password-fd` parsed, and the verb then
+ * opened custody with JINN_PASSWORD instead of the password on the descriptor. Like
+ * `jinn native-vertical`, whose executor this one mirrors, these verbs take the password from
+ * JINN_PASSWORD only, so the flag is refused before anything is read or loaded.
+ */
+describe('runTasksLifecycle — --password-fd is refused (#5390)', () => {
+  const VALID_ARGV: Record<'close' | 'cancel' | 'release', string[]> = {
+    close: ['--task-id', '42'],
+    cancel: ['--attempt', ATTEMPT, '--reason', 'stale'],
+    release: ['--task-id', '7', '--attempt-index', '0'],
+  };
+
+  it.each(['close', 'cancel', 'release'] as const)(
+    'tasks %s refuses --password-fd before loading custody, naming where it takes its password',
+    async (verb) => {
+      const harness = fakeDeps();
+      const { ctx, writes, exits } = makeCommandCtx({
+        argv: ['--json', ...VALID_ARGV[verb], '--password-fd', '0'],
+        env: { JINN_PASSWORD: 'env-secret' },
+      });
+      await runTasksLifecycle(ctx, verb, harness.deps);
+      const env = only<{ code: string; message: string; hint: string; details: Record<string, unknown> }>(writes);
+      expect(env.code).toBe('invalid_invocation');
+      expect(env.message).toBe(`tasks ${verb} does not take --password-fd`);
+      expect(env.hint).toBe(
+        `Drop --password-fd: tasks ${verb} would not read it. It takes the keystore password from JINN_PASSWORD only.`,
+      );
+      expect(env.details).toMatchObject({ field: 'password-fd', state: 'unused-flag', verb, sideEffects: false });
+      expect(exits[0]).not.toBe(0);
+      expect(harness.state.loaded).toBe(0);
+    },
+  );
+
+  it('refuses the equals form, and refuses it in the feature-disabled build too', async () => {
+    const { ctx, writes } = makeCommandCtx({ argv: ['--json', '--task-id', '42', '--password-fd=3'] });
+    await runTasksLifecycle(ctx, 'close');
+    const env = only<{ code: string; details: { state: string } }>(writes);
+    expect(env.code).toBe('invalid_invocation');
+    expect(env.details.state).toBe('unused-flag');
+  });
+});

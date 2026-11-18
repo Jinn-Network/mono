@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { closeSync, mkdtempSync, existsSync, openSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import init from '../../../src/cli/commands/init.js';
+import { FleetStateStore } from '../../../src/earning/store.js';
+import { decryptMnemonic } from '../../../src/earning/wallet.js';
 import { makeCommandCtx } from '@test/cli.js';
 
 const KEYSTORE_FILE = 'master_keystore.json';
@@ -91,5 +93,28 @@ describe('init command', () => {
     const parsed = JSON.parse(writes[writes.length - 1]);
     expect(parsed.code).toBe('invalid_invocation');
     expect(exits).toEqual([11]);
+  });
+
+  // #5390: `jinn quickstart` and `jinn run` run init in their own process and hand it the
+  // password they resolved in JINN_PASSWORD. A --password-fd on the outer command line is
+  // theirs; init must not read it (the outer verb already drained it).
+  it('run in-process, uses JINN_PASSWORD and not a --password-fd only the process argv carries', { timeout: 20_000 }, async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-init-fd-'));
+    const fdPath = join(dir, 'fd-password');
+    writeFileSync(fdPath, 'fd-secret\n', { mode: 0o600 });
+    const fd = openSync(fdPath, 'r');
+    const originalArgv = process.argv;
+    process.argv = [originalArgv[0]!, 'jinn', 'quickstart', '--password-fd', String(fd)];
+    try {
+      const { ctx, writes } = makeInitCtx({ argv: ['--json'] });
+      await init.run(ctx);
+      expect(JSON.parse(writes[writes.length - 1]).master).toMatch(/^0x[0-9a-fA-F]{40}$/);
+      const keystore = await new FleetStateStore(ctx.env['JINN_EARNING_DIR']!).loadMnemonicKeystore();
+      await expect(decryptMnemonic(keystore, 'testpw')).resolves.toEqual(expect.any(String));
+    } finally {
+      process.argv = originalArgv;
+      closeSync(fd);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

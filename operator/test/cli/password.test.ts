@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { closeSync, mkdtempSync, mkdirSync, openSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -162,14 +162,49 @@ describe('parsePasswordFdFromArgv (#4375)', () => {
     );
   });
 
-  // `resolveCliPassword` merges the verb argv with `process.argv`, so the flag
-  // routinely appears twice; an unusable occurrence must not terminate the
-  // scan before a usable later one.
+  // The flag can appear twice on one argv; an unusable occurrence must not
+  // terminate the scan before a usable later one.
   it('falls through an unusable occurrence to a later usable one', () => {
     expect(parsePasswordFdFromArgv(['--password-fd=', '--password-fd', '3'])).toBe(3);
   });
 
   it('does not match flags that merely start with --password-fd', () => {
     expect(parsePasswordFdFromArgv(['--password-fdx=3'])).toBeUndefined();
+  });
+});
+
+/**
+ * #5390 — `resolveCliPassword` also scanned `process.argv`, so a verb run in
+ * the same process by another verb (`jinn quickstart` running `init` and
+ * `bootstrap`, `jinn run` running `init`) read the outer verb's
+ * `--password-fd` instead of the password it was handed.
+ */
+describe('resolveCliPassword reads only the argv it is given (#5390)', () => {
+  let dir: string;
+  let fd: number;
+  const originalArgv = process.argv;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'jinn-pw-fd-'));
+    const path = join(dir, 'fd-password');
+    writeFileSync(path, 'fd-secret\n', { mode: 0o600 });
+    fd = openSync(path, 'r');
+    process.argv = [originalArgv[0]!, 'jinn', 'quickstart', '--password-fd', String(fd)];
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    closeSync(fd);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('ignores a --password-fd that only the process argv carries', () => {
+    const r = resolveCliPassword(['--json'], { HOME: dir, JINN_PASSWORD: 'env-secret' }, {});
+    expect(r).toMatchObject({ ok: true, password: 'env-secret', source: 'env' });
+  });
+
+  it('still reads a --password-fd the verb argv carries', () => {
+    const r = resolveCliPassword(['--password-fd', String(fd)], { HOME: dir, JINN_PASSWORD: 'env-secret' }, {});
+    expect(r).toMatchObject({ ok: true, password: 'fd-secret', source: 'fd' });
   });
 });

@@ -138,13 +138,21 @@ order:
    fallback (`~/.jinn-client/keystore-password` on an install that still
    keeps its state there)
 
+`jinn quickstart` reads the same four sources in the same order and, when
+none of them supplies a password, generates one into the file in item 3. It
+uses that one password for every step: it runs `init` and `bootstrap` in its
+own process and hands them the password in `JINN_PASSWORD`, as `jinn run`
+does when it creates the wallet with `init`. A command run inside another
+one this way never reads `--password-fd` itself, so `jinn mcp`, whose tools
+run commands that way, refuses it.
+
 `jinn ceremony`, `jinn native-vertical` and `jinn tasks close`, `cancel` and
-`release` do not read `--password-fd`. `jinn ceremony init`, `join` and
-`rotate` read `JINN_PASSWORD`, then `<dir>/earning/keystore-password` under
-their `--dir`, then the host-wide file in item 4; `jinn ceremony show --store`
-reads `JINN_PASSWORD` only; and every `jinn ceremony` verb refuses
-`--password-fd`. `jinn native-vertical` and `jinn tasks close`, `cancel` and
-`release` read `JINN_PASSWORD` only.
+`release` refuse `--password-fd`. `jinn ceremony init`, `join` and `rotate`
+read `JINN_PASSWORD`, then `<dir>/earning/keystore-password` under their
+`--dir`, then the host-wide file in item 4; `jinn ceremony show --store`
+reads `JINN_PASSWORD` only. `jinn native-vertical identity` and
+`request --execute` and `jinn tasks close`, `cancel` and `release` read
+`JINN_PASSWORD` only; `jinn native-vertical consume` reads no password.
 
 The password is never read from config files. `jinn keys change-password`
 rotates the keystore of the earning dir it targets — `JINN_EARNING_DIR`,

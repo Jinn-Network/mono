@@ -207,6 +207,8 @@ Status:
   It never gates on --execute -- it holds no funds and writes only inside its own state directory.
   \`identity\` opens (or, with --create, mints) an encrypted role identity store and prints its
   role -> did:key keyIds. It never prints or exports private key material.
+  No subcommand takes --password-fd: identity and request --execute read the keystore password
+  from JINN_PASSWORD only.
 
 Options (request):
   --network <name>    Must be base-sepolia
@@ -235,6 +237,20 @@ Examples:
         parsed = parseArgs({ args: ctx.argv, options: OPTIONS, allowPositionals: true }) as Parsed;
       } catch (error) {
         invalid(ctx, error instanceof Error ? error.message : String(error));
+      }
+      // `--password-fd` parses (COMMON_FLAGS), but no subcommand reads it: identity and request
+      // --execute take the password from JINN_PASSWORD only, and consume reads none, so a descriptor
+      // would be set aside for another password. Refused before any dep, store or file is touched
+      // (#5390).
+      if (parsed.values['password-fd'] !== undefined) {
+        return emitEnvelope({
+          code: 'invalid_invocation',
+          message: 'native-vertical does not take --password-fd (no native-vertical subcommand takes it)',
+          hint: 'Drop --password-fd: native-vertical would not read it. identity and request --execute take '
+            + 'the keystore password from JINN_PASSWORD only; consume and request without --execute read no password.',
+          exampleCli: `JINN_PASSWORD=... ${IDENTITY_EXAMPLE_CLI}`,
+          details: { feature: 'native-vertical', field: 'password-fd', state: 'unused-flag', sideEffects: false },
+        }, { writer: ctx.writer, exit: ctx.exit });
       }
       if (parsed.positionals[0] === 'identity') {
         return runIdentity(ctx, parsed);

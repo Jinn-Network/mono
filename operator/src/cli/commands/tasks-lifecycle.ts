@@ -103,6 +103,22 @@ export async function runTasksLifecycle(
     invalid(ctx, verb, err instanceof Error ? err.message : String(err));
     return;
   }
+  // `--password-fd` parses (COMMON_FLAGS) but these verbs take the password from JINN_PASSWORD
+  // only, as `native-vertical request` does, so a descriptor would be set aside for another
+  // password. Refused before anything is read or loaded (#5390).
+  if (parsed.values['password-fd'] !== undefined) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: `tasks ${verb} does not take --password-fd`,
+        hint: `Drop --password-fd: tasks ${verb} would not read it. It takes the keystore password from JINN_PASSWORD only.`,
+        exampleCli: EXAMPLE[verb],
+        details: { field: 'password-fd', state: 'unused-flag', verb, sideEffects: false },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
   const json = Boolean(parsed.values.json);
   const human = Boolean(parsed.values.human);
 
