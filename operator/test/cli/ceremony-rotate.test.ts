@@ -1184,6 +1184,31 @@ describe('ceremony join after a rotation', () => {
     expect(help).toContain('Moving the run receipt aside drops every anchor it records');
   });
 
+  it('resumes a --fresh-anchor re-author killed in its finality wait onto the anchor it sent, re-run without the flag (#5377)', async () => {
+    // The second finality wait is the re-author's: it is killed after its anchor was sent.
+    const h = await provisioned({ interruptWait: 'rebind' });
+    const previousPath = join(h.home, 'trust.previous.json');
+    renameSync(h.catalogPath, previousPath);
+    const argv = [
+      'init', '--dir', h.dir, '--role-sets', 'requester,admission,solver', '--authority-store', h.authorityStore,
+      '--previous-catalog', previousPath, '--execute',
+    ];
+    await expect(run(h, [...argv, '--fresh-anchor'])).rejects.toThrow(/killed during the rebind finality wait/u);
+    expect(h.submitted).toHaveLength(2);
+    const sent = h.submitted[1]!;
+    expect(runReceipt(h).anchorTransactionHash).toBe(sent.transactionHash);
+
+    const resumed = await run(h, argv);
+
+    expect(resumed).toMatchObject({ kind: 'ceremony_init_complete', anchorReused: true, anchorTransactionHash: sent.transactionHash });
+    expect(h.submitted).toHaveLength(2);
+    const help = createCeremonyCommand(h.deps).helpText.replace(/\s+/gu, ' ');
+    expect(help.slice(help.indexOf('RESUMABLE.'), help.indexOf('RE-AUTHORING.'))).toContain(
+      'Resume a --fresh-anchor run interrupted after its anchor was sent without --fresh-anchor: with it, the re-run '
+        + 'sends another anchor.',
+    );
+  });
+
   it('keeps, for every role family, a role whose scope no other family holds, which is how a revoked binding names it', () => {
     const scopeOf = (role: NativeRoleIdentityRole): string => [...scopeForRole(role)].sort().join(' ');
     const families = Object.keys(ROLE_SETS) as RoleSetName[];

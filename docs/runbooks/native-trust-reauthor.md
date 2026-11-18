@@ -104,10 +104,13 @@ verifier refused at the time for want of that very scope.
 **Taking the fresh anchor.** Pass `--fresh-anchor` to `init` and leave
 `<dir>/ceremony/receipt.json` where it is. `init` then sends a new anchor even when the run receipt
 names one for the same key set, and records it in the run receipt, which keeps every anchor and
-catalog it recorded before (`earlierAnchors`). Do not move the run receipt aside to get the fresh
-anchor: it names every anchor under which `init` or `join` bound the keys in `<dir>/identity`, which
-the rotated-family refusal reads (see "Revocations carry forward" below), and the next `init` writes
-a receipt that names only its own anchor. The re-authored bindings then carry the new anchor's block
+catalog it recorded before (`earlierAnchors`). If that run is interrupted after it sends the anchor,
+re-run it without `--fresh-anchor`: the run receipt then names the anchor it sent, and `init`
+resumes onto it. With the flag, the re-run sends another anchor, and every re-authored binding takes
+that later anchor's block time. Do not move the run receipt aside to get the fresh anchor: it
+names every anchor under which `init` or `join` bound the keys in `<dir>/identity`, which the
+rotated-family refusal reads (see "Revocations carry forward" below), and the next `init` writes a
+receipt that names only its own anchor. The re-authored bindings then carry the new anchor's block
 time and the widened scope is claimed only from the moment it was widened. The cost is a
 coverage gap between the old anchor time and the new one, and the gap is **wholesale**: because
 the re-author rewrites the catalog and §6 law 2 gives *every* re-authored binding the new

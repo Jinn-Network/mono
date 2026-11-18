@@ -2803,7 +2803,8 @@ Status:
   After the catalog is sealed, a re-run refuses instead, and names the config keys still outstanding.
   A re-author (RE-AUTHORING below) that recomputes the anchor digest the run receipt names reuses
   that anchor too; init --fresh-anchor sends a new one instead and keeps the run receipt, so every
-  anchor it records stays recorded (see STORES).
+  anchor it records stays recorded (see STORES). Resume a --fresh-anchor run interrupted after its
+  anchor was sent without --fresh-anchor: with it, the re-run sends another anchor.
 
   RE-AUTHORING. To seal a catalog again over the same directory, move it aside and run init with
   --previous-catalog <where it went>. Every revocation it holds is carried into the new catalog
