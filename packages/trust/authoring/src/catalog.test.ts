@@ -1078,6 +1078,55 @@ describe("authorCatalog re-authoring a catalog that holds revocations", () => {
       expect(after.revocations).toEqual(operator.revocations);
       expect(after.bindings).toHaveLength(operator.previous.bindings.length + SOLVER_ROLES.length);
     });
+
+    /**
+     * A rebind into the catalog the rotation left, once Agent B has joined it under the same voucher.
+     * Agent B's bindings and the policy successor that accepts it pass every other rebind check, so
+     * only the retired-key check stands between the retired keys and Agent B.
+     */
+    describe("rebindRoles into it", () => {
+      const ANCHOR_D = "sha256:4444444444444444444444444444444444444444444444444444444444444444" as const;
+
+      async function rebind(operator: Awaited<ReturnType<typeof rotated>>, label: string, agent: string) {
+        const replacements = await bindingsFor({
+          root: operator.root, label, agent, roles: SOLVER_ROLES, anchorDigest: ANCHOR_D, validFrom: TIME_C,
+        });
+        return rebindRoles({ catalogPath: operator.previousPath, replacements, anchor: declaration(ANCHOR_D, "88") });
+      }
+
+      it("refuses, naming the revocation, a replacement whose key a revocation in the catalog retired, whichever Agent, and writes nothing (#5387)", async () => {
+        const operator = await rotated();
+        await join(operator, "b-solver", AGENT_B);
+        const named = new RegExp(
+          `revocation (${operator.revocations.map(({ digest }) => digest).join("|")}) retired key did:key:`,
+          "u",
+        );
+        const before = await readFile(operator.previousPath);
+
+        for (const agent of [AGENT_B, AGENT_A]) {
+          // The rotation's retiring store, opened again: the keys its revocations retired.
+          // eslint-disable-next-line no-await-in-loop -- each refusal is checked before the next.
+          await expect(rebind(operator, "a-solver", agent)).rejects.toThrow(named);
+        }
+
+        expect(await readFile(operator.previousPath)).toEqual(before);
+        await expect(stat(`${operator.previousPath}.lock`)).rejects.toThrow();
+      });
+
+      it("still rebinds Agent B to keys no revocation retired, beside the revocations the catalog holds", async () => {
+        const operator = await rotated();
+        await join(operator, "b-solver", AGENT_B);
+        const joined = await readCatalog(operator.previousPath);
+
+        const result = await rebind(operator, "b-solver-rotated", AGENT_B);
+
+        const after = await readCatalog(operator.previousPath);
+        expect(after.revocations).toEqual(operator.revocations);
+        expect(after.bindings.map(({ digest }) => digest)).toEqual(
+          [...joined.bindings.map(({ digest }) => digest), ...result.bindings.map(({ digest }) => digest)],
+        );
+      });
+    });
   });
 
   it("refuses, naming it, a revocation whose anchor the previous catalog does not declare, and writes nothing", async () => {
