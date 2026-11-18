@@ -1010,10 +1010,11 @@ function sameScope(left: readonly string[], right: readonly string[]): boolean {
  * retired, as an admission Agent is, has no other: revoked first, the replacement has no chain.
  *
  * Refuses an anchor the catalog already declares (a rebind's anchor is newly submitted, law 1), a
- * key the Agent already holds (rotating to the same key is no rotation), a role the Agent does not
- * hold under the replacement's voucher (a binding under another voucher needs consent, which this
- * flow does not author), and an Agent with no binding under that voucher left unrevoked. Seals no
- * policy successor: the trust policy names Agent IRIs, and a rebind keeps them.
+ * key a revocation in the catalog retired, to any Agent (`assertNoRetiredKeyBound`), a key the Agent
+ * already holds (rotating to the same key is no rotation), a role the Agent does not hold under the
+ * replacement's voucher (a binding under another voucher needs consent, which this flow does not
+ * author), and an Agent with no binding under that voucher left unrevoked. Seals no policy
+ * successor: the trust policy names Agent IRIs, and a rebind keeps them.
  */
 export async function rebindRoles(input: {
   readonly catalogPath: string;
@@ -1055,12 +1056,15 @@ export async function rebindRoles(input: {
       if (target === undefined) continue;
       revoked.add(JSON.stringify([target.binding.agent, accountVoucherDid(target.binding), target.binding.key.didKey]));
     }
+    const retired = { retired: retiredIn(loaded.file) };
     for (const replacement of replacements) {
       const report = validateKeyBinding(replacement.envelopeBytes);
       if (!report.conforms || report.value === undefined) {
         throw new TrustAuthoringError(`replacement binding ${replacement.digest} is not a conforming sealed KeyBinding`);
       }
       const binding = report.value;
+      // Checked on the record the catalog will hold, not on the entry's own agent and keyId fields.
+      assertNoRetiredKeyBound(retired, [{ agent: binding.agent, keyId: binding.key.didKey }]);
       const voucherDid = accountVoucherDid(binding);
       if (existing.some((entry) => entry.binding.agent === binding.agent && entry.binding.key.didKey === binding.key.didKey)) {
         throw new TrustAuthoringError(

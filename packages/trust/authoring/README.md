@@ -42,10 +42,11 @@ The dependency direction is one-way: `authoring` depends on `core`; `resolve` ne
   anchor.
 - **Role key rotation**: two acts, each under its own fresh anchor, in this order. `rebindRoles`
   appends replacement bindings for new keys, authored by `authorRoleBinding` under the same voucher.
-  Then `planRevocation` checks the voucher can revoke the retiring bindings and names the act's
-  `revocation-anchor/v1` digest (`revocationAnchorDigest`), and `revokeBinding` seals and appends one
-  revocation per retiring binding. Neither seals a policy successor: the policy names Agent IRIs,
-  and a rotation keeps them.
+  It refuses, writing nothing, a replacement whose key a revocation in the catalog retired, to any
+  Agent (`assertNoRetiredKeyBound`). Then `planRevocation` checks the voucher can revoke the
+  retiring bindings and names the act's `revocation-anchor/v1` digest (`revocationAnchorDigest`),
+  and `revokeBinding` seals and appends one revocation per retiring binding. Neither seals a policy
+  successor: the policy names Agent IRIs, and a rotation keeps them.
 
 ## Sequencing law (§6), enforced where it can be
 
