@@ -1,4 +1,15 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -104,5 +115,112 @@ describe('quickstart password resolution (#4087)', () => {
     expect(deps.randomBytesFn).toHaveBeenCalled();
     expect(readFileSync(primaryPath, 'utf-8').trim()).toBe('ab'.repeat(32));
     expect(statSync(primaryPath).mode & 0o777).toBe(0o600);
+  });
+
+  // #5390: quickstart accepted --password-fd but picked JINN_PASSWORD, the file or a fresh
+  // password, then ran init and bootstrap in-process, which read the descriptor themselves.
+  describe('--password-fd', () => {
+    const fds: number[] = [];
+
+    function openPasswordFd(content: string): number {
+      const path = join(fakeHome, `fd-${fds.length}`);
+      writeFileSync(path, content, { mode: 0o600 });
+      const fd = openSync(path, 'r');
+      fds.push(fd);
+      return fd;
+    }
+
+    afterEach(() => {
+      for (const fd of fds.splice(0)) closeSync(fd);
+    });
+
+    it('uses the descriptor password for doctor, init and bootstrap, over JINN_PASSWORD and the file', async () => {
+      const earningDir = join(fakeHome, '.jinn-operator', 'earning');
+      mkdirSync(earningDir, { recursive: true });
+      const primaryPath = primaryKeystorePasswordPath(earningDir);
+      writeFileSync(primaryPath, 'file-secret\n', { mode: 0o600 });
+      const env = { HOME: fakeHome, JINN_PASSWORD: 'env-secret' };
+      const fd = openPasswordFd('fd-secret\n');
+      const seen: Array<{ step: string; password: string | undefined; argv: string[] }> = [];
+
+      const deps = makeDeps({
+        doctorRun: vi.fn(async (ctx) => {
+          seen.push({ step: 'doctor', password: ctx.env['JINN_PASSWORD'], argv: ctx.argv });
+          ctx.writer.write(JSON.stringify({ ok: true, blockingCount: 0, checks: [] }) + '\n');
+        }) as unknown as QuickstartDeps['doctorRun'],
+        initRun: vi.fn(async (ctx) => {
+          seen.push({ step: 'init', password: ctx.env['JINN_PASSWORD'], argv: ctx.argv });
+          ctx.writer.write(JSON.stringify({ master: '0xmaster' }) + '\n');
+        }) as unknown as QuickstartDeps['initRun'],
+        bootstrapRun: vi.fn(async (ctx) => {
+          seen.push({ step: 'bootstrap', password: ctx.env['JINN_PASSWORD'], argv: ctx.argv });
+        }) as unknown as QuickstartDeps['bootstrapRun'],
+      });
+      const { ctx, writes, exits } = makeCommandCtx({ argv: ['--no-daemon', '--password-fd', String(fd)], env });
+      await createQuickstartCommand(deps).run(ctx);
+
+      expect(exits).toEqual([]);
+      expect(seen.map(({ step, password }) => `${step}:${password}`)).toEqual([
+        'doctor:fd-secret',
+        'init:fd-secret',
+        'bootstrap:fd-secret',
+      ]);
+      for (const { argv } of seen) expect(argv.join(' ')).not.toContain('--password-fd');
+      expect(deps.randomBytesFn).not.toHaveBeenCalled();
+      expect(readFileSync(primaryPath, 'utf-8').trim()).toBe('file-secret');
+      const payload = JSON.parse(writes.join('').trim().split('\n').at(-1)!);
+      expect(payload).toMatchObject({ status: 'ready', passwordGenerated: false });
+      expect(payload.passwordFile).toBeUndefined();
+    });
+
+    it('starts the daemon with the descriptor password', async () => {
+      const fd = openPasswordFd('fd-secret\n');
+      const saved = {
+        password: process.env['JINN_PASSWORD'],
+        log: console.log,
+        info: console.info,
+        warn: console.warn,
+        error: console.error,
+      };
+      let daemonPassword: string | undefined;
+      try {
+        const deps = makeDeps({
+          mainFn: vi.fn(async () => {
+            daemonPassword = process.env['JINN_PASSWORD'];
+            return {};
+          }),
+        });
+        const { ctx } = makeCommandCtx({ argv: ['--password-fd', String(fd)], env: { HOME: fakeHome } });
+        await createQuickstartCommand(deps).run(ctx);
+      } finally {
+        console.log = saved.log;
+        console.info = saved.info;
+        console.warn = saved.warn;
+        console.error = saved.error;
+        if (saved.password === undefined) delete process.env['JINN_PASSWORD'];
+        else process.env['JINN_PASSWORD'] = saved.password;
+      }
+      expect(daemonPassword).toBe('fd-secret');
+      expect(capturedInitEnv?.['JINN_PASSWORD']).toBe('fd-secret');
+    });
+
+    it.each([
+      ['an invalid descriptor', () => '--password-fd=', 'Missing or invalid value for --password-fd'],
+      ['an empty descriptor', () => `--password-fd=${openPasswordFd('')}`, 'Password from --password-fd is empty.'],
+    ])('refuses %s before any preflight, and generates and writes nothing', async (_label, flag, message) => {
+      const earningDir = join(fakeHome, '.jinn-operator', 'earning');
+      const deps = makeDeps();
+      const { ctx, writes, exits } = makeCommandCtx({ argv: ['--no-daemon', flag()], env: { HOME: fakeHome } });
+      await createQuickstartCommand(deps).run(ctx);
+
+      const envelope = JSON.parse(writes.join('').trim());
+      expect(envelope).toMatchObject({ code: 'invalid_invocation', message, details: { field: 'password-fd' } });
+      expect(exits).toEqual([11]);
+      expect(deps.checkRpcNetwork).not.toHaveBeenCalled();
+      expect(deps.doctorRun).not.toHaveBeenCalled();
+      expect(deps.initRun).not.toHaveBeenCalled();
+      expect(deps.randomBytesFn).not.toHaveBeenCalled();
+      expect(existsSync(primaryKeystorePasswordPath(earningDir))).toBe(false);
+    });
   });
 });

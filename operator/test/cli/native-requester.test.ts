@@ -1,3 +1,6 @@
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runCli } from '../../src/cli/index.js';
 import { createNativeRequesterCommand } from '../../src/cli/commands/native-requester.js';
@@ -476,5 +479,87 @@ describe('native requester CLI surface', () => {
       });
       expect(io.exits).toEqual([11]);
     });
+  });
+});
+
+/**
+ * #5390: the option table spreads COMMON_FLAGS, so `--password-fd` parsed, and `request --execute`
+ * and `identity` then opened custody with JINN_PASSWORD instead of the password on the descriptor
+ * (`consume` reads no password at all). Each subcommand refuses the flag before any dep, store or
+ * file is touched.
+ */
+describe('native-vertical refuses --password-fd (#5390)', () => {
+  const HINT = 'Drop --password-fd: native-vertical would not read it. identity and request --execute take '
+    + 'the keystore password from JINN_PASSWORD only; consume and request without --execute read no password.';
+
+  function mustNotRunDeps(events: string[]) {
+    return createNativeRequesterCommand({
+      installShutdownHandlers() { events.push('shutdown-handlers'); },
+      async preflightRequest() { events.push('preflight'); throw new Error('must not run'); },
+      async loadExecutor() { events.push('load-executor'); throw new Error('must not run'); },
+      async runConsumer() { events.push('consume'); throw new Error('must not run'); },
+    });
+  }
+
+  function expectRefusal(io: ReturnType<typeof captureIo>, events: string[]) {
+    expect(io.writes).toHaveLength(1);
+    const envelope = JSON.parse(io.writes[0]!);
+    expect(envelope.code).toBe('invalid_invocation');
+    expect(envelope.message).toBe('native-vertical does not take --password-fd (no native-vertical subcommand takes it)');
+    expect(envelope.hint).toBe(HINT);
+    expect(envelope.details).toMatchObject({
+      feature: 'native-vertical',
+      field: 'password-fd',
+      state: 'unused-flag',
+      sideEffects: false,
+    });
+    expect(io.exits).toEqual([11]);
+    expect(events).toEqual([]);
+  }
+
+  it('request --execute refuses it before preflight or execution authority', async () => {
+    const events: string[] = [];
+    const { ctx, io } = context([
+      'request',
+      '--network', 'base-sepolia',
+      '--fixture', PREDICTION_FORECAST_GOLDEN,
+      '--run-id', 'operator-run-20260802',
+      '--execute',
+      '--password-fd', '0',
+    ]);
+    ctx.env.JINN_NATIVE_VERTICAL_EXECUTE = '1';
+    ctx.env.JINN_PASSWORD = 'env-secret';
+
+    await mustNotRunDeps(events).run(ctx);
+
+    expectRefusal(io, events);
+  });
+
+  it('consume refuses it before running the consumer', async () => {
+    const events: string[] = [];
+    const { ctx, io } = context(['consume', '--consumer-config', './consumer.json', '--password-fd=3']);
+
+    await mustNotRunDeps(events).run(ctx);
+
+    expectRefusal(io, events);
+  });
+
+  it('identity --create refuses it before minting the store', async () => {
+    const events: string[] = [];
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-nv-fd-'));
+    try {
+      const store = join(dir, 'roles.enc.json');
+      const { ctx, io } = context([
+        'identity', '--store', store, '--roles', 'requester', '--create', '--password-fd', '0',
+      ]);
+      ctx.env.JINN_PASSWORD = 'env-secret';
+
+      await mustNotRunDeps(events).run(ctx);
+
+      expectRefusal(io, events);
+      expect(existsSync(store)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
