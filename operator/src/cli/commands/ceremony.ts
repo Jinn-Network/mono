@@ -1923,6 +1923,63 @@ interface RecordedRotationAnchor {
   readonly locator: AnchorLocator;
 }
 
+/**
+ * The anchor an act of a rotation waits on again: the one its receipt recorded for the digest the act
+ * recomputes, re-validated, unless --resubmit-anchor asks for a fresh one. `undefined` sends a fresh
+ * one. The plan and the run both decide by it, so the plan says what the run does.
+ */
+function reusableRotationAnchor(
+  recorded: RecordedRotationAnchor | undefined,
+  digest: `sha256:${string}`,
+  resubmit: boolean,
+): AnchorLocator | undefined {
+  return !resubmit && recorded?.digest === digest ? recordedLocator(recorded.locator) : undefined;
+}
+
+/** What a rotate run has left of one act: nothing, a fresh anchor, or a wait again on the recorded one. */
+interface PlannedRotationAct {
+  readonly anchor: 'none' | 'fresh' | 'recorded';
+  /** The recorded anchor's transaction, when the act waits on it again. */
+  readonly transactionHash: AnchorLocator['transactionHash'] | null;
+  /** The recorded anchor a fresh one takes the place of, under --resubmit-anchor. */
+  readonly replaces?: AnchorLocator['transactionHash'];
+}
+
+/** What a rotate run has left to do: the new stores it mints, its two acts, and what they send and wait on. */
+interface RemainingRotation {
+  readonly mints: readonly string[];
+  readonly rebind: PlannedRotationAct;
+  readonly revocation: PlannedRotationAct;
+  readonly anchors: number;
+  readonly finalityWaits: number;
+}
+
+/** The plan's text for a resumed rotation (#5380): what is left of it from where it stopped. */
+function resumedRotationPlanText(receiptPath: string, remaining: RemainingRotation): string[] {
+  const step = (act: 'rebind' | 'revocation', planned: PlannedRotationAct): string[] => {
+    const what = act === 'rebind' ? 'the replacement bindings' : 'the revocation of the retiring keys';
+    if (planned.anchor === 'none') return [];
+    if (planned.anchor === 'recorded') {
+      return [`wait again on the recorded ${act} anchor ${planned.transactionHash} and author ${what}`];
+    }
+    return [`anchor and author ${what}${planned.replaces === undefined
+      ? ''
+      : `, with a fresh anchor in place of the recorded ${planned.replaces} (--resubmit-anchor)`}`];
+  };
+  const steps = [...step('rebind', remaining.rebind), ...step('revocation', remaining.revocation)];
+  return [
+    `This run resumes the unfinished rotation ${receiptPath} records.`,
+    remaining.mints.length === 0
+      ? 'It mints no store: the new stores are the ones that rotation minted.'
+      : `It mints the new stores that rotation named and had not minted yet: ${remaining.mints.join(', ')}.`,
+    ...(remaining.rebind.anchor === 'none' ? ['Its rebind landed: the catalog binds every new key.'] : []),
+    ...(remaining.revocation.anchor === 'none' ? ['Its revocation landed: the catalog revokes every retiring binding.'] : []),
+    steps.length === 0 ? 'Re-run with --execute to mark it finished.' : `Re-run with --execute to ${steps.join(', then ')}.`,
+    `${['No anchor', 'One anchor', 'Two anchors'][remaining.anchors]}, `
+      + `${['no finality wait', 'one finality wait', 'two finality waits'][remaining.finalityWaits]}.`,
+  ];
+}
+
 /** The receipt's shape, checked field by field: every field rotate reads is one it can rely on. */
 function isRotationReceipt(value: unknown): value is RotationReceipt {
   const isObject = (field: unknown): field is Record<string, unknown> =>
@@ -2637,7 +2694,67 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
     }
   }
 
+  // The replacement keys the catalog binds for no Agent yet, and the anchor of their rebind. The plan
+  // reads what is left of a rotation by these, and the run rebinds by them.
+  const boundKeys = new Set(catalog.bindings.map(({ binding }) => `${binding.agent} ${binding.key.didKey}`));
+  const unboundOf = (signers: ReadonlyMap<NativeRoleIdentityRole, RoleSigner>) => new Map([...signers].filter(([role, signer]) =>
+    !boundKeys.has(`${agentForRole(plan, role)} ${signer.keyId}`)));
+  const rebindAnchorDigest = (unbound: ReadonlyMap<NativeRoleIdentityRole, RoleSigner>) => ceremonyAnchorDigest({
+    agentIri,
+    ...(admissionAgent === undefined ? {} : { admissionAgent }),
+    safeAddress: custody.safeAddress,
+    keys: [...unbound.values()].map(({ role, keyId }) => ({ role, keyId })),
+  });
+
   if (!execute) {
+    // What is left of the rotation from where it stopped (#5380), decided as the run decides it. A
+    // new store not on disk yet is minted, and its keys take a fresh rebind anchor. Otherwise the
+    // rebind covers the keys of the new stores the catalog does not bind yet, and none when it binds
+    // them all. Each act waits again on the anchor the receipt recorded for its digest unless
+    // --resubmit-anchor asks for a fresh one. Only a resumed rotation's receipt records one.
+    const recordedReceipt = resuming ? prior : undefined;
+    const plannedAct = (recorded: RecordedRotationAnchor | undefined, digest: `sha256:${string}`): PlannedRotationAct => {
+      const onRecord = reusableRotationAnchor(recorded, digest, false);
+      if (onRecord === undefined) return { anchor: 'fresh', transactionHash: null };
+      return resubmitAnchor
+        ? { anchor: 'fresh', transactionHash: null, replaces: onRecord.transactionHash }
+        : { anchor: 'recorded', transactionHash: onRecord.transactionHash };
+    };
+    const mints = roleSets.map((family) => newStores[family]!).filter((storePath) => !existsSync(storePath));
+    let rebind: PlannedRotationAct = { anchor: 'fresh', transactionHash: null };
+    if (mints.length === 0) {
+      const replacements = new Map<NativeRoleIdentityRole, RoleSigner>();
+      for (const family of roleSets) {
+        let signers: ReadonlyMap<NativeRoleIdentityRole, RoleSigner>;
+        try {
+          // eslint-disable-next-line no-await-in-loop -- bounded (≤4 families).
+          signers = await openRoleSigners({
+            storePath: newStores[family]!,
+            password: password.password,
+            ownedRoles: orderedRolesForSet(family),
+            create: false,
+          });
+        } catch (cause) {
+          return invalid(ctx, `the ${family} store at ${String(newStores[family])} could not be opened: ${cause instanceof Error ? cause.message : String(cause)}`);
+        }
+        for (const [role, signer] of signers) replacements.set(role, signer);
+      }
+      const unbound = unboundOf(replacements);
+      rebind = unbound.size === 0
+        ? { anchor: 'none', transactionHash: null }
+        : plannedAct(recordedReceipt?.rebindAnchor, rebindAnchorDigest(unbound));
+    }
+    const revocation: PlannedRotationAct = revocationPlan === undefined
+      ? { anchor: 'none', transactionHash: null }
+      : plannedAct(recordedReceipt?.revocationAnchor, revocationPlan.anchorDigest);
+    const remaining: RemainingRotation = {
+      mints,
+      rebind,
+      revocation,
+      anchors: [rebind, revocation].filter(({ anchor }) => anchor === 'fresh').length,
+      finalityWaits: [rebind, revocation].filter(({ anchor }) => anchor !== 'none').length,
+    };
+    const actJson = ({ anchor, transactionHash }: PlannedRotationAct) => ({ anchor, transactionHash });
     emitResult(
       {
         schemaVersion: 1,
@@ -2654,6 +2771,7 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
         recovering,
         retiring: retiring.map(({ role, agent, keyId, bindingDigests }) => ({ role, agent, keyId, bindingDigests })),
         newStores,
+        remaining: { ...remaining, rebind: actJson(rebind), revocation: actJson(revocation) },
         revocationAnchorDigest: revocationPlan?.anchorDigest ?? null,
         passwordSource: password.source,
         warnings: password.warnings,
@@ -2672,18 +2790,21 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
         'new stores',
         ...Object.entries(newStores).map(([family, path]) => `  ${family.padEnd(10)} ${path}`),
         '',
-        // Finishing a lost rotation: the checks above showed every replacement key bound, so there is
-        // no rebind, and at least one retiring binding unrevoked, so there is one revocation.
-        ...(recovering
-          ? [
-            'This run finishes a rotation whose rotation.json was lost after it repointed the config. It mints no store:',
-            'the new stores are the ones identityStores names, which that rotation bound. Re-run with --execute to',
-            'anchor and author the revocation of the retiring keys. One anchor, one finality wait.',
-          ]
-          : [
-            'Re-run with --execute to mint the new stores, anchor and author the replacement bindings, then anchor and',
-            'author the revocation of the retiring ones. Two anchors, two finality waits.',
-          ]),
+        // A resumed rotation: what is left of it. Finishing a lost rotation: the checks above showed
+        // every replacement key bound, so there is no rebind, and at least one retiring binding
+        // unrevoked, so there is one revocation.
+        ...(resuming
+          ? resumedRotationPlanText(rotationReceiptPath(dir), remaining)
+          : recovering
+            ? [
+              'This run finishes a rotation whose rotation.json was lost after it repointed the config. It mints no store:',
+              'the new stores are the ones identityStores names, which that rotation bound. Re-run with --execute to',
+              'anchor and author the revocation of the retiring keys. One anchor, one finality wait.',
+            ]
+            : [
+              'Re-run with --execute to mint the new stores, anchor and author the replacement bindings, then anchor and',
+              'author the revocation of the retiring ones. Two anchors, two finality waits.',
+            ]),
       ].join('\n'),
       {
         json: Boolean(parsed.values.json),
@@ -2746,9 +2867,7 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
     for (const [role, signer] of minted) replacementSigners.set(role, signer);
     if (!existed) storesCreated.push(storePath);
   }
-  const boundKeys = new Set(catalog.bindings.map(({ binding }) => `${binding.agent} ${binding.key.didKey}`));
-  const unbound = new Map([...replacementSigners].filter(([role, signer]) =>
-    !boundKeys.has(`${agentForRole(plan, role)} ${signer.keyId}`)));
+  const unbound = unboundOf(replacementSigners);
 
   const session = await deps.openAnchorSession({
     dir,
@@ -2765,7 +2884,7 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
     // because the recorded anchor never reads back finalized (--resubmit-anchor).
     const field = act === 'rebind' ? 'rebindAnchor' : 'revocationAnchor';
     const recorded = receipt[field];
-    const reused = !resubmitAnchor && recorded?.digest === digest ? recordedLocator(recorded.locator) : undefined;
+    const reused = reusableRotationAnchor(recorded, digest, resubmitAnchor);
     const locator = reused ?? await session.submit(digest);
     if (reused === undefined) {
       receipt = { ...receipt, [field]: { digest, locator } };
@@ -2800,12 +2919,7 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
     const ceremonySigner = { address: custody.agentEoa, signMessage: (m: { readonly message: { readonly raw: Uint8Array } }) => session.signMessage(m) };
     let rebindAnchor: { digest: `sha256:${string}`; transactionHash: `0x${string}`; validFrom: string } | undefined;
     if (unbound.size > 0) {
-      const anchorDigest = ceremonyAnchorDigest({
-        agentIri,
-        ...(admissionAgent === undefined ? {} : { admissionAgent }),
-        safeAddress: custody.safeAddress,
-        keys: [...unbound.values()].map(({ role, keyId }) => ({ role, keyId })),
-      });
+      const anchorDigest = rebindAnchorDigest(unbound);
       const locator = await anchorAndWait(anchorDigest, 'rebind');
       const replacements = await authorBindings({
         plan,
