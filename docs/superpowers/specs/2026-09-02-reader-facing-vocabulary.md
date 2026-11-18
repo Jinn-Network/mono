@@ -182,17 +182,19 @@
   wrapper that interpolates it (with the error's class name in front where the wrapper interpolates
   the error itself, as `String(cause)` does), and as the `detail` or `reason` a platform result
   returns and a refusal prints (`report-recompute: <message>`). A template every path catches before
-  a line prints is listed apart and not scanned. At this version the walk reads 1,709 templates in
-  187 modules, 967 of them in 128 platform modules, 122 of them strings a platform result returns
-  and 24 of them schema issue messages: 988 use no word §5 hides or renames, 638 are reworded by the
+  a line prints is listed apart and not scanned. At this version the walk reads 1,710 templates in
+  187 modules, 968 of them in 128 platform modules, 122 of them strings a platform result returns
+  and 24 of them schema issue messages: 989 use no word §5 hides or renames, 638 are reworded by the
   *Refusal lines* row's rules (95 of which this version adds, for 193 in all), and 83 still carry
-  such a word, each recorded with its reason (61 of them new). Another 50 are written by reached
-  code but caught on every path. One reason is new, *hash algorithm*: an RFC 3161 or OpenTimestamps
-  refusal that names SHA-256 as the algorithm a proof uses or falls below, which §4.1 already keeps
-  where the algorithm is the point. A rule for an item of a list a refusal joins with `; ` rewords
-  that item wherever it stands, inside a list the message starts with. The platform packages' own
-  messages do not change: the reader rewords at its boundary, on the human line only, and `--json`,
-  the errors a library caller catches and the conformance kit do not change. No disposition changes.
+  such a word, each recorded with its reason (61 of them new). Another 49 are written by reached
+  code but caught on every path. A schema's `.parse()`, which throws its issue messages rather than
+  returning them, is not followed (§7). One reason is new, *hash algorithm*: an RFC 3161 or
+  OpenTimestamps refusal that names SHA-256 as the algorithm a proof uses or falls below, which §4.1
+  already keeps where the algorithm is the point. A rule for an item of a list a refusal joins with
+  `; ` rewords that item wherever it stands, inside a list the message starts with. The platform
+  packages' own messages do not change: the reader rewords at its boundary, on the human line only,
+  and `--json`, the errors a library caller catches and the conformance kit do not change. No
+  disposition changes.
 
 ## 1. Scope
 
@@ -665,12 +667,14 @@ template with its status and human line, run in `check`:
 The walk is a reading of source, not of every run, so it answers for the paths it can see: a call
 through an interface type the walked packages declare is taken to reach every implementation
 stored under that property name, and a function stored as a value (`{ resolve: f }`) is taken to
-throw only where something calls it. Three kinds of text stay outside it and reach a line only
-inside a template's hole, so the inventory sees the template that carries them and not their
-words: a string a module returns other than as a property of a call's result (the reasons
-`anchor/check.ts` words, which #5251 reworded), a value a refusal reads by a longer path than
-`result.property`, and the schema library's own issue text (`Invalid input`), as distinct from the
-messages the check package's schemas write.
+throw only where something calls it. A schema's `.parse()`, which throws its issue messages rather
+than returning them, is not followed either: a message only such a call throws reaches a line
+unscanned. Three kinds of text stay outside it and reach a line only inside a template's hole, so
+the inventory sees the template that carries them and not their words: a string a module returns
+other than as a property of a call's result (the reasons `anchor/check.ts` words, which #5251
+reworded), a value a refusal reads by a longer path than `result.property`, and the schema
+library's own issue text (`Invalid input`), as distinct from the messages the check package's
+schemas write.
 
 **Contract renames — queued to a bundle-format revision, not scheduled here.** Nothing in §4
 requires one; every ruling above is reachable through presentation. The queue exists so the
