@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import keysCmd from '../../../src/cli/commands/keys-backup.js';
@@ -62,6 +62,32 @@ describe('keys backup command', () => {
     const joined = stderrWrites.join('');
     expect(joined).toMatch(/\[warn\] Mnemonic written in plaintext/);
     expect(joined).toMatch(/seed material/);
+  });
+
+  // #5391: backup reads --password-fd ahead of JINN_PASSWORD, like change-password.
+  it('decrypts with the password from --password-fd, not JINN_PASSWORD', async () => {
+    const { dir, password } = await makeKeystore();
+    const passwordPath = join(dir, 'password');
+    writeFileSync(passwordPath, `${password}\n`, { mode: 0o600 });
+    const fd = openSync(passwordPath, 'r');
+    const outPath = join(dir, 'backup.txt');
+    const writes: string[] = [];
+    const exits: number[] = [];
+    const ctx: CommandContext = {
+      argv: ['backup', '--output', outPath, '--password-fd', String(fd), '--json'],
+      stdoutIsTty: false,
+      writer: { write: (s: string) => { writes.push(s); return true; } },
+      exit: (c: number) => { exits.push(c); },
+      env: { JINN_PASSWORD: 'not-the-keystore-password', JINN_EARNING_DIR: dir },
+    };
+    try {
+      await keysCmd.run(ctx);
+    } finally {
+      closeSync(fd);
+    }
+    expect(exits).toEqual([]);
+    expect(JSON.parse(writes[writes.length - 1]!).verb).toBe('keys backup');
+    expect(readFileSync(outPath, 'utf-8').trim().split(/\s+/).length).toBeGreaterThanOrEqual(12);
   });
 
   it('missing --output emits invalid_invocation', async () => {
