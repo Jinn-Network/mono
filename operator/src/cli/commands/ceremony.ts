@@ -28,8 +28,8 @@
  *      running daemon), stated in the output of every verb that rewrites.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { linkSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, hostname } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { randomUUID } from 'node:crypto';
@@ -41,6 +41,7 @@ import {
   authorCatalog,
   authorRoleBinding,
   completePolicyPurposes,
+  IdentityStore,
   isSettlementRole,
   openCatalogAuthority,
   openRoleSigners,
@@ -2056,6 +2057,163 @@ function newRotatedStorePath(ctx: CommandContext, input: {
 }
 
 /**
+ * The lock a `rotate --execute` run holds on its operator directory (#5366), from before it reads the
+ * config or `rotation.json` until it ends. A run reads the receipt first and writes it only after its
+ * checks, so two runs at once would each find no unfinished rotation and each start one. The plan
+ * reads only and takes no lock.
+ */
+function rotationLockPath(dir: string): string {
+  return join(dir, 'ceremony', 'rotate.lock');
+}
+
+/** The run that holds the lock, as it recorded itself. */
+interface RotationLockHolder {
+  readonly pid: number;
+  readonly host: string;
+  readonly startedAt: string;
+  readonly token: string;
+}
+
+function readRotationLockHolder(path: string): RotationLockHolder | undefined {
+  try {
+    const value = JSON.parse(readFileSync(path, 'utf-8')) as Partial<RotationLockHolder>;
+    return Number.isSafeInteger(value.pid) && (value.pid as number) > 0 && typeof value.host === 'string'
+      && typeof value.startedAt === 'string' && typeof value.token === 'string'
+      ? value as RotationLockHolder
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether the run holding the lock is gone: its process no longer exists on this host (`ESRCH`). Any
+ * other answer keeps the lock. A process that exists may be that run, or another program that took
+ * its number, and a lock written on another host cannot be checked from here.
+ */
+function rotationLockHolderGone(holder: RotationLockHolder): boolean {
+  if (holder.host !== hostname()) return false;
+  try {
+    process.kill(holder.pid, 0);
+    return false;
+  } catch (cause) {
+    return (cause as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+}
+
+function refuseRotationLocked(ctx: CommandContext, input: {
+  readonly dir: string;
+  readonly path: string;
+  readonly holder: RotationLockHolder | undefined;
+  readonly takeover?: string;
+}): never {
+  const runOf = (holder: RotationLockHolder) => `process ${holder.pid} on ${holder.host}, started ${holder.startedAt}`;
+  const who = input.holder === undefined
+    ? `a run whose record in ${input.path} cannot be read`
+    : input.takeover === undefined
+      ? runOf(input.holder)
+      : `a run taking over the lock that ${runOf(input.holder)}, left behind`;
+  const message = `another jinn ceremony rotate --execute holds ${input.dir}: ${who}. Two rotations of one operator `
+    + 'directory at once would each mint and bind keys of their own, so rotate refuses before it reads, mints, '
+    + 'anchors or writes anything.';
+  emitEnvelope({
+    code: 'invalid_invocation',
+    message,
+    hint: `Re-run once that run has finished. A run that was killed leaves its lock at ${input.path}, and rotate `
+      + 'takes it over by itself once the process the lock names no longer exists on this host. It cannot tell that '
+      + 'for a lock written on another host, or whose process number now belongs to another program: if no rotate '
+      + `is running on ${input.dir} and this refusal persists, remove `
+      + `${[input.path, input.takeover].filter(Boolean).join(' and ')} and re-run.`,
+    exampleCli: EXAMPLE_CLI,
+    details: {
+      feature: 'ceremony',
+      state: 'rotation-in-progress',
+      sideEffects: false,
+      lock: input.path,
+      holder: input.holder ?? null,
+    },
+  }, { writer: ctx.writer, exit: ctx.exit });
+  throw new CeremonyRefusal(message);
+}
+
+/**
+ * Takes the rotate lock on `dir`, or refuses (`rotation-in-progress`) naming the run that holds it,
+ * and returns its release, which removes the lock only while it is still this run's.
+ *
+ * As the run-finalization lock in `packages/benchmark-product/core` does, the record is written whole
+ * to a file of this run's own and hard-linked into place, so the lock is never seen half written and
+ * a link onto a lock that exists fails. A lock whose run is gone is taken over under a second,
+ * short-lived file created exclusively (`rotate.lock.takeover`), so of two runs that find it gone only
+ * one takes it: that one re-reads the lock, removes it only if it is still the gone run's, and links
+ * its own. The other finds the takeover file, or then a live holder, and refuses.
+ *
+ * A refusal exits through `ctx.exit`, which is `process.exit` in production and runs no `finally`, so
+ * it first removes this run's record and the takeover file when this run created it.
+ */
+function acquireRotationLock(ctx: CommandContext, dir: string): () => void {
+  const path = rotationLockPath(dir);
+  const takeover = `${path}.takeover`;
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const own: RotationLockHolder = { pid: process.pid, host: hostname(), startedAt: new Date().toISOString(), token: randomUUID() };
+  const record = `${path}.${own.token}`;
+  let ownsTakeover = false;
+  const cleanUp = (): void => {
+    rmSync(record, { force: true });
+    if (ownsTakeover) rmSync(takeover, { force: true });
+    ownsTakeover = false;
+  };
+  const refusing: CommandContext = { ...ctx, exit: (code) => { cleanUp(); ctx.exit(code); } };
+  writeFileSync(record, `${JSON.stringify(own)}\n`, { mode: 0o600, flag: 'wx' });
+  const link = (): boolean => {
+    try {
+      linkSync(record, path);
+      return true;
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === 'EEXIST') return false;
+      throw cause;
+    }
+  };
+  try {
+    if (!link()) {
+      const holder = readRotationLockHolder(path);
+      if (holder === undefined || !rotationLockHolderGone(holder)) refuseRotationLocked(refusing, { dir, path, holder });
+      try {
+        writeFileSync(takeover, `${JSON.stringify(own)}\n`, { mode: 0o600, flag: 'wx' });
+        ownsTakeover = true;
+      } catch (cause) {
+        if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') throw cause;
+        refuseRotationLocked(refusing, { dir, path, holder, takeover });
+      }
+      if (readRotationLockHolder(path)?.token === holder.token) rmSync(path, { force: true });
+      if (!link()) refuseRotationLocked(refusing, { dir, path, holder: readRotationLockHolder(path) });
+    }
+  } finally {
+    cleanUp();
+  }
+  return () => {
+    if (readRotationLockHolder(path)?.token === own.token) rmSync(path, { force: true });
+  };
+}
+
+/**
+ * `rotate`, holding the operator directory's rotate lock (above) when it may take side effects. A
+ * refusal exits through `ctx.exit`, which is `process.exit` in production and runs no `finally`, so
+ * the lock is released before that exit as well as when the run returns or throws. A directory that
+ * does not exist holds no rotation to race, and rotate refuses it.
+ */
+async function runRotateLocked(ctx: CommandContext, parsed: Parsed, deps: CeremonyCommandDeps): Promise<void> {
+  if (!resolveExecute(ctx, parsed)) return runRotate(ctx, parsed, deps);
+  const dir = resolveDir(ctx, parsed);
+  if (!existsSync(dir)) return runRotate(ctx, parsed, deps);
+  const release = acquireRotationLock(ctx, dir);
+  try {
+    return await runRotate({ ...ctx, exit: (code) => { release(); ctx.exit(code); } }, parsed, deps);
+  } finally {
+    release();
+  }
+}
+
+/**
  * `jinn ceremony rotate` (spec §3.2 rotation, §6 laws 1 and 6): retires every key of the named role
  * families and binds new ones, for an operator `init` or `join` already provisioned.
  *
@@ -2458,15 +2616,43 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
   writeRotationReceipt(dir, receipt);
   const replacementSigners = new Map<NativeRoleIdentityRole, RoleSigner>();
   const storesCreated: string[] = [];
+  // A new rotation mints its new stores and never finds one (#5366). newRotatedStorePath refused a
+  // path already taken and the lock keeps every other rotate out, but a store can still appear there
+  // after those checks. `created` says whether this run's mint is the store now on disk. When it is
+  // not, the run takes none of its keys: it puts rotation.json back as it was, removes the stores it
+  // minted a moment ago, whose keys nothing anchored, bound or recorded, and refuses.
+  const mintsNewStores = !resuming && !recovering;
   for (const family of roleSets) {
     const storePath = newStores[family]!;
     const existed = existsSync(storePath);
+    if (mintsNewStores) {
+      // eslint-disable-next-line no-await-in-loop -- bounded (≤4 families).
+      const store = await IdentityStore.open({ path: storePath, password: password.password });
+      // eslint-disable-next-line no-await-in-loop -- bounded (≤4 families).
+      const { created } = await store.loadOrCreate(new Date(), orderedRolesForSet(family));
+      if (!created) {
+        if (prior === undefined) rmSync(rotationReceiptPath(dir), { force: true });
+        else writeRotationReceipt(dir, prior);
+        for (const minted of storesCreated) rmSync(minted, { force: true });
+        const message = `a store appeared at ${storePath}, where ceremony rotate was minting the new ${family} store, `
+          + 'after rotate checked that path. rotate takes no keys from a store it did not mint: it put '
+          + `${rotationReceiptPath(dir)} back as it was and removed the stores this run minted, before anything was anchored.`;
+        emitEnvelope({
+          code: 'invalid_invocation',
+          message,
+          hint: 'Find out what wrote that store before rotating again. A re-run in a later second mints at a path of its own.',
+          exampleCli: EXAMPLE_CLI,
+          details: { feature: 'ceremony', state: 'new-store-exists', sideEffects: false, family, path: storePath },
+        }, { writer: ctx.writer, exit: ctx.exit });
+        throw new CeremonyRefusal(message);
+      }
+    }
     // eslint-disable-next-line no-await-in-loop -- bounded (≤4 families).
     const minted = await openRoleSigners({
       storePath,
       password: password.password,
       ownedRoles: orderedRolesForSet(family),
-      create: true,
+      create: !mintsNewStores,
     });
     for (const [role, signer] of minted) replacementSigners.set(role, signer);
     if (!existed) storesCreated.push(storePath);
@@ -2890,6 +3076,15 @@ Status:
   rotation never skips a family: it opens the store it retires and refuses unless the catalog binds
   each key there, so it never completes with nothing retired.
 
+  One \`rotate --execute\` at a time holds an operator directory. It takes <dir>/ceremony/rotate.lock
+  before it reads anything and removes it when it ends, so a second run refuses
+  (rotation-in-progress), naming the process that holds the lock, before anything is minted,
+  anchored or written. A run that was killed leaves its lock behind: the next run takes it over once
+  that process no longer exists on this host, and otherwise the refusal says to remove it when no
+  rotate is running. The plan takes no lock. A new rotation also takes no keys from a store that
+  appears at its new store's path after it checked that path: it undoes what it wrote and refuses
+  (new-store-exists).
+
   Keep rotation.json where rotate wrote it: once identityStores names the new store, it is the only
   record of the store being retired. rotate refuses a rotation.json it cannot read
   (rotation-receipt-unreadable), and refuses to start a new rotation while the catalog binds,
@@ -2997,7 +3192,7 @@ Examples:
         }
         if (verb === 'show') return await runShow(ctx, parsed, deps);
         if (verb === 'init') return await runInit(ctx, parsed, deps);
-        if (verb === 'rotate') return await runRotate(ctx, parsed, deps);
+        if (verb === 'rotate') return await runRotateLocked(ctx, parsed, deps);
         return await runJoin(ctx, parsed, deps);
       } catch (cause) {
         // The envelope and the exit code were already emitted at the refusal site; this only stops

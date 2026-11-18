@@ -1,9 +1,12 @@
 # Native Identity Ceremony — production trust-artifact provisioning
 
-**Version:** 0.13 (§4.5 states the refusal of a run with nothing left to finish as `rotate` applies
-it, after issue #5365: the run refuses when every binding of the named stores' keys is revoked
-already, not when one named store's are. v0.12 made a new rotation never take an existing store as
-its new one, after issue #5345:
+**Version:** 0.14 (one `rotate --execute` at a time holds an operator directory, after issue #5366:
+§4.5 adds the rotate lock, `<dir>/ceremony/rotate.lock`, says how a lock left by a killed run is
+taken over, and states that a new rotation takes no keys from a store that appears at its new
+store's path after its checks. v0.13 states the refusal of a run with nothing left to finish as
+`rotate` applies it, after issue #5365: the run refuses when every binding of the named stores' keys
+is revoked already, not when one named store's are. v0.12 made a new rotation never take an existing
+store as its new one, after issue #5345:
 §4.5 names the store a rotation mints, refuses (`new-store-exists`) when a file is already at that
 path, as one started in the same second as the last would find, and states that a new rotation never
 skips a family. v0.11 let a rotation whose receipt was lost after its config repoint be finished,
@@ -1146,6 +1149,23 @@ key, and the rotation would retire nothing, or revoke the keys the config names 
 at keys a rotation retired. A new rotation also never skips a family the way a resumed v0.8 receipt
 does: it opens the store it retires and refuses unless the catalog binds each key there, so it never
 completes with nothing retired.
+
+One `rotate --execute` at a time holds an operator directory. A run reads `rotation.json` before
+its checks and writes it only after them, so two runs inside that window would each find no
+unfinished rotation and each start one: each would bind keys of its own and repoint the config,
+leaving one set bound and unrevoked in a store the config no longer names. So before it reads the
+config or the receipt, a run takes `<dir>/ceremony/rotate.lock`, a file naming its process, host and
+start time, created exclusively, and removes it however the run ends, including before a refusal
+exits. A run that finds the lock held refuses (`rotation-in-progress`), naming that process, before
+anything is minted, anchored or written. A lock is stale only when the process it names no longer
+exists on this host; a run that finds one takes it over under a second, short-lived exclusive file
+(`rotate.lock.takeover`), so two runs that both find it stale never both take it. A lock whose
+process exists, which may be another program that took a killed run's process number, or that was
+written on another host, is never taken over: the refusal says to remove it when no rotate is
+running. The plan reads only and takes no lock. A new rotation also takes no keys from a store that
+appears at its new store's path after its checks: its mint must be the store on disk, and when it
+is not, the run restores `rotation.json` as it was, removes the stores it minted, and refuses
+(`new-store-exists`) before anything is anchored.
 
 From step 5 on, the receipt is the only record of the store being retired, so rotate never reads a
 receipt it cannot use as no rotation. A `rotation.json` that exists but does not parse, or lacks the
