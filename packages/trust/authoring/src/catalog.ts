@@ -302,13 +302,45 @@ export function assertNoRetiredKeyBound(
 }
 
 /**
+ * The retired-key check on the records a catalog write will hold. The catalog stores each entry's
+ * sealed envelope, and a verifier reads the key and Agent from it, so the check reads them there,
+ * not from the entry's own `agent` and `keyId` fields: it refuses, naming the revocation, an envelope
+ * that binds a retired key whatever those fields say. It then refuses an entry whose fields are not
+ * its envelope's, because the policy's accepted Agents are built from the entry's `agent`, and a
+ * policy that accepts another Agent than the one the envelope binds is not the policy for it.
+ */
+function assertBindingsWritable(
+  carried: Pick<CarriedRevocations, "retired">,
+  entries: readonly SealedBindingEntry[],
+): void {
+  const sealed = entries.map((entry) => {
+    const report = validateKeyBinding(entry.envelopeBytes);
+    if (!report.conforms || report.value === undefined) {
+      throw new TrustAuthoringError(`binding ${entry.digest} is not a conforming sealed KeyBinding`);
+    }
+    return { entry, binding: report.value };
+  });
+  assertNoRetiredKeyBound(carried, sealed.map(({ binding }) => ({ agent: binding.agent, keyId: binding.key.didKey })));
+  for (const { entry, binding } of sealed) {
+    if (binding.agent !== entry.agent || binding.key.didKey !== entry.keyId) {
+      throw new TrustAuthoringError(
+        `binding ${entry.digest} names key ${entry.keyId} for ${entry.agent}, but its sealed envelope binds key `
+          + `${binding.key.didKey} to ${binding.agent}; the catalog holds the envelope, so the entry must name its key `
+          + "and Agent",
+      );
+    }
+  }
+}
+
+/**
  * Seals the genesis policy and writes the catalog. Refuses to overwrite an existing path: a second
  * genesis at the same location would strand every pin that named the first one.
  *
  * A re-author names the catalog it replaces as `previousCatalogPath`, and the new catalog carries
  * every revocation that one held (`revocationsToCarry`). It refuses, writing nothing, when one cannot
  * be carried intact, when `anchors` declares an anchor a carried record relies on differently (that
- * would move the record's time), and when a binding binds a key a carried revocation retired.
+ * would move the record's time), and when a binding's sealed envelope binds a key a carried
+ * revocation retired, or names another key or Agent than the entry does (`assertBindingsWritable`).
  */
 export async function authorCatalog(input: {
   readonly path: string;
@@ -340,7 +372,7 @@ export async function authorCatalog(input: {
   const carried: CarriedRevocations = input.previousCatalogPath === undefined
     ? { revocations: [], bindings: [], anchors: [], retired: [] }
     : await revocationsToCarry(input.previousCatalogPath);
-  assertNoRetiredKeyBound(carried, bindings);
+  assertBindingsWritable(carried, bindings);
   const anchors = [...input.anchors];
   for (const declaration of carried.anchors) {
     const declared = anchors.find(({ digest }) => digest === declaration.digest);
@@ -606,8 +638,8 @@ async function sealSuccessor(input: {
  * file copy plus a daemon restart (`assertFresh` makes a changed catalog under a running daemon a
  * hard refusal by design).
  *
- * Refuses, writing nothing, a binding of a key a revocation in the catalog retired, to any Agent
- * (`assertNoRetiredKeyBound`).
+ * Refuses, writing nothing, a binding whose sealed envelope binds a key a revocation in the catalog
+ * retired, to any Agent, or names another key or Agent than the entry does (`assertBindingsWritable`).
  */
 export async function appendOperator(input: {
   readonly catalogPath: string;
@@ -628,7 +660,7 @@ export async function appendOperator(input: {
   // the same predecessor would otherwise seal a successor whose write silently overwrites ours.
   return withCatalogLock(input.catalogPath, async () => {
     const loaded = await loadCatalog(input.catalogPath);
-    assertNoRetiredKeyBound({ retired: retiredIn(loaded.file) }, newBindings);
+    assertBindingsWritable({ retired: retiredIn(loaded.file) }, newBindings);
 
     const existingDigests = new Set(
       loaded.file.bindings.map((entry) => String((entry as { digest?: unknown }).digest)),
