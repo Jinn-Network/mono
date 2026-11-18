@@ -28,7 +28,6 @@ import {
   recordPath,
   refreshWorkspacePublicationHead,
   withWorkspacePublicationSourceLock,
-  type WorkspacePublicationHeadRefresh,
 } from "../run/publication-source.js";
 import { readRunState, writeRunState } from "../run/state.js";
 import {
@@ -266,6 +265,25 @@ async function announcedReceipt(digestHex: string) {
   return Object.values(state?.announcements ?? {}).find((entry) => entry.receipt.record?.digest === `sha256:${digestHex}`)?.receipt;
 }
 
+/**
+ * One heartbeat while accounting is `in-progress` (#5389). It re-signs the head past the time the
+ * stage froze; with entry anchoring configured, its release of the source lock then announces the
+ * pending anchor over the entry at `anchoredSequence`. Returns the sequence the head has reached.
+ */
+async function resignWhileInProgress(anchoredSequence?: string): Promise<string> {
+  const accounting = readRunState(workspaceDir, "draft-1")!.publication!.accounting;
+  expect(accounting.state).toBe("in-progress");
+  const outcome = await refreshWorkspacePublicationHead(workspaceDir, "colophon-benchmarks");
+  expect(outcome.status).toBe("refreshed");
+  if (outcome.status === "refreshed") expect(Date.parse(outcome.current.issuedAt)).toBeGreaterThan(Date.parse(accounting.announcedAt!));
+  const source = createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks");
+  if (anchoredSequence === undefined) return (await source.head.getExact())!.sequence;
+  const anchorId = readEntryAnchorLedger(workspaceDir, source.source.agent, "colophon-benchmarks").rows
+    .find((row) => row.sequence === anchoredSequence)?.announcedAnnouncementId;
+  expect(anchorId).toBeDefined();
+  return (await source.writer.readState())!.announcements[anchorId!]!.receipt.sequence;
+}
+
 describe("publication.accounting operation", () => {
   test("publishes partial Accounting and Matrix v2 post-hoc without executing a backend", async () => {
     const now = clock();
@@ -393,19 +411,25 @@ describe("publication.accounting operation", () => {
     expect(input!.receipt.sequence > passed.sequence).toBe(true);
   });
 
-  // The other half of #5334: once accounting has frozen its time, the heartbeat leaves the head
-  // alone until the stage has announced, and picks it up again after.
-  test("withholds the idle-head heartbeat from its freeze until it has announced (#5334)", async () => {
+  // Once accounting has frozen its time it no longer holds the heartbeat back (#5389). A head
+  // re-signed between its input hold and the hold that announces its own records is passed by
+  // those records, which are announced at their planned times or after the served head.
+  test.each([
+    ["without entry anchoring", false],
+    ["with entry anchoring configured", true],
+  ] as const)("finishes when the heartbeat re-signs the head between its inputs and its own records, %s (#5389)", async (_label, anchoring) => {
     const now = clock();
     const fixture = await registeredClosed(now);
     capture(fixture.runSha256, fixture.cells[0]!);
-    let during: WorkspacePublicationHeadRefresh | undefined;
+    if (anchoring) configureEntryAnchoring();
+    let headAfter: string | undefined;
     const result = await publicationAccounting(context(now), { draftId: "draft-1" }, { afterInputsBeforeCutoff: async () => {
-      during = await refreshWorkspacePublicationHead(workspaceDir, "colophon-benchmarks");
+      headAfter = await resignWhileInProgress();
     } });
     expect(result.ok, JSON.stringify(result)).toBe(true);
-    expect(during).toEqual({ status: "withheld", drafts: ["draft-1"] });
-    expect((await refreshWorkspacePublicationHead(workspaceDir, "colophon-benchmarks")).status).toBe("refreshed");
+    const state = readRunState(workspaceDir, "draft-1")!;
+    expect(state.publication!.matrixV2.state).toBe("complete");
+    expect(state.publication!.accounting.receipt!.sourceSequence > headAfter!).toBe(true);
   });
 
   // #5348. Accounting announces its inputs in one source-lock hold and its own records in a later
@@ -457,17 +481,19 @@ describe("publication.accounting operation", () => {
 
   // #5348. The fault lands after the Accounting record is appended and before the plan journal
   // records it, so the retry asks to announce the Accounting record again and Matrix v2 for the
-  // first time. Between the attempts the head moves past the time planned for Matrix v2: either the
-  // heartbeat's withheld check releases the source lock, which announces the pending anchor over
-  // the Accounting entry at the very millisecond planned for Matrix v2, or another draft announces.
+  // first time. Between the attempts the head moves past the time planned for Matrix v2: the
+  // heartbeat re-signs it while both stages are `in-progress` (#5389), and with entry anchoring
+  // configured its release of the source lock then announces the pending anchor over the
+  // Accounting entry; or another draft announces.
   test.each([
-    "a pending entry anchor is announced",
+    "the heartbeat re-signs the head",
+    "the heartbeat re-signs the head and announces a pending entry anchor",
     "another announcement lands on the source",
   ] as const)("a retry after %s keeps the Accounting entry already announced and finishes (#5348)", async (move) => {
     const now = clock();
     const fixture = await registeredClosed(now);
     capture(fixture.runSha256, fixture.cells[0]!);
-    if (move === "a pending entry anchor is announced") configureEntryAnchoring();
+    if (move === "the heartbeat re-signs the head and announces a pending entry anchor") configureEntryAnchoring();
     let faulted = false;
     const first = await publicationAccounting(context(now), { draftId: "draft-1" }, { recordPlanFaults: { async at({ action }) {
       if (action === "announce" && !faulted) { faulted = true; throw new Error("fixture crash after the Accounting append"); }
@@ -481,14 +507,11 @@ describe("publication.accounting operation", () => {
     expect(announced.some((entry) => entry.receipt.record?.contentType === MATRIX_MEDIA_TYPE)).toBe(false);
 
     let moved: string;
-    if (move === "a pending entry anchor is announced") {
-      expect((await refreshWorkspacePublicationHead(workspaceDir, "colophon-benchmarks")).status).toBe("withheld");
-      const anchorId = readEntryAnchorLedger(workspaceDir, source.source.agent, "colophon-benchmarks").rows
-        .find((row) => row.sequence === accounting[0]!.sequence)?.announcedAnnouncementId;
-      expect(anchorId).toBeDefined();
-      moved = (await source.writer.readState())!.announcements[anchorId!]!.receipt.sequence;
-    } else {
+    if (move === "another announcement lands on the source") {
       moved = (await announceAnotherRecord()).sequence;
+    } else {
+      expect(readRunState(workspaceDir, "draft-1")!.publication!.matrixV2.state).toBe("in-progress");
+      moved = await resignWhileInProgress(move === "the heartbeat re-signs the head" ? undefined : accounting[0]!.sequence);
     }
 
     const retried = await publicationAccounting(context(now), { draftId: "draft-1" });
@@ -537,31 +560,28 @@ describe("publication.accounting operation", () => {
   });
 
   // #5349. Between the failed attempt and its retry the head can move past the second input's slot:
-  // the heartbeat's withheld check releases the source lock, which announces the pending anchor over
-  // the first input's entry in exactly that millisecond, or another draft announces.
+  // the heartbeat re-signs it while accounting is `in-progress` (#5389), and with entry anchoring
+  // configured its release of the source lock then announces the pending anchor over the first
+  // input's entry; or another draft announces.
   test.each([
-    "a pending entry anchor is announced",
+    "the heartbeat re-signs the head",
+    "the heartbeat re-signs the head and announces a pending entry anchor",
     "another announcement lands on the source",
   ] as const)("a retry after a failed probe between two input appends finishes when %s first (#5349)", async (move) => {
     const now = clock();
     const fixture = await registeredClosed(now);
     const [first, second] = captureReplacedDispatch(fixture);
-    if (move === "a pending entry anchor is announced") configureEntryAnchoring();
+    if (move === "the heartbeat re-signs the head and announces a pending entry anchor") configureEntryAnchoring();
     refuseFirstPublicRead(`sha256:${first}`);
     expect((await publicationAccounting(context(now), { draftId: "draft-1" })).ok).toBe(false);
     const announced = (await announcedReceipt(first))!;
     expect(announced).toBeDefined();
 
     let moved: string;
-    if (move === "a pending entry anchor is announced") {
-      expect((await refreshWorkspacePublicationHead(workspaceDir, "colophon-benchmarks")).status).toBe("withheld");
-      const source = createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks");
-      const anchorId = readEntryAnchorLedger(workspaceDir, source.source.agent, "colophon-benchmarks").rows
-        .find((row) => row.sequence === announced.sequence)?.announcedAnnouncementId;
-      expect(anchorId).toBeDefined();
-      moved = (await source.writer.readState())!.announcements[anchorId!]!.receipt.sequence;
-    } else {
+    if (move === "another announcement lands on the source") {
       moved = (await announceAnotherRecord()).sequence;
+    } else {
+      moved = await resignWhileInProgress(move === "the heartbeat re-signs the head" ? undefined : announced.sequence);
     }
 
     const retried = await publicationAccounting(context(now), { draftId: "draft-1" });
@@ -572,12 +592,15 @@ describe("publication.accounting operation", () => {
   });
 
   // #5349. The input plan announces this workspace's own Deliveries before the Submissions. A retry
-  // after it stops before or after announcing one, with another announcement in between, keeps
-  // what was announced as it was and announces the rest after the head.
+  // after it stops before or after announcing one, with another announcement in between, or the
+  // heartbeat's re-sign while accounting is `in-progress` (#5389), keeps what was announced as it
+  // was and announces the rest after the head.
   test.each([
-    ["before", "store"],
-    ["after", "announce"],
-  ] as const)("a retry after the input plan stops %s announcing an owned Delivery finishes after another announcement (#5349)", async (_when, action) => {
+    ["before", "another announcement", "store"],
+    ["after", "another announcement", "announce"],
+    ["before", "the heartbeat's re-sign", "store"],
+    ["after", "the heartbeat's re-sign", "announce"],
+  ] as const)("a retry after the input plan stops %s announcing an owned Delivery finishes after %s (#5349)", async (_when, move, action) => {
     const now = clock();
     const fixture = await registeredClosed(now);
     const cell = fixture.cells[0]!;
@@ -593,7 +616,7 @@ describe("publication.accounting operation", () => {
     expect(announced === undefined).toBe(action === "store");
     expect(await announcedReceipt(submission)).toBeUndefined();
 
-    const other = await announceAnotherRecord();
+    const other = move === "another announcement" ? await announceAnotherRecord() : { sequence: await resignWhileInProgress() };
     const retried = await publicationAccounting(context(now), { draftId: "draft-1" });
     expect(retried.ok, JSON.stringify(retried)).toBe(true);
     if (announced !== undefined) expect(await announcedReceipt(delivery)).toEqual(announced);

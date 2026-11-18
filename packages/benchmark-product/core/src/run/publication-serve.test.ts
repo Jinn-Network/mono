@@ -617,45 +617,24 @@ describe("idle source head heartbeat (#4187)", () => {
     expect(after.head).toEqual({ ...before.head, issuedAt: after.head.issuedAt, refreshBy: after.head.refreshBy });
   });
 
-  test("withholds the re-sign while a publication stage holds a frozen announcement time", async () => {
-    const workspaceDir = workspace("publication-serve-heartbeat-frozen-");
+  // Every publication stage announces a record it has not yet announced at its planned time or
+  // after the served head, whichever is later, so a head re-signed past a time a stage froze no
+  // longer stops that stage from finishing; the stage suites show each one finishing after a
+  // re-sign (#5389). The heartbeat therefore reads no run documents: neither a stage left
+  // `in-progress` nor a run document that cannot be read keeps the head from being re-signed.
+  test("re-signs while a publication stage is in-progress and a run document cannot be read (#5389)", async () => {
+    const workspaceDir = workspace("publication-serve-heartbeat-in-progress-");
     await announce(workspaceDir, "first", "2026-08-13T12:00:00Z");
-    // The stage froze this instant before it announced. A head re-signed now would carry a later
-    // `issuedAt`, and the writer refuses any append that does not strictly advance the head, so
-    // the stage's retry could never land.
-    const frozenAt = "2026-08-14T09:00:00.000Z";
-    writeRunWithStage(workspaceDir, "draft-frozen", "in-progress", frozenAt);
-    const before = headOnDisk(workspaceDir);
-
-    let server = await startPublicationArchiveServer({ workspaceDir, sourceName: SOURCE_NAME, port: 0 });
-    try {
-      expect(server.headRefresh).toEqual({ status: "withheld", drafts: ["draft-frozen"] });
-      expect(await getBytes(`${server.url}${headPath(SOURCE_NAME)}`)).toEqual(before.bytes);
-      // The retry the gate protects still lands at its frozen time.
-      await announce(workspaceDir, "frozen", frozenAt);
-    } finally {
-      await server.close();
-    }
-
-    writeRunWithStage(workspaceDir, "draft-frozen", "complete", frozenAt);
-    server = await startPublicationArchiveServer({ workspaceDir, sourceName: SOURCE_NAME, port: 0 });
-    try {
-      expect(server.headRefresh?.status).toBe("refreshed");
-      expect((await coldCheck(server, workspaceDir)).outcome.status).toBe("ok");
-    } finally {
-      await server.close();
-    }
-  });
-
-  test("withholds rather than guessing when a run document cannot be read", async () => {
-    const workspaceDir = workspace("publication-serve-heartbeat-unreadable-");
-    await announce(workspaceDir, "first", "2026-08-13T12:00:00Z");
-    mkdirSync(runsDir(workspaceDir), { recursive: true });
+    writeRunWithStage(workspaceDir, "draft-frozen", "in-progress", "2026-08-14T09:00:00.000Z");
     writeFileSync(runStatePath(workspaceDir, "draft-torn"), "{", "utf8");
+    const before = headOnDisk(workspaceDir);
 
     const server = await startPublicationArchiveServer({ workspaceDir, sourceName: SOURCE_NAME, port: 0 });
     try {
-      expect(server.headRefresh).toEqual({ status: "withheld", drafts: ["draft-torn"] });
+      expect(server.headRefresh).toMatchObject({ status: "refreshed", previous: { issuedAt: before.head.issuedAt } });
+      const { served, outcome } = await coldCheck(server, workspaceDir);
+      expect(outcome.status).toBe("ok");
+      expect(served.head).toEqual({ ...before.head, issuedAt: served.head.issuedAt, refreshBy: served.head.refreshBy });
     } finally {
       await server.close();
     }

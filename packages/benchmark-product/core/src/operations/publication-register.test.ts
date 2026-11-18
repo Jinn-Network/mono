@@ -337,10 +337,10 @@ describe("registration's frozen announcement time and the idle-head heartbeat (#
     await expectRegisteredAfter(runSha256, passed);
   });
 
-  // The other half: a time registration has frozen and not yet announced, here left by an attempt
-  // that failed before its first announcement, keeps the heartbeat withheld until a retry has
-  // announced at that time.
-  test("withholds the heartbeat from a time a failed attempt froze until a retry announces it", async () => {
+  // A time registration has frozen and not yet announced, here left by an attempt that failed after
+  // its freeze and before its first announcement, no longer holds the heartbeat back (#5389). The
+  // heartbeat re-signs the head past that time, and the retry announces after the re-signed head.
+  test("finishes after the heartbeat re-signed the head past a time a failed attempt froze (#5389)", async () => {
     const now = clock();
     const runSha256 = await lockedSample(now);
     // Foreign Tasks and Benchmark make origin verification the first thing the plan does.
@@ -375,14 +375,19 @@ describe("registration's frozen announcement time and the idle-head heartbeat (#
     const frozen = readRunState(workspaceDir, "draft-1")!.publication!.registration;
     expect(frozen).toMatchObject({ state: "in-progress", announcedAt: expect.any(String) });
     expect((await source.writer.readState())!.last).toEqual(before);
-    expect(await refreshWorkspacePublicationHead(workspaceDir, SOURCE_NAME)).toEqual({ status: "withheld", drafts: ["draft-1"] });
+    expect((await refreshWorkspacePublicationHead(workspaceDir, SOURCE_NAME)).status).toBe("refreshed");
+    // Re-signed at the same position, past the frozen time.
+    const resigned = await servedHead();
+    expect({ sequence: resigned.sequence, entry: resigned.entry }).toEqual({ sequence: before!.sequence, entry: before!.entryDigest });
+    expect(Date.parse(resigned.issuedAt)).toBeGreaterThan(Date.parse(frozen.announcedAt!));
 
     const retried = await publicationRegister(context(now), { draftId: "draft-1" }, {
       verifyOrigin: { async verifyOrigin() { /* reachable now */ } },
     });
     expect(retried.ok, JSON.stringify(retried)).toBe(true);
-    expect(readRunState(workspaceDir, "draft-1")!.publication!.registration).toMatchObject({ state: "complete", announcedAt: frozen.announcedAt });
-    expect((await refreshWorkspacePublicationHead(workspaceDir, SOURCE_NAME)).status).toBe("refreshed");
+    const registration = readRunState(workspaceDir, "draft-1")!.publication!.registration;
+    expect(registration).toMatchObject({ state: "complete", announcedAt: frozen.announcedAt });
+    expect(registration.receipt!.sourceSequence > resigned.sequence).toBe(true);
   });
 });
 
@@ -434,18 +439,19 @@ describe("a registration retry after a partial announcement (#5369)", () => {
   // Registration announces its Tasks, Benchmark and Run at its frozen time plus 0, 1, 2
   // milliseconds and so on. The first attempt stops after its first Task append, before the plan
   // journal records it, so the retry asks to announce that Task again. Between the attempts the
-  // head reaches the time planned for the second Task: with entry anchoring configured, the
-  // heartbeat's withheld check releases the source lock, which announces the pending anchor over
-  // the first Task's entry at one millisecond after it; or another draft announces.
+  // head passes the time planned for the second Task: the heartbeat re-signs it while registration
+  // is `in-progress` (#5389), and with entry anchoring configured its release of the source lock
+  // then announces the pending anchor over the first Task's entry; or another draft announces.
   test.each([
-    "the heartbeat announces the pending entry anchor",
+    "the heartbeat re-signs the head",
+    "the heartbeat re-signs the head and announces the pending entry anchor",
     "another draft announces",
   ] as const)("finishes after it stopped after its first Task append and %s", async (move) => {
     const now = clock();
     const runSha256 = await lockedSample(now);
     const base = await serveWorkspace();
     expect((await publicationConfigure(context(now), { draftId: "draft-1", publicBaseUrl: base })).ok).toBe(true);
-    if (move === "the heartbeat announces the pending entry anchor") configureEntryAnchoring();
+    if (move === "the heartbeat re-signs the head and announces the pending entry anchor") configureEntryAnchoring();
 
     let announces = 0;
     const first = await publicationRegister(context(now), { draftId: "draft-1" }, { planFaults: { async at({ action }) {
@@ -464,14 +470,20 @@ describe("a registration retry after a partial announcement (#5369)", () => {
     expect(taskAt).toBe(frozen.announcedAt);
 
     let moved: string;
-    if (move === "the heartbeat announces the pending entry anchor") {
-      expect(await refreshWorkspacePublicationHead(workspaceDir, SOURCE_NAME)).toEqual({ status: "withheld", drafts: ["draft-1"] });
-      const anchorId = readEntryAnchorLedger(workspaceDir, source.source.agent, SOURCE_NAME).rows
-        .find((row) => row.sequence === task.receipt.sequence)?.announcedAnnouncementId;
-      expect(anchorId).toBeDefined();
-      moved = (await source.writer.readState())!.announcements[anchorId!]!.receipt.sequence;
-    } else {
+    if (move === "another draft announces") {
       moved = (await announceAnotherDraft()).sequence;
+    } else {
+      expect(readRunState(workspaceDir, "draft-1")!.publication!.registration.state).toBe("in-progress");
+      const outcome = await refreshWorkspacePublicationHead(workspaceDir, SOURCE_NAME);
+      expect(outcome.status).toBe("refreshed");
+      if (outcome.status === "refreshed") expect(Date.parse(outcome.current.issuedAt)).toBeGreaterThan(Date.parse(taskAt));
+      moved = task.receipt.sequence;
+      if (move === "the heartbeat re-signs the head and announces the pending entry anchor") {
+        const anchorId = readEntryAnchorLedger(workspaceDir, source.source.agent, SOURCE_NAME).rows
+          .find((row) => row.sequence === task.receipt.sequence)?.announcedAnnouncementId;
+        expect(anchorId).toBeDefined();
+        moved = (await source.writer.readState())!.announcements[anchorId!]!.receipt.sequence;
+      }
     }
     // The head has reached the time planned for the second Task.
     expect(Date.parse((await source.head.getExact())!.issuedAt)).toBeGreaterThanOrEqual(Date.parse(taskAt) + 1);
@@ -489,6 +501,5 @@ describe("a registration retry after a partial announcement (#5369)", () => {
     const run = Object.values(after.announcements).find((entry) => entry.receipt.record?.digest === `sha256:${runSha256}`)!.receipt;
     expect(registration.receipt).toEqual({ sourceSequence: run.sequence, entrySha256: run.entryDigest.slice(7) });
     expect(run.sequence > moved).toBe(true);
-    expect((await refreshWorkspacePublicationHead(workspaceDir, SOURCE_NAME)).status).toBe("refreshed");
   });
 });

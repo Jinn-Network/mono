@@ -1409,8 +1409,6 @@ function headRefreshLine(outcome: WorkspacePublicationHeadRefresh): string {
       return "an announcement is in flight; the source head is checked again on the next tick";
     case "refused":
       return `WARNING: the source head was not re-signed (${outcome.reason}); check this host's clock. It lapses at ${outcome.current.refreshBy}`;
-    case "withheld":
-      return `WARNING: the source head is not re-signed while runs ${outcome.drafts.join(", ")} may still announce at a time they froze earlier, which the source would refuse once its head is re-signed past it; the head lapses unless those publication stages finish`;
     case "faulted":
       return `WARNING: the source head could not be re-signed (${outcome.error instanceof Error ? outcome.error.message : String(outcome.error)}); it lapses unless a later tick succeeds`;
   }
