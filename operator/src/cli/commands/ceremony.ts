@@ -28,8 +28,8 @@
  *      running daemon), stated in the output of every verb that rewrites.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { linkSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, hostname } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { randomUUID } from 'node:crypto';
@@ -41,12 +41,14 @@ import {
   authorCatalog,
   authorRoleBinding,
   completePolicyPurposes,
+  IdentityStore,
   isSettlementRole,
   openCatalogAuthority,
   openRoleSigners,
   performEoaCeremony,
   planRevocation,
   rebindRoles,
+  retiredKeys,
   revocationsToCarry,
   revokeBinding,
   roleBindingTerms,
@@ -110,6 +112,83 @@ const OPTIONS = {
 };
 
 type Parsed = ReturnType<typeof parseArgs<{ options: typeof OPTIONS; allowPositionals: true }>>;
+
+export const CEREMONY_VERBS = ['init', 'join', 'rotate', 'show'] as const;
+export type CeremonyVerb = (typeof CEREMONY_VERBS)[number];
+
+/**
+ * The verbs that take each flag: the one table every verb's accepted flags come from.
+ *
+ * Every verb parses against OPTIONS, so without this a flag meant for one verb is accepted by the
+ * others and ignored without a word, and these are key-custody commands. `run` refuses
+ * (unused-flag) any flag the verb is not listed for, before anything is read, minted or anchored.
+ * Typed against OPTIONS, so a new flag does not compile until it names the verbs that take it (none,
+ * for a flag every verb refuses). The help's option list marks each flag with the same verbs, and
+ * the tests hold the two equal.
+ */
+export const CEREMONY_FLAG_VERBS = {
+  dir: CEREMONY_VERBS,
+  config: CEREMONY_VERBS,
+  // show reads it only to open the --store it lists.
+  'role-sets': CEREMONY_VERBS,
+  'authority-store': ['init', 'join'],
+  catalog: CEREMONY_VERBS,
+  'previous-catalog': ['init'],
+  genesis: ['join'],
+  store: ['show'],
+  'rpc-url': CEREMONY_VERBS,
+  'anchor-target': ['init', 'join', 'rotate'],
+  'service-index': ['init', 'join', 'rotate'],
+  'finality-timeout-ms': ['init', 'join', 'rotate'],
+  'resubmit-anchor': ['rotate'],
+  'fresh-anchor': ['init'],
+  'retiring-store': ['rotate'],
+  execute: ['init', 'join', 'rotate'],
+  'dry-run': ['init', 'join', 'rotate'],
+  human: CEREMONY_VERBS,
+  json: CEREMONY_VERBS,
+  // `jinn ceremony --help` is answered before any verb runs.
+  help: CEREMONY_VERBS,
+  // No verb reads it: init, join and rotate take the password from JINN_PASSWORD, else a
+  // keystore-password file (resolveCeremonyPassword), and show --store from JINN_PASSWORD only, so a
+  // password passed on a file descriptor would be set aside for another. Reading it instead would
+  // first need spec section 4 to name it as a password source.
+  'password-fd': [],
+} as const satisfies Record<keyof typeof OPTIONS, readonly CeremonyVerb[]>;
+
+function verbList(verbs: readonly string[]): string {
+  return verbs.length === 1 ? verbs[0]! : `${verbs.slice(0, -1).join(', ')} and ${verbs[verbs.length - 1]}`;
+}
+
+/** Refuses each flag in `given` that `verb` does not take, naming it and the verbs that do. */
+function refuseUnusedFlags(ctx: CommandContext, verb: CeremonyVerb, given: readonly string[]): void {
+  const unused = [...new Set(given)].filter((flag) => {
+    const takers: readonly CeremonyVerb[] = CEREMONY_FLAG_VERBS[flag as keyof typeof OPTIONS];
+    return !takers.includes(verb);
+  });
+  if (unused.length === 0) return;
+  const flags = unused.map((flag) => ({
+    flag: `--${flag}`,
+    takenBy: [...CEREMONY_FLAG_VERBS[flag as keyof typeof OPTIONS]],
+  }));
+  const message = `ceremony ${verb} does not take ${flags.map(({ flag, takenBy }) => `${flag} (${takenBy.length === 0
+    ? 'no ceremony verb takes it'
+    : `only ${verbList(takenBy)} ${takenBy.length === 1 ? 'takes' : 'take'} it`})`).join(' or ')}`;
+  const passwordSource = unused.includes('password-fd')
+    ? ' init, join and rotate read the keystore password from JINN_PASSWORD, else <dir>/earning/keystore-password, '
+      + 'else the host-wide keystore-password file; show --store reads JINN_PASSWORD only.'
+    : '';
+  emitEnvelope({
+    code: 'invalid_invocation',
+    message,
+    hint: `Drop ${verbList(flags.map(({ flag }) => flag))}: ceremony ${verb} would not read `
+      + `${flags.length === 1 ? 'it' : 'them'}. The options in \`jinn ceremony --help\` name the verbs that take each.`
+      + passwordSource,
+    exampleCli: EXAMPLE_CLI,
+    details: { feature: 'ceremony', state: 'unused-flag', verb, flags, sideEffects: false },
+  }, { writer: ctx.writer, exit: ctx.exit });
+  throw new CeremonyRefusal(message);
+}
 
 /** §5: genesis + ~6 months. `openNativeTrustCatalog` hard-refuses an expired policy. */
 const REFRESH_BY_MONTHS = 6;
@@ -1647,6 +1726,25 @@ async function runJoin(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
   }
 
   const { signers, authority, created } = await mintCustody({ plan, password: password.password });
+  // Before any anchor: a revocation in the catalog this join appends to retired one of these keys,
+  // and binding it again, to this Agent or a new one, would make it verify again.
+  const retired = await retiredKeys(plan.catalogPath);
+  try {
+    assertNoRetiredKeyBound(
+      retired,
+      [...signers.values()].map(({ role, keyId }) => ({ agent: agentForRole(plan, role), keyId })),
+    );
+  } catch (cause) {
+    return emitEnvelope({
+      code: 'invalid_invocation',
+      message: cause instanceof Error ? cause.message : String(cause),
+      hint: `join binds the keys in ${join(plan.dir, 'identity')}/<family>.enc.json, and after \`jinn ceremony rotate\` `
+        + 'those stores hold the keys it retired. A rotated family cannot be added to a catalog by join, under its '
+        + 'Agent IRI or a new one.',
+      exampleCli: EXAMPLE_CLI,
+      details: { feature: 'ceremony', state: 'retired-key-bound', sideEffects: created.length > 0 },
+    }, { writer: ctx.writer, exit: ctx.exit });
+  }
 
   const anchorDigest = ceremonyAnchorDigest({
     agentIri: plan.agentIri,
@@ -2018,6 +2116,163 @@ function newRotatedStorePath(ctx: CommandContext, input: {
     details: { feature: 'ceremony', state: 'new-store-exists', sideEffects: false, family: input.family, path },
   }, { writer: ctx.writer, exit: ctx.exit });
   throw new CeremonyRefusal(message);
+}
+
+/**
+ * The lock a `rotate --execute` run holds on its operator directory (#5366), from before it reads the
+ * config or `rotation.json` until it ends. A run reads the receipt first and writes it only after its
+ * checks, so two runs at once would each find no unfinished rotation and each start one. The plan
+ * reads only and takes no lock.
+ */
+function rotationLockPath(dir: string): string {
+  return join(dir, 'ceremony', 'rotate.lock');
+}
+
+/** The run that holds the lock, as it recorded itself. */
+interface RotationLockHolder {
+  readonly pid: number;
+  readonly host: string;
+  readonly startedAt: string;
+  readonly token: string;
+}
+
+function readRotationLockHolder(path: string): RotationLockHolder | undefined {
+  try {
+    const value = JSON.parse(readFileSync(path, 'utf-8')) as Partial<RotationLockHolder>;
+    return Number.isSafeInteger(value.pid) && (value.pid as number) > 0 && typeof value.host === 'string'
+      && typeof value.startedAt === 'string' && typeof value.token === 'string'
+      ? value as RotationLockHolder
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether the run holding the lock is gone: its process no longer exists on this host (`ESRCH`). Any
+ * other answer keeps the lock. A process that exists may be that run, or another program that took
+ * its number, and a lock written on another host cannot be checked from here.
+ */
+function rotationLockHolderGone(holder: RotationLockHolder): boolean {
+  if (holder.host !== hostname()) return false;
+  try {
+    process.kill(holder.pid, 0);
+    return false;
+  } catch (cause) {
+    return (cause as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+}
+
+function refuseRotationLocked(ctx: CommandContext, input: {
+  readonly dir: string;
+  readonly path: string;
+  readonly holder: RotationLockHolder | undefined;
+  readonly takeover?: string;
+}): never {
+  const runOf = (holder: RotationLockHolder) => `process ${holder.pid} on ${holder.host}, started ${holder.startedAt}`;
+  const who = input.holder === undefined
+    ? `a run whose record in ${input.path} cannot be read`
+    : input.takeover === undefined
+      ? runOf(input.holder)
+      : `a run taking over the lock that ${runOf(input.holder)}, left behind`;
+  const message = `another jinn ceremony rotate --execute holds ${input.dir}: ${who}. Two rotations of one operator `
+    + 'directory at once would each mint and bind keys of their own, so rotate refuses before it reads, mints, '
+    + 'anchors or writes anything.';
+  emitEnvelope({
+    code: 'invalid_invocation',
+    message,
+    hint: `Re-run once that run has finished. A run that was killed leaves its lock at ${input.path}, and rotate `
+      + 'takes it over by itself once the process the lock names no longer exists on this host. It cannot tell that '
+      + 'for a lock written on another host, or whose process number now belongs to another program: if no rotate '
+      + `is running on ${input.dir} and this refusal persists, remove `
+      + `${[input.path, input.takeover].filter(Boolean).join(' and ')} and re-run.`,
+    exampleCli: EXAMPLE_CLI,
+    details: {
+      feature: 'ceremony',
+      state: 'rotation-in-progress',
+      sideEffects: false,
+      lock: input.path,
+      holder: input.holder ?? null,
+    },
+  }, { writer: ctx.writer, exit: ctx.exit });
+  throw new CeremonyRefusal(message);
+}
+
+/**
+ * Takes the rotate lock on `dir`, or refuses (`rotation-in-progress`) naming the run that holds it,
+ * and returns its release, which removes the lock only while it is still this run's.
+ *
+ * As the run-finalization lock in `packages/benchmark-product/core` does, the record is written whole
+ * to a file of this run's own and hard-linked into place, so the lock is never seen half written and
+ * a link onto a lock that exists fails. A lock whose run is gone is taken over under a second,
+ * short-lived file created exclusively (`rotate.lock.takeover`), so of two runs that find it gone only
+ * one takes it: that one re-reads the lock, removes it only if it is still the gone run's, and links
+ * its own. The other finds the takeover file, or then a live holder, and refuses.
+ *
+ * A refusal exits through `ctx.exit`, which is `process.exit` in production and runs no `finally`, so
+ * it first removes this run's record and the takeover file when this run created it.
+ */
+function acquireRotationLock(ctx: CommandContext, dir: string): () => void {
+  const path = rotationLockPath(dir);
+  const takeover = `${path}.takeover`;
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const own: RotationLockHolder = { pid: process.pid, host: hostname(), startedAt: new Date().toISOString(), token: randomUUID() };
+  const record = `${path}.${own.token}`;
+  let ownsTakeover = false;
+  const cleanUp = (): void => {
+    rmSync(record, { force: true });
+    if (ownsTakeover) rmSync(takeover, { force: true });
+    ownsTakeover = false;
+  };
+  const refusing: CommandContext = { ...ctx, exit: (code) => { cleanUp(); ctx.exit(code); } };
+  writeFileSync(record, `${JSON.stringify(own)}\n`, { mode: 0o600, flag: 'wx' });
+  const link = (): boolean => {
+    try {
+      linkSync(record, path);
+      return true;
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === 'EEXIST') return false;
+      throw cause;
+    }
+  };
+  try {
+    if (!link()) {
+      const holder = readRotationLockHolder(path);
+      if (holder === undefined || !rotationLockHolderGone(holder)) refuseRotationLocked(refusing, { dir, path, holder });
+      try {
+        writeFileSync(takeover, `${JSON.stringify(own)}\n`, { mode: 0o600, flag: 'wx' });
+        ownsTakeover = true;
+      } catch (cause) {
+        if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') throw cause;
+        refuseRotationLocked(refusing, { dir, path, holder, takeover });
+      }
+      if (readRotationLockHolder(path)?.token === holder.token) rmSync(path, { force: true });
+      if (!link()) refuseRotationLocked(refusing, { dir, path, holder: readRotationLockHolder(path) });
+    }
+  } finally {
+    cleanUp();
+  }
+  return () => {
+    if (readRotationLockHolder(path)?.token === own.token) rmSync(path, { force: true });
+  };
+}
+
+/**
+ * `rotate`, holding the operator directory's rotate lock (above) when it may take side effects. A
+ * refusal exits through `ctx.exit`, which is `process.exit` in production and runs no `finally`, so
+ * the lock is released before that exit as well as when the run returns or throws. A directory that
+ * does not exist holds no rotation to race, and rotate refuses it.
+ */
+async function runRotateLocked(ctx: CommandContext, parsed: Parsed, deps: CeremonyCommandDeps): Promise<void> {
+  if (!resolveExecute(ctx, parsed)) return runRotate(ctx, parsed, deps);
+  const dir = resolveDir(ctx, parsed);
+  if (!existsSync(dir)) return runRotate(ctx, parsed, deps);
+  const release = acquireRotationLock(ctx, dir);
+  try {
+    return await runRotate({ ...ctx, exit: (code) => { release(); ctx.exit(code); } }, parsed, deps);
+  } finally {
+    release();
+  }
 }
 
 /**
@@ -2423,15 +2678,43 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
   writeRotationReceipt(dir, receipt);
   const replacementSigners = new Map<NativeRoleIdentityRole, RoleSigner>();
   const storesCreated: string[] = [];
+  // A new rotation mints its new stores and never finds one (#5366). newRotatedStorePath refused a
+  // path already taken and the lock keeps every other rotate out, but a store can still appear there
+  // after those checks. `created` says whether this run's mint is the store now on disk. When it is
+  // not, the run takes none of its keys: it puts rotation.json back as it was, removes the stores it
+  // minted a moment ago, whose keys nothing anchored, bound or recorded, and refuses.
+  const mintsNewStores = !resuming && !recovering;
   for (const family of roleSets) {
     const storePath = newStores[family]!;
     const existed = existsSync(storePath);
+    if (mintsNewStores) {
+      // eslint-disable-next-line no-await-in-loop -- bounded (≤4 families).
+      const store = await IdentityStore.open({ path: storePath, password: password.password });
+      // eslint-disable-next-line no-await-in-loop -- bounded (≤4 families).
+      const { created } = await store.loadOrCreate(new Date(), orderedRolesForSet(family));
+      if (!created) {
+        if (prior === undefined) rmSync(rotationReceiptPath(dir), { force: true });
+        else writeRotationReceipt(dir, prior);
+        for (const minted of storesCreated) rmSync(minted, { force: true });
+        const message = `a store appeared at ${storePath}, where ceremony rotate was minting the new ${family} store, `
+          + 'after rotate checked that path. rotate takes no keys from a store it did not mint: it put '
+          + `${rotationReceiptPath(dir)} back as it was and removed the stores this run minted, before anything was anchored.`;
+        emitEnvelope({
+          code: 'invalid_invocation',
+          message,
+          hint: 'Find out what wrote that store before rotating again. A re-run in a later second mints at a path of its own.',
+          exampleCli: EXAMPLE_CLI,
+          details: { feature: 'ceremony', state: 'new-store-exists', sideEffects: false, family, path: storePath },
+        }, { writer: ctx.writer, exit: ctx.exit });
+        throw new CeremonyRefusal(message);
+      }
+    }
     // eslint-disable-next-line no-await-in-loop -- bounded (≤4 families).
     const minted = await openRoleSigners({
       storePath,
       password: password.password,
       ownedRoles: orderedRolesForSet(family),
-      create: true,
+      create: !mintsNewStores,
     });
     for (const [role, signer] of minted) replacementSigners.set(role, signer);
     if (!existed) storesCreated.push(storePath);
@@ -2780,7 +3063,7 @@ export function createCeremonyCommand(deps?: CeremonyCommandDeps): CommandModule
   jinn ceremony init --dir <operator home> --role-sets <families> --authority-store <path> [--execute]
   jinn ceremony join --dir <operator home> --role-sets <families> --catalog <path> --genesis <digest> --authority-store <path> [--execute]
   jinn ceremony rotate --dir <operator home> --role-sets <families> [--catalog <path>] [--execute]
-  jinn ceremony show [--catalog <path>] [--store <path>]
+  jinn ceremony show [--catalog <path>] [--store <path> --role-sets <family>]
 
 Status:
   \`init\` provisions the FIRST operator and the shared catalog genesis; \`join\` adds operator N+1 to
@@ -2810,11 +3093,12 @@ Status:
   --previous-catalog <where it went>. Every revocation it holds is carried into the new catalog
   verbatim, with the binding each names and the anchors both reference, so a retired key stays
   retired. Without the flag, init refuses once its receipt shows it sealed a catalog at --catalog or
-  <dir>/ceremony/rotation.json exists. With it, init refuses, before any anchor, to bind a key a
-  carried revocation retired, for the same Agent IRI. That still catches a family \`rotate\` replaced
-  once the records STORES names are gone and the config names no other store for it, but only while
-  the config or the run receipt supplies the operator's agentIri and admissionAgent: with neither,
-  init mints new Agent IRIs and that check passes.
+  <dir>/ceremony/rotation.json exists. With it, init refuses (retired-key-bound), before any anchor,
+  to bind a key a carried revocation retired, whatever Agent IRI it would bind the key to. join
+  refuses the same way, before any anchor, to bind a key a revocation in its --catalog retired. So a
+  family \`rotate\` replaced is still refused once the records STORES names are gone and the config
+  names no other store for it, also when neither the config nor the run receipt supplies the
+  operator's agentIri and admissionAgent and init or join mints new Agent IRIs.
 
   STORES. init and join bind the role stores at <dir>/identity/<family>.enc.json, never the stores
   identityStores names, and after \`rotate\` those hold the keys it retired. So both refuse
@@ -2862,6 +3146,15 @@ Status:
   rotation never skips a family: it opens the store it retires and refuses unless the catalog binds
   each key there, so it never completes with nothing retired.
 
+  One \`rotate --execute\` at a time holds an operator directory. It takes <dir>/ceremony/rotate.lock
+  before it reads anything and removes it when it ends, so a second run refuses
+  (rotation-in-progress), naming the process that holds the lock, before anything is minted,
+  anchored or written. A run that was killed leaves its lock behind: the next run takes it over once
+  that process no longer exists on this host, and otherwise the refusal says to remove it when no
+  rotate is running. The plan takes no lock. A new rotation also takes no keys from a store that
+  appears at its new store's path after it checked that path: it undoes what it wrote and refuses
+  (new-store-exists).
+
   Keep rotation.json where rotate wrote it: once identityStores names the new store, it is the only
   record of the store being retired. rotate refuses a rotation.json it cannot read
   (rotation-receipt-unreadable), and refuses to start a new rotation while the catalog binds,
@@ -2881,41 +3174,52 @@ Status:
   while another key for those roles is bound that neither the named stores nor the configured ones
   hold. It then sends a fresh revocation anchor and revokes the named stores' keys.
 
-Options (init, join, and rotate; rotate takes no --authority-store or --genesis):
+Options (a flag marked "<verbs> only" is taken by those verbs alone, and any other verb refuses it
+(unused-flag) before it reads any store, catalog or chain state; an unmarked flag is taken by all four):
   --dir <path>               Operator home (default ~/.jinn-client). The keystore, identity stores,
                              and config.json are resolved beneath it.
   --config <path>            Config file to write back to (default <dir>/config.json)
   --role-sets <list>         Comma-separated families: requester, admission, solver, evaluator.
-                             \`requester\` is mandatory — every native boot opens requester custody.
-  --authority-store <path>   The DEDICATED catalog-authority keypair, held by the deploy coordinator.
-                             Never an operator role key: policy-update capability must survive any
-                             operator's key rotation.
-  --catalog <path>           Trust catalog path (default <dir>/trust.json; required for join)
+                             init and join require \`requester\`, since every native boot opens
+                             requester custody; rotate does not. show reads it only with --store:
+                             the one family that store holds.
+  --authority-store <path>   init and join only: the DEDICATED catalog-authority keypair, held by the
+                             deploy coordinator. Never an operator role key: policy-update capability
+                             must survive any operator's key rotation.
+  --catalog <path>           Trust catalog path (default <dir>/trust.json; required for join). rotate
+                             and show default to the config's trustRootsPath when it names one.
   --previous-catalog <path>  init only: the catalog a re-author replaces (see RE-AUTHORING above)
   --fresh-anchor             init only: send a new anchor even when the run receipt names one for the
                              same key set, keeping the receipt (see RESUMABLE above)
   --genesis <digest>         join only: the sha256 genesis digest init printed. The pin is what makes
                              a join a join rather than an unnoticed fork onto a different catalog.
+  --store <path>             show only: additionally list an identity store's role -> did:key ids
+                             (needs JINN_PASSWORD and --role-sets)
   --rpc-url <url>            Base Sepolia RPC (defaults to the configured chain)
-  --anchor-target <address>  Address the anchor calldata is sent to (default: this operator's own EOA)
-  --service-index <n>        Which earning service supplies the EOA and Safe (default: the primary)
-  --finality-timeout-ms <n>  How long to wait for the finalized tag (default 2700000, i.e. 45 min)
+  --anchor-target <address>  init, join and rotate only: address the anchor calldata is sent to
+                             (default: this operator's own EOA)
+  --service-index <n>        init, join and rotate only: which earning service supplies the EOA and
+                             Safe (default: the primary)
+  --finality-timeout-ms <n>  init, join and rotate only: how long to wait for the finalized tag
+                             (default 2700000, i.e. 45 min)
   --resubmit-anchor          rotate only: send a fresh anchor for the act an unfinished rotation
                              resumes, in place of a recorded one that never reads back finalized
   --retiring-store <family>=<path>
                              rotate only, once for each --role-sets family: the store a rotation
                              whose rotation.json was lost after the repoint was retiring
-  --execute                  Perform the ceremony. Without it, nothing is minted, sent, or written.
-  --dry-run                  Force the read-only plan. Refuses if combined with --execute.
+  --execute                  init, join and rotate only: perform the ceremony. Without it, nothing is
+                             minted, sent, or written.
+  --dry-run                  init, join and rotate only: force the read-only plan. Refuses if
+                             combined with --execute.
   --human                    Human-readable output, including the anchor and finality progress lines.
-  JINN_PASSWORD              Required unless a keystore-password file exists (primary
-                             <dir>/earning/keystore-password, or the host-wide default-state
-                             fallback). The ceremony must run with the password the daemon
-                             will later resolve, or it mints custody the daemon cannot decrypt.
-
-Options (show):
-  --catalog <path>           Catalog to inspect (default: the config's trustRootsPath)
-  --store <path>             Additionally list an identity store's role -> did:key ids (needs JINN_PASSWORD)
+  --json                     JSON output, the default when --human is not given
+  --help                     This help
+  JINN_PASSWORD              The keystore password. init, join and rotate read it first, then
+                             <dir>/earning/keystore-password, then the host-wide default-state
+                             keystore-password file, and refuse when none of the three supplies one.
+                             show --store reads JINN_PASSWORD only. No verb takes --password-fd.
+                             The ceremony must run with the password the daemon will later
+                             resolve, or it mints custody the daemon cannot decrypt.
 
 Config write-back:
   init and join write exactly five keys onto config.json: agentIri, admissionAgent (only when the
@@ -2934,8 +3238,12 @@ Examples:
     async run(ctx: CommandContext): Promise<void> {
       try {
         let parsed: Parsed;
+        let given: string[];
         try {
-          parsed = parseArgs({ args: ctx.argv, options: OPTIONS, allowPositionals: true }) as Parsed;
+          const result = parseArgs({ args: ctx.argv, options: OPTIONS, allowPositionals: true, tokens: true });
+          parsed = result as Parsed;
+          // The flags actually passed: `values` cannot tell a boolean's default from the flag.
+          given = result.tokens.flatMap((token) => (token.kind === 'option' ? [token.name] : []));
         } catch (error) {
           return invalid(ctx, error instanceof Error ? error.message : String(error));
         }
@@ -2944,6 +3252,7 @@ Examples:
           || (verb !== 'init' && verb !== 'join' && verb !== 'rotate' && verb !== 'show')) {
           return invalid(ctx, 'ceremony requires the `init`, `join`, `rotate`, or `show` subcommand');
         }
+        refuseUnusedFlags(ctx, verb, given);
         if (deps === undefined) {
           return emitEnvelope({
             code: 'bootstrap_incomplete',
@@ -2955,7 +3264,7 @@ Examples:
         }
         if (verb === 'show') return await runShow(ctx, parsed, deps);
         if (verb === 'init') return await runInit(ctx, parsed, deps);
-        if (verb === 'rotate') return await runRotate(ctx, parsed, deps);
+        if (verb === 'rotate') return await runRotateLocked(ctx, parsed, deps);
         return await runJoin(ctx, parsed, deps);
       } catch (cause) {
         // The envelope and the exit code were already emitted at the refusal site; this only stops

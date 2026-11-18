@@ -125,6 +125,7 @@ async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
         json: { type: 'boolean', default: false },
         human: { type: 'boolean', default: false },
         config: { type: 'string' },
+        'password-fd': { type: 'string' },
       },
       allowPositionals: false,
     });
@@ -398,7 +399,7 @@ const command: CommandModule = {
   name: 'keys',
   summary: 'Keystore management: backup, change-password',
   helpText: `Usage:
-  jinn keys backup --output <path> [--config <path>] [--human]
+  jinn keys backup --output <path> [--config <path>] [--password-fd <fd>] [--human]
   jinn keys change-password [--config <path>] [--human]
 
 Subverbs:
@@ -412,8 +413,9 @@ Target keystore:
   that still keeps its state there).
 
 backup:
-  Decrypts the local keystore using JINN_PASSWORD and writes the
-  mnemonic to <path> with mode 0600. Idempotent: same mnemonic →
+  Decrypts the local keystore with the password resolved the same way
+  as for change-password below, and writes the mnemonic to <path>
+  with mode 0600. Idempotent: same mnemonic →
   same output. Does not touch the keystore.
 
 change-password:

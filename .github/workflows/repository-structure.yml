@@ -127,6 +127,10 @@ jobs:
       # this tree cannot install Chromium, and the move reached runners one at a time (#5173).
       - name: Every job that installs a Playwright browser runs on ubuntu-24.04
         run: node --test .github/scripts/workflow-playwright-runner.test.mjs
+      # Repository-wide as well: on Linux x64 the onnxruntime-node postinstall downloads optional CUDA
+      # binaries, and the lanes that never skipped it failed when the download returned 404 (#5392).
+      - name: Every job that installs onnxruntime-node skips its optional CUDA download
+        run: node --test .github/scripts/workflow-onnxruntime-skip.test.mjs
       # Repository-wide as well: the scan reads every first-party package.json, so it must run on
       # a change to any one of them. Behind the Task Execution path filter it never ran for a
       # change confined to operator, core, policy or the benchmark-product packages (#5277).

@@ -18,10 +18,12 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import { hostname, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { openRoleSigners, revocationAnchorDigest, scopeForRole } from '@jinn-network/trust-authoring';
-import { didPkh, validateKeyBinding } from '@jinn-network/trust-core';
+import { didPkh, validateKeyBinding, validateRevocation } from '@jinn-network/trust-core';
 import { privateKeyToAccount } from 'viem/accounts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -41,6 +43,12 @@ import { openRoleIdentitySet, type NativeRoleIdentityRole } from '../../src/daem
  * a descriptor is matched by the path it was opened at. Every other write passes through.
  */
 const diskFull = vi.hoisted(() => ({ path: undefined as string | undefined, fired: false }));
+
+/** Armed for one write: after the next write into a file whose path starts with `path`, runs `then`. */
+const afterWrite = vi.hoisted(() => ({
+  path: undefined as string | undefined,
+  then: undefined as ((written: string) => void) | undefined,
+}));
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
@@ -62,6 +70,12 @@ vi.mock('node:fs', async (importOriginal) => {
       throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
     }
     actual.writeFileSync(file, data, options);
+    if (afterWrite.path !== undefined && path?.startsWith(afterWrite.path) === true) {
+      const { then } = afterWrite;
+      afterWrite.path = undefined;
+      afterWrite.then = undefined;
+      then?.(path);
+    }
   };
   return { ...actual, openSync, writeFileSync, default: { ...actual, openSync, writeFileSync } };
 });
@@ -69,13 +83,23 @@ vi.mock('node:fs', async (importOriginal) => {
 /** Every identity store `openRoleSigners` opens, by path, so a refusal can show it opened none. */
 const storesOpened = vi.hoisted(() => [] as string[]);
 
+/** Armed for one call: the next `planRevocation` returns its plan only once `pause` settles. */
+const afterPlanRevocation = vi.hoisted(() => ({ pause: undefined as (() => Promise<void>) | undefined }));
+
 vi.mock('@jinn-network/trust-authoring', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@jinn-network/trust-authoring')>();
   const openRoleSigners: typeof actual.openRoleSigners = async (input) => {
     storesOpened.push(input.storePath);
     return actual.openRoleSigners(input);
   };
-  return { ...actual, openRoleSigners };
+  const planRevocation: typeof actual.planRevocation = async (input) => {
+    const plan = await actual.planRevocation(input);
+    const { pause } = afterPlanRevocation;
+    afterPlanRevocation.pause = undefined;
+    await pause?.();
+    return plan;
+  };
+  return { ...actual, openRoleSigners, planRevocation };
 });
 
 const SAFE = '0x8464135c8F25Da09e49BC8782676a84730C318bC' as const;
@@ -183,13 +207,17 @@ function harness(options: HarnessOptions = {}) {
 
 type Harness = ReturnType<typeof harness>;
 
-async function run(h: Harness, argv: string[]): Promise<Record<string, unknown>> {
+async function run(
+  h: Harness,
+  argv: string[],
+  exit: CommandContext['exit'] = () => undefined,
+): Promise<Record<string, unknown>> {
   const writes: string[] = [];
   const ctx: CommandContext = {
     argv,
     stdoutIsTty: false,
     writer: { write: (text: string) => { writes.push(text); return true; } },
-    exit: () => undefined,
+    exit,
     env: { HOME: h.home, JINN_PASSWORD: PASSWORD } as NodeJS.ProcessEnv,
   };
   await createCeremonyCommand(h.deps).run(ctx);
@@ -1220,6 +1248,74 @@ describe('ceremony join after a rotation', () => {
 });
 
 /**
+ * A key a rotation retired, bound again under a new Agent IRI (#5372). With every rotation record and
+ * the run receipt gone, the rotated-family refusal sees no rotation, and an init or join whose config
+ * carries no agentIri mints new Agent IRIs. The revocations in the catalog it names are what is left,
+ * and they retire the key whatever Agent it would be bound to.
+ */
+describe('ceremony init and join with no record of a rotation left', () => {
+  it.each([
+    ['a config with no agentIri', (_h: Harness) => undefined],
+    ['a config carrying the Agent IRIs', (h: Harness) => ({ agentIri: config(h).agentIri, admissionAgent: config(h).admissionAgent })],
+  ])('refuse, before any anchor, to bind a key a revocation in the catalog they name retired, with %s', async (_case, values) => {
+    const h = await provisioned();
+    const rotation = await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'solver', '--execute']);
+    expect(rotation.kind).toBe('ceremony_rotate_complete');
+    const retiredFor = config(h).agentIri;
+    // Every rotation record goes: the rotated store leaves <dir>/identity, and rotation.json and the run
+    // receipt are removed. The catalog holding the revocations is moved aside, as for a re-author.
+    const setAside = join(h.home, 'set-aside');
+    mkdirSync(setAside);
+    for (const name of readdirSync(join(h.dir, 'identity')).filter((entry) => entry.startsWith('solver.rotated-'))) {
+      renameSync(join(h.dir, 'identity', name), join(setAside, name));
+    }
+    rmSync(join(h.dir, 'ceremony', 'rotation.json'));
+    rmSync(join(h.dir, 'ceremony', 'receipt.json'));
+    const holding = join(h.home, 'trust.previous.json');
+    renameSync(h.catalogPath, holding);
+    const { policyGenesisDigest, revocations } = JSON.parse(readFileSync(holding, 'utf-8')) as {
+      policyGenesisDigest: string;
+      revocations: { digest: string }[];
+    };
+    expect(revocations).toHaveLength(SOLVER_ROLES.length);
+    const freshConfig = join(h.home, 'fresh-config.json');
+    const configValues = values(h);
+    if (configValues !== undefined) writeFileSync(freshConfig, JSON.stringify(configValues));
+    const configBefore = configValues === undefined ? undefined : readFileSync(freshConfig);
+    const catalogBefore = readFileSync(holding);
+    const common = [
+      '--dir', h.dir, '--config', freshConfig, '--role-sets', 'requester,admission,solver', '--authority-store', h.authorityStore,
+    ];
+
+    // Without the Agent IRIs, the plan shows init would bind the stores to a new Agent.
+    const plan = await run(h, ['init', ...common, '--previous-catalog', holding]);
+    expect(plan.kind).toBe('ceremony_init_plan');
+    expect(plan.agentIri === retiredFor).toBe(configValues !== undefined);
+
+    const sessions = h.calls.filter((call) => call === 'openAnchorSession').length;
+    const submissions = h.submitted.length;
+    const refusals = [
+      await run(h, ['init', ...common, '--execute', '--previous-catalog', holding]),
+      await run(h, ['join', ...common, '--execute', '--catalog', holding, '--genesis', policyGenesisDigest]),
+    ];
+
+    for (const refusal of refusals) {
+      expect(refusal.code).toBe('invalid_invocation');
+      expect(refusal.details).toMatchObject({ state: 'retired-key-bound', sideEffects: false });
+      expect(revocations.some(({ digest }) => String(refusal.message).includes(`revocation ${digest} retired key`))).toBe(true);
+      expect(String(refusal.message)).toContain(`for ${retiredFor}`);
+    }
+    expect(h.calls.filter((call) => call === 'openAnchorSession')).toHaveLength(sessions);
+    expect(h.submitted).toHaveLength(submissions);
+    expect(existsSync(h.catalogPath)).toBe(false);
+    expect(readFileSync(holding)).toEqual(catalogBefore);
+    if (configBefore === undefined) expect(existsSync(freshConfig)).toBe(false);
+    else expect(readFileSync(freshConfig)).toEqual(configBefore);
+    expect(createCeremonyCommand(h.deps).helpText).toContain('whatever Agent IRI it would bind the key to');
+  });
+});
+
+/**
  * A lost, unreadable or stale rotation receipt (#5329). From the config repoint on, `rotation.json`
  * is the only record of the store a rotation retires: the config names the store it just bound. A
  * receipt read as absent made the next run rotate those keys and leave the retiring ones bound.
@@ -1883,5 +1979,296 @@ describe('ceremony rotate and its rotation receipt', () => {
     const revokedAt = h.submitted[h.submitted.length - 1]!.anchorTime;
     await expect(bootAt(h, retiring.solver!, revokedAt)).rejects.toThrow(/binding is revoked at boot/u);
     await expect(bootAt(h, stores.solver!, revokedAt)).resolves.toBeDefined();
+  });
+});
+
+describe('ceremony rotate, one run at a time on an operator directory (#5366)', () => {
+  const rotateArgv = (h: Harness, extra: readonly string[] = []) => [
+    'rotate', '--dir', h.dir, '--role-sets', 'solver', ...extra,
+  ];
+  const lockPathOf = (h: Harness) => join(h.dir, 'ceremony', 'rotate.lock');
+  type Family = Parameters<typeof orderedRolesForSet>[0];
+  const nextSecond = () => new Promise((resolve) => { setTimeout(resolve, 1_000 - (Date.now() % 1_000)); });
+
+  afterEach(() => {
+    afterWrite.path = undefined;
+    afterWrite.then = undefined;
+    afterPlanRevocation.pause = undefined;
+  });
+
+  /** A run's last envelope, or what it threw. */
+  async function outcome(pending: Promise<Record<string, unknown>>): Promise<Record<string, unknown>> {
+    try {
+      return await pending;
+    } catch (error) {
+      return { thrown: String(error) };
+    }
+  }
+
+  async function keyIdsIn(storePath: string, family: Family): Promise<string[]> {
+    const signers = await openRoleSigners({
+      storePath, password: PASSWORD, ownedRoles: orderedRolesForSet(family), create: false,
+    });
+    return [...signers.values()].map(({ keyId }) => keyId).sort();
+  }
+
+  function revocationTargets(h: Harness): string[] {
+    const file = JSON.parse(readFileSync(h.catalogPath, 'utf-8')) as { revocations: { envelope: string }[] };
+    return file.revocations.map(({ envelope }) =>
+      validateRevocation(new Uint8Array(Buffer.from(envelope, 'base64'))).value!.target);
+  }
+
+  /**
+   * Exactly one rotation of the solver family happened since the catalog held `before`, retiring the
+   * keys of `retiredStore`: one set of new keys bound, held by the store the config names; each
+   * retiring binding revoked once and nothing else revoked; and no key the catalog binds, unrevoked,
+   * that no store the config names holds.
+   */
+  async function expectOneRotation(
+    h: Harness,
+    before: ReturnType<typeof catalogBindings>,
+    revokedBefore: readonly string[],
+    retiredStore: string,
+  ): Promise<void> {
+    const retiringKeys = await keyIdsIn(retiredStore, 'solver');
+    const retiringDigests = before.filter(({ binding }) => retiringKeys.includes(binding.key.didKey)).map(({ digest }) => digest);
+    const added = catalogBindings(h).filter(({ digest }) => !before.some((earlier) => earlier.digest === digest));
+    expect(added.map(({ binding }) => binding.key.didKey).sort())
+      .toEqual(await keyIdsIn(config(h).identityStores.solver!, 'solver'));
+    const targets = revocationTargets(h);
+    expect(targets).toHaveLength(revokedBefore.length + retiringDigests.length);
+    for (const digest of retiringDigests) expect(targets.filter((target) => target === digest)).toHaveLength(1);
+    const held = new Set<string>();
+    for (const [family, storePath] of Object.entries(config(h).identityStores)) {
+      // eslint-disable-next-line no-await-in-loop -- bounded (≤4 families).
+      for (const keyId of await keyIdsIn(storePath, family as Family)) held.add(keyId);
+    }
+    const revoked = new Set(targets);
+    expect(catalogBindings(h)
+      .filter(({ digest, binding }) => !revoked.has(digest) && !held.has(binding.key.didKey))
+      .map(({ binding }) => binding.key.didKey)).toEqual([]);
+  }
+
+  it('lets exactly one of two rotate --execute runs started together on one operator directory rotate, and refuses the other, naming the run that holds it', async () => {
+    const h = await provisioned();
+    const retiredStore = config(h).identityStores.solver!;
+    const before = catalogBindings(h);
+    const revokedBefore = revocationTargets(h);
+    const submissions = h.submitted.length;
+
+    const results = await Promise.all([
+      outcome(run(h, rotateArgv(h, ['--execute']))),
+      outcome(run(h, rotateArgv(h, ['--execute']))),
+    ]);
+
+    expect(results.filter(({ kind }) => kind === 'ceremony_rotate_complete')).toHaveLength(1);
+    const refusals = results.filter(({ kind }) => kind !== 'ceremony_rotate_complete');
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toMatchObject({
+      code: 'invalid_invocation',
+      details: {
+        state: 'rotation-in-progress',
+        sideEffects: false,
+        lock: lockPathOf(h),
+        holder: { pid: process.pid, host: hostname() },
+      },
+    });
+    expect(String(refusals[0]!.message)).toContain(`process ${process.pid} on ${hostname()}`);
+    // One rebind anchor and one revocation anchor, both from the run that held the directory.
+    expect(h.submitted).toHaveLength(submissions + 2);
+    await expectOneRotation(h, before, revokedBefore, retiredStore);
+    expect(existsSync(lockPathOf(h))).toBe(false);
+    expect(createCeremonyCommand(h.deps).helpText).toContain('rotation-in-progress');
+  });
+
+  it('refuses a run started in a later second, while another is between its checks and its receipt, so no second set of keys is bound', async () => {
+    const h = await provisioned();
+    const retiredStore = config(h).identityStores.solver!;
+    const before = catalogBindings(h);
+    const revokedBefore = revocationTargets(h);
+    const submissions = h.submitted.length;
+    // The first run stops once it has planned the revocation, before it records its rotation.
+    let resume!: () => void;
+    const planned = new Promise<void>((resolve) => {
+      afterPlanRevocation.pause = () => {
+        resolve();
+        return new Promise<void>((go) => { resume = go; });
+      };
+    });
+    const first = outcome(run(h, rotateArgv(h, ['--execute'])));
+    await planned;
+    // The second starts in a later second, so it would name a new store of its own.
+    await nextSecond();
+
+    const second = await outcome(run(h, rotateArgv(h, ['--execute'])));
+    resume();
+    const firstResult = await first;
+
+    expect(second).toMatchObject({ code: 'invalid_invocation', details: { state: 'rotation-in-progress', sideEffects: false } });
+    expect(firstResult.kind).toBe('ceremony_rotate_complete');
+    expect(h.submitted).toHaveLength(submissions + 2);
+    expect(readdirSync(join(h.dir, 'identity')).filter((name) => name.startsWith('solver.rotated-'))).toHaveLength(1);
+    await expectOneRotation(h, before, revokedBefore, retiredStore);
+  });
+
+  it('refuses while the process a left-behind lock names is running, and takes the lock over once it is gone', async () => {
+    const h = await provisioned();
+    // What a run killed mid-rotation leaves behind: its lock, naming its process.
+    const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    try {
+      writeFileSync(lockPathOf(h), `${JSON.stringify({
+        pid: holder.pid, host: hostname(), startedAt: new Date().toISOString(), token: 'left-behind',
+      })}\n`);
+      const submissions = h.submitted.length;
+      const configBytes = readFileSync(h.configPath);
+
+      const refusal = await run(h, rotateArgv(h, ['--execute']));
+
+      expect(refusal).toMatchObject({
+        code: 'invalid_invocation',
+        details: { state: 'rotation-in-progress', sideEffects: false, holder: { pid: holder.pid } },
+      });
+      expect(String(refusal.hint)).toContain(`remove ${lockPathOf(h)}`);
+      expect(h.submitted).toHaveLength(submissions);
+      expect(readFileSync(h.configPath)).toEqual(configBytes);
+      expect(existsSync(join(h.dir, 'ceremony', 'rotation.json'))).toBe(false);
+      expect(existsSync(lockPathOf(h))).toBe(true);
+    } finally {
+      holder.kill('SIGKILL');
+      await once(holder, 'exit');
+    }
+
+    const result = await run(h, rotateArgv(h, ['--execute']));
+
+    expect(result.kind).toBe('ceremony_rotate_complete');
+    expect(readdirSync(join(h.dir, 'ceremony')).sort()).toEqual(['receipt.json', 'rotation.json']);
+  });
+
+  it('refuses a lock written on another host, which it cannot check, and says how to clear it; the plan takes no lock', async () => {
+    const h = await provisioned();
+    const elsewhere = `not-${hostname()}`;
+    // A process number that exists nowhere on this host, which says nothing about the other one.
+    const { pid } = spawnSync(process.execPath, ['-e', '']);
+    writeFileSync(lockPathOf(h), `${JSON.stringify({
+      pid, host: elsewhere, startedAt: new Date().toISOString(), token: 'elsewhere',
+    })}\n`);
+
+    const refusal = await run(h, rotateArgv(h, ['--execute']));
+
+    expect(refusal).toMatchObject({ details: { state: 'rotation-in-progress', sideEffects: false, holder: { host: elsewhere } } });
+    expect(String(refusal.message)).toContain(`on ${elsewhere}`);
+    expect(String(refusal.hint)).toContain(`remove ${lockPathOf(h)}`);
+    expect((await run(h, rotateArgv(h))).kind).toBe('ceremony_rotate_plan');
+
+    rmSync(lockPathOf(h));
+    expect((await run(h, rotateArgv(h, ['--execute']))).kind).toBe('ceremony_rotate_complete');
+  });
+
+  it('releases the lock however a run ends: before a refusal exits, when it is interrupted, and when it completes', async () => {
+    const h = await provisioned({ interruptWait: 'revocation' });
+    h.useAccount(strangerAccount);
+    const lockAtExit: boolean[] = [];
+
+    const refusal = await run(h, rotateArgv(h, ['--execute']), () => { lockAtExit.push(existsSync(lockPathOf(h))); });
+
+    expect(String(refusal.message)).toContain('cannot revoke the retiring bindings');
+    // In production a refusal exits the process right there, so no `finally` would release it.
+    expect(lockAtExit).toEqual([false]);
+    h.useAccount(agentAccount);
+    await expect(run(h, rotateArgv(h, ['--execute']))).rejects.toThrow(/killed during the revocation finality wait/u);
+    expect(existsSync(lockPathOf(h))).toBe(false);
+    expect((await run(h, rotateArgv(h, ['--execute']))).kind).toBe('ceremony_rotate_complete');
+    expect(readdirSync(join(h.dir, 'ceremony')).sort()).toEqual(['receipt.json', 'rotation.json']);
+  });
+
+  /**
+   * An exit that records `<dir>/ceremony` when a refusal calls it. In production the exit is
+   * `process.exit`, which runs no `finally`, so what is there at that moment is what stays.
+   */
+  const recordingExit = (h: Harness, seen: string[][]) => () => {
+    seen.push(readdirSync(join(h.dir, 'ceremony')).sort());
+  };
+  const writeLock = (h: Harness, holder: { readonly pid: number; readonly token: string }) => {
+    writeFileSync(lockPathOf(h), `${JSON.stringify({ host: hostname(), startedAt: new Date().toISOString(), ...holder })}\n`);
+  };
+
+  it('leaves no file of its own in <dir>/ceremony when it refuses, though the process exits right there', async () => {
+    const h = await provisioned();
+    writeLock(h, { pid: process.pid, token: 'live' });
+    const before = readdirSync(join(h.dir, 'ceremony')).sort();
+    const atExit: string[][] = [];
+
+    const refusal = await run(h, rotateArgv(h, ['--execute']), recordingExit(h, atExit));
+
+    expect(refusal.details).toMatchObject({ state: 'rotation-in-progress', holder: { token: 'live' } });
+    expect(atExit).toEqual([before]);
+  });
+
+  it('removes the takeover file it created when another run takes a stale lock first, before the refusal exits', async () => {
+    const h = await provisioned();
+    const { pid: gone } = spawnSync(process.execPath, ['-e', '']);
+    writeLock(h, { pid: gone, token: 'killed' });
+    const before = readdirSync(join(h.dir, 'ceremony')).sort();
+    // Once this run has created the takeover file, another run's lock replaces the stale one.
+    afterWrite.path = `${lockPathOf(h)}.takeover`;
+    afterWrite.then = () => { writeLock(h, { pid: process.pid, token: 'faster' }); };
+    const atExit: string[][] = [];
+
+    const refusal = await run(h, rotateArgv(h, ['--execute']), recordingExit(h, atExit));
+
+    expect(refusal.details).toMatchObject({ state: 'rotation-in-progress', holder: { token: 'faster' } });
+    expect(atExit).toEqual([before]);
+    // With no takeover file left, a lock left later by a killed run is still taken over by itself.
+    writeLock(h, { pid: gone, token: 'killed-again' });
+    expect((await run(h, rotateArgv(h, ['--execute']))).kind).toBe('ceremony_rotate_complete');
+  });
+
+  it('leaves alone a takeover file it did not create, and names it, when it refuses', async () => {
+    const h = await provisioned();
+    const { pid: gone } = spawnSync(process.execPath, ['-e', '']);
+    writeLock(h, { pid: gone, token: 'killed' });
+    writeFileSync(`${lockPathOf(h)}.takeover`, '{}\n');
+    const before = readdirSync(join(h.dir, 'ceremony')).sort();
+    const atExit: string[][] = [];
+
+    const refusal = await run(h, rotateArgv(h, ['--execute']), recordingExit(h, atExit));
+
+    expect(refusal.details).toMatchObject({ state: 'rotation-in-progress', holder: { token: 'killed' } });
+    expect(String(refusal.hint)).toContain(`${lockPathOf(h)}.takeover`);
+    expect(atExit).toEqual([before]);
+  });
+
+  it('takes no keys from a store that appears at its new store\'s path after its checks ran, and undoes what it wrote', async () => {
+    const h = await provisioned();
+    const retiringStore = config(h).identityStores.solver!;
+    const sessions = h.calls.filter((call) => call === 'openAnchorSession').length;
+    const submissions = h.submitted.length;
+    const catalog = readFileSync(h.catalogPath);
+    const configBytes = readFileSync(h.configPath);
+    const stores = readdirSync(join(h.dir, 'identity')).sort();
+    // Once the run has checked its new stores' paths and recorded its rotation, a store appears at
+    // the solver one. The requester store comes first, so the run has minted it by then.
+    let appeared: string | undefined;
+    afterWrite.path = join(h.dir, 'ceremony', 'rotation.json');
+    afterWrite.then = (written) => {
+      appeared = (JSON.parse(readFileSync(written, 'utf-8')) as { stores: Record<string, string> }).stores.solver!;
+      copyFileSync(retiringStore, appeared);
+    };
+
+    const refusal = await run(h, ['rotate', '--dir', h.dir, '--role-sets', 'requester,solver', '--execute']);
+
+    expect(appeared).toBeDefined();
+    expect(refusal).toMatchObject({
+      code: 'invalid_invocation',
+      details: { state: 'new-store-exists', sideEffects: false, family: 'solver', path: appeared },
+    });
+    expect(h.calls.filter((call) => call === 'openAnchorSession')).toHaveLength(sessions);
+    expect(h.submitted).toHaveLength(submissions);
+    expect(readFileSync(h.catalogPath)).toEqual(catalog);
+    expect(readFileSync(h.configPath)).toEqual(configBytes);
+    // No rotation recorded, the requester store it minted removed, and the store that appeared left alone.
+    expect(existsSync(join(h.dir, 'ceremony', 'rotation.json'))).toBe(false);
+    expect(readdirSync(join(h.dir, 'identity')).sort()).toEqual([...stores, basename(appeared!)].sort());
+    expect(readFileSync(appeared!)).toEqual(readFileSync(retiringStore));
   });
 });

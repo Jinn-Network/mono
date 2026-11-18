@@ -30,6 +30,13 @@ defaults:
   run:
     working-directory: packages/core
 
+# CPU-only. Skip the optional CUDA downloads of both onnxruntime-node installer
+# generations; their CPU binaries ship in the npm package (#5392,
+# .github/scripts/workflow-onnxruntime-skip.test.mjs).
+env:
+  ONNXRUNTIME_NODE_INSTALL: skip
+  ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
 jobs:
   check:
     name: Typecheck, Test & Build
@@ -64,6 +71,32 @@ jobs:
       - run: yarn build
       - run: yarn typecheck
       - run: yarn test
+      # The npm bundled with the runner's Node 22 (10.9.9) can crash on packed
+      # installs (#5079). Pin the version the other package lanes pin.
+      - name: Pin npm for the packed install
+        run: npm install --global npm@11.19.0 --no-audit --no-fund
+      - name: Install the packed tarball the way a user does
+        # A user who installs @jinn-network/core sets neither ONNX Runtime
+        # variable, so this step unsets the two the workflow sets for the Yarn
+        # installs above. On Linux x64 the onnxruntime-node postinstall scripts
+        # then run as they do for that user, and a required dependency whose
+        # install fails also fails this step (#5395).
+        run: |
+          set -euo pipefail
+          unset ONNXRUNTIME_NODE_INSTALL ONNXRUNTIME_NODE_INSTALL_CUDA
+          work="$(mktemp -d)"
+          (cd ../plugin && npm pack --silent --pack-destination "$work")
+          npm pack --silent --pack-destination "$work"
+          mkdir "$work/consumer"
+          npm install --prefix "$work/consumer" --no-audit --no-fund \
+            "$work"/jinn-network-plugin-*.tgz "$work"/jinn-network-core-*.tgz
+          cd "$work/consumer"
+          node --input-type=module -e "await import('@jinn-network/core'); await import('@jinn-network/core/scrub');"
+          if [ -d node_modules/@lmoe/gliner-onnx ]; then
+            echo "@lmoe/gliner-onnx is installed"
+          else
+            echo "@lmoe/gliner-onnx is not installed: its install failed and npm dropped the optional dependency"
+          fi
 
   client-compat:
     name: Client Typecheck & Extracted-Boundary Tests

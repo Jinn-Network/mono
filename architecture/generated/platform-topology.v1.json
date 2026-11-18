@@ -3020,12 +3020,13 @@
       },
       "classification": "legacy",
       "dependencies": {
-        "optional": [],
+        "optional": [
+          "@lmoe/gliner-onnx"
+        ],
         "peer": [],
         "runtime": [
           "@huggingface/transformers",
           "@jinn-network/plugin",
-          "@lmoe/gliner-onnx",
           "@noble/hashes",
           "@secretlint/core",
           "@secretlint/secretlint-rule-preset-recommend",

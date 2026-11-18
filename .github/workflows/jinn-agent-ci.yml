@@ -31,6 +31,13 @@ defaults:
   run:
     working-directory: plugin/scripts
 
+# CPU-only. Skip the optional CUDA downloads of both onnxruntime-node installer
+# generations; their CPU binaries ship in the npm package (#5392,
+# .github/scripts/workflow-onnxruntime-skip.test.mjs).
+env:
+  ONNXRUNTIME_NODE_INSTALL: skip
+  ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
 jobs:
   changes:
     # Four workflows run a `changes` job on every event. Without distinct display

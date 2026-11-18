@@ -971,6 +971,28 @@ test("aliasing a hostile publisher name stays linear in its length", async () =>
       `a ${" bundle's qualification document must keep its frozen ".repeat(16_000)}`,
       `a ${" bundle's qualification document must keep its frozen ".repeat(16_000)}`,
     ],
+    // The #5373 rules: a lazy label before a fixed tail, a run of field paths, and lists joined with
+    // `; ` whose items repeat a rule's own item, or never complete it. Each costs one scan.
+    [
+      `report-recompute: MethodInputError: binary-record-malformed: sha256:${"5".repeat(64)}: ${"x".repeat(1_000_000)}`,
+      `report-recompute: MethodInputError: binary-record-malformed: sha256:${"5".repeat(64)}: ${"x".repeat(1_000_000)}`,
+    ],
+    [
+      `report-recompute: MethodInputError: a: b: ${"c must carry one lowercase sha256 digesx ".repeat(25_000)}`,
+      `report-recompute: MethodInputError: a: b: ${"c must carry one lowercase sha256 digesx ".repeat(25_000)}`,
+    ],
+    [
+      `binary admission replay failed: ${"a.b: ".repeat(200_000)}`,
+      `binary admission replay failed: ${"a.b: ".repeat(200_000)}`,
+    ],
+    [
+      `sealed Report: invalid binary qualification: ${"qualification.arms must contain two or more arm; ".repeat(18_000)}`,
+      `report.json: invalid binary qualification: ${"qualification.arms must contain two or more arm; ".repeat(18_000)}`,
+    ],
+    [
+      `binary admission replay failed: admissionManifest: ${"x: digest references must be sorted and unique; ".repeat(20_000)}y`,
+      `binary admission replay failed: admissionManifest: ${"x: fingerprint references must be sorted and unique; ".repeat(20_000)}y`,
+    ],
   ]) {
     const started = performance.now();
     const result = await runVerifierCli(["bundle"], {
@@ -1614,6 +1636,429 @@ test("the #5299 refusal wording is rewritten only where a rule matches from the 
       verify: async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); },
     });
     assert.equal(result.stderr, `colophon-check: ${message}\n`, message);
+  }
+});
+
+// Issue #5373: text the platform packages write, and the check package's own schema issue messages,
+// where the refusal inventory reaches a line with them. Each row is the message as the reader's CLI
+// receives it (bare, behind the wrapper that carries it, or as the detail the result's recomputation
+// reports) and the human line a reader gets; --json keeps the message byte for byte. Every rule the
+// #5373 block of READER_WORDING adds rewrites at least one row. The last rows join several issues
+// with `; `: a rule rewords its item wherever it stands in the list, as often as it appears.
+const READER_WORDING_5373 = (() => {
+  const hex = "5".repeat(64);
+  return [
+    ["A DSSE envelope requires at least one signature.", "the DSSE-signed record requires at least one signature."],
+    ["DSSE envelope bytes are not the exact producer encoding.", "the DSSE-signed record's bytes are not the exact producer encoding."],
+    [
+      "report-envelope: invalid DSSE envelope: TrustCoreError: A DSSE envelope requires at least one signature.",
+      "report-envelope: the signed result is not valid DSSE: it carries no signature.",
+    ],
+    // The same refusals, carried through a method-input wrapper that also prints its record.
+    [
+      `report-recompute: MethodInputError: anchored-announcement-malformed: sha256:${hex}: TrustCoreError: DSSE envelope payloadType must be a string.`,
+      `report-recompute: MethodInputError: anchored-announcement-malformed: sha256:${hex}: TrustCoreError: the DSSE-signed record's payloadType must be a string.`,
+    ],
+    [
+      `report-recompute: MethodInputError: anchored-announcement-malformed: sha256:${hex}: TrustCoreError: DSSE envelope requires at least one signature.`,
+      `report-recompute: MethodInputError: anchored-announcement-malformed: sha256:${hex}: TrustCoreError: the DSSE-signed record requires at least one signature.`,
+    ],
+    [
+      `report-recompute: MethodInputError: anchored-announcement-malformed: sha256:${hex}: Error: entry previous must be null or an exact lowercase sha256 digest`,
+      `report-recompute: MethodInputError: anchored-announcement-malformed: sha256:${hex}: Error: entry previous must be null or an exact fingerprint in lowercase hex`,
+    ],
+    [
+      `report-recompute: MethodInputError: anchored-announcement-malformed: sha256:${hex}: Error: signed entry does not announce the requested Benchmark digest`,
+      `report-recompute: MethodInputError: anchored-announcement-malformed: sha256:${hex}: Error: signed entry does not announce the requested Benchmark fingerprint`,
+    ],
+    [
+      "anchor record is not the exact sealed encoding of a conforming AnchorEvidence: Anchor-evidence bytes are not the exact sealed encoding.",
+      "the timestamp proof is not the exact sealed encoding of a conforming AnchorEvidence: its bytes are not the exact sealed encoding.",
+    ],
+    [
+      "carried anchor is invalid: ESSCertIDv2.hashAlgorithm names digest algorithm 1.3.14.3.2.26, which is not admitted.",
+      "carried timestamp proof is invalid: ESSCertIDv2.hashAlgorithm names hash algorithm 1.3.14.3.2.26, which is not admitted.",
+    ],
+    [
+      "carried anchor is invalid: RSASSA-PSS carries no parameters, so its digest defaults to SHA-1 (§6.1 rule 5).",
+      "carried timestamp proof is invalid: RSASSA-PSS carries no parameters, so its hash defaults to SHA-1 (§6.1 rule 5).",
+    ],
+    [
+      "carried anchor is invalid: The file digest operation is 0x02; this profile admits SHA-256 (0x08) only.",
+      "carried timestamp proof is invalid: The file hash operation is 0x02; this profile admits SHA-256 (0x08) only.",
+    ],
+    [
+      "carried anchor is invalid: The messageDigest attribute is not the digest of eContent (§6.1 rule 4).",
+      "carried timestamp proof is invalid: The messageDigest attribute is not the hash of eContent (§6.1 rule 4).",
+    ],
+    [
+      "carried anchor is invalid: TSTInfo.tsa is not among the signer certificate's subject names (§6.1 rule 10).",
+      "carried timestamp proof is invalid: TSTInfo.tsa is not among the names the signer certificate is issued to (§6.1 rule 10).",
+    ],
+    [
+      `carried anchor is invalid: The proof is detached from ${hex}, not from the subject ${hex}.`,
+      `carried timestamp proof is invalid: The proof is detached from ${hex}, not from the covered record's fingerprint ${hex}.`,
+    ],
+    [
+      "carried anchor is invalid: The subject digest is not 64 hex characters.",
+      "carried timestamp proof is invalid: The covered record's fingerprint is not 64 hex characters.",
+    ],
+    [
+      "carried anchor is invalid: messageImprint.hashAlgorithm is 1.3.14.3.2.26; the caller's subject digest is a SHA-256 and cannot be compared to it (§6.1 rule 12).",
+      "carried timestamp proof is invalid: messageImprint.hashAlgorithm is 1.3.14.3.2.26; the covered record's fingerprint is a SHA-256 hash and cannot be compared to it (§6.1 rule 12).",
+    ],
+    [
+      "carried anchor is invalid: messageImprint.hashedMessage is not the subject digest (§6.1 rule 12).",
+      "carried timestamp proof is invalid: messageImprint.hashedMessage is not the covered record's fingerprint (§6.1 rule 12).",
+    ],
+    [
+      `malformed cellKey task digest (must be 64 lowercase hex digits): ${hex}/x/1`,
+      `malformed cellKey task fingerprint (must be 64 lowercase hex digits): ${hex}/x/1`,
+    ],
+    [
+      `malformed cellKey replicate (must be 1-based minimal decimal): ${hex}/x/1`,
+      `malformed cellKey repeat (must be 1-based minimal decimal): ${hex}/x/1`,
+    ],
+    ["expected cell set exceeds MAX_MATERIALIZED_CELLS (1000000): 1500000", "the expected set of runs exceeds the cap of 1000000 runs: 1500000"],
+    [
+      "expected cell cardinality exceeds Number.MAX_SAFE_INTEGER: 9007199254740993",
+      "the expected number of runs exceeds Number.MAX_SAFE_INTEGER: 9007199254740993",
+    ],
+    [
+      "Benchmark item's task descriptor lacks a sha256 digest (schema invariant violated)",
+      "Benchmark item's task descriptor lacks a fingerprint (schema invariant violated)",
+    ],
+    [
+      `artifacts/${hex}.bin digest does not match its exact descriptor`,
+      `artifacts/${hex}.bin fingerprint does not match its exact descriptor`,
+    ],
+    ["claim-package/3 evidence closure differs from records/", "the claim's evidence closure differs from records/"],
+    [
+      "claim-package/3 is inconsistent with the exact evidence-native chain",
+      "the claim is inconsistent with the exact evidence-native chain",
+    ],
+    ["report.json differs from the signed Report v3 payload", "report.json differs from the signed v3 result's payload"],
+    ["Report v3 signature is invalid or unbound", "the v3 result's signature is invalid or unbound"],
+    ["Report v3 envelope has the wrong payload type", "the signed v3 result has the wrong payload type"],
+    ["Report v2 must subject the exact Matrix v2 bytes", "the v2 result must name the exact v2 matrix.json bytes as its input"],
+    [
+      "matrix-rederivation: exact matrix bytes are required for verifyMatrix",
+      "matrix-rederivation: the exact bytes of matrix.json are required for verifyMatrix",
+    ],
+    [
+      "matrix-rederivation: re-derived matrix bytes diverge at offset 0",
+      "matrix-rederivation: the runs re-derived from the evidence diverge from matrix.json at offset 0",
+    ],
+    [
+      "evaluator-independence: evaluator Agent IRI is not distinct from solver",
+      "evaluator-independence: judge Agent IRI is not distinct from solver",
+    ],
+    [
+      "evaluator-independence: solver or evaluator unresolved (fail-closed)",
+      "evaluator-independence: solver or judge unresolved (fail-closed)",
+    ],
+    [
+      "verdict-spec-match: verdict lacks a digest-shaped evaluationSpecification and task has no pinned digest",
+      "verdict-spec-match: verdict lacks a fingerprint-shaped evaluationSpecification and task has no pinned fingerprint",
+    ],
+    [
+      "report-authenticity: Report envelope has no signer keyid to bind to author",
+      "report-authenticity: the signed result has no signer keyid to bind to author",
+    ],
+    [
+      "report-envelope: Report payload bytes are not the exact canonical encoding",
+      "report-envelope: the result's payload bytes are not the exact canonical encoding",
+    ],
+    [
+      "report-envelope: invalid Report payload: IJsonNumberError: number is not an exact I-JSON integer: x",
+      "report-envelope: invalid result payload: IJsonNumberError: number is not an exact I-JSON integer: x",
+    ],
+    [
+      "report-recompute: exact subject bytes/order do not match the sealed Report subjects",
+      "report-recompute: the exact matrix.json bytes, in order, do not match the runs the sealed result names",
+    ],
+    [
+      "disclosures-faithfulness: recomputed per-subject disclosures do not match the exact subject bytes/order",
+      "disclosures-faithfulness: what was pinned, recomputed from the exact matrix.json bytes in order, does not match the sealed result",
+    ],
+    [
+      `disclosures-faithfulness: Error: subject ${hex} is not a valid Matrix: IJsonNumberError: number is not an exact I-JSON integer: x`,
+      `disclosures-faithfulness: Error: matrix.json ${hex} is not valid: IJsonNumberError: number is not an exact I-JSON integer: x`,
+    ],
+    [
+      `disclosures-faithfulness: Error: subject ${hex} is not the exact canonical Matrix encoding`,
+      `disclosures-faithfulness: Error: matrix.json ${hex} is not in exact canonical encoding`,
+    ],
+    [
+      `benchmark-comparability: subjects resolve to distinct Benchmark digests: ${hex}`,
+      `benchmark-comparability: the result's runs resolve to distinct Benchmark fingerprints: ${hex}`,
+    ],
+    [
+      "benchmark-comparability: version-robust result does not disclose exact paired Task digests",
+      "benchmark-comparability: version-robust result does not disclose exact paired Task fingerprints",
+    ],
+    [
+      "benchmark-comparability: version-robust cross-Benchmark result has no exact shared Task-digest pairing",
+      "benchmark-comparability: version-robust cross-Benchmark result has no exact shared Task-fingerprint pairing",
+    ],
+    [
+      "benchmark-comparability: version-robust cross-Benchmark results must disclose one identical Task-digest pairing per subject",
+      "benchmark-comparability: version-robust cross-Benchmark results must disclose one identical Task-fingerprint pairing for each set of runs",
+    ],
+    [
+      "benchmark-comparability: version-robust pairing includes a Task digest not shared by every subject",
+      "benchmark-comparability: version-robust pairing includes a Task fingerprint not shared by every set of runs",
+    ],
+    [
+      `report-recompute: Error: method subjectSha256 is not an exact lowercase sha256: ${hex}`,
+      `report-recompute: Error: method subjectSha256 is not an exact fingerprint in lowercase hex: ${hex}`,
+    ],
+    [
+      `report-recompute: Error: method subjectSha256 ${hex} does not match canonical Matrix digest ${hex}`,
+      `report-recompute: Error: method subjectSha256 ${hex} does not match the canonical matrix.json fingerprint ${hex}`,
+    ],
+    [
+      `report-recompute: Error: method subject identity is duplicated: ${hex}`,
+      `report-recompute: Error: the method is given the same matrix.json twice: ${hex}`,
+    ],
+    [
+      "report-recompute: Error: clean-subset@1: delegate did not preserve the restricted subject identity",
+      "report-recompute: Error: clean-subset@1: delegate did not preserve the identity of the restricted runs",
+    ],
+    [
+      "report-recompute: Error: entry previous must be null or an exact lowercase sha256 digest",
+      "report-recompute: Error: entry previous must be null or an exact fingerprint in lowercase hex",
+    ],
+    [
+      "report-recompute: Error: signed entry does not announce the requested Benchmark digest",
+      "report-recompute: Error: signed entry does not announce the requested Benchmark fingerprint",
+    ],
+    ["report-recompute: Error: instrument arm ids must be unique", "report-recompute: Error: the judges' configuration ids must be unique"],
+    ["report-recompute: Error: invalid instrument digest for x", "report-recompute: Error: invalid judge fingerprint for configuration x"],
+    [
+      "report-recompute: Error: invalid paired-majority-delta@1 parameters: parameters \"baseline\" and \"candidate\" must name distinct arms",
+      "report-recompute: Error: invalid paired-majority-delta@1 parameters: parameters \"baseline\" and \"candidate\" must name distinct configurations",
+    ],
+    [
+      "sealed Report: invalid binary qualification: qualification cell keys must be unique across item groups",
+      "report.json: invalid binary qualification: qualification runs must be unique across item groups",
+    ],
+    [
+      "sealed Report: invalid binary qualification: qualification task x must carry exactly one group for every arm",
+      "report.json: invalid binary qualification: qualification task x must carry exactly one group for every configuration",
+    ],
+    [
+      "sealed Report: invalid binary qualification: qualification.arms must bind distinct instruments per arm",
+      "report.json: invalid binary qualification: qualification.arms must bind a distinct judge for each configuration",
+    ],
+    [
+      "sealed Report: invalid binary qualification: qualification.arms must contain two or more arms",
+      "report.json: invalid binary qualification: qualification.arms must contain two or more configurations",
+    ],
+    [
+      "sealed Report: invalid binary qualification: qualification.conflicted contains an unknown cell key",
+      "report.json: invalid binary qualification: qualification.conflicted contains an unknown run",
+    ],
+    [
+      `report-recompute: MethodInputError: anchored-announcement-unavailable: sha256:${hex}: resolver returned no exact signed Discovery Entry envelope bytes`,
+      `report-recompute: MethodInputError: anchored-announcement-unavailable: sha256:${hex}: resolver returned no exact DSSE-signed Discovery Entry bytes`,
+    ],
+    [
+      `report-recompute: MethodInputError: anchored-announcement-unverified: sha256:${hex}: verification proof does not bind the exact source, entry chain, head anchor, and derived time`,
+      `report-recompute: MethodInputError: anchored-announcement-unverified: sha256:${hex}: verification proof does not bind the exact source, entry chain, timestamp proof of the head, and derived time`,
+    ],
+    [
+      `report-recompute: MethodInputError: binary-binding-mismatch: ${hex}: Result Evaluation does not bind the exact Matrix Task`,
+      `report-recompute: MethodInputError: binary-binding-mismatch: ${hex}: Result Evaluation does not bind the exact Task its run names`,
+    ],
+    [
+      `report-recompute: MethodInputError: binary-binding-mismatch: ${hex}: parser-invalid output does not match the sealed instrument policy`,
+      `report-recompute: MethodInputError: binary-binding-mismatch: ${hex}: the decision on an answer that could not be read does not match the sealed judge record's policy`,
+    ],
+    [
+      `report-recompute: MethodInputError: binary-binding-mismatch: ${hex}: signed instrument drifts from the Run arm pin`,
+      `report-recompute: MethodInputError: binary-binding-mismatch: ${hex}: the signed judge drifts from the Run configuration's judge pin`,
+    ],
+    [
+      `report-recompute: MethodInputError: binary-binding-mismatch: ${hex}: sole Result Evaluation is reused across Matrix cells x and ${hex}/x/1`,
+      `report-recompute: MethodInputError: binary-binding-mismatch: ${hex}: sole Result Evaluation is reused across runs x and ${hex}/x/1`,
+    ],
+    [
+      `report-recompute: MethodInputError: binary-binding-mismatch: sha256:${hex}: EvaluationSpec drifts from the frozen binary evaluator contract`,
+      `report-recompute: MethodInputError: binary-binding-mismatch: sha256:${hex}: EvaluationSpec drifts from the frozen binary judge contract`,
+    ],
+    [
+      `report-recompute: MethodInputError: binary-binding-mismatch: sha256:${hex}: EvaluationSpec grader digest is not the frozen binary evaluator semantics`,
+      `report-recompute: MethodInputError: binary-binding-mismatch: sha256:${hex}: EvaluationSpec grader fingerprint is not the frozen binary judge semantics`,
+    ],
+    [
+      `report-recompute: MethodInputError: binary-binding-mismatch: sha256:${hex}: Run arms do not exactly cover Matrix arms`,
+      `report-recompute: MethodInputError: binary-binding-mismatch: sha256:${hex}: the sealed Run's configurations do not exactly cover matrix.json's configurations`,
+    ],
+    [
+      `report-recompute: MethodInputError: binary-binding-mismatch: sha256:${hex}: Task must remain arm-neutral and cannot pin an instrument`,
+      `report-recompute: MethodInputError: binary-binding-mismatch: sha256:${hex}: Task must remain configuration-neutral and cannot pin a judge`,
+    ],
+    [
+      `report-recompute: MethodInputError: binary-binding-mismatch: sha256:${hex}: binary-instrument@1 requires distinct instruments across arms`,
+      `report-recompute: MethodInputError: binary-binding-mismatch: sha256:${hex}: binary-instrument@1 requires a distinct judge for each configuration`,
+    ],
+    [
+      `report-recompute: MethodInputError: binary-binding-mismatch: sha256:${hex}: binary-instrument@1 requires two or more matching, distinct Run and Matrix arms`,
+      `report-recompute: MethodInputError: binary-binding-mismatch: sha256:${hex}: binary-instrument@1 requires two or more distinct configurations, matching between the sealed Run and matrix.json`,
+    ],
+    [
+      `report-recompute: MethodInputError: binary-binding-mismatch: sha256:${hex}: judge observation drifts from its exact Matrix cell or semantic request`,
+      `report-recompute: MethodInputError: binary-binding-mismatch: sha256:${hex}: judge observation drifts from its exact run or semantic request`,
+    ],
+    [
+      `report-recompute: MethodInputError: binary-binding-mismatch: sha256:${hex}: judge observation limitations are not the frozen per-profile disclosure`,
+      `report-recompute: MethodInputError: binary-binding-mismatch: sha256:${hex}: judge observation limitations are not the frozen per-profile limitations`,
+    ],
+    [
+      `report-recompute: MethodInputError: binary-record-malformed: sha256:${hex}: judge observation cannot resolve its instrument's declared model`,
+      `report-recompute: MethodInputError: binary-record-malformed: sha256:${hex}: judge observation cannot resolve its judge record's declared model`,
+    ],
+    [
+      "report-recompute: MethodInputError: binary-binding-mismatch: x: instrument generation drifts from the frozen x call policy",
+      "report-recompute: MethodInputError: binary-binding-mismatch: x: the judge record's generation drifts from the frozen x call policy",
+    ],
+    [
+      "report-recompute: MethodInputError: binary-binding-mismatch: x: instrument identity does not match the Run arm",
+      "report-recompute: MethodInputError: binary-binding-mismatch: x: the judge record's identity does not match its Run configuration",
+    ],
+    [
+      "report-recompute: MethodInputError: binary-binding-mismatch: x: instrument prompt digest does not match its message templates",
+      "report-recompute: MethodInputError: binary-binding-mismatch: x: the judge record's prompt fingerprint does not match its message templates",
+    ],
+    [
+      "report-recompute: MethodInputError: binary-binding-mismatch: x: instrument must use the jinn-openai adapter and a declared judge model",
+      "report-recompute: MethodInputError: binary-binding-mismatch: x: the judge record must use the jinn-openai adapter and a declared judge model",
+    ],
+    [
+      "report-recompute: MethodInputError: binary-binding-mismatch: x: instrument invalidOutputDecision does not match its registered parser pair",
+      "report-recompute: MethodInputError: binary-binding-mismatch: x: the judge record's invalidOutputDecision does not match its registered parser pair",
+    ],
+    [
+      "report-recompute: MethodInputError: binary-record-digest-mismatch: x: arm x instrument bytes hash to x",
+      "report-recompute: MethodInputError: binary-record-digest-mismatch: x: configuration x's judge record bytes hash to x",
+    ],
+    [
+      `report-recompute: MethodInputError: binary-record-malformed: sha256:${hex}: Run arm x instrument pin must be sha256:<64 lowercase hex>`,
+      `report-recompute: MethodInputError: binary-record-malformed: sha256:${hex}: Run configuration x's judge pin must be sha256:<64 lowercase hex>`,
+    ],
+    [
+      `report-recompute: MethodInputError: binary-record-malformed: sha256:${hex}: analysis-context.json digest has an unsupported field set`,
+      `report-recompute: MethodInputError: binary-record-malformed: sha256:${hex}: analysis-context.json's fingerprint field has an unsupported field set`,
+    ],
+    [
+      `report-recompute: MethodInputError: verdict-record-malformed: ${hex}: invalid DSSE envelope: x`,
+      `report-recompute: MethodInputError: verdict-record-malformed: ${hex}: not valid DSSE: x`,
+    ],
+    [
+      `report-recompute: MethodInputError: binary-record-malformed: ${hex}: Task subject digest must carry one lowercase sha256 digest`,
+      `report-recompute: MethodInputError: binary-record-malformed: ${hex}: Task subject digest must carry one fingerprint in lowercase hex`,
+    ],
+    [
+      `report-recompute: MethodInputError: verdict-record-malformed: ${hex}: every subject must carry one exact lowercase sha256 digest`,
+      `report-recompute: MethodInputError: verdict-record-malformed: ${hex}: every subject must carry one exact fingerprint in lowercase hex`,
+    ],
+    [
+      "report-recompute: MethodInputError: binary-record-malformed: x: reviewVerdictSha256s must be a strictly sorted unique pair of sha256 digests",
+      "report-recompute: MethodInputError: binary-record-malformed: x: reviewVerdictSha256s must be a strictly sorted unique pair of fingerprints",
+    ],
+    [
+      "report-recompute: BinaryInstrumentReductionError: context-drift: contexts must name every and only Matrix Task exactly once",
+      "report-recompute: BinaryInstrumentReductionError: context-drift: contexts must name every and only Task in matrix.json exactly once",
+    ],
+    [
+      `report-recompute: BinaryInstrumentReductionError: duplicate-coordinate: Matrix repeats ${hex}/x/x`,
+      `report-recompute: BinaryInstrumentReductionError: duplicate-coordinate: matrix.json repeats ${hex}/x/x`,
+    ],
+    [
+      "report-recompute: BinaryInstrumentReductionError: incomplete-coordinate-set: Matrix is not the exact task x arm x 1..x cell set",
+      "report-recompute: BinaryInstrumentReductionError: incomplete-coordinate-set: matrix.json is not the exact task x configuration x 1..x set of runs",
+    ],
+    [
+      `report-recompute: BinaryInstrumentReductionError: instrument-drift: ${hex}/x/1 does not carry arm x's expected instrument`,
+      `report-recompute: BinaryInstrumentReductionError: instrument-drift: ${hex}/x/1 does not carry configuration x's expected judge`,
+    ],
+    [
+      "report-recompute: BinaryInstrumentReductionError: instrument-drift: duplicate instrument for arm x",
+      "report-recompute: BinaryInstrumentReductionError: instrument-drift: duplicate judge for configuration x",
+    ],
+    [
+      "report-recompute: BinaryInstrumentReductionError: instrument-drift: instruments must name every and only Matrix arm exactly once",
+      "report-recompute: BinaryInstrumentReductionError: instrument-drift: judges must name every and only configuration in matrix.json exactly once",
+    ],
+    [
+      "report-recompute: BinaryInstrumentReductionError: invalid-subject: Matrix must contain at least one cell",
+      "report-recompute: BinaryInstrumentReductionError: invalid-subject: matrix.json must contain at least one run",
+    ],
+    [
+      `report-recompute: BinaryInstrumentReductionError: unknown-cell-input: cell ${hex}/x/1 without a sole valid verdict carries a parsed evaluation`,
+      `report-recompute: BinaryInstrumentReductionError: unknown-cell-input: run ${hex}/x/1 without a sole valid verdict carries a parsed evaluation`,
+    ],
+    [
+      `report-recompute: BinaryInstrumentReductionError: unknown-cell-input: non-judged cell ${hex}/x/1 carries a parsed evaluation`,
+      `report-recompute: BinaryInstrumentReductionError: unknown-cell-input: non-judged run ${hex}/x/1 carries a parsed evaluation`,
+    ],
+    [
+      `report-recompute: BinaryInstrumentReductionError: unknown-cell-input: parsed input names non-Matrix cell ${hex}/x/1`,
+      `report-recompute: BinaryInstrumentReductionError: unknown-cell-input: parsed input names ${hex}/x/1, a run matrix.json does not carry`,
+    ],
+    [
+      `report-recompute: BinaryInstrumentReductionError: verdict-digest-mismatch: ${hex}/x/1 parsed ${hex}, Matrix names x`,
+      `report-recompute: BinaryInstrumentReductionError: verdict-digest-mismatch: ${hex}/x/1 parsed ${hex}, matrix.json names x`,
+    ],
+    [
+      "binary admission replay failed: admissionManifest: (root): digest references must be sorted and unique",
+      "binary admission replay failed: admissionManifest: (root): fingerprint references must be sorted and unique",
+    ],
+    [
+      `report-recompute: MethodInputError: verdict-record-malformed: ${hex}: invalid DSSE envelope: TrustCoreError: DSSE envelope payload must be a string.`,
+      `report-recompute: MethodInputError: verdict-record-malformed: ${hex}: not valid DSSE: payload must be a string.`,
+    ],
+    [
+      "sealed Report: invalid binary qualification: qualification.arms must contain two or more arms; qualification task t1 must carry exactly one group for every arm; qualification task t2 must carry exactly one group for every arm",
+      "report.json: invalid binary qualification: qualification.arms must contain two or more configurations; qualification task t1 must carry exactly one group for every configuration; qualification task t2 must carry exactly one group for every configuration",
+    ],
+    [
+      "binary admission replay failed: admissionManifest: reviewVerdictSha256s: digest references must be sorted and unique; (root): Invalid input; visibilityReceiptSha256s: digest references must be sorted and unique",
+      "binary admission replay failed: admissionManifest: reviewVerdictSha256s: fingerprint references must be sorted and unique; (root): Invalid input; visibilityReceiptSha256s: fingerprint references must be sorted and unique",
+    ],
+    [
+      "report-recompute: invalid method parameters: parameter \"k\" must be an odd positive safe integer; parameters \"baseline\" and \"candidate\" must name distinct arms",
+      "report-recompute: invalid method parameters: parameter \"k\" must be an odd positive safe integer; parameters \"baseline\" and \"candidate\" must name distinct configurations",
+    ],
+  ];
+})();
+
+test("the platform and schema refusals the inventory reaches use the reader's names, and --json keeps the message", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  for (const [message, human] of READER_WORDING_5373) {
+    const verify = async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); };
+    const result = await runVerifierCli(["bundle"], { verify });
+    assert.equal(result.exitCode, 1, message);
+    assert.equal(result.stderr, `colophon-check: ${human}\n`, message);
+
+    const json = await runVerifierCli(["bundle", "--json"], { verify });
+    assert.equal(json.stderr, "", message);
+    assert.equal(JSON.parse(json.stdout).message, message);
+  }
+});
+
+// The same rules, after text a publisher could choose: each prints unchanged. A list item is
+// reworded only inside a list the message starts with.
+test("the #5373 refusal wording is rewritten only where a rule matches from the message's start", async () => {
+  const { runVerifierCli } = await import("../dist/index.js");
+  for (const [body] of READER_WORDING_5373) {
+    for (const message of [`unknown member: ${body}`, `; ${body}`]) {
+      const result = await runVerifierCli(["bundle"], {
+        verify: async () => { throw Object.assign(new Error(message), { code: "record-integrity" }); },
+      });
+      assert.equal(result.stderr, `colophon-check: ${message}\n`, message);
+    }
   }
 });
 
