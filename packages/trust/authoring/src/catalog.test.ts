@@ -26,11 +26,13 @@ import { NATIVE_ANCHOR_CHAIN_ID, NATIVE_ANCHOR_PROFILE, type AnchorDeclaration }
 import { authorRoleBinding, roleBindingTerms, type SealedBindingEntry } from "./binding.js";
 import {
   appendOperator,
+  assertNoRetiredKeyBound,
   authorCatalog,
   completePolicyPurposes,
   planRevocation,
   rebindRoles,
   REVOCATION_ANCHOR_PROTOCOL,
+  retiredKeys,
   revocationAnchorDigest,
   revokeBinding,
   sealPolicySuccessor,
@@ -936,7 +938,13 @@ describe("authorCatalog re-authoring a catalog that holds revocations", () => {
   /** What `jinn ceremony init` re-authors over the same directory: the named stores' keys, again. */
   async function reauthor(
     operator: Awaited<ReturnType<typeof rotated>>,
-    options: { readonly labels?: readonly string[]; readonly anchor?: AnchorDeclaration; readonly previous?: boolean } = {},
+    options: {
+      readonly labels?: readonly string[];
+      readonly anchor?: AnchorDeclaration;
+      readonly previous?: boolean;
+      /** The Agent the keys are bound to: a re-author that minted a new Agent IRI binds them to that. */
+      readonly agent?: string;
+    } = {},
   ) {
     const anchor = options.anchor ?? declaration(ANCHOR_A, "ab");
     const bindings: SealedBindingEntry[] = [];
@@ -944,7 +952,7 @@ describe("authorCatalog re-authoring a catalog that holds revocations", () => {
       bindings.push(...await bindingsFor({
         root: operator.root,
         label,
-        agent: AGENT_A,
+        agent: options.agent ?? AGENT_A,
         roles: label === "a-solver" ? SOLVER_ROLES : REQUESTER_ROLES,
         anchorDigest: anchor.digest,
         validFrom: TIME_A,
@@ -995,6 +1003,81 @@ describe("authorCatalog re-authoring a catalog that holds revocations", () => {
     // `jinn ceremony init` opens the stores at their original paths, which hold the retired keys.
     await expect(reauthor(operator, { labels: ["a-solver", "a-requester"] })).rejects.toThrow(named);
     await expect(stat(operator.path)).rejects.toThrow();
+  });
+
+  it("refuses, naming the revocation, a re-author that binds a retired key to another Agent, and writes nothing (#5372)", async () => {
+    const operator = await rotated();
+    const named = new RegExp(
+      `revocation (${operator.revocations.map(({ digest }) => digest).join("|")}) retired key did:key:`,
+      "u",
+    );
+
+    // An init whose config and run receipt are gone mints a new Agent IRI and binds the same stores to it.
+    await expect(reauthor(operator, { labels: ["a-solver", "a-requester"], agent: AGENT_B })).rejects.toThrow(named);
+    await expect(stat(operator.path)).rejects.toThrow();
+  });
+
+  it("names the keys a catalog's revocations retire, which assertNoRetiredKeyBound refuses for any Agent (#5372)", async () => {
+    const operator = await rotated();
+
+    const retired = await retiredKeys(operator.previousPath);
+
+    expect(retired.retired.map(({ keyId }) => keyId).sort()).toEqual(operator.solver.map(({ keyId }) => keyId).sort());
+    for (const agent of [AGENT_A, AGENT_B]) {
+      expect(() => assertNoRetiredKeyBound(retired, operator.solver.map(({ keyId }) => ({ agent, keyId }))))
+        .toThrow(/retired key did:key:/u);
+    }
+    // A key no revocation retired passes, for any Agent.
+    const fresh = await bindingsFor({
+      root: operator.root, label: "b-solver", agent: AGENT_B, roles: SOLVER_ROLES, anchorDigest: ANCHOR_C, validFrom: TIME_C,
+    });
+    expect(() => assertNoRetiredKeyBound(retired, fresh)).not.toThrow();
+  });
+
+  /**
+   * `jinn ceremony join` appends to a catalog that may hold revocations: its own, after a rotation,
+   * or another operator's. The catalog the rotation left is joined where `rotated` moved it.
+   */
+  describe("appendOperator joining it", () => {
+    async function join(operator: Awaited<ReturnType<typeof rotated>>, label: string, agent: string) {
+      const bindings = await bindingsFor({
+        root: operator.root, label, agent, roles: SOLVER_ROLES, anchorDigest: ANCHOR_C, validFrom: TIME_C,
+      });
+      return appendOperator({
+        catalogPath: operator.previousPath,
+        authority: operator.authority,
+        newBindings: bindings,
+        newAnchor: declaration(ANCHOR_C, "77"),
+        refreshBy: REFRESH_BY,
+      });
+    }
+
+    it("refuses, naming the revocation, to bind a key a revocation in the catalog retired, whichever Agent, and writes nothing (#5372)", async () => {
+      const operator = await rotated();
+      const named = new RegExp(
+        `revocation (${operator.revocations.map(({ digest }) => digest).join("|")}) retired key did:key:`,
+        "u",
+      );
+      const before = await readFile(operator.previousPath);
+
+      for (const agent of [AGENT_A, AGENT_B]) {
+        // eslint-disable-next-line no-await-in-loop -- each refusal is checked before the next.
+        await expect(join(operator, "a-solver", agent)).rejects.toThrow(named);
+      }
+
+      expect(await readFile(operator.previousPath)).toEqual(before);
+      await expect(stat(`${operator.previousPath}.lock`)).rejects.toThrow();
+    });
+
+    it("still appends keys no revocation retired, beside the revocations the catalog holds", async () => {
+      const operator = await rotated();
+
+      await join(operator, "b-solver", AGENT_B);
+
+      const after = await readCatalog(operator.previousPath);
+      expect(after.revocations).toEqual(operator.revocations);
+      expect(after.bindings).toHaveLength(operator.previous.bindings.length + SOLVER_ROLES.length);
+    });
   });
 
   it("refuses, naming it, a revocation whose anchor the previous catalog does not declare, and writes nothing", async () => {

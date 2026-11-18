@@ -203,8 +203,8 @@ revocations as `carriedRevocations`.
   declare (the refusal names the revocation);
 - the re-author declares an anchor a carried record relies on differently from the replaced catalog,
   which would move that record's time;
-- the re-author would bind a key a carried revocation retired, for the same Agent (the refusal names
-  the revocation);
+- the re-author would bind a key a carried revocation retired, to any Agent: the one the revocation
+  retired it for, or a new one `init` minted (`retired-key-bound`; the refusal names the revocation);
 - a rotation in `<dir>` replaced or is replacing a family it would bind, an earlier rotation
   included, whatever `--previous-catalog` and `--config` name (`rotated-family`). It reads three
   records, and opens no store to read them:
@@ -232,9 +232,10 @@ be re-authored with `init`. The refusal comes before `init` opens any store or p
 spends no gas. The retired-key refusal is the check behind it: when the rotated stores have been
 moved out of `<dir>/identity`, `rotation.json` no longer records the family, the run receipt is gone,
 and the config names no other store for it, it still refuses if `--previous-catalog` is the catalog
-holding the rotation's revocations and the config `--config` names carries the operator's `agentIri`
-and `admissionAgent`. That check matches the Agent as well as the key, so with the run receipt gone
-and no Agent IRI in the config, `init` mints new Agent IRIs and binds the retired keys to them.
+holding the rotation's revocations. That check matches the key alone, whatever Agent `init` would bind
+it to, so it refuses as well when, with the run receipt gone and no Agent IRI in the config, `init`
+mints new Agent IRIs. `jinn ceremony join` runs the same check, before any anchor, against the
+catalog `--catalog` names, and `appendOperator` runs it again before it writes.
 
 ## Cost and sequencing
 
