@@ -25,6 +25,7 @@ import {
   primaryKeystorePasswordPath,
   replacePasswordFileAtomically,
 } from '../../earning/password-file.js';
+import { parsePasswordFdFromArgv, readPasswordFromFd } from '../password.js';
 // ── Structured progress envelope ─────────────────────────────────────────────
 
 /**
@@ -124,7 +125,7 @@ export function createQuickstartCommand(deps: QuickstartDeps = PRODUCTION_DEPS):
   return {
     name: 'quickstart',
     summary: 'Legacy compatibility alias for zero-to-running setup; prefer jinn run',
-    helpText: `Usage: jinn quickstart [--no-daemon] [--json-progress] [--config <path>]
+    helpText: `Usage: jinn quickstart [--no-daemon] [--json-progress] [--config <path>] [--password-fd <fd>]
 
 Compatibility command. New operators should run \`jinn run\`; it opens the
 operator app and walks Claude/runtime setup there when needed.
@@ -146,14 +147,17 @@ Flags:
                     attempt, blocking, nextAction, addresses, estimatedWaitMs.
                     Automatically enabled in --json mode on non-TTY stdout.
   --config <path>   Path to config file.
+  --password-fd <fd>  Read the keystore password from this file descriptor.
 
 Runtime mode:
   New operators do not need to choose a runtime mode at the CLI. Complete any
   required Claude/runtime setup in the app opened by \`jinn run\`.
 
 Password handling:
-  If JINN_PASSWORD is set in the environment, that value is used — no file
-  is written. This is the recommended approach for CI and advanced use.
+  A password read from --password-fd is used first, then JINN_PASSWORD; with
+  either, no file is written and that one password is used for every step
+  (wallet, bootstrap, daemon). This is the recommended approach for CI and
+  advanced use.
 
   Otherwise quickstart auto-generates a random password and writes it to
   <earningDir>/keystore-password (mode 0600; typically
@@ -177,7 +181,7 @@ Agent/script mode (--json / --no-daemon / --json-progress):
       "status": "ready",
       "masterAddress": "0x...",
       "dashboardUrl": "http://127.0.0.1:7331",
-      "passwordFile": "<earningDir>/keystore-password"  // omitted if JINN_PASSWORD was used
+      "passwordFile": "<earningDir>/keystore-password"  // omitted unless a password was generated
     }
 
   Operational verbs emit JSON on stdout by default. Use --human for
@@ -197,6 +201,9 @@ Examples:
 
   # CI: supply password via env, no daemon
   JINN_PASSWORD=mysecret jinn quickstart --no-daemon
+
+  # CI: supply password on a file descriptor, no daemon
+  printf '%s\\n' "$SECRET" | jinn quickstart --no-daemon --password-fd 0
 
   # Custom config
   jinn quickstart --config /etc/jinn/config.json
@@ -234,6 +241,29 @@ Examples:
           ? parsed.values.config
           : undefined;
       const bootstrapArgv = ['--json', ...(configPath ? ['--config', configPath] : [])];
+
+      // --password-fd is read once, here, and its password is the one every step uses: doctor,
+      // init and bootstrap get it in JINN_PASSWORD, and so does the daemon. They run in this
+      // process with an argv of their own, so none of them reads the descriptor again (#5390).
+      // An explicit descriptor that cannot be read is refused, never replaced by JINN_PASSWORD,
+      // the file or a generated password (#4375).
+      let fdPassword: string | undefined;
+      try {
+        const fd = parsePasswordFdFromArgv(ctx.argv);
+        if (fd !== undefined) {
+          fdPassword = readPasswordFromFd(fd);
+          if (!fdPassword) throw new Error('Password from --password-fd is empty.');
+        }
+      } catch (err) {
+        emitEnvelope({
+          code: 'invalid_invocation',
+          message: err instanceof Error ? err.message : String(err),
+          hint: 'Pass a readable file descriptor via --password-fd N, or omit the flag.',
+          exampleCli: "printf '%s\\n' secret | jinn quickstart --password-fd 0",
+          details: { field: 'password-fd', expected: 'non-negative file descriptor holding the password' },
+        }, { writer: ctx.writer, exit: ctx.exit });
+        return;
+      }
 
       // ── Preflight (no secret state yet) ──
       // SECURITY (audit W4, jinn-mono-964.6): all non-secret preflight runs
@@ -324,7 +354,8 @@ Examples:
         emitProgress(ctx.writer, { type: 'progress', phase: 'preflight', step: 'doctor_checks', estimatedWaitMs: 5000 });
       }
       console.error('[quickstart] Running preflight checks...');
-      const doctorTransientPassword = ctx.env['JINN_PASSWORD']
+      const doctorTransientPassword = fdPassword
+        ?? ctx.env['JINN_PASSWORD']
         ?? existingFilePassword
         ?? 'preflight-only';
       const doctorWriter = new StringWriter();
@@ -381,7 +412,10 @@ Examples:
         emitProgress(ctx.writer, { type: 'progress', phase: 'password', step: 'resolving_password', estimatedWaitMs: 100 });
       }
       let password: string;
-      if (ctx.env['JINN_PASSWORD']) {
+      if (fdPassword !== undefined) {
+        password = fdPassword;
+        console.error('[quickstart] Using password from --password-fd.');
+      } else if (ctx.env['JINN_PASSWORD']) {
         password = ctx.env['JINN_PASSWORD'];
         console.error('[quickstart] Using password from JINN_PASSWORD environment variable.');
       } else if (existingFilePassword) {

@@ -29,11 +29,10 @@ import { readKeystorePasswordFile } from '../earning/password-file.js';
 /**
  * Resolve the file descriptor from `--password-fd <n>` or `--password-fd=<n>`.
  *
- * The first *usable* occurrence wins -- `resolveCliPassword` merges the verb
- * argv with `process.argv`, so the flag routinely appears twice. A present flag
- * with no usable occurrence throws: silently returning undefined fell through to
- * `JINN_PASSWORD` or the keystore-password file, decrypting with a different
- * secret than the operator supplied (#4375).
+ * The first *usable* occurrence wins. A present flag with no usable occurrence
+ * throws: silently returning undefined fell through to `JINN_PASSWORD` or the
+ * keystore-password file, decrypting with a different secret than the operator
+ * supplied (#4375).
  */
 export function parsePasswordFdFromArgv(argv: string[]): number | undefined {
   let seen = false;
@@ -64,12 +63,6 @@ export function readPasswordFromFd(fd: number): string {
   return buf.replace(/\r?\n$/, '').trim();
 }
 
-function mergeArgv(argv?: string[]): string[] {
-  const fromVerb = argv ?? [];
-  const fromProcess = typeof process !== 'undefined' ? process.argv.slice(2) : [];
-  return [...fromVerb, ...fromProcess];
-}
-
 export type CliPasswordSource = 'fd' | 'env' | 'primary' | 'legacy';
 
 export type ResolveCliPasswordOptions = {
@@ -85,11 +78,14 @@ export function resolveCliPassword(
   env: NodeJS.ProcessEnv = process.env,
   options: ResolveCliPasswordOptions,
 ): ResolvedCliPassword {
-  // 1. --password-fd wins (explicit scripted task).
-  const merged = mergeArgv(argv);
+  // 1. --password-fd wins (explicit scripted task). Only the argv this verb was
+  // given is scanned, never `process.argv`: a verb another verb runs in-process
+  // (`jinn quickstart` running `init` and `bootstrap`, `jinn run` running
+  // `init`) is handed the outer verb's password and must not read its
+  // descriptor a second time (#5390).
   let fd: number | undefined;
   try {
-    fd = parsePasswordFdFromArgv(merged);
+    fd = parsePasswordFdFromArgv(argv ?? []);
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : String(e) };
   }

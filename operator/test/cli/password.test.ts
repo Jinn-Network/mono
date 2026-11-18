@@ -162,9 +162,8 @@ describe('parsePasswordFdFromArgv (#4375)', () => {
     );
   });
 
-  // `resolveCliPassword` merges the verb argv with `process.argv`, so the flag
-  // routinely appears twice; an unusable occurrence must not terminate the
-  // scan before a usable later one.
+  // The flag can appear twice on one argv; an unusable occurrence must not
+  // terminate the scan before a usable later one.
   it('falls through an unusable occurrence to a later usable one', () => {
     expect(parsePasswordFdFromArgv(['--password-fd=', '--password-fd', '3'])).toBe(3);
   });

@@ -1379,7 +1379,8 @@ const command: CommandModule = {
 \`close\` reclaims a posted task's unused budget; \`cancel\` persists a durable
 cancel signal for one in-flight attempt; \`release\` returns a claimed-but-unworked
 attempt to the pool (reported \`unsupported\` on chain generations with no on-chain
-release). Each requires JINN_PASSWORD to open the venue custody.
+release). Each requires JINN_PASSWORD to open the venue custody and refuses
+--password-fd.
 
 \`watch\` polls the discovery indexer until the task's solution delivery is
 indexed, emitting NDJSON progress envelopes (type/phase/step/attempt/

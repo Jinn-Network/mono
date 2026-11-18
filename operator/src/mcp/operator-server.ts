@@ -457,7 +457,7 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
             effects: [
               'Writes encrypted mnemonic keystore under the configured earning directory if absent.',
               'Writes master_address into the fleet-state JSON.',
-              'Reads JINN_PASSWORD (or --password-fd) from the daemon environment.',
+              'Reads JINN_PASSWORD (or a keystore-password file) from the daemon environment.',
             ],
           }),
         );
