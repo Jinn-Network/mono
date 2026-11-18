@@ -1606,6 +1606,242 @@ describe('ceremony rotate and its rotation receipt', () => {
     expect(await runHuman(h, rotateArgv(h, ['--human']))).toContain('mint the new stores');
   });
 
+  /**
+   * A resumed rotation's plan says what is left of it (#5380): which new stores it mints, and for the
+   * rebind and the revocation whether it sends a fresh anchor, waits again on the one its receipt
+   * recorded, or has nothing left, with --resubmit-anchor taken into account. Each test then runs it
+   * and counts what it minted, sent and waited on.
+   */
+  const finalityWaitsOf = (h: Harness) => h.calls.filter((call) => call === 'waitForFinalized').length;
+  /** `h`, with its next run killed in its first finality wait, once that run submitted and recorded the anchor. */
+  const killedInNextWait = (h: Harness): Harness => ({
+    ...h,
+    deps: {
+      ...h.deps,
+      async openAnchorSession(input) {
+        const session = await h.deps.openAnchorSession(input);
+        return { ...session, async waitForFinalized() { throw new Error('killed during a finality wait'); } };
+      },
+    },
+  });
+  const none = { anchor: 'none', transactionHash: null } as const;
+  const fresh = { anchor: 'fresh', transactionHash: null } as const;
+
+  it.each([
+    ['rebind', [], 'recorded', 'fresh', 1, 2, 'One anchor, two finality waits.'],
+    ['rebind', ['--resubmit-anchor'], 'fresh', 'fresh', 2, 2, 'Two anchors, two finality waits.'],
+    ['revocation', [], 'none', 'recorded', 0, 1, 'No anchor, one finality wait.'],
+    ['revocation', ['--resubmit-anchor'], 'none', 'fresh', 1, 1, 'One anchor, one finality wait.'],
+  ] as const)('plans a rotation stopped in its %s finality wait, re-run with %j, as what is left of it, and the run does that', async (act, flags, rebind, revocation, anchors, finalityWaits, count) => {
+    const h = await provisioned({ interruptWait: act });
+    await expect(run(h, rotateArgv(h, ['--execute']))).rejects.toThrow(`killed during the ${act} finality wait`);
+    // The anchor of the act the run was waiting on, which its receipt recorded.
+    const recorded = h.submitted[h.submitted.length - 1]!.transactionHash;
+    const { stores } = storesOf(h);
+    const unchanged = unchangedBy(h);
+
+    const plan = await run(h, rotateArgv(h, flags));
+    const text = await runHuman(h, rotateArgv(h, [...flags, '--human']));
+
+    const planned = (state: 'none' | 'fresh' | 'recorded') =>
+      ({ anchor: state, transactionHash: state === 'recorded' ? recorded : null });
+    expect(plan).toMatchObject({
+      kind: 'ceremony_rotate_plan',
+      resuming: true,
+      recovering: false,
+      newStores: stores,
+      remaining: { mints: [], rebind: planned(rebind), revocation: planned(revocation), anchors, finalityWaits },
+    });
+    expect(text).toContain(`This run resumes the unfinished rotation ${receiptPathOf(h)} records.`);
+    expect(text).toContain('It mints no store: the new stores are the ones that rotation minted.');
+    expect(text).toContain(count);
+    expect(text).not.toContain('mint the new stores');
+    if (act === 'rebind' && flags.length === 0) {
+      expect(text).toContain(`Re-run with --execute to wait again on the recorded rebind anchor ${recorded} and author the `
+        + 'replacement bindings, then anchor and author the revocation of the retiring keys.');
+    }
+    if (act === 'rebind' && flags.length > 0) {
+      expect(text).toContain('Re-run with --execute to anchor and author the replacement bindings, with a fresh anchor in '
+        + `place of the recorded ${recorded} (--resubmit-anchor), then anchor and author the revocation of the retiring keys.`);
+    }
+    if (act === 'revocation') expect(text).toContain('Its rebind landed: the catalog binds every new key.');
+    if (act === 'revocation' && flags.length === 0) {
+      expect(text).toContain(`Re-run with --execute to wait again on the recorded revocation anchor ${recorded} and author `
+        + 'the revocation of the retiring keys.');
+    }
+    if (act === 'revocation' && flags.length > 0) {
+      expect(text).toContain('Re-run with --execute to anchor and author the revocation of the retiring keys, with a fresh '
+        + `anchor in place of the recorded ${recorded} (--resubmit-anchor).`);
+    }
+    unchanged();
+
+    const submissions = h.submitted.length;
+    const waits = finalityWaitsOf(h);
+    const result = await run(h, rotateArgv(h, ['--execute', ...flags]));
+
+    expect(result).toMatchObject({ kind: 'ceremony_rotate_complete', resumed: true, storesCreated: [] });
+    expect(h.submitted.length - submissions).toBe(anchors);
+    expect(finalityWaitsOf(h) - waits).toBe(finalityWaits);
+  });
+
+  it('plans the re-run of a --retiring-store run stopped in its finality wait as the resume it is: no store, no rebind, the recorded anchor', async () => {
+    const h = await stoppedAfterRepoint();
+    const { retiring, stores } = storesOf(h);
+    rmSync(receiptPathOf(h));
+    aMinuteLater();
+    const way = ['--retiring-store', `solver=${retiring.solver}`];
+    await expect(run(killedInNextWait(h), rotateArgv(h, ['--execute', ...way]))).rejects.toThrow('killed during a finality wait');
+    // genesis, the rebind, the revocation anchor the lost receipt recorded, and this run's fresh one.
+    expect(h.submitted).toHaveLength(4);
+    const recorded = h.submitted[3]!.transactionHash;
+    expect(rotationReceipt(h)).toMatchObject({
+      stores: { solver: stores.solver },
+      retiring: { solver: retiring.solver },
+      revocationAnchor: { locator: { transactionHash: recorded } },
+    });
+    const unchanged = unchangedBy(h);
+
+    // With or without --retiring-store, the re-run resumes from the receipt the interrupted run wrote.
+    for (const [flags, revocation, anchors, count] of [
+      [way, { anchor: 'recorded', transactionHash: recorded }, 0, 'No anchor, one finality wait.'],
+      [[], { anchor: 'recorded', transactionHash: recorded }, 0, 'No anchor, one finality wait.'],
+      [[...way, '--resubmit-anchor'], fresh, 1, 'One anchor, one finality wait.'],
+    ] as const) {
+      // eslint-disable-next-line no-await-in-loop -- one plan after the other.
+      const plan = await run(h, rotateArgv(h, flags));
+      // eslint-disable-next-line no-await-in-loop -- one plan after the other.
+      const text = await runHuman(h, rotateArgv(h, [...flags, '--human']));
+      expect(plan).toMatchObject({
+        kind: 'ceremony_rotate_plan',
+        resuming: true,
+        recovering: false,
+        newStores: { solver: stores.solver },
+        remaining: { mints: [], rebind: none, revocation, anchors, finalityWaits: 1 },
+      });
+      expect(text).toContain(`This run resumes the unfinished rotation ${receiptPathOf(h)} records.`);
+      expect(text).toContain('It mints no store');
+      expect(text).toContain('Its rebind landed');
+      expect(text).toContain(count);
+      expect(text).not.toContain('This run finishes a rotation whose rotation.json was lost');
+      expect(text).not.toContain('mint the new stores');
+    }
+    unchanged();
+
+    const result = await run(h, rotateArgv(h, ['--execute', ...way]));
+
+    expect(result).toMatchObject({
+      kind: 'ceremony_rotate_complete',
+      resumed: true,
+      rebindAnchor: null,
+      storesCreated: [],
+      revocationAnchor: { transactionHash: recorded },
+    });
+    expect(h.submitted).toHaveLength(4);
+    await expect(bootAt(h, retiring.solver!, h.submitted[3]!.anchorTime)).rejects.toThrow(/binding is revoked at boot/u);
+  });
+
+  it('plans a rotation stopped before it minted its new store as one that mints it and sends both anchors', async () => {
+    const h = await provisioned();
+    const retiringStore = config(h).identityStores.solver!;
+    const newStore = ((await run(h, rotateArgv(h))).newStores as Stores).solver!;
+    // The receipt as rotate records it before it mints anything; the run stopped right after.
+    writeFileSync(receiptPathOf(h), JSON.stringify({
+      schemaVersion: 1, roleSets: ['solver'], stores: { solver: newStore }, retiring: { solver: retiringStore },
+    }));
+    const unchanged = unchangedBy(h);
+
+    const plan = await run(h, rotateArgv(h));
+    const text = await runHuman(h, rotateArgv(h, ['--human']));
+
+    expect(plan).toMatchObject({
+      kind: 'ceremony_rotate_plan',
+      resuming: true,
+      newStores: { solver: newStore },
+      remaining: { mints: [newStore], rebind: fresh, revocation: fresh, anchors: 2, finalityWaits: 2 },
+    });
+    expect(text).toContain(`It mints the new stores that rotation named and had not minted yet: ${newStore}.`);
+    expect(text).toContain('Re-run with --execute to anchor and author the replacement bindings, then anchor and author '
+      + 'the revocation of the retiring keys.');
+    expect(text).toContain('Two anchors, two finality waits.');
+    expect(existsSync(newStore)).toBe(false);
+    unchanged();
+
+    const result = await run(h, rotateArgv(h, ['--execute']));
+
+    expect(result).toMatchObject({ kind: 'ceremony_rotate_complete', resumed: true, storesCreated: [newStore] });
+    expect(h.submitted).toHaveLength(3);
+  });
+
+  it('plans a finished rotation whose receipt lost its completion mark as one with nothing left to anchor', async () => {
+    const h = await provisioned();
+    expect((await run(h, rotateArgv(h, ['--execute']))).kind).toBe('ceremony_rotate_complete');
+    const { completedAt, ...unmarked } = rotationReceipt(h);
+    expect(completedAt).toEqual(expect.any(String));
+    writeFileSync(receiptPathOf(h), JSON.stringify(unmarked));
+    const unchanged = unchangedBy(h);
+
+    const plan = await run(h, rotateArgv(h));
+    const text = await runHuman(h, rotateArgv(h, ['--human']));
+
+    expect(plan).toMatchObject({
+      kind: 'ceremony_rotate_plan',
+      resuming: true,
+      remaining: { mints: [], rebind: none, revocation: none, anchors: 0, finalityWaits: 0 },
+    });
+    expect(text).toContain('Its rebind landed: the catalog binds every new key.');
+    expect(text).toContain('Its revocation landed: the catalog revokes every retiring binding.');
+    expect(text).toContain('Re-run with --execute to mark it finished.');
+    expect(text).toContain('No anchor, no finality wait.');
+    unchanged();
+
+    const submissions = h.submitted.length;
+    const waits = finalityWaitsOf(h);
+    const result = await run(h, rotateArgv(h, ['--execute']));
+
+    expect(result).toMatchObject({ kind: 'ceremony_rotate_complete', resumed: true, storesCreated: [] });
+    expect(h.submitted).toHaveLength(submissions);
+    expect(finalityWaitsOf(h)).toBe(waits);
+  });
+
+  it('keeps the plan text of a --retiring-store run and of a new rotation, and says the same in remaining', async () => {
+    const h = await stoppedAfterRepoint();
+    const { retiring } = storesOf(h);
+    rmSync(receiptPathOf(h));
+    aMinuteLater();
+    const way = ['--retiring-store', `solver=${retiring.solver}`];
+    const closing = (text: string, lines: number) => text.trimEnd().split('\n').slice(-lines);
+
+    const recovery = await run(h, rotateArgv(h, way));
+    expect(recovery).toMatchObject({
+      resuming: false,
+      recovering: true,
+      remaining: { mints: [], rebind: none, revocation: fresh, anchors: 1, finalityWaits: 1 },
+    });
+    expect(closing(await runHuman(h, rotateArgv(h, [...way, '--human'])), 3)).toEqual([
+      'This run finishes a rotation whose rotation.json was lost after it repointed the config. It mints no store:',
+      'the new stores are the ones identityStores names, which that rotation bound. Re-run with --execute to',
+      'anchor and author the revocation of the retiring keys. One anchor, one finality wait.',
+    ]);
+    expect((await run(h, rotateArgv(h, ['--execute', ...way]))).kind).toBe('ceremony_rotate_complete');
+
+    const plan = await run(h, rotateArgv(h));
+    expect(plan).toMatchObject({
+      resuming: false,
+      recovering: false,
+      remaining: {
+        mints: [(plan.newStores as Stores).solver],
+        rebind: fresh,
+        revocation: fresh,
+        anchors: 2,
+        finalityWaits: 2,
+      },
+    });
+    expect(closing(await runHuman(h, rotateArgv(h, ['--human'])), 2)).toEqual([
+      'Re-run with --execute to mint the new stores, anchor and author the replacement bindings, then anchor and',
+      'author the revocation of the retiring ones. Two anchors, two finality waits.',
+    ]);
+  });
+
   it('refuses when the catalog revokes the keys of the store identityStores names, rather than revoke the only standing ones', async () => {
     const h = await provisioned();
     const first = await run(h, rotateArgv(h, ['--execute']));
