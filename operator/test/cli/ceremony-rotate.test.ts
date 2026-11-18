@@ -1803,6 +1803,21 @@ describe('ceremony rotate and its rotation receipt', () => {
     expect(finalityWaitsOf(h)).toBe(waits);
   });
 
+  it('refuses in the plan, with no side effects, a resumed rotation whose new store cannot be opened, which the run cannot open either', async () => {
+    const h = await stoppedAfterRepoint();
+    const { stores } = storesOf(h);
+    writeFileSync(stores.solver!, '{}');
+    const unchanged = unchangedBy(h);
+
+    const refusal = await run(h, rotateArgv(h));
+
+    expect(refusal.code).toBe('invalid_invocation');
+    expect(String(refusal.message)).toContain(`the solver store at ${stores.solver} could not be opened`);
+    unchanged();
+    await expect(run(h, rotateArgv(h, ['--execute']))).rejects.toThrow();
+    expect(h.submitted).toHaveLength(3);
+  });
+
   it('keeps the plan text of a --retiring-store run and of a new rotation, and says the same in remaining', async () => {
     const h = await stoppedAfterRepoint();
     const { retiring } = storesOf(h);
