@@ -2792,3 +2792,136 @@ describe('ceremony init and join, and rotate, one run at a time on an operator d
     expect(readdirSync(join(h.dir, 'ceremony')).sort()).toEqual(['receipt.json']);
   });
 });
+
+/**
+ * An operator directory whose keys are bound in more than one catalog (#5413). A join of a provisioned
+ * directory into a second catalog binds the keys in `<dir>/identity` there too and points the config at
+ * it, and the run receipt records both catalogs. A revocation names a binding of its own catalog, so a
+ * rotation that revokes only in the catalog the config names leaves the retired keys bound, unrevoked,
+ * in the other.
+ */
+describe('ceremony rotate of an operator whose keys are bound in more than one catalog (#5413)', () => {
+  type Catalog = { readonly path: string; readonly genesis: string };
+  const rotateArgv = (h: Harness, extra: readonly string[] = []) => ['rotate', '--dir', h.dir, '--role-sets', 'solver', ...extra];
+  const runReceiptPathOf = (h: Harness) => join(h.dir, 'ceremony', 'receipt.json');
+
+  /** A second catalog at another path, sealed by another operator under the same catalog authority. */
+  async function secondCatalog(h: Harness): Promise<Catalog> {
+    const otherDir = join(h.home, '.jinn-operator-b');
+    mkdirSync(otherDir, { recursive: true });
+    const init = await run(h, [
+      'init', '--dir', otherDir, '--role-sets', 'requester,admission,solver', '--authority-store', h.authorityStore,
+      '--execute',
+    ]);
+    expect(init.kind).toBe('ceremony_init_complete');
+    return { path: join(otherDir, 'trust.json'), genesis: String(init.policyGenesisDigest) };
+  }
+
+  /**
+   * A provisioned operator directory joined, with its requester and solver families, into a second
+   * catalog, which the config then names. The run receipt records the first catalog as well.
+   */
+  async function joinedElsewhere(): Promise<{ readonly h: Harness; readonly second: Catalog }> {
+    const h = await provisioned();
+    const second = await secondCatalog(h);
+    const joined = await run(h, [
+      'join', '--dir', h.dir, '--role-sets', 'requester,solver', '--catalog', second.path, '--genesis', second.genesis,
+      '--authority-store', h.authorityStore, '--execute',
+    ]);
+    expect(joined.kind).toBe('ceremony_join_complete');
+    expect((config(h) as { trustRootsPath?: string }).trustRootsPath).toBe(second.path);
+    expect(JSON.parse(readFileSync(runReceiptPathOf(h), 'utf-8'))).toMatchObject({
+      catalogPath: second.path,
+      earlierAnchors: [{ catalogPath: h.catalogPath }],
+    });
+    return { h, second };
+  }
+
+  async function solverKeysIn(storePath: string): Promise<string[]> {
+    const signers = await openRoleSigners({ storePath, password: PASSWORD, ownedRoles: SOLVER_ROLES, create: false });
+    return [...signers.values()].map(({ keyId }) => keyId).sort();
+  }
+
+  /** Each binding of one of `keys` in the catalog at `path`, and whether that catalog revokes it. */
+  function bindingsOf(path: string, keys: readonly string[]): { readonly key: string; readonly revoked: boolean }[] {
+    const file = JSON.parse(readFileSync(path, 'utf-8')) as {
+      bindings: { digest: string; envelope: string }[];
+      revocations: { envelope: string }[];
+    };
+    const revoked = new Set(file.revocations.map(({ envelope }) =>
+      validateRevocation(new Uint8Array(Buffer.from(envelope, 'base64'))).value!.target));
+    return file.bindings
+      .map(({ digest, envelope }) => ({
+        key: validateKeyBinding(new Uint8Array(Buffer.from(envelope, 'base64'))).value!.key.didKey,
+        revoked: revoked.has(digest),
+      }))
+      .filter(({ key }) => keys.includes(key));
+  }
+
+  /** Opens the solver keys in `storePath` as the daemon does at boot, against the catalog at `path`. */
+  async function bootIn(h: Harness, path: string, storePath: string, at: string) {
+    const trust = await openNativeTrustCatalog({
+      path,
+      expectedPolicyGenesisDigest: (JSON.parse(readFileSync(path, 'utf-8')) as { policyGenesisDigest: `sha256:${string}` })
+        .policyGenesisDigest,
+      anchorClient: {
+        async lookupFinalizedAnchor({ digest, locator }) {
+          const found = h.submitted.find((anchor) => anchor.transactionHash === locator.transactionHash);
+          if (found === undefined || found.digest !== digest) return null;
+          return {
+            digest,
+            anchorTime: found.anchorTime,
+            chainId: 84532,
+            transactionHash: found.transactionHash,
+            blockHash: `0x${'ef'.repeat(32)}`,
+            blockNumber: 1n,
+            finalized: true,
+          };
+        },
+      },
+      settlementOwnershipClient: {
+        async isOwner(safe, owner) {
+          return safe.toLowerCase() === SAFE.toLowerCase() && owner.toLowerCase() === agentAccount.address.toLowerCase();
+        },
+      },
+      now: new Date(at),
+    });
+    return openRoleIdentitySet({
+      agent: config(h).agentIri,
+      requiredRoles: SOLVER_ROLES,
+      storePath,
+      password: PASSWORD,
+      bindingResolver: trust.bindingResolver,
+      revocationAuthority: trust,
+      verifyRoleBinding: trust.verifyRoleBinding,
+      now: () => new Date(at),
+    });
+  }
+
+  it('revokes the retiring bindings in every catalog the run receipt records, not only the one the config names', async () => {
+    const { h, second } = await joinedElsewhere();
+    const retiredStore = config(h).identityStores.solver!;
+    const retiredKeys = await solverKeysIn(retiredStore);
+    // init bound the solver keys in the first catalog, and the join bound them again in the second.
+    for (const path of [h.catalogPath, second.path]) {
+      expect(bindingsOf(path, retiredKeys).map(({ revoked }) => revoked)).toEqual(SOLVER_ROLES.map(() => false));
+    }
+
+    const result = await run(h, rotateArgv(h, ['--execute']));
+
+    expect(result.kind).toBe('ceremony_rotate_complete');
+    expect(result.catalogPath).toBe(second.path);
+    // No catalog the run receipt records binds a retired key unrevoked.
+    for (const path of [second.path, h.catalogPath]) {
+      expect(bindingsOf(path, retiredKeys).map(({ revoked }) => revoked), path).toEqual(SOLVER_ROLES.map(() => true));
+    }
+    // So the daemon refuses the retired keys at boot against either catalog, and boots the new ones
+    // against the catalog the config names, the one rotate bound them in.
+    const revokedAt = h.submitted[h.submitted.length - 1]!.anchorTime;
+    for (const path of [second.path, h.catalogPath]) {
+      // eslint-disable-next-line no-await-in-loop -- one catalog after the other.
+      await expect(bootIn(h, path, retiredStore, revokedAt), path).rejects.toThrow(/binding is revoked at boot/u);
+    }
+    await expect(bootIn(h, second.path, config(h).identityStores.solver!, revokedAt)).resolves.toBeDefined();
+  });
+});
