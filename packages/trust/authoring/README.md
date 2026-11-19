@@ -39,7 +39,8 @@ The dependency direction is one-way: `authoring` depends on `core`; `resolve` ne
   retired, to any Agent. `revocationsToCarry` and `assertNoRetiredKeyBound` run the same checks before
   an anchor. `appendOperator` likewise refuses a binding of a key a revocation in the catalog it joins
   retired, to any Agent, and `retiredKeys` with `assertNoRetiredKeyBound` runs that check before an
-  anchor.
+  anchor. Both read the key and Agent from each binding's sealed envelope, which is what the catalog
+  holds, and refuse an entry whose `agent` or `keyId` is not its envelope's.
 - **Role key rotation**: two acts, each under its own fresh anchor, in this order. `rebindRoles`
   appends replacement bindings for new keys, authored by `authorRoleBinding` under the same voucher.
   It refuses, writing nothing, a replacement whose key a revocation in the catalog retired, to any
