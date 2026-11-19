@@ -168,7 +168,7 @@ describe('jinn solver-plugins endorse', () => {
           getSummary: vi.fn(),
           getClients: vi.fn(),
         }) as any,
-      resolveCliPassword: () => ({ ok: false, message: 'no password' } as any),
+      resolveCliPassword: () => ({ ok: false, message: 'No keystore password found. Set JINN_PASSWORD.' } as any),
     });
 
     const { ctx, writes, exits } = makeCtx([
@@ -180,7 +180,7 @@ describe('jinn solver-plugins endorse', () => {
 
     const out = parsedLine(writes);
     expect((out as any).error?.code).toBe('keystore_missing');
-    expect((out as any).error?.message).toMatch(/JINN_PASSWORD/);
+    expect((out as any).error?.message).toBe('No keystore password found. Set JINN_PASSWORD.');
     expect(giveFeedback).not.toHaveBeenCalled();
     expect(exits).toEqual([1]);
   });
