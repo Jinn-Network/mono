@@ -9,16 +9,18 @@
 // drops or moves those lines.
 //
 // A stage is in scope when one of its RUN commands runs `yarn` in a directory holding a `yarn.lock`
-// that resolves onnxruntime-node. The directory comes from WORKDIR and `cd`, and the lockfile from
-// the COPY that placed it there, resolved against the build context (the repository root, or
+// that resolves onnxruntime-node, or runs `yarn` where the guard cannot place a lockfile: it fails
+// closed, since setting both variables is harmless in any image. The directory comes from WORKDIR
+// and `cd`, and the lockfile from the COPY or ADD that placed it there, whether it names the file
+// or a directory holding it, resolved against the build context (the repository root, or
 // `packages/` as in the indexer images). Both ONNXRUNTIME_NODE_INSTALL and
 // ONNXRUNTIME_NODE_INSTALL_CUDA must then be `skip` by ENV at that RUN. Like the workflow guards,
 // this reads text rather than parsing the Dockerfile: Repository structure runs it before any
 // dependency is installed.
 
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, posix, relative, resolve } from 'node:path';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join, posix, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -31,6 +33,16 @@ function resolvesOnnxruntime(lockfile) {
 
 // The repository file a COPY source names, trying each build context an image here uses.
 const sourceFile = (source) => CONTEXTS.map((context) => join(context, source)).find(existsSync);
+
+// Every `yarn.lock` under a directory a COPY names, outside node_modules.
+function lockfilesUnder(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory()) {
+      return ['node_modules', '.git'].includes(entry.name) ? [] : lockfilesUnder(join(dir, entry.name));
+    }
+    return entry.name === 'yarn.lock' ? [join(dir, entry.name)] : [];
+  });
+}
 
 // Instructions with continuation lines joined and comments dropped: `[keyword, arguments]`.
 function instructionsOf(source) {
@@ -62,14 +74,14 @@ function yarnDirectories(command, workdir) {
   return found;
 }
 
-// `<Dockerfile>:<line of the RUN>` text for each in-scope RUN, with the variables not `skip` there.
+// `<Dockerfile> (<directory>): <start of the RUN>` text for each in-scope RUN, with the variables not `skip` there.
 function onnxruntimeRuns(name, source, resolves = resolvesOnnxruntime) {
   const stages = new Map();
   let stage = { env: new Map(), lockfiles: new Map(), workdir: '/' };
   const runs = [];
   for (const [keyword, args] of instructionsOf(source)) {
     if (keyword === 'FROM') {
-      const [base, , alias] = args.replace(/^--\S+\s+/u, '').split(/\s+/u);
+      const [base, , alias] = args.replace(/^--\S+\s+/u, '').toLowerCase().split(/\s+/u);
       const inherited = stages.get(base);
       stage = inherited
         ? { env: new Map(inherited.env), lockfiles: new Map(inherited.lockfiles), workdir: inherited.workdir }
@@ -79,17 +91,26 @@ function onnxruntimeRuns(name, source, resolves = resolvesOnnxruntime) {
       for (const [key, value] of envPairs(args)) stage.env.set(key, value);
     } else if (keyword === 'WORKDIR') {
       stage.workdir = posix.resolve(stage.workdir, args.trim());
-    } else if (keyword === 'COPY' && !/--from=/u.test(args)) {
+    } else if ((keyword === 'COPY' || keyword === 'ADD') && !/--from=/u.test(args)) {
       const parts = args.split(/\s+/u).filter((part) => !part.startsWith('--'));
-      const destination = parts.pop();
-      const lockfile = parts.find((part) => posix.basename(part) === 'yarn.lock');
-      if (lockfile && sourceFile(lockfile)) {
-        stage.lockfiles.set(posix.resolve(stage.workdir, destination), sourceFile(lockfile));
+      const destination = posix.resolve(stage.workdir, parts.pop());
+      for (const part of parts) {
+        const source = sourceFile(part);
+        if (!source) continue;
+        if (statSync(source).isDirectory()) {
+          for (const lockfile of lockfilesUnder(source)) {
+            stage.lockfiles.set(posix.join(destination, relative(source, dirname(lockfile))), lockfile);
+          }
+        } else if (posix.basename(part) === 'yarn.lock') {
+          const project = posix.basename(destination) === 'yarn.lock' ? posix.dirname(destination) : destination;
+          stage.lockfiles.set(project, source);
+        }
       }
     } else if (keyword === 'RUN') {
       for (const dir of yarnDirectories(args, stage.workdir)) {
         const lockfile = stage.lockfiles.get(dir);
-        if (lockfile && resolves(lockfile)) {
+        // A yarn run the guard cannot match to a placed lockfile is in scope: fail closed.
+        if (lockfile === undefined || resolves(lockfile)) {
           runs.push({
             name: `${name} (${dir}): ${args.slice(0, 60)}`,
             missing: SKIP_VARIABLES.filter((variable) => stage.env.get(variable) !== 'skip'),
@@ -180,4 +201,16 @@ test('a yarn run in a project whose lockfile does not resolve onnxruntime-node i
 test('a later yarn build in WORKDIR is checked as well as the install', () => {
   const build = `${fixture()}\nWORKDIR /app/operator\nRUN yarn build`;
   assert.deepEqual(missingIn(build), [SKIP_VARIABLES, SKIP_VARIABLES]);
+});
+
+test('a lockfile placed by a directory COPY is found', () => {
+  const directory = ['FROM node:22-slim AS build', 'WORKDIR /app', 'COPY operator/ ./operator/', 'RUN cd operator && yarn install --immutable'];
+  assert.deepEqual(missingIn(directory.join('\n')), [SKIP_VARIABLES]);
+});
+
+test('a yarn run with no lockfile the guard can place fails closed', () => {
+  const [from, ...rest] = ['FROM node:22-slim AS build', 'WORKDIR /app', 'COPY package.json yarn.lock ./', 'RUN yarn install --immutable'];
+  assert.deepEqual(missingIn([from, ...rest].join('\n'), () => false), [SKIP_VARIABLES]);
+  const skipped = [from, 'ENV ONNXRUNTIME_NODE_INSTALL=skip ONNXRUNTIME_NODE_INSTALL_CUDA=skip', ...rest];
+  assert.deepEqual(missingIn(skipped.join('\n'), () => false), [[]]);
 });
