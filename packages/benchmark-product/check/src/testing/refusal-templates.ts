@@ -62,7 +62,9 @@
  * value a refusal reads by a longer path than `result.property`, and the schema library's own issue
  * text (`Invalid input`). A list a refusal joins (`a; b`) is probed one item at a time. A schema's
  * `.parse()`, which throws its issue messages rather than returning them, is not followed either: a
- * message only such a call throws reaches a line unscanned.
+ * message only such a call throws reaches a line unscanned. The walk lists each such call it reaches
+ * instead (`schemaParses`), and the conformance test holds each to the guard that keeps it from
+ * throwing on a reader's input (#5404).
  */
 
 import { existsSync } from "node:fs";
@@ -112,6 +114,24 @@ export interface RefusalInventory {
   readonly modules: readonly string[];
   /** `@jinn-network/*` imports that did not resolve to their source (an unbuilt package), sorted. */
   readonly unreadImports: readonly string[];
+  /**
+   * Each `.parse()` of a schema in reached code, sorted by module, then line. Such a call throws its
+   * issue messages rather than returning them, and the walk does not follow it, so the conformance
+   * test holds each one to the guard that keeps it from throwing on a reader's input (#5404).
+   */
+  readonly schemaParses: readonly SchemaParse[];
+}
+
+/** One `.parse()` of a schema in reached code. */
+export interface SchemaParse {
+  /** The calling module, named as `RefusalTemplate.module` names it. */
+  readonly module: string;
+  /** 1-based line of the call, for a reader of the inventory; not part of its identity. */
+  readonly line: number;
+  /** The named function the call sits in (`Class.method` for a method), or `(module)` at top level. */
+  readonly within: string;
+  /** The call as written, with its whitespace collapsed. */
+  readonly call: string;
 }
 
 interface ParameterPart {
@@ -1286,6 +1306,46 @@ export function refusalTemplateInventory(): RefusalInventory {
     }
   }
 
+  // ── Schema parses ────────────────────────────────────────────────────────────────────────────
+  // `schema.parse(value)`, like `parseAsync`, throws its issue messages, which no template above
+  // holds. Each call in reached code is listed, for the conformance test to hold it to its guard. A
+  // receiver whose type has `safeParse` is a schema; one whose type cannot be read counts as one, so
+  // an unresolved type lists a call rather than hiding it.
+  const withinOf = (node: ts.Node): string => {
+    for (let current = node.parent; current !== undefined; current = current.parent) {
+      if (ts.isFunctionDeclaration(current) && current.name !== undefined) return current.name.text;
+      if ((ts.isMethodDeclaration(current) || ts.isGetAccessorDeclaration(current) || ts.isSetAccessorDeclaration(current))
+        && ts.isClassLike(current.parent) && current.parent.name !== undefined) {
+        return `${current.parent.name.text}.${current.name.getText()}`;
+      }
+      if (ts.isVariableDeclaration(current) && ts.isIdentifier(current.name) && current.initializer !== undefined
+        && isFunctionLike(unwrap(current.initializer))) return current.name.text;
+    }
+    return "(module)";
+  };
+  const isSchema = (receiver: ts.Expression): boolean => {
+    const type = checker.getTypeAtLocation(receiver);
+    return (type.flags & ts.TypeFlags.Any) !== 0 || type.getProperty("safeParse") !== undefined;
+  };
+  const schemaParses: SchemaParse[] = [];
+  const parseCalls = new Set<ts.Node>();
+  for (const unit of reachable) {
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && !parseCalls.has(node) && ts.isPropertyAccessExpression(node.expression)
+        && ["parse", "parseAsync"].includes(node.expression.name.text) && isSchema(node.expression.expression)) {
+        parseCalls.add(node);
+        schemaParses.push({
+          module: modulePath(node),
+          line: node.getSourceFile().getLineAndCharacterOfPosition(node.getStart()).line + 1,
+          within: withinOf(node),
+          call: sourceOf(node),
+        });
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(unit);
+  }
+
   const entries = [...origins.values()].map((origin) => ({
     module: origin.module,
     line: origin.line,
@@ -1302,5 +1362,7 @@ export function refusalTemplateInventory(): RefusalInventory {
     caught: entries.filter((entry) => entry.messages.length === 0).sort(byPlace),
     modules,
     unreadImports: [...unread].sort(),
+    schemaParses: schemaParses.sort((left, right) =>
+      (left.module === right.module ? left.line - right.line : left.module < right.module ? -1 : 1)),
   };
 }

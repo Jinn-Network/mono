@@ -9,6 +9,7 @@ import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
 import {
   BENCHMARKING_METHOD_IDS,
   DISCLOSURE_SPECIFICATION_EXTENSION,
+  ReportDisclosureExtensionSchema,
   cellIdempotencyKey,
   compareCodeUnitStrings,
   expectedCellSet,
@@ -814,6 +815,19 @@ export async function verifyPublicBundleSnapshot(
   let disclosureExtensionDigest: string | undefined;
   let claimDisclosure: ClaimDisclosureSection | undefined;
   if (carriesDisclosure) {
+    // `ReportRecordSchema` admits any value at an extension key, so `parseReport` has not checked
+    // this one, and `readReportDisclosureExtension` throws the schema's issue list on a value the
+    // schema refuses. Admitted here first, so a malformed descriptor ends in a worded refusal
+    // (issue #5418).
+    const extension = (report as unknown as Record<string, unknown>)[DISCLOSURE_SPECIFICATION_EXTENSION];
+    if (extension !== undefined && !ReportDisclosureExtensionSchema.safeParse(extension).success) {
+      refuse(
+        "record-integrity",
+        "report.json",
+        `report.json carries ${DISCLOSURE_SPECIFICATION_EXTENSION}, but its value is not a resource descriptor`
+        + " with a fingerprint of 64 lowercase hex digits",
+      );
+    }
     const descriptor = readReportDisclosureExtension(report as unknown as Record<string, unknown>);
     if (descriptor === undefined) {
       refuse(
