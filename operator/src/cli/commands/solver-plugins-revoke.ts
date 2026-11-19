@@ -40,8 +40,7 @@ export async function revokeHandler(
     writeJson(ctx, {
       error: {
         code: 'keystore_missing',
-        message:
-          'Could not resolve password. Set JINN_PASSWORD, write <earningDir>/keystore-password, or pass --password-fd.',
+        message: passwordResult.message,
       },
     });
     ctx.exit(1);

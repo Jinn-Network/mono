@@ -140,3 +140,50 @@ describe('jinn solver-plugins write verbs read --password-fd (#5391)', () => {
     expect(h[signer].mock.calls[0]![0].password).toBe(FD_PASSWORD);
   });
 });
+
+// #5398: a failed --password-fd used to print a fixed "set JINN_PASSWORD, write
+// keystore-password, or pass --password-fd" hint, which tells the operator to
+// pass the flag they already passed. The resolver's own reason must surface.
+function openEmptyFd(): number {
+  const dir = mkdtempSync(join(tmpdir(), 'jinn-sp-password-fd-'));
+  tempDirs.push(dir);
+  const path = join(dir, 'empty');
+  writeFileSync(path, '', { mode: 0o600 });
+  const fd = openSync(path, 'r');
+  openFds.push(fd);
+  return fd;
+}
+
+function closedFd(): number {
+  const fd = openPasswordFd();
+  closeSync(fd);
+  openFds.splice(openFds.indexOf(fd), 1);
+  return fd;
+}
+
+const FAILURES: Array<{ kind: string; fdArg: () => string; message: RegExp }> = [
+  { kind: 'closed descriptor', fdArg: () => String(closedFd()), message: /EBADF|bad file descriptor/i },
+  { kind: 'empty descriptor', fdArg: () => String(openEmptyFd()), message: /^Password from --password-fd is empty\.$/ },
+  { kind: 'non-numeric value', fdArg: () => 'abc', message: /^Missing or invalid value for --password-fd/ },
+];
+
+describe('jinn solver-plugins write verbs report why --password-fd failed (#5398)', () => {
+  for (const failure of FAILURES) {
+    it.each(CASES)(`$verb reports the reason for a ${failure.kind}`, async ({ verb, args }) => {
+      const h = harness();
+      const { ctx, writes, exits } = makeCtx(
+        [verb, ...args(), '--config', withTempConfig(), '--password-fd', failure.fdArg()],
+        { JINN_PASSWORD: ENV_PASSWORD },
+      );
+
+      await h.command.run(ctx);
+
+      const out = parsedLine(writes) as { error?: { code?: string; message?: string } };
+      expect(out.error?.code).toBe('keystore_missing');
+      expect(out.error?.message).toMatch(failure.message);
+      expect(out.error?.message).not.toMatch(/Set JINN_PASSWORD/);
+      expect(exits).toEqual([1]);
+      expect(h.ensureStage1).not.toHaveBeenCalled();
+    });
+  }
+});
