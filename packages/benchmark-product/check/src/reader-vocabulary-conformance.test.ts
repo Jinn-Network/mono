@@ -79,7 +79,7 @@ import { domainBindingProof, type VerifiedDomainBinding } from "./identity/domai
 import { BUNDLE_V10_FORMAT, SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
 import type { PublicBundleSigner } from "./signers.js";
 import { goldenInput } from "./testing/golden-asset-input.js";
-import { isPlatformModule, refusalTemplateInventory, type RefusalTemplate } from "./testing/refusal-templates.js";
+import { isPlatformModule, refusalTemplateInventory, type RefusalTemplate, type SchemaParse } from "./testing/refusal-templates.js";
 import type { PublicBundleVerificationResult, VerifiedPublicBundleSnapshot } from "./verify.js";
 
 // ---------------------------------------------------------------------------
@@ -2465,5 +2465,215 @@ describe("refusal templates the reader's modules write", () => {
         expect(probe.human, message).toMatch(/^colophon-check: [^\n]*\n$/u);
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Schema parses on the reader's path (#5404)
+// ---------------------------------------------------------------------------
+
+/**
+ * The inventory above reads a schema's issue messages only where a refusal prints a `safeParse`
+ * failure. A schema's `.parse()` throws them instead, and the walk does not follow it, so a message
+ * only such a call throws reaches a line unscanned (spec section 7). The walk lists every such call
+ * in the code it reaches (`schemaParses`), and each is recorded below with the guard that keeps it
+ * from throwing on a reader's input, named where it is in the code. A call that joins the reader's
+ * path fails here until it is recorded with its guard, and a recorded call the walk no longer
+ * reaches fails too, so the list cannot outlive the code it describes. A call no guard covers is
+ * recorded as `unguarded`, with the issue that owns it.
+ */
+const PARSE_GUARDS = {
+  "admitted first":
+    "An earlier `safeParse` of the same schema admitted the value, and the reader refuses when it does not, so this"
+    + " parse cannot fail. A value counted up from 1 to a bound that schema admitted is admitted with it.",
+  "computed by the reader":
+    "The reader computes the value itself, so no bundle chooses it.",
+  "caught with fixed words":
+    "Every call the reader makes sits in a `try` whose `catch` refuses with its own fixed words, so no issue message"
+    + " reaches a line.",
+  "not called":
+    "The reader reaches the function, but no call on its path passes the input the parsing branch needs.",
+  unguarded:
+    "No guard: a bundle can make this call throw, and its issue messages reach the line unscanned. Recorded so the gap"
+    + " stays visible; `by` names the issue that owns it.",
+} as const;
+
+interface RecordedParse {
+  readonly module: string;
+  /** The named function the call sits in, as `SchemaParse.within` names it. */
+  readonly within: string;
+  readonly call: string;
+  readonly guard: keyof typeof PARSE_GUARDS;
+  /** Where the guard is in the code, for a reader who checks it. */
+  readonly by: string;
+}
+
+const RECORDS = "benchmarking/records/src";
+
+/** Every `.parse()` of a schema in the code the walk reaches, with the guard that keeps it from throwing. */
+const RECORDED_PARSES: readonly RecordedParse[] = [
+  {
+    module: `${RECORDS}/anchor-intent-extension.ts`, within: "runAnchorIntentExtension", call: "RunAnchorIntentExtensionSchema.parse(value)",
+    guard: "admitted first",
+    by: "`RunRecordSchema` safeParses this extension with this schema, so `parseRun` refuses a Run whose extension it"
+      + " would not admit, and the one reached call, `readRunAnchorIntentExtension(run)` in verify.ts, reads that parsed Run.",
+  },
+  {
+    module: `${RECORDS}/disclosure-extension.ts`, within: "reportDisclosureExtension", call: "ReportDisclosureExtensionSchema.parse(value)",
+    guard: "unguarded",
+    by: "#5418: `ReportRecordSchema` does not check this extension, so `parseReport` admits any value for it, and the"
+      + " one reached call, `readReportDisclosureExtension(report)` in verify.ts on a bundle that carries a disclosure"
+      + " record, is in no `try`.",
+  },
+  {
+    module: `${RECORDS}/publication-extension.ts`, within: "runPublicationExtension", call: "RunPublicationExtensionSchema.parse(value)",
+    guard: "admitted first",
+    by: "`RunRecordSchema` safeParses this extension with this schema, so `parseRun` refuses a Run whose extension it"
+      + " would not admit, and both reached calls, `readRunPublicationExtension(run)` in verify.ts, read that parsed Run.",
+  },
+  {
+    module: `${RECORDS}/publication-extension.ts`, within: "matrixPublicationExtension", call: "MatrixPublicationExtensionSchema.parse(value)",
+    guard: "not called",
+    by: "Its one reached caller, `withMatrixPublicationExtension`, runs only when `assembleMatrixForProcedure` is given"
+      + " an accounting descriptor, and the reader reaches that through `verifyMatrix` and `assembleMatrix`, which pass none.",
+  },
+  {
+    module: `${RECORDS}/run/cells.ts`, within: "cellKey", call: "TaskDigestHexSchema.parse(taskDigestHex)",
+    guard: "admitted first",
+    by: "`expectedCellSet` passes a Benchmark item's task digest, which `parseBenchmark` admits with"
+      + " `LowercaseSha256HexSchema`, the same schema; `MatrixRecordSchema` calls it only after its own `safeParse` of"
+      + " the cell's digest; `reduceBinaryInstrumentReplicates` passes a Matrix cell's digest after"
+      + " `validateExactSubject` seals that Matrix through `MatrixRecordSchema`.",
+  },
+  {
+    module: `${RECORDS}/run/cells.ts`, within: "cellKey", call: "ArmIdSchema.parse(armId)",
+    guard: "admitted first",
+    by: "`expectedCellSet` passes a Run arm's id, which `parseRun` admits with this schema; `MatrixRecordSchema` calls"
+      + " it only after its own `safeParse` of the cell's arm id; `reduceBinaryInstrumentReplicates` passes a Matrix"
+      + " cell's arm id after `validateExactSubject` seals that Matrix through `MatrixRecordSchema`.",
+  },
+  {
+    module: `${RECORDS}/run/cells.ts`, within: "cellKey", call: "ReplicateSchema.parse(replicate)",
+    guard: "admitted first",
+    by: "`expectedCellSet` counts from 1 to the Run's `replicates`, which `parseRun` admits with this schema;"
+      + " `MatrixRecordSchema` calls it only after its own `safeParse` of the cell's replicate;"
+      + " `reduceBinaryInstrumentReplicates` counts from 1 to its `k`, which it refuses unless an odd positive safe integer.",
+  },
+  {
+    module: `${RECORDS}/run/cells.ts`, within: "cellIdempotencyKey", call: "RunDigestSchema.parse(runDigest)",
+    guard: "computed by the reader",
+    by: "Its one reached call, in verify.ts, passes `sha256:` and the SHA-256 the reader took over run.json's bytes.",
+  },
+  {
+    module: `${RECORDS}/task-selection.ts`, within: "runTaskSelectionExtension", call: "RunTaskSelectionExtensionSchema.parse(value)",
+    guard: "admitted first",
+    by: "`RunRecordSchema` safeParses this extension with this schema, so `parseRun` refuses a Run whose extension it"
+      + " would not admit, and every reached call goes through `declaredTaskSelectionMode`, whose callers pass that"
+      + " parsed Run. That function's `catch` prints the caught message, so this guard is the one that holds.",
+  },
+  {
+    module: "comparison.ts", within: "taskProjection", call: "TaskSpecificationSchema.parse(exactJson(bytes, `Task ${digest}`))",
+    guard: "admitted first",
+    by: "`derivePublicComparison` parses the Task of each Benchmark item, and verify.ts has already read each of those"
+      + " Tasks with `parseRecord(taskBytes, TaskSpecificationSchema, …)` over the expected cells, which cover every item.",
+  },
+  {
+    module: "comparison.ts", within: "officialSuiteTaskProjection", call: "TaskSpecificationSchema.parse(exactJson(bytes, `Task ${digest}`))",
+    guard: "admitted first",
+    by: "`derivePublicComparison` parses the Task of each Benchmark item, and verify.ts has already read each of those"
+      + " Tasks with `parseRecord(taskBytes, TaskSpecificationSchema, …)` over the expected cells, which cover every item.",
+  },
+  {
+    module: "identity/domain-binding.ts", within: "domainBindingStatementBytes", call: "DomainBindingStatementSchema.parse(statement)",
+    guard: "admitted first",
+    by: "Its one reached caller, `verifyDomainBinding`, passes the statement of a document"
+      + " `DomainBindingDocumentSchema.safeParse` admitted, and that schema is this one with `signature` added.",
+  },
+  {
+    module: "profile/pinning-evidence.ts", within: "parseRunPinningEvidenceArtifact", call: "RunPinningEvidenceSchema.parse(value)",
+    guard: "caught with fixed words",
+    by: "Its one reached call, in verify.ts, refuses with `run-pinning evidence … is invalid` on any throw.",
+  },
+  {
+    module: "task-execution/profiles/src/documents/evaluation-task-1.0.ts", within: "deriveEvaluationTask",
+    call: "ResourceDescriptorSchema.parse(input.admissionReceipt)",
+    guard: "not called",
+    by: "It parses `admissionReceipt` only when one is passed, and neither reached call, both in verify.ts, passes one.",
+  },
+  {
+    module: "verify.ts", within: "verifyPublicBundleSnapshot", call: "BundleV4TrustSchema.parse(trust)",
+    guard: "admitted first",
+    by: "Under `if (qualification !== undefined)`, where `trust` is what `parseJson` returned for this schema:"
+      + " `binary-qualification` is the only capability that refines `trust/public-keys.json`.",
+  },
+  {
+    module: "verify.ts", within: "verifyPublicBundleSnapshot",
+    call: "InspectCellSummarySchema.parse(JSON.parse(new TextDecoder(\"utf8\", { fatal: true }).decode(summaryBytes)))",
+    guard: "caught with fixed words",
+    by: "It refuses with `Inspect summary is invalid` on any throw.",
+  },
+  {
+    module: "verify.ts", within: "verifyPublicBundleSnapshot", call: "BundleV4TrustSchema.parse(trust)",
+    guard: "admitted first",
+    by: "Under `qualification === undefined ? [] : …`, where `trust` is what `parseJson` returned for this schema, as above.",
+  },
+];
+
+function parseKey(entry: { readonly module: string; readonly within: string; readonly call: string }): string {
+  return `${entry.module} · ${entry.within} · ${entry.call}`;
+}
+
+/** What differs between the walk's calls and the recorded ones. Two calls alike are two entries. */
+function parseLedgerDifferences(observed: readonly SchemaParse[], recorded: readonly RecordedParse[]): string[] {
+  const remaining = new Map<string, number>();
+  for (const entry of recorded) remaining.set(parseKey(entry), (remaining.get(parseKey(entry)) ?? 0) + 1);
+  const diffs: string[] = [];
+  for (const call of observed) {
+    const key = parseKey(call);
+    const left = remaining.get(key) ?? 0;
+    if (left > 0) remaining.set(key, left - 1);
+    else diffs.push(`unrecorded schema parse (record the guard that keeps it from throwing on a reader's input): ${key} (line ${call.line})`);
+  }
+  for (const [key, left] of remaining) {
+    for (let index = 0; index < left; index += 1) diffs.push(`stale recorded schema parse (the walk no longer reaches it): ${key}`);
+  }
+  return diffs;
+}
+
+describe("schema parses on the reader's path", () => {
+  const calls = REFUSAL_INVENTORY.schemaParses;
+
+  test("the walk lists each schema's `.parse()` it reaches, and no other `.parse()`", () => {
+    const keys = calls.map(parseKey);
+    // The check package's own schema, and a platform package's.
+    expect(keys).toContain("verify.ts · verifyPublicBundleSnapshot · BundleV4TrustSchema.parse(trust)");
+    expect(keys).toContain(`${RECORDS}/run/cells.ts · cellKey · ReplicateSchema.parse(replicate)`);
+    // Reached code calls `JSON.parse` and `Date.parse` too; neither is a schema's.
+    expect(calls.some((call) => /^(?:JSON|Date)\.parse\(/u.test(call.call))).toBe(false);
+  });
+
+  test("every schema parse is recorded with the guard that keeps it from throwing on a reader's input", () => {
+    expect(parseLedgerDifferences(calls, RECORDED_PARSES)).toEqual([]);
+    for (const entry of RECORDED_PARSES) {
+      expect(PARSE_GUARDS[entry.guard], parseKey(entry)).toBeDefined();
+      expect(entry.by, parseKey(entry)).not.toBe("");
+      if (entry.guard === "unguarded") expect(entry.by, parseKey(entry)).toMatch(/^#\d+: /u);
+    }
+  });
+
+  test("a schema parse that joins the reader's path fails until it is recorded", () => {
+    const added: SchemaParse = { module: "verify.ts", line: 1, within: "verifyPublicBundleSnapshot", call: "BundleManifestSchema.parse(raw)" };
+    // A second call written like a recorded one is a call of its own.
+    const twin: SchemaParse = { module: "verify.ts", line: 2, within: "verifyPublicBundleSnapshot", call: "BundleV4TrustSchema.parse(trust)" };
+    expect(parseLedgerDifferences([...calls, added, twin], RECORDED_PARSES)).toEqual([
+      "unrecorded schema parse (record the guard that keeps it from throwing on a reader's input):"
+        + " verify.ts · verifyPublicBundleSnapshot · BundleManifestSchema.parse(raw) (line 1)",
+      "unrecorded schema parse (record the guard that keeps it from throwing on a reader's input):"
+        + " verify.ts · verifyPublicBundleSnapshot · BundleV4TrustSchema.parse(trust) (line 2)",
+    ]);
+    const gone = calls.filter((call) => call.within !== "cellIdempotencyKey");
+    expect(parseLedgerDifferences(gone, RECORDED_PARSES)).toEqual([
+      `stale recorded schema parse (the walk no longer reaches it): ${RECORDS}/run/cells.ts · cellIdempotencyKey · RunDigestSchema.parse(runDigest)`,
+    ]);
   });
 });
