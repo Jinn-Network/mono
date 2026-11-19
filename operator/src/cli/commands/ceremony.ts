@@ -2423,12 +2423,15 @@ async function runLocked(
  *      bindings, vouched by the same agent EOA (`rebindRoles`);
  *   2. points `identityStores.<family>` at the new store, whose keys are now bound;
  *   3. revokes: one fresh `revocation-anchor/v1` anchor, then the agent EOA's revocation of every
- *      retired binding (`planRevocation`, `revokeBinding`).
+ *      retired binding (`planRevocation`, `revokeBinding`);
+ *   4. revokes the same way, under a fresh anchor of each catalog's own, the retired keys' bindings
+ *      in every other catalog the run receipt records init or join bound them in (#5413). It binds
+ *      no replacement there.
  * The rebind comes first because a replacement draws its authority from a binding of the same
  * Agent and voucher that still stands at its effective start, and an admission Agent has no other.
  * The config moves before the revocation, so it never names a store whose bindings are revoked.
- * The voucher check runs before either anchor is sent, so a rotation the catalog would ignore
- * spends no gas.
+ * The voucher check runs, in every catalog, before any anchor is sent, so a rotation a catalog
+ * would ignore spends no gas.
  */
 async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyCommandDeps): Promise<void> {
   const execute = resolveExecute(ctx, parsed);
@@ -3469,6 +3472,20 @@ Status:
   itself is compromised: that account is the voucher, so a binding under a new EOA needs consent,
   which rotate does not author.
 
+  When the keys are bound in more than one catalog, as after a join of a provisioned directory into
+  a second catalog, rotate revokes the retiring bindings in each. It binds the replacement keys in
+  one catalog, --catalog or the config's trustRootsPath, which identityStores and trustRootsPath
+  then name. The run receipt, <dir>/ceremony/receipt.json, names every catalog init or join bound
+  the keys in <dir>/identity in. A revocation names a binding of its own catalog, so after the
+  revocation above rotate sends a fresh revocation anchor of its own for each other catalog there
+  that binds a retiring key unrevoked, and revokes those bindings in it. rotation.json records each
+  such anchor by catalog, and a re-run waits on it. rotate binds no replacement in those catalogs.
+  The plan names each one and counts its anchor. Before anything is minted or anchored, rotate
+  refuses when the agent EOA cannot revoke a retiring binding in one of them, and refuses a run
+  receipt it cannot read (run-receipt-unreadable). A catalog no longer at the path the run receipt
+  records is not read: the plan and the completion name it, since any copy of it still binds the
+  retired keys. Copy every catalog rotate rewrote to each operator that holds it.
+
   A new rotation without --retiring-store (below) mints each new store at
   <dir>/identity/<family>.rotated-<stamp>.enc.json, <stamp> being the UTC second the run started.
   It refuses (new-store-exists), before anything is minted or anchored and in the plan as well, when
@@ -3506,7 +3523,8 @@ Status:
   of the store identityStores names, unrevoked, each one after the named store's key for the same
   role, so it never revokes the keys the lost rotation bound; and it refuses (another-key-bound)
   while another key for those roles is bound that neither the named stores nor the configured ones
-  hold. It then sends a fresh revocation anchor and revokes the named stores' keys.
+  hold. It then sends a fresh revocation anchor and revokes the named stores' keys, and does the same
+  in each other catalog the run receipt records that still binds them (above).
 
 Options (a flag marked "<verbs> only" is taken by those verbs alone, and any other verb refuses it
 (unused-flag) before it reads any store, catalog or chain state; an unmarked flag is taken by all four):
