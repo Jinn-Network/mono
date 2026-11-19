@@ -34,6 +34,12 @@ import {
   PUBLIC_BUNDLE_VERIFICATION_COMMAND,
 } from "./legacy-closures.js";
 import { DISCLOSURE_SPECIFICATION_BUNDLE_ROLE } from "./profile/disclosure.js";
+import {
+  SUITE_EVIDENCE_BUNDLE_MEMBER,
+  SUITE_EVIDENCE_ROLE,
+  SUITE_PROTOCOL_SELECTION_BUNDLE_ROLE,
+} from "./profile/suite-evidence.js";
+import { SUITE_PROTOCOL_SELECTION_ROLE } from "./profile/suite-protocol-selection.js";
 import { refuse } from "./profile/errors.js";
 import type { PublicBundleVerificationCheck } from "./verify.js";
 
@@ -64,6 +70,14 @@ export const READER_RELEASE_LINES = {
   "check@0.2.1": {
     command: "npx @colophon-claims/check@0.2.1 <bundle-dir>",
     compatibleCommand: "npx @colophon-claims/check@0.2 <bundle-dir>",
+  },
+  // The first checker release that implements `suite-comparability` (issues #4759, #4761, #4762).
+  // Not published yet. A minor line rather than a patch: the compatible `@0.2` line would also
+  // name `0.2.1` and `0.2.2`, which refuse the token, so a claim pinning it would point a reader at
+  // a release that cannot read the bundle. `@0.3` names no release before this one.
+  "check@0.3.0": {
+    command: "npx @colophon-claims/check@0.3.0 <bundle-dir>",
+    compatibleCommand: "npx @colophon-claims/check@0.3 <bundle-dir>",
   },
 } as const;
 
@@ -115,6 +129,8 @@ export interface CapabilityActivationFacts {
   readonly declaresTaskSelection: boolean;
   /** The Benchmark carries the `official-suite-slate/v1` extension naming Terminal-Bench 2.1. */
   readonly officialTerminalBench21Slate: boolean;
+  /** The sealed Run registers a runtime selection bound to an official suite protocol. */
+  readonly suiteProtocolBound: boolean;
 }
 
 /** The uniform per-entry contract (design §4). */
@@ -154,6 +170,7 @@ export const EXTERNAL_IMPORT_CAPABILITY = "external-import" as const;
 export const TASK_SELECTION_CAPABILITY = "task-selection" as const;
 export const OWNER_CONTROLLED_PUBLICATION_CAPABILITY = "owner-controlled-publication" as const;
 export const TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY = "terminal-bench-2-1-comparability" as const;
+export const SUITE_COMPARABILITY_CAPABILITY = "suite-comparability" as const;
 
 /**
  * Every capability this build implements, in `order`.
@@ -315,6 +332,37 @@ export const CAPABILITY_REGISTRY = [
     checks: [],
     minimumReaderRelease: "check@0.2.1",
     activation: (facts) => facts.officialTerminalBench21Slate && facts.importedRun,
+  },
+  {
+    // Issues #4759, #4761 and #4762 (board front door design 11.6, 11.5 and 11.9, which the
+    // operator ruled land as one change). A run bound to an official suite protocol seals
+    // `suiteComparability` in its claim; this capability carries what a reader re-derives it from.
+    // The Run's registered runtime selection manifest travels as a `records/<sha256>.bin` member
+    // under `runtime-selection`, the suite-protocol object the Run registers on its own under
+    // `suite-protocol-selection`, and the files core read to decide `leaderboardSubmitReady` under
+    // `suite-evidence`, indexed by `suite-evidence.json` with the path core read each at. It
+    // appends no check: the bytes are checked under `evidence-closure`, and `claim-consistency`
+    // re-derives the section, and the limitation sentence it selects, from them.
+    //
+    // The first token added since `/10` gained a published reader, so its minimum reader is a
+    // release no published one predates: the published `check` releases refuse it by name.
+    token: SUITE_COMPARABILITY_CAPABILITY,
+    order: 8,
+    requires: [],
+    conflicts: [],
+    mandatoryFiles: [SUITE_EVIDENCE_BUNDLE_MEMBER],
+    memberPatterns: [],
+    refines: [],
+    roleDerivations: [
+      { role: "runtime-selection", derivedFrom: "the Run's registered runtime selection row" },
+      { role: SUITE_PROTOCOL_SELECTION_BUNDLE_ROLE, derivedFrom: SUITE_PROTOCOL_SELECTION_ROLE },
+      { role: SUITE_EVIDENCE_ROLE, derivedFrom: SUITE_EVIDENCE_BUNDLE_MEMBER },
+    ],
+    claimSection: "suiteComparability",
+    checks: [],
+    minimumReaderRelease: "check@0.3.0",
+    // A fact about the sealed Run, so every analysis of a suite-bound run declares it.
+    activation: (facts) => facts.suiteProtocolBound,
   },
 ] as const satisfies readonly CapabilityEntry[];
 

@@ -459,6 +459,8 @@ export async function verifyRunWorkspace(
             // `terminal-bench-2-1-comparability`, whose section `assertClaimConsistency` then
             // rebuilds from `benchRecord` and the import marker below.
             officialTerminalBench21Slate: carriesOfficialTerminalBench21Slate(benchRecord),
+            // The suite facts `report` derived, recomputed above from the workspace.
+            suiteProtocolBound: suiteComparability !== undefined,
           })
           : undefined;
 

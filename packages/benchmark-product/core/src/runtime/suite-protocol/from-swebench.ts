@@ -1,12 +1,8 @@
-import {
-  SWE_BENCH_VERIFIED_DATASET_INSTANCE_COUNT,
-  SWE_BENCH_VERIFIED_DATASET_REVISION,
-  type SwebenchVerifiedSelectionManifest,
-} from "../swe-bench-verified/manifest.js";
+import { swebenchSuiteMethodFacts, type SuiteMethodFacts } from "@colophon-claims/check";
+import type { SwebenchVerifiedSelectionManifest } from "../swe-bench-verified/manifest.js";
 import {
   deriveSuiteComparability,
   methodLeaderboardEligible,
-  officialSwebenchHarnessConformance,
   suiteLeaderboardLimitation,
   type SuiteComparability,
 } from "./comparability.js";
@@ -29,37 +25,10 @@ export interface OfficialSwebenchDatasetSize {
 
 function methodBitsFromSwebench(
   manifest: SwebenchVerifiedSelectionManifest,
-  officialDatasetInstanceCount: number = SWE_BENCH_VERIFIED_DATASET_INSTANCE_COUNT,
-): {
-  readonly protocol: "swe-bench-verified";
-  readonly coverage: SuiteProtocolSelection["coverage"];
-  readonly executionConformance: boolean;
-  readonly k: number;
-  readonly selectedCount: number;
-  readonly datasetCount: number;
-  readonly atifPresent: boolean;
-  readonly datasetRevisionMatchesLeaderboardPin: boolean;
-  readonly datasetCountMatchesLeaderboardPin: boolean;
-} {
-  const suite = manifest.suite;
-  return {
-    protocol: "swe-bench-verified",
-    coverage: suite.coverage,
-    executionConformance: officialSwebenchHarnessConformance({
-      k: suite.replicates,
-      harnessVersion: manifest.harness.version,
-      timeoutSeconds: manifest.harness.timeoutSeconds,
-      timeoutOverride: manifest.harness.timeoutOverride,
-      resourceOverride: manifest.harness.resourceOverride,
-      evaluatorId: manifest.harness.adapterId,
-    }),
-    k: suite.replicates,
-    selectedCount: suite.selectedTaskNames.length,
-    datasetCount: suite.datasetTaskCount,
-    atifPresent: suite.atifRequired,
-    datasetRevisionMatchesLeaderboardPin: suite.datasetRevision === SWE_BENCH_VERIFIED_DATASET_REVISION,
-    datasetCountMatchesLeaderboardPin: suite.datasetTaskCount === officialDatasetInstanceCount,
-  };
+  officialDatasetInstanceCount?: number,
+): SuiteMethodFacts {
+  // The checker's, so `report` and a reader decide the method half alike (issue #4761).
+  return swebenchSuiteMethodFacts(manifest, officialDatasetInstanceCount);
 }
 
 function presentSuiteQuote(

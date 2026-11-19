@@ -380,7 +380,10 @@ const ClaimPackageWireSchema = z.object({
    * refine below refuses it on every earlier allocation. Contents are the projection of the
    * Benchmark's verified official-slate extension plus the sealed sentence, never a second opinion. */
   terminalBench21Comparability: ClaimTerminalBench21ComparabilitySectionSchema.optional(),
-  /** Optional Colophon suite-protocol bits. Not Report v2 required fields. */
+  /** Optional Colophon suite-protocol bits. Not Report v2 required fields. Present exactly when the
+   * composed vector declares `suite-comparability` (issues #4759, #4761); the refine below refuses
+   * it on every earlier allocation, since no earlier closure carries what a reader re-derives it
+   * from. */
   suiteComparability: z.object({
     executionConformance: z.boolean(),
     coverage: z.enum(["one_task", "ten_task", "full", "custom"]),
@@ -434,6 +437,13 @@ const ClaimPackageWireSchema = z.object({
       code: "custom",
       message: "only the composed claim-package/7 allocation carries an ownerControlledPublication section",
       path: ["ownerControlledPublication"],
+    });
+  }
+  if (!composedClosure && claim.suiteComparability !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "only the composed claim-package/7 allocation carries a suiteComparability section",
+      path: ["suiteComparability"],
     });
   }
   if (!composedClosure && claim.terminalBench21Comparability !== undefined) {
@@ -1233,6 +1243,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
       taskSelection: taskSelection !== undefined,
       ownerControlledPublication: input.ownerControlledPublication !== undefined,
       terminalBench21Comparability: input.terminalBench21Comparability !== undefined,
+      suiteComparability: input.suiteComparability !== undefined,
     };
     for (const capability of CAPABILITY_REGISTRY) {
       if (supplied[capability.claimSection] !== input.composedCapabilities!.includes(capability.token)) {

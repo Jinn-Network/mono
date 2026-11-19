@@ -1,8 +1,8 @@
 /** Inspect eval suite quote/lock/report facts. Not Harbor; not Inspect Hub. */
+import { inspectEvalSuiteMethodFacts, type SuiteMethodFacts } from "@colophon-claims/check";
 import {
   deriveSuiteComparability,
   methodLeaderboardEligible,
-  officialInspectEvalConformance,
   suiteLeaderboardLimitation,
   type SuiteComparability,
 } from "./comparability.js";
@@ -31,36 +31,9 @@ export function digestBySampleIdFromSuite(suite: SuiteProtocolSelection): Readon
  * `k === specifiedEpochs` check tautological — and `draft update` can move the planned
  * `replicates` after select. Planned k is what actually ran; that is what must be judged.
  */
-function methodBitsFromInspect(manifest: InspectEvalSelectionManifest, replicates: number): {
-  readonly protocol: "inspect-eval";
-  readonly coverage: InspectEvalSelectionManifest["coverage"];
-  readonly executionConformance: boolean;
-  readonly k: number;
-  readonly selectedCount: number;
-  readonly datasetCount: number;
-  readonly atifPresent: false;
-  readonly datasetRevisionMatchesLeaderboardPin: boolean;
-} {
-  const suite = manifest.suite;
-  return {
-    protocol: "inspect-eval",
-    coverage: suite.coverage,
-    executionConformance: officialInspectEvalConformance({
-      k: replicates,
-      specifiedEpochs: manifest.catalog.specifiedEpochs,
-      inspectVersion: manifest.inspect.runtime.inspectVersion,
-      adapterId: "inspect",
-      solver: manifest.solver,
-      sampleLimit: manifest.sampleLimit,
-      epochsInRunOptions: Object.prototype.hasOwnProperty.call(manifest.inspect.runOptions, "epochs"),
-    }),
-    k: replicates,
-    selectedCount: suite.selectedTaskNames.length,
-    datasetCount: suite.datasetTaskCount,
-    atifPresent: false,
-    datasetRevisionMatchesLeaderboardPin: suite.datasetRevision === manifest.catalog.snapshotSha256
-      && suite.replicates === manifest.catalog.specifiedEpochs,
-  };
+function methodBitsFromInspect(manifest: InspectEvalSelectionManifest, replicates: number): SuiteMethodFacts {
+  // The checker's, so `report` and a reader decide the method half alike (issue #4761).
+  return inspectEvalSuiteMethodFacts(manifest, replicates);
 }
 
 function presentInspectQuote(

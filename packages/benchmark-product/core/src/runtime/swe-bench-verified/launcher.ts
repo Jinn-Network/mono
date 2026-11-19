@@ -7,6 +7,7 @@ import { SWE_BENCH_VERIFIED_DATASET_ID, SWE_BENCH_VERIFIED_DEFAULT_TIMEOUT_SECON
 import { harnessReportPath, readHarnessReport } from "./reports.js";
 import { readSwebenchModuleVersion, type SwebenchVerifiedHostBinding } from "./host.js";
 import { inheritedTempEnv } from "../child-temp-env.js";
+import { swebenchModelNameOrPath, swebenchRunId } from "@colophon-claims/check";
 
 export interface SwebenchPredictionRow {
   readonly instance_id: string;
@@ -14,17 +15,10 @@ export interface SwebenchPredictionRow {
   readonly model_patch: string;
 }
 
-export function swebenchRunId(runSha256: string, predictionsSha256: string): string {
-  return createHash("sha256").update(`${runSha256}:${predictionsSha256}`).digest("hex").slice(0, 32);
-}
-
-export function swebenchModelNameOrPath(arm: { readonly armId: string; readonly pinning: Readonly<Record<string, unknown>> }): string {
-  const model = arm.pinning.model;
-  if (model !== null && typeof model === "object" && "id" in model && typeof model.id === "string" && model.id.length > 0) {
-    return model.id;
-  }
-  return arm.armId;
-}
+// The harness `run_id` and each arm's model directory name decide where the harness reports are,
+// so the checker re-derives them from a bundle declaring `suite-comparability` (issue #4762). One
+// implementation, re-exported here.
+export { swebenchModelNameOrPath, swebenchRunId };
 
 export function swebenchModelNameOrPathByArm(
   arms: readonly { readonly armId: string; readonly pinning: Readonly<Record<string, unknown>> }[],

@@ -1,16 +1,8 @@
+import { harborSuiteMethodFacts, type SuiteMethodFacts } from "@colophon-claims/check";
 import type { HarborSelectionManifest } from "../harbor/manifest.js";
-import {
-  DEEP_SWE_V11_GIT_SHA,
-  DEEP_SWE_V11_TASK_COUNT,
-  DEEP_SWE_V11_TASKS_TREE_SHA,
-} from "../deep-swe-v1.1/manifest.js";
-import { TERMINAL_BENCH_2_1_DATASET_REF } from "../terminal-bench-2-1/manifest.js";
-import { TERMINAL_BENCH_3_0_DATASET_REF } from "../terminal-bench-3-0/manifest.js";
 import {
   deriveSuiteComparability,
   methodLeaderboardEligible,
-  officialHarborExecutionConformance,
-  officialPierExecutionConformance,
   suiteLeaderboardLimitation,
   type SuiteComparability,
   type SuiteProtocolId,
@@ -33,10 +25,6 @@ export function suiteSelectionFromHarbor(manifest: HarborSelectionManifest): Sui
     : undefined;
 }
 
-function officialPinFor(protocol: SuiteProtocolId): string {
-  if (protocol === "terminal-bench-3.0") return TERMINAL_BENCH_3_0_DATASET_REF;
-  return TERMINAL_BENCH_2_1_DATASET_REF;
-}
 
 export function taskNameByDigestFromSuite(suite: SuiteProtocolSelection): Readonly<Record<string, string>> {
   return Object.fromEntries(suite.items.map((item) => [item.taskSha256, item.taskName]));
@@ -65,51 +53,10 @@ export interface SuiteQuotePresentation extends SuiteComparability {
 function methodBitsFromHarbor(input: {
   readonly manifest: HarborSelectionManifest;
   readonly suite: SuiteProtocolSelection;
-}): {
-  readonly protocol: SuiteProtocolSelection["protocol"];
-  readonly coverage: SuiteProtocolSelection["coverage"];
-  readonly executionConformance: boolean;
-  readonly k: number;
-  readonly selectedCount: number;
-  readonly datasetCount: number;
-  readonly atifPresent: boolean;
-  readonly datasetRevisionMatchesLeaderboardPin: boolean;
-} {
-  // `tasksTreeSha` is recomputed from the operator's task material at select, so this compares
-  // sealed bytes against the official pin rather than a constant against itself.
-  const pin = input.suite.protocol === "deep-swe-v1.1"
-    ? input.suite.datasetRevision === DEEP_SWE_V11_GIT_SHA
-      && input.suite.tasksTreeSha === DEEP_SWE_V11_TASKS_TREE_SHA
-      && input.suite.datasetTaskCount === DEEP_SWE_V11_TASK_COUNT
-    : input.suite.datasetRevision === officialPinFor(input.suite.protocol);
-  const executionConformance = input.suite.protocol === "deep-swe-v1.1"
-    ? officialPierExecutionConformance({
-      k: input.manifest.retryPolicy.nAttempts,
-      maxRetries: input.manifest.retryPolicy.maxRetries,
-      jobGrain: input.manifest.jobGrain ?? "per-dispatch",
-      environmentConfiguration: input.manifest.environment.configuration as Readonly<Record<string, unknown>>,
-      pierVersion: input.manifest.harbor.version,
-      adapterId: input.manifest.adapter.id,
-      environmentType: input.manifest.environment.type,
-      agentNames: input.manifest.arms.map((arm) => arm.jobAgent.name),
-    })
-    : officialHarborExecutionConformance({
-      k: input.manifest.retryPolicy.nAttempts,
-      maxRetries: input.manifest.retryPolicy.maxRetries,
-      jobGrain: input.manifest.jobGrain ?? "per-dispatch",
-      environmentConfiguration: input.manifest.environment.configuration as Readonly<Record<string, unknown>>,
-      harborVersion: input.manifest.harbor.version,
-    });
-  return {
-    protocol: input.suite.protocol,
-    coverage: input.suite.coverage,
-    executionConformance,
-    k: input.suite.replicates,
-    selectedCount: input.suite.selectedTaskNames.length,
-    datasetCount: input.suite.datasetTaskCount,
-    atifPresent: input.suite.atifRequired,
-    datasetRevisionMatchesLeaderboardPin: pin,
-  };
+}): SuiteMethodFacts {
+  // The checker's, so `report` and a reader of a bundle declaring `suite-comparability` decide the
+  // method half from the same fields of the same sealed manifest (issue #4761).
+  return harborSuiteMethodFacts(input.manifest, input.suite);
 }
 
 function presentSuiteQuote(

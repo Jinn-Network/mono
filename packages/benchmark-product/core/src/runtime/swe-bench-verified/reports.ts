@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { swebenchHarnessReportsPresent } from "@colophon-claims/check";
+import { suiteEvidenceTreeFromDirectory } from "../suite-protocol/run-complete.js";
 
 export interface SwebenchHarnessReport {
   readonly instanceId: string;
@@ -33,16 +35,19 @@ export function readHarnessReport(path: string): SwebenchHarnessReport | undefin
   return { instanceId, resolved };
 }
 
+/** Every selected instance has a harness report naming it. The predicate is the checker's, which
+ * re-derives the flag from the reports a bundle declaring `suite-comparability` carries
+ * (issue #4762); this hands it the report root on the producing machine. */
 export function harnessReportsPresent(input: {
   readonly reportRoot: string;
   readonly runId: string;
   readonly modelNameOrPath: string;
   readonly instanceIds: readonly string[];
 }): boolean {
-  if (input.instanceIds.length === 0) return false;
-  return input.instanceIds.every((instanceId) => {
-    const path = harnessReportPath({ ...input, instanceId });
-    const report = readHarnessReport(path);
-    return report !== undefined && report.instanceId === instanceId;
+  return swebenchHarnessReportsPresent({
+    tree: suiteEvidenceTreeFromDirectory(input.reportRoot),
+    runId: input.runId,
+    modelNameOrPath: input.modelNameOrPath,
+    instanceIds: input.instanceIds,
   });
 }

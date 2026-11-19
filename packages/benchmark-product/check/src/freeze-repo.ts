@@ -176,6 +176,9 @@ export const FREEZE_REPO_ROLES: readonly BundleV4EvidenceRole[] = [
  * manifest (spec 1.5 rule 5) — it evidences how the Run's arms were served, so it is execution
  * evidence that merely arrives later in the catalog's frozen order. `disclosure-specification`
  * hangs off the Report extension (issue #2839) and is likewise part of the claim.
+ * `suite-protocol-selection` and `suite-evidence` (issues #4759, #4762) are the sealed suite
+ * selection and the producing machine's files a suite-bound claim's `suiteComparability` is
+ * re-derived from, so they are execution evidence too.
  */
 export const FREEZE_REPO_EXCLUDED_ROLES: readonly BundleV4EvidenceRole[] = [
   "task",
@@ -192,6 +195,8 @@ export const FREEZE_REPO_EXCLUDED_ROLES: readonly BundleV4EvidenceRole[] = [
   "verdict",
   "snapshot-probe",
   "disclosure-specification",
+  "suite-protocol-selection",
+  "suite-evidence",
 ] as const;
 
 /**

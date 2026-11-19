@@ -97,6 +97,7 @@ import {
 } from "./profile/external-import.js";
 import { assertTaskSelectionConsistency, assertTaskSelectionDeclaration } from "./profile/task-selection.js";
 import { assertTerminalBench21ComparabilityDeclaration } from "./profile/terminal-bench-2-1-comparability.js";
+import { assertInspectEvalTask, resolveCarriedSuite, type CarriedSuite } from "./profile/suite-evidence.js";
 import { buildPublicAssets } from "./assets.js";
 import { derivePublicComparison, type PublicComparisonView } from "./comparison.js";
 import {
@@ -118,6 +119,7 @@ import {
   EXTERNAL_IMPORT_CAPABILITY,
   TASK_SELECTION_CAPABILITY,
   TERMINAL_BENCH_21_COMPARABILITY_CAPABILITY,
+  SUITE_COMPARABILITY_CAPABILITY,
   assertMemberClosure,
   composeClosure,
 } from "./capabilities.js";
@@ -850,6 +852,24 @@ export async function verifyPublicBundleSnapshot(
     claimExternalImport = deriveClaimExternalImport(parseExternalImportMarker(read(EXTERNAL_IMPORT_BUNDLE_MEMBER)));
   }
 
+  // Issues #4759, #4761, #4762: the `suite-comparability` axis is BOUND to the sealed Run both
+  // ways, and on a declaring bundle the carried selection bytes, suite object and evidence are
+  // resolved against the digests the Run registered and re-derived into the claim section and the
+  // limitation sentence it selects. Read here, beside the other carried projections, and for the
+  // same reason: the evidence-closure walk needs the roles, and `assertClaimConsistency` the
+  // re-derivation, from bytes rather than from the claim under test.
+  const carriedSuite: CarriedSuite | undefined = composed === undefined
+    ? undefined
+    : resolveCarriedSuite({
+      declared: composed.capabilities.includes(SUITE_COMPARABILITY_CAPABILITY),
+      runRecord: run,
+      registrationArtifacts: readRunPublicationExtension(run as unknown as Record<string, unknown>)?.registrationArtifacts ?? [],
+      runSha256: identities.runSha256,
+      matrix,
+      records,
+      readMember: read,
+    });
+
   const assembly = parseAssembly(read("verification/assembly.jsonl"));
   const expectedNativePaths = new Set(
     assembly.header.graph.solveDeliveries.flatMap((delivery) => delivery.outputs
@@ -899,6 +919,15 @@ export async function verifyPublicBundleSnapshot(
     || composed.roleDerivations.some(({ role }) => role === DISCLOSURE_SPECIFICATION_BUNDLE_ROLE);
   if (disclosureExtensionDigest !== undefined && derivesDisclosureRole) {
     addRole(expectedRoles, disclosureExtensionDigest, DISCLOSURE_SPECIFICATION_BUNDLE_ROLE);
+  }
+  // The `suite-comparability` capability's three edges: the Run's registration rows reach the
+  // runtime selection and the suite object, and `suite-evidence.json` reaches each evidence file.
+  if (carriedSuite !== undefined) {
+    addRole(expectedRoles, carriedSuite.runtimeSelectionSha256, "runtime-selection");
+    if (carriedSuite.suiteSelectionSha256 !== undefined) {
+      addRole(expectedRoles, carriedSuite.suiteSelectionSha256, "suite-protocol-selection");
+    }
+    for (const digest of carriedSuite.evidenceSha256s) addRole(expectedRoles, digest, "suite-evidence");
   }
   const evaluationSpecs = new Map<string, ReturnType<typeof parseEvaluationSpec>>();
   const taskSpecs = new Map<string, ReturnType<typeof TaskSpecificationSchema.parse>>();
@@ -1164,7 +1193,11 @@ export async function verifyPublicBundleSnapshot(
     if (taskBytes === undefined) refuse("record-integrity", "evidence-closure", `${coord.cellKey} has no exact Task bytes`);
     const task = taskSpecs.get(coord.taskDigest) ?? parseRecord(taskBytes, TaskSpecificationSchema, `records/${coord.taskDigest}.bin`);
     taskSpecs.set(coord.taskDigest, task);
-    if (task.profile.uri === INSPECT_TASK_PROFILE_URI) {
+    if (task.profile.uri === INSPECT_TASK_PROFILE_URI && carriedSuite?.selection.kind === "inspect-eval") {
+      // An Inspect eval Task binds its sample by id, never a per-Task selection: the one selection
+      // manifest the Run registered (carried above, under `runtime-selection`) names the samples.
+      assertInspectEvalTask({ selection: carriedSuite.selection, payload: task.payload, taskDigest: coord.taskDigest, cellKey: coord.cellKey });
+    } else if (task.profile.uri === INSPECT_TASK_PROFILE_URI) {
       const payload = task.payload as { selectionManifestSha256?: unknown };
       const selectionSha256 = payload.selectionManifestSha256;
       if (typeof selectionSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(selectionSha256)) {
@@ -2014,7 +2047,8 @@ export async function verifyPublicBundleSnapshot(
     reportRecord: verifiedReport.record,
     draftId: assembly.header.draftId,
     assurancePreset: assembly.header.assurancePreset,
-    ...(inspectSelections.size > 0 && inspectEvaluationStrategy === "separate-log-verification"
+    ...((inspectSelections.size > 0 || carriedSuite?.selection.kind === "inspect-eval")
+      && inspectEvaluationStrategy === "separate-log-verification"
       ? { additionalLimitations: INSPECT_SEPARATE_ASSURANCE_LIMITATIONS }
       : {}),
     ...(assembly.header.rehearsal === undefined ? {} : { rehearsal: assembly.header.rehearsal }),
@@ -2025,6 +2059,7 @@ export async function verifyPublicBundleSnapshot(
     ...(composed === undefined ? {} : { composedCapabilities: composed.capabilities }),
     ...(claimDisclosure === undefined ? {} : { disclosure: claimDisclosure }),
     ...(claimExternalImport === undefined ? {} : { externalImport: claimExternalImport }),
+    ...(carriedSuite === undefined ? {} : { suite: { comparability: carriedSuite.comparability, limitation: carriedSuite.limitation } }),
   });
   checks.push("claim-consistency");
   // Always present for the anchored closure versions, and never for any earlier one: an anchored
