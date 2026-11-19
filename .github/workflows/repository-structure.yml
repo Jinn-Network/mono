@@ -131,6 +131,10 @@ jobs:
       # binaries, and the lanes that never skipped it failed when the download returned 404 (#5392).
       - name: Every job that installs onnxruntime-node skips its optional CUDA download
         run: node --test .github/scripts/workflow-onnxruntime-skip.test.mjs
+      # Repository-wide as well: no workflow builds the operator image before merge, so this reads
+      # every Dockerfile for the same skip before a yarn install or build that reaches onnxruntime-node (#5401).
+      - name: Every Dockerfile stage that runs yarn on onnxruntime-node skips its optional CUDA download
+        run: node --test .github/scripts/dockerfile-onnxruntime-skip.test.mjs
       # Repository-wide as well: the scan reads every first-party package.json, so it must run on
       # a change to any one of them. Behind the Task Execution path filter it never ran for a
       # change confined to operator, core, policy or the benchmark-product packages (#5277).
