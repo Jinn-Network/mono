@@ -79,7 +79,13 @@ import { domainBindingProof, type VerifiedDomainBinding } from "./identity/domai
 import { BUNDLE_V10_FORMAT, SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
 import type { PublicBundleSigner } from "./signers.js";
 import { goldenInput } from "./testing/golden-asset-input.js";
-import { isPlatformModule, refusalTemplateInventory, type RefusalTemplate, type SchemaParse } from "./testing/refusal-templates.js";
+import {
+  isPlatformModule,
+  refusalTemplateInventory,
+  schemaParsesInSource,
+  type RefusalTemplate,
+  type SchemaParse,
+} from "./testing/refusal-templates.js";
 import type { PublicBundleVerificationResult, VerifiedPublicBundleSnapshot } from "./verify.js";
 
 // ---------------------------------------------------------------------------
@@ -2479,8 +2485,9 @@ describe("refusal templates the reader's modules write", () => {
  * in the code it reaches (`schemaParses`), and each is recorded below with the guard that keeps it
  * from throwing on a reader's input, named where it is in the code. A call that joins the reader's
  * path fails here until it is recorded with its guard, and a recorded call the walk no longer
- * reaches fails too, so the list cannot outlive the code it describes. A call no guard covers is
- * recorded as `unguarded`, with the issue that owns it.
+ * reaches fails too. The guard is recorded, not checked: a new caller of a recorded call, or a guard
+ * removed from around one, leaves the list as it is, so a change to a guard's code means re-reading
+ * its record here. A call no guard covers is recorded as `unguarded`, with the issue that owns it.
  */
 const PARSE_GUARDS = {
   "admitted first":
@@ -2650,6 +2657,41 @@ describe("schema parses on the reader's path", () => {
     expect(keys).toContain(`${RECORDS}/run/cells.ts · cellKey · ReplicateSchema.parse(replicate)`);
     // Reached code calls `JSON.parse` and `Date.parse` too; neither is a schema's.
     expect(calls.some((call) => /^(?:JSON|Date)\.parse\(/u.test(call.call))).toBe(false);
+    // Nor is the response parser `binary-instrument-method.ts` calls (`registered.parse(bytes)`).
+    expect(REFUSAL_INVENTORY.modules).toContain(BINARY_METHOD);
+    expect(calls.some((call) => call.module === BINARY_METHOD)).toBe(false);
+  });
+
+  // The reader's path holds none of the next forms today, so each is shown on a module of its own,
+  // read the way the walk reads one.
+  const SAMPLE_DECLARATIONS = [
+    "interface Schema { parse(value: unknown): unknown; safeParse(value: unknown): unknown; decode(value: unknown): unknown }",
+    "interface ResponseParser { parse(bytes: Uint8Array): unknown }",
+    "declare const A: Schema;",
+    "declare const SCHEMAS: Map<string, Schema>;",
+    "declare const PARTIAL: Partial<Record<string, Schema>>;",
+    "declare const PARSERS: Map<string, ResponseParser>;",
+  ].join("\n");
+  const listed = (expression: string): string[] =>
+    schemaParsesInSource(`${SAMPLE_DECLARATIONS}\nexport function read(v: unknown, vs: readonly unknown[], bytes: Uint8Array): unknown {\n  return ${expression};\n}\n`)
+      .map((call) => `${call.within} · ${call.call}`);
+
+  test("the walk lists a parse through `?.` on a value that may be undefined", () => {
+    expect(listed('SCHEMAS.get("a")?.parse(v)')).toEqual(['read · SCHEMAS.get("a")?.parse(v)']);
+  });
+
+  test("the walk lists a parse through `?.` on an optional table entry", () => {
+    expect(listed('PARTIAL["a"]?.parse(v)')).toEqual(['read · PARTIAL["a"]?.parse(v)']);
+  });
+
+  test("the walk lists a schema's `parse` handed on as a value", () => {
+    expect(listed("vs.map(A.parse)")).toEqual(["read · A.parse"]);
+  });
+
+  test("the walk lists zod's other throwing methods, and no `parse` or `decode` that is not a schema's", () => {
+    expect(listed("A.decode(v)")).toEqual(["read · A.decode(v)"]);
+    expect(listed('[JSON.parse("1"), Date.parse("2026-01-01"), PARSERS.get("p")?.parse(bytes), new TextDecoder().decode(bytes)]'))
+      .toEqual([]);
   });
 
   test("every schema parse is recorded with the guard that keeps it from throwing on a reader's input", () => {

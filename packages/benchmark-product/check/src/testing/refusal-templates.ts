@@ -63,7 +63,7 @@
  * text (`Invalid input`). A list a refusal joins (`a; b`) is probed one item at a time. A schema's
  * `.parse()`, which throws its issue messages rather than returning them, is not followed either: a
  * message only such a call throws reaches a line unscanned. The walk lists each such call it reaches
- * instead (`schemaParses`), and the conformance test holds each to the guard that keeps it from
+ * instead (`schemaParses`), and the conformance test records each with the guard that keeps it from
  * throwing on a reader's input (#5404).
  */
 
@@ -115,14 +115,15 @@ export interface RefusalInventory {
   /** `@jinn-network/*` imports that did not resolve to their source (an unbuilt package), sorted. */
   readonly unreadImports: readonly string[];
   /**
-   * Each `.parse()` of a schema in reached code, sorted by module, then line. Such a call throws its
-   * issue messages rather than returning them, and the walk does not follow it, so the conformance
-   * test holds each one to the guard that keeps it from throwing on a reader's input (#5404).
+   * Each `.parse()` of a schema in reached code, or another method that throws as it does
+   * (`findSchemaParses`), sorted by module, then line. Such a call throws its issue messages rather
+   * than returning them, and the walk does not follow it, so the conformance test records each one
+   * with the guard that keeps it from throwing on a reader's input (#5404).
    */
   readonly schemaParses: readonly SchemaParse[];
 }
 
-/** One `.parse()` of a schema in reached code. */
+/** One `.parse()` of a schema in reached code, called or handed on as a value. */
 export interface SchemaParse {
   /** The calling module, named as `RefusalTemplate.module` names it. */
   readonly module: string;
@@ -130,7 +131,7 @@ export interface SchemaParse {
   readonly line: number;
   /** The named function the call sits in (`Class.method` for a method), or `(module)` at top level. */
   readonly within: string;
-  /** The call as written, with its whitespace collapsed. */
+  /** The call as written, or the method alone when it is handed on as a value, whitespace collapsed. */
   readonly call: string;
 }
 
@@ -159,6 +160,15 @@ interface Message {
 }
 
 const ERROR_CONSTRUCTORS = new Set(["Error", "TypeError", "RangeError", "SyntaxError"]);
+/** How the walk compiles what it reads. */
+const COMPILER_OPTIONS: ts.CompilerOptions = {
+  target: ts.ScriptTarget.ES2022,
+  module: ts.ModuleKind.NodeNext,
+  moduleResolution: ts.ModuleResolutionKind.NodeNext,
+  strict: true,
+  skipLibCheck: true,
+  noEmit: true,
+};
 /** The most alternatives one message expands to. No site comes close; the cap bounds a mistake. */
 const ALTERNATIVES_CAP = 64;
 /** How deep a message's expression is read before the rest is taken as a hole. */
@@ -345,14 +355,7 @@ function isInvocation(identifier: ts.Identifier): boolean {
 /** Every refusal line `runVerifierCli` can print, read from the source of the code it reaches. */
 export function refusalTemplateInventory(): RefusalInventory {
   const entry = resolve(SRC, "cli.ts");
-  const options: ts.CompilerOptions = {
-    target: ts.ScriptTarget.ES2022,
-    module: ts.ModuleKind.NodeNext,
-    moduleResolution: ts.ModuleResolutionKind.NodeNext,
-    strict: true,
-    skipLibCheck: true,
-    noEmit: true,
-  };
+  const options = COMPILER_OPTIONS;
   const host = ts.createCompilerHost(options, true);
   /** `@jinn-network/*` imports that resolved to no platform source, which would end the walk silently. */
   const unread = new Set<string>();
@@ -1306,46 +1309,6 @@ export function refusalTemplateInventory(): RefusalInventory {
     }
   }
 
-  // ── Schema parses ────────────────────────────────────────────────────────────────────────────
-  // `schema.parse(value)`, like `parseAsync`, throws its issue messages, which no template above
-  // holds. Each call in reached code is listed, for the conformance test to hold it to its guard. A
-  // receiver whose type has `safeParse` is a schema; one whose type cannot be read counts as one, so
-  // an unresolved type lists a call rather than hiding it.
-  const withinOf = (node: ts.Node): string => {
-    for (let current = node.parent; current !== undefined; current = current.parent) {
-      if (ts.isFunctionDeclaration(current) && current.name !== undefined) return current.name.text;
-      if ((ts.isMethodDeclaration(current) || ts.isGetAccessorDeclaration(current) || ts.isSetAccessorDeclaration(current))
-        && ts.isClassLike(current.parent) && current.parent.name !== undefined) {
-        return `${current.parent.name.text}.${current.name.getText()}`;
-      }
-      if (ts.isVariableDeclaration(current) && ts.isIdentifier(current.name) && current.initializer !== undefined
-        && isFunctionLike(unwrap(current.initializer))) return current.name.text;
-    }
-    return "(module)";
-  };
-  const isSchema = (receiver: ts.Expression): boolean => {
-    const type = checker.getTypeAtLocation(receiver);
-    return (type.flags & ts.TypeFlags.Any) !== 0 || type.getProperty("safeParse") !== undefined;
-  };
-  const schemaParses: SchemaParse[] = [];
-  const parseCalls = new Set<ts.Node>();
-  for (const unit of reachable) {
-    const visit = (node: ts.Node): void => {
-      if (ts.isCallExpression(node) && !parseCalls.has(node) && ts.isPropertyAccessExpression(node.expression)
-        && ["parse", "parseAsync"].includes(node.expression.name.text) && isSchema(node.expression.expression)) {
-        parseCalls.add(node);
-        schemaParses.push({
-          module: modulePath(node),
-          line: node.getSourceFile().getLineAndCharacterOfPosition(node.getStart()).line + 1,
-          within: withinOf(node),
-          call: sourceOf(node),
-        });
-      }
-      ts.forEachChild(node, visit);
-    };
-    visit(unit);
-  }
-
   const entries = [...origins.values()].map((origin) => ({
     module: origin.module,
     line: origin.line,
@@ -1362,7 +1325,82 @@ export function refusalTemplateInventory(): RefusalInventory {
     caught: entries.filter((entry) => entry.messages.length === 0).sort(byPlace),
     modules,
     unreadImports: [...unread].sort(),
-    schemaParses: schemaParses.sort((left, right) =>
+    schemaParses: findSchemaParses(checker, reachable, modulePath).sort((left, right) =>
       (left.module === right.module ? left.line - right.line : left.module < right.module ? -1 : 1)),
   };
+}
+
+// ── Schema parses ──────────────────────────────────────────────────────────────────────────────
+/** The schema methods that throw their issue messages rather than returning them. */
+const THROWING_SCHEMA_METHODS = new Set(["parse", "parseAsync", "decode", "decodeAsync", "encode", "encodeAsync"]);
+
+/** The named function a node sits in (`Class.method` for a method), or `(module)` at top level. */
+function withinOf(node: ts.Node): string {
+  for (let current = node.parent; current !== undefined; current = current.parent) {
+    if (ts.isFunctionDeclaration(current) && current.name !== undefined) return current.name.text;
+    if ((ts.isMethodDeclaration(current) || ts.isGetAccessorDeclaration(current) || ts.isSetAccessorDeclaration(current))
+      && ts.isClassLike(current.parent) && current.parent.name !== undefined) {
+      return `${current.parent.name.text}.${current.name.getText()}`;
+    }
+    if (ts.isVariableDeclaration(current) && ts.isIdentifier(current.name) && current.initializer !== undefined
+      && isFunctionLike(unwrap(current.initializer))) return current.name.text;
+  }
+  return "(module)";
+}
+
+/**
+ * Each schema `.parse()` under `units`, and each other method in `THROWING_SCHEMA_METHODS`: called
+ * (`schema.parse(value)`, `schemas.get(kind)?.parse(value)`) or handed on as a value
+ * (`items.map(schema.parse)`), listed at the call when there is one. These throw their issue
+ * messages, which no template holds. A receiver is a schema when its type, read without `undefined`,
+ * has `safeParse`, or any member of it does when it is a union. One whose type cannot be read counts
+ * as one, so an unresolved type lists a call rather than hiding it.
+ */
+export function findSchemaParses(
+  checker: ts.TypeChecker,
+  units: Iterable<ts.Node>,
+  moduleOf: (node: ts.Node) => string,
+): SchemaParse[] {
+  const isSchema = (receiver: ts.Expression): boolean => {
+    const type = checker.getNonNullableType(checker.getTypeAtLocation(receiver));
+    if ((type.flags & ts.TypeFlags.Any) !== 0) return true;
+    return (type.isUnion() ? type.types : [type]).some((member) => member.getProperty("safeParse") !== undefined);
+  };
+  const found: SchemaParse[] = [];
+  const seen = new Set<ts.Node>();
+  for (const unit of units) {
+    const visit = (node: ts.Node): void => {
+      if (ts.isPropertyAccessExpression(node) && !seen.has(node) && THROWING_SCHEMA_METHODS.has(node.name.text)
+        && isSchema(node.expression)) {
+        seen.add(node);
+        const site = ts.isCallExpression(node.parent) && node.parent.expression === node ? node.parent : node;
+        found.push({
+          module: moduleOf(site),
+          line: site.getSourceFile().getLineAndCharacterOfPosition(site.getStart()).line + 1,
+          within: withinOf(site),
+          call: sourceOf(site),
+        });
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(unit);
+  }
+  return found;
+}
+
+/**
+ * `findSchemaParses` over one module written as `source`, read with the walk's compiler options, so
+ * a test can show what the walk lists without a reader path to it.
+ */
+export function schemaParsesInSource(source: string): SchemaParse[] {
+  const file = resolve(SRC, "testing", "schema-parse-sample.ts");
+  const host = ts.createCompilerHost(COMPILER_OPTIONS, true);
+  const getSourceFile = host.getSourceFile.bind(host);
+  host.getSourceFile = (name, languageVersion, ...rest) => (name === file
+    ? ts.createSourceFile(name, source, languageVersion, true)
+    : getSourceFile(name, languageVersion, ...rest));
+  const program = ts.createProgram({ rootNames: [file], options: COMPILER_OPTIONS, host });
+  const sample = program.getSourceFile(file);
+  if (sample === undefined) throw new Error("schema parse sample did not load");
+  return findSchemaParses(program.getTypeChecker(), [sample], () => "sample.ts");
 }
