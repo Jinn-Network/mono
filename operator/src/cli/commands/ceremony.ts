@@ -27,7 +27,7 @@
  *   5. a rewritten catalog means a daemon RESTART (`assertFresh` refuses a changed catalog under a
  *      running daemon), stated in the output of every verb that rewrites.
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { linkSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
@@ -419,6 +419,26 @@ function earlierAnchorsOf(receipt: CeremonyReceipt | undefined): readonly Earlie
 }
 
 /**
+ * Every catalog the run receipt in `dir` records init or join bound the keys in `<dir>/identity` in:
+ * the one it names, then those its earlier anchors name, each once. None when there is no receipt.
+ */
+function recordedCatalogs(dir: string): readonly string[] {
+  const receipt = readReceipt(dir);
+  return [...new Set([receipt?.catalogPath, ...earlierAnchorsOf(receipt).map(({ catalogPath }) => catalogPath)])]
+    .filter((path): path is string => path !== undefined);
+}
+
+/** Whether two catalog paths name one file: equal, or resolving to the same file. */
+function sameCatalogFile(left: string, right: string): boolean {
+  if (left === right) return true;
+  try {
+    return realpathSync(left) === realpathSync(right);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The receipt's shape, checked field by field: the receipt is an operator-writable file, and each
  * field init and join decide on must be one they can rely on. The anchor locator is checked where it
  * is read (`recordedLocator`).
@@ -463,19 +483,25 @@ function readReceipt(dir: string): CeremonyReceipt | undefined {
 }
 
 /**
- * Refuses, naming it, a run receipt that exists but cannot be read, before init or join opens any
- * store or sends any anchor. It names every anchor under which init or join bound the keys in
+ * Refuses, naming it, a run receipt that exists but cannot be read, before init, join or rotate opens
+ * any store or sends any anchor. It names every anchor under which init or join bound the keys in
  * `<dir>/identity`, which the rotated-family refusal reads (`familiesRevokedIn`), and the Agent IRIs a
- * re-run reuses, so reading it as no record would take a rotated family for an unrotated one.
+ * re-run reuses, so reading it as no record would take a rotated family for an unrotated one. It also
+ * names every catalog they bound those keys in, each of which rotate revokes the retiring keys in
+ * (`recordedCatalogs`), so reading it as no record would leave them bound in all but one.
  */
 function refuseUnreadableReceipt(ctx: CommandContext, input: {
-  readonly verb: 'init' | 'join';
+  readonly verb: 'init' | 'join' | 'rotate';
   readonly dir: string;
 }): void {
   const path = receiptPath(input.dir);
   if (!existsSync(path) || parseReceipt(path) !== undefined) return;
-  const message = `${path} exists but cannot be read as a run receipt, so ${input.verb} cannot tell under which `
-    + `anchors init or join bound the keys in ${join(input.dir, 'identity')}, or which of them a rotation retired, `
+  const message = `${path} exists but cannot be read as a run receipt, so ${input.verb} cannot tell `
+    + (input.verb === 'rotate'
+      ? `in which catalogs init or join bound the keys in ${join(input.dir, 'identity')}, each of which rotate `
+        + 'revokes the retiring keys in, '
+      : `under which anchors init or join bound the keys in ${join(input.dir, 'identity')}, or which of them a `
+        + 'rotation retired, ')
     + 'and refuses rather than guess.';
   emitEnvelope({
     code: 'invalid_invocation',
@@ -1914,6 +1940,12 @@ interface RotationReceipt {
   readonly retiring?: Partial<Record<RoleSetName, string>>;
   readonly rebindAnchor?: RecordedRotationAnchor;
   readonly revocationAnchor?: RecordedRotationAnchor;
+  /**
+   * The revocation anchor this rotation submitted in each other catalog the run receipt records the
+   * retiring keys bound in (#5413), by that catalog's path. `revocationAnchor` is the one in the
+   * catalog the rotation binds the new keys in.
+   */
+  readonly otherRevocationAnchors?: Readonly<Record<string, RecordedRotationAnchor>>;
   readonly completedAt?: string;
 }
 
@@ -1945,28 +1977,49 @@ interface PlannedRotationAct {
   readonly replaces?: AnchorLocator['transactionHash'];
 }
 
-/** What a rotate run has left to do: the new stores it mints, its two acts, and what they send and wait on. */
+/**
+ * What a rotate run has left to do: the new stores it mints, its two acts in the catalog it rotates in,
+ * the revocation in each other catalog that still binds a retiring key (#5413), and what they send and
+ * wait on.
+ */
 interface RemainingRotation {
   readonly mints: readonly string[];
   readonly rebind: PlannedRotationAct;
   readonly revocation: PlannedRotationAct;
+  readonly otherRevocations: readonly (PlannedRotationAct & { readonly catalogPath: string })[];
   readonly anchors: number;
   readonly finalityWaits: number;
 }
 
+/** A remaining act, as the plan's text says it: nothing, waiting again on its recorded anchor, or a fresh one. */
+function plannedActText(act: 'rebind' | 'revocation', planned: PlannedRotationAct, catalogPath?: string): string[] {
+  const what = act === 'rebind' ? 'the replacement bindings' : 'the revocation of the retiring keys';
+  const where = catalogPath === undefined ? '' : ` in ${catalogPath}`;
+  if (planned.anchor === 'none') return [];
+  if (planned.anchor === 'recorded') {
+    return [`wait again on the recorded ${act} anchor ${planned.transactionHash} and author ${what}${where}`];
+  }
+  return [`anchor and author ${what}${where}${planned.replaces === undefined
+    ? ''
+    : `, with a fresh anchor in place of the recorded ${planned.replaces} (--resubmit-anchor)`}`];
+}
+
+/** The plan's count of what a run sends and waits on: "Two anchors, two finality waits." */
+function anchorsAndWaitsText(remaining: RemainingRotation): string {
+  const counted = (count: number, noun: string): string =>
+    `${['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'][count] ?? String(count)} `
+      + `${noun}${count > 1 ? 's' : ''}`;
+  const anchors = counted(remaining.anchors, 'anchor');
+  return `${anchors.charAt(0).toUpperCase()}${anchors.slice(1)}, ${counted(remaining.finalityWaits, 'finality wait')}.`;
+}
+
 /** The plan's text for a resumed rotation (#5380): what is left of it from where it stopped. */
 function resumedRotationPlanText(receiptPath: string, remaining: RemainingRotation): string[] {
-  const step = (act: 'rebind' | 'revocation', planned: PlannedRotationAct): string[] => {
-    const what = act === 'rebind' ? 'the replacement bindings' : 'the revocation of the retiring keys';
-    if (planned.anchor === 'none') return [];
-    if (planned.anchor === 'recorded') {
-      return [`wait again on the recorded ${act} anchor ${planned.transactionHash} and author ${what}`];
-    }
-    return [`anchor and author ${what}${planned.replaces === undefined
-      ? ''
-      : `, with a fresh anchor in place of the recorded ${planned.replaces} (--resubmit-anchor)`}`];
-  };
-  const steps = [...step('rebind', remaining.rebind), ...step('revocation', remaining.revocation)];
+  const steps = [
+    ...plannedActText('rebind', remaining.rebind),
+    ...plannedActText('revocation', remaining.revocation),
+    ...remaining.otherRevocations.flatMap((planned) => plannedActText('revocation', planned, planned.catalogPath)),
+  ];
   return [
     `This run resumes the unfinished rotation ${receiptPath} records.`,
     remaining.mints.length === 0
@@ -1975,8 +2028,7 @@ function resumedRotationPlanText(receiptPath: string, remaining: RemainingRotati
     ...(remaining.rebind.anchor === 'none' ? ['Its rebind landed: the catalog binds every new key.'] : []),
     ...(remaining.revocation.anchor === 'none' ? ['Its revocation landed: the catalog revokes every retiring binding.'] : []),
     steps.length === 0 ? 'Re-run with --execute to mark it finished.' : `Re-run with --execute to ${steps.join(', then ')}.`,
-    `${['No anchor', 'One anchor', 'Two anchors'][remaining.anchors]}, `
-      + `${['no finality wait', 'one finality wait', 'two finality waits'][remaining.finalityWaits]}.`,
+    anchorsAndWaitsText(remaining),
   ];
 }
 
@@ -1996,6 +2048,8 @@ function isRotationReceipt(value: unknown): value is RotationReceipt {
     && (value.retiring === undefined || isStorePaths(value.retiring))
     && isRecordedAnchor(value.rebindAnchor)
     && isRecordedAnchor(value.revocationAnchor)
+    && (value.otherRevocationAnchors === undefined || (isObject(value.otherRevocationAnchors)
+      && Object.values(value.otherRevocationAnchors).every((anchor) => anchor !== undefined && isRecordedAnchor(anchor))))
     && (value.completedAt === undefined || typeof value.completedAt === 'string');
 }
 
@@ -2369,12 +2423,15 @@ async function runLocked(
  *      bindings, vouched by the same agent EOA (`rebindRoles`);
  *   2. points `identityStores.<family>` at the new store, whose keys are now bound;
  *   3. revokes: one fresh `revocation-anchor/v1` anchor, then the agent EOA's revocation of every
- *      retired binding (`planRevocation`, `revokeBinding`).
+ *      retired binding (`planRevocation`, `revokeBinding`);
+ *   4. revokes the same way, under a fresh anchor of each catalog's own, the retired keys' bindings
+ *      in every other catalog the run receipt records init or join bound them in (#5413). It binds
+ *      no replacement there.
  * The rebind comes first because a replacement draws its authority from a binding of the same
  * Agent and voucher that still stands at its effective start, and an admission Agent has no other.
  * The config moves before the revocation, so it never names a store whose bindings are revoked.
- * The voucher check runs before either anchor is sent, so a rotation the catalog would ignore
- * spends no gas.
+ * The voucher check runs, in every catalog, before any anchor is sent, so a rotation a catalog
+ * would ignore spends no gas.
  */
 async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyCommandDeps): Promise<void> {
   const execute = resolveExecute(ctx, parsed);
@@ -2454,6 +2511,8 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
   // the two acts, so after the rebind only the receipt names the stores being retired. A receipt that
   // exists but cannot be read refuses here, before anything is minted or anchored, in the plan too.
   const prior = readRotationReceiptOrRefuse(ctx, { verb: 'rotate', dir, sideEffects: false });
+  // The run receipt names every catalog the retiring keys may be bound in besides this one (below).
+  refuseUnreadableReceipt(ctx, { verb: 'rotate', dir });
   const resuming = prior !== undefined && prior.completedAt === undefined;
   if (resuming && JSON.stringify([...prior.roleSets].sort()) !== JSON.stringify([...roleSets].sort())) {
     invalid(
@@ -2667,10 +2726,34 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
   }
   const allTargets = retiring.flatMap(({ bindingDigests }) => bindingDigests);
   const pendingTargets = allTargets.filter((digest) => !revokedByVoucher.has(digest));
-  if (recovering && pendingTargets.length === 0) {
+
+  // Every other catalog the run receipt records init or join bound the keys in <dir>/identity in, as
+  // a join of this directory into a second catalog leaves (#5413). A revocation names a binding of its
+  // own catalog, so the one above reaches none of them, and each binds the retiring keys until a
+  // revocation of its own. So rotate revokes, in each, every binding of a retiring key, matched as
+  // above by Agent and key, that this voucher has not revoked, under a fresh revocation anchor per
+  // catalog. It binds no replacement there. A catalog no longer at the path the run receipt records
+  // is not read, and the plan and the completion name it.
+  const elsewhere = recordedCatalogs(dir).filter((path, index, all) => !sameCatalogFile(path, catalogPath)
+    && all.findIndex((other) => sameCatalogFile(other, path)) === index);
+  const catalogsNotRead = elsewhere.filter((path) => !existsSync(path));
+  const otherTargets = elsewhere.filter((path) => existsSync(path)).flatMap((path) => {
+    const other = catalogRecords(loadCatalogFile(ctx, path));
+    const revoked = new Set(other.revocations
+      .filter(({ revokedBy }) => revokedBy === voucherDid)
+      .map(({ target }) => target));
+    const targets = other.bindings
+      .filter(({ digest, binding }) => !revoked.has(digest)
+        && retiring.some(({ agent, keyId }) => binding.agent === agent && binding.key.didKey === keyId))
+      .map(({ digest }) => digest);
+    return targets.length === 0 ? [] : [{ catalogPath: path, targets }];
+  });
+
+  if (recovering && pendingTargets.length === 0 && otherTargets.length === 0) {
     invalid(
       ctx,
-      `${catalogPath} already revokes every binding of the keys in ${roleSets.map((family) => retiringStores[family]).join(', ')}: `
+      `${catalogPath} already revokes every binding of the keys in ${roleSets.map((family) => retiringStores[family]).join(', ')}`
+        + `${elsewhere.length === catalogsNotRead.length ? '' : `, and no other catalog ${receiptPath(dir)} records binds them unrevoked`}: `
         + 'there is nothing to finish.',
     );
   }
@@ -2690,6 +2773,25 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
         ctx,
         `the agent EOA ${custody.agentEoa} cannot revoke the retiring bindings: ${cause instanceof Error ? cause.message : String(cause)}`,
         'A role binding is revoked by the account that vouched for it. Run rotate with the earning service whose EOA ran the ceremony (--service-index).',
+      );
+    }
+  }
+  // Each other catalog's revocation, shown the same way before any anchor is sent: one this voucher
+  // cannot carry out refuses here, with nothing minted or anchored, rather than after the rotation.
+  const otherRevocationPlans: { readonly catalogPath: string; readonly plan: RevocationPlan }[] = [];
+  for (const { catalogPath: path, targets } of otherTargets) {
+    try {
+      // eslint-disable-next-line no-await-in-loop -- one catalog after the other.
+      otherRevocationPlans.push({ catalogPath: path, plan: await planRevocation({ catalogPath: path, voucher: planningVoucher, targets }) });
+    } catch (cause) {
+      return invalid(
+        ctx,
+        `the agent EOA ${custody.agentEoa} cannot revoke the retiring bindings in ${path}, which ${receiptPath(dir)} `
+          + `records init or join bound the keys in ${join(dir, 'identity')} in: ${cause instanceof Error ? cause.message : String(cause)}`,
+        'A role binding is revoked only by the account that vouched for it. rotate revokes the retiring keys in every '
+          + 'catalog the run receipt records, signing with one agent EOA, so it refuses before anything is minted or '
+          + 'anchored rather than leave them bound in one. Run rotate with the earning service (--service-index) whose EOA '
+          + 'ran init or join in each of those catalogs.',
       );
     }
   }
@@ -2747,14 +2849,23 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
     const revocation: PlannedRotationAct = revocationPlan === undefined
       ? { anchor: 'none', transactionHash: null }
       : plannedAct(recordedReceipt?.revocationAnchor, revocationPlan.anchorDigest);
+    const otherRevocations = otherRevocationPlans.map(({ catalogPath: path, plan: otherPlan }) => ({
+      catalogPath: path,
+      ...plannedAct(recordedReceipt?.otherRevocationAnchors?.[path], otherPlan.anchorDigest),
+    }));
+    const acts = [rebind, revocation, ...otherRevocations];
     const remaining: RemainingRotation = {
       mints,
       rebind,
       revocation,
-      anchors: [rebind, revocation].filter(({ anchor }) => anchor === 'fresh').length,
-      finalityWaits: [rebind, revocation].filter(({ anchor }) => anchor !== 'none').length,
+      otherRevocations,
+      anchors: acts.filter(({ anchor }) => anchor === 'fresh').length,
+      finalityWaits: acts.filter(({ anchor }) => anchor !== 'none').length,
     };
     const actJson = ({ anchor, transactionHash }: PlannedRotationAct) => ({ anchor, transactionHash });
+    // What a new rotation, or one finishing a lost one, does after its acts in this catalog.
+    const thenElsewhere = otherRevocations.map(({ catalogPath: path }) => `, then anchor and author their revocation in ${path}`)
+      .join('');
     emitResult(
       {
         schemaVersion: 1,
@@ -2771,8 +2882,19 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
         recovering,
         retiring: retiring.map(({ role, agent, keyId, bindingDigests }) => ({ role, agent, keyId, bindingDigests })),
         newStores,
-        remaining: { ...remaining, rebind: actJson(rebind), revocation: actJson(revocation) },
+        remaining: {
+          ...remaining,
+          rebind: actJson(rebind),
+          revocation: actJson(revocation),
+          otherRevocations: otherRevocations.map((act) => ({ catalogPath: act.catalogPath, ...actJson(act) })),
+        },
         revocationAnchorDigest: revocationPlan?.anchorDigest ?? null,
+        otherCatalogs: otherRevocationPlans.map(({ catalogPath: path, plan: otherPlan }) => ({
+          catalogPath: path,
+          bindingDigests: otherPlan.targets,
+          revocationAnchorDigest: otherPlan.anchorDigest,
+        })),
+        catalogsNotRead,
         passwordSource: password.source,
         warnings: password.warnings,
         restartRequired: true,
@@ -2782,6 +2904,7 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
         '',
         `operator dir        ${dir}`,
         `catalog             ${catalogPath}`,
+        ...otherRevocationPlans.map(({ catalogPath: path }) => `also revokes in     ${path}`),
         `agent EOA           ${custody.agentEoa}`,
         '',
         'retiring',
@@ -2790,20 +2913,26 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
         'new stores',
         ...Object.entries(newStores).map(([family, path]) => `  ${family.padEnd(10)} ${path}`),
         '',
+        ...catalogsNotRead.flatMap((path) => [
+          `${receiptPath(dir)} records ${path}, which is not at that path, so this run revokes nothing there: a copy of `
+            + 'it that binds the retiring keys keeps them bound.',
+          '',
+        ]),
         // A resumed rotation: what is left of it. Finishing a lost rotation: the checks above showed
         // every replacement key bound, so there is no rebind, and at least one retiring binding
-        // unrevoked, so there is one revocation.
+        // unrevoked in some catalog, so there is a revocation in this catalog, another, or both.
         ...(resuming
           ? resumedRotationPlanText(rotationReceiptPath(dir), remaining)
           : recovering
             ? [
               'This run finishes a rotation whose rotation.json was lost after it repointed the config. It mints no store:',
               'the new stores are the ones identityStores names, which that rotation bound. Re-run with --execute to',
-              'anchor and author the revocation of the retiring keys. One anchor, one finality wait.',
+              `${[...plannedActText('revocation', revocation), ...otherRevocations.flatMap((act) =>
+                plannedActText('revocation', act, act.catalogPath))].join(', then ')}. ${anchorsAndWaitsText(remaining)}`,
             ]
             : [
               'Re-run with --execute to mint the new stores, anchor and author the replacement bindings, then anchor and',
-              'author the revocation of the retiring ones. Two anchors, two finality waits.',
+              `author the revocation of the retiring ones${thenElsewhere}. ${anchorsAndWaitsText(remaining)}`,
             ]),
       ].join('\n'),
       {
@@ -2876,29 +3005,38 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
     anchorTarget: (anchorTargetRaw as `0x${string}` | undefined) ?? custody.agentEoa,
     ...(rpcUrl === undefined ? {} : { rpcUrl }),
   });
-  const anchorAndWait = async (digest: `sha256:${string}`, act: 'rebind' | 'revocation'): Promise<AnchorLocator> => {
+  const anchorAndWait = async (
+    digest: `sha256:${string}`,
+    act: 'rebind' | 'revocation',
+    /** The other catalog a revocation act is for (#5413), absent for an act in the catalog rotate rotates in. */
+    otherCatalog?: string,
+  ): Promise<AnchorLocator> => {
     // Each act's anchor is fresh for that act (§6): submitted by this rotation, never another act's.
     // An interrupted run recorded it the moment it existed, and a re-run of the same act, which
     // recomputes the same digest, waits on it again rather than sending a second one (§4.5). A fresh
     // one replaces the record when the recorded digest differs, and when the operator asks for one
     // because the recorded anchor never reads back finalized (--resubmit-anchor).
     const field = act === 'rebind' ? 'rebindAnchor' : 'revocationAnchor';
-    const recorded = receipt[field];
+    const recorded = otherCatalog === undefined ? receipt[field] : receipt.otherRevocationAnchors?.[otherCatalog];
     const reused = reusableRotationAnchor(recorded, digest, resubmitAnchor);
     const locator = reused ?? await session.submit(digest);
     if (reused === undefined) {
-      receipt = { ...receipt, [field]: { digest, locator } };
+      receipt = otherCatalog === undefined
+        ? { ...receipt, [field]: { digest, locator } }
+        : { ...receipt, otherRevocationAnchors: { ...receipt.otherRevocationAnchors, [otherCatalog]: { digest, locator } } };
       writeRotationReceipt(dir, receipt);
     }
+    const where = otherCatalog === undefined ? '' : ` for ${otherCatalog}`;
     progress({
       schemaVersion: 1,
       kind: reused === undefined ? 'ceremony_anchor_submitted' : 'ceremony_anchor_reused',
       act,
+      ...(otherCatalog === undefined ? {} : { catalogPath: otherCatalog }),
       anchorDigest: digest,
       transactionHash: locator.transactionHash,
       anchorTime: locator.anchorTime,
       note: 'waiting for the finalized tag (Base Sepolia trails head by roughly 10-20 minutes)',
-    }, `${act} anchor ${reused === undefined ? 'submitted' : 'reused'} ${locator.transactionHash} at ${locator.anchorTime}\n`
+    }, `${act} anchor${where} ${reused === undefined ? 'submitted' : 'reused'} ${locator.transactionHash} at ${locator.anchorTime}\n`
       + '  waiting for the finalized tag (Base Sepolia trails head by roughly 10-20 minutes)');
     const finalized = await session.waitForFinalized({
       digest,
@@ -2906,8 +3044,14 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
       timeoutMs: finalityTimeoutMs,
       pollMs: FINALITY_POLL_MS,
       onProgress: (elapsedMs) => {
-        progress({ schemaVersion: 1, kind: 'ceremony_finality_wait', act, anchorDigest: digest, elapsedMs },
-          `  still waiting for finality, ${Math.round(elapsedMs / 1000)}s elapsed`);
+        progress({
+          schemaVersion: 1,
+          kind: 'ceremony_finality_wait',
+          act,
+          ...(otherCatalog === undefined ? {} : { catalogPath: otherCatalog }),
+          anchorDigest: digest,
+          elapsedMs,
+        }, `  still waiting for finality, ${Math.round(elapsedMs / 1000)}s elapsed`);
       },
     });
     // §6 law 2: the anchor's block time is the act's validFrom or effectiveTime. The finality read
@@ -2958,6 +3102,36 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
       revocation = { digest: revocationPlan.anchorDigest, transactionHash: locator.transactionHash, effectiveTime: locator.anchorTime };
     }
 
+    // Then the retiring bindings in each other catalog the run receipt records (#5413), under an
+    // anchor of that catalog's own: a revocation anchor commits to its targets, which are bindings
+    // of that catalog alone.
+    const otherRevocations: {
+      catalogPath: string;
+      bindingDigests: readonly `sha256:${string}`[];
+      digest: `sha256:${string}`;
+      transactionHash: `0x${string}`;
+      effectiveTime: string;
+    }[] = [];
+    for (const { catalogPath: path, plan: otherPlan } of otherRevocationPlans) {
+      // eslint-disable-next-line no-await-in-loop -- one catalog after the other, each recorded as it is sent.
+      const locator = await anchorAndWait(otherPlan.anchorDigest, 'revocation', path);
+      // eslint-disable-next-line no-await-in-loop -- one catalog after the other.
+      await revokeBinding({
+        catalogPath: path,
+        voucher: ceremonySigner,
+        targets: otherPlan.targets,
+        effectiveTime: locator.anchorTime,
+        anchor: anchorDeclaration(otherPlan.anchorDigest, locator),
+      });
+      otherRevocations.push({
+        catalogPath: path,
+        bindingDigests: otherPlan.targets,
+        digest: otherPlan.anchorDigest,
+        transactionHash: locator.transactionHash,
+        effectiveTime: locator.anchorTime,
+      });
+    }
+
     writeRotationReceipt(dir, { ...receipt, completedAt: new Date().toISOString() });
 
     emitResult(
@@ -2974,22 +3148,40 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
         bindings: [...replacementSigners].map(([role, { keyId }]) => ({ role, agent: agentForRole(plan, role), keyId })),
         rebindAnchor: rebindAnchor ?? null,
         revocationAnchor: revocation ?? null,
+        otherCatalogs: otherRevocations.map(({ catalogPath: path, bindingDigests, digest, transactionHash, effectiveTime }) => ({
+          catalogPath: path,
+          bindingDigests,
+          revocationAnchor: { digest, transactionHash, effectiveTime },
+        })),
+        catalogsNotRead,
         storesCreated,
         configWriteBack: writeResult,
         warnings: password.warnings,
         restartRequired: true,
         nextSteps: [
           `Copy ${catalogPath} to every other operator's trustRootsPath; the genesis digest did not move, so their configs need no edit.`,
+          ...otherRevocations.map(({ catalogPath: path }) => `Copy ${path} to the trustRootsPath of every operator that holds it: it `
+            + `now revokes the retired keys too. rotate bound their replacements in ${catalogPath} only.`),
+          ...catalogsNotRead.map((path) => `${receiptPath(dir)} records ${path}, which is not at that path, so rotate revoked `
+            + 'nothing there: a copy of it that binds the retired keys keeps them bound.'),
           'Restart every daemon: assertFresh makes a changed catalog under a running daemon a hard refusal.',
         ],
       },
       (raw) => {
-        const v = raw as { retired: { role: string; keyId: string }[]; bindings: { role: string; keyId: string }[] };
+        const v = raw as {
+          retired: { role: string; keyId: string }[];
+          bindings: { role: string; keyId: string }[];
+          nextSteps: string[];
+        };
         return [
           'jinn ceremony rotate: COMPLETE',
           '',
           `catalog             ${catalogPath}`,
           ...(revocation === undefined ? [] : [`retired from        ${revocation.effectiveTime}`]),
+          ...otherRevocations.flatMap(({ catalogPath: path, effectiveTime }) => [
+            `also revoked in     ${path}`,
+            `retired from        ${effectiveTime}`,
+          ]),
           '',
           'retired',
           ...v.retired.map(({ role, keyId }) => `  ${role.padEnd(24)} ${keyId}`),
@@ -2999,6 +3191,7 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
           '',
           'next',
           `  - Copy ${catalogPath} to every other operator's trustRootsPath.`,
+          ...v.nextSteps.slice(1, -1).map((step) => `  - ${step}`),
           '  - Restart every daemon.',
         ].join('\n');
       },
@@ -3279,6 +3472,20 @@ Status:
   itself is compromised: that account is the voucher, so a binding under a new EOA needs consent,
   which rotate does not author.
 
+  When the keys are bound in more than one catalog, as after a join of a provisioned directory into
+  a second catalog, rotate revokes the retiring bindings in each. It binds the replacement keys in
+  one catalog, --catalog or the config's trustRootsPath, which identityStores and trustRootsPath
+  then name. The run receipt, <dir>/ceremony/receipt.json, names every catalog init or join bound
+  the keys in <dir>/identity in. A revocation names a binding of its own catalog, so after the
+  revocation above rotate sends a fresh revocation anchor of its own for each other catalog there
+  that binds a retiring key unrevoked, and revokes those bindings in it. rotation.json records each
+  such anchor by catalog, and a re-run waits on it. rotate binds no replacement in those catalogs.
+  The plan names each one and counts its anchor. Before anything is minted or anchored, rotate
+  refuses when the agent EOA cannot revoke a retiring binding in one of them, and refuses a run
+  receipt it cannot read (run-receipt-unreadable). A catalog no longer at the path the run receipt
+  records is not read: the plan and the completion name it, since a copy of it that binds the
+  retired keys keeps them bound. Copy every catalog rotate rewrote to each operator that holds it.
+
   A new rotation without --retiring-store (below) mints each new store at
   <dir>/identity/<family>.rotated-<stamp>.enc.json, <stamp> being the UTC second the run started.
   It refuses (new-store-exists), before anything is minted or anchored and in the plan as well, when
@@ -3316,7 +3523,8 @@ Status:
   of the store identityStores names, unrevoked, each one after the named store's key for the same
   role, so it never revokes the keys the lost rotation bound; and it refuses (another-key-bound)
   while another key for those roles is bound that neither the named stores nor the configured ones
-  hold. It then sends a fresh revocation anchor and revokes the named stores' keys.
+  hold. It then sends a fresh revocation anchor and revokes the named stores' keys, and does the same
+  in each other catalog the run receipt records that still binds them (above).
 
 Options (a flag marked "<verbs> only" is taken by those verbs alone, and any other verb refuses it
 (unused-flag) before it reads any store, catalog or chain state; an unmarked flag is taken by all four):
