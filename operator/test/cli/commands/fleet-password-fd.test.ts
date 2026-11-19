@@ -36,9 +36,8 @@ const raw: GatheredStatusRaw = {
   lastRewardClaimTickAt: null,
   rewardClaimIntervalMs: 1,
   fleet: {
+    ...createDefaultFleetState('base-sepolia'),
     master_address: '0xM',
-    chain: 'base-sepolia',
-    staking_mode: 'standard',
     updated_at: '2026-04-14T12:00:00.000Z',
     services: [service(1), service(2)],
   },
