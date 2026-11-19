@@ -169,7 +169,7 @@ export function createFleetScaleCommand(deps: FleetScaleDeps = PRODUCTION_DEPS):
       return;
     }
 
-    const built = await deps.signerContextFactory({ argv: ctx.argv, env: ctx.env });
+    const built = await deps.signerContextFactory({ argv: ctx.argv, env: ctx.env, password: pw.password });
     if (!built.ok) {
       emitEnvelope(built.envelope, { writer: ctx.writer, exit: ctx.exit });
       return;
@@ -473,7 +473,7 @@ export function createFleetScaleCommand(deps: FleetScaleDeps = PRODUCTION_DEPS):
       return;
     }
 
-    const built = await deps.signerContextFactory({ argv: ctx.argv, env: ctx.env });
+    const built = await deps.signerContextFactory({ argv: ctx.argv, env: ctx.env, password: pw.password });
     if (!built.ok) {
       emitEnvelope(built.envelope, { writer: ctx.writer, exit: ctx.exit });
       return;

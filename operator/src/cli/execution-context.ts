@@ -63,6 +63,12 @@ export function pickPrimaryMechService(services: ServiceState[]): ServiceState |
 export type CreateCliExecutionContextOptions = {
   argv?: string[];
   env?: NodeJS.ProcessEnv;
+  /**
+   * A keystore password the caller has already resolved. When set it is used as is and `argv` is
+   * not scanned for `--password-fd`, so a caller that read the descriptor itself does not make
+   * this function read it a second time (a second read comes back empty, #5408).
+   */
+  password?: string;
 };
 
 async function buildCliSignerContext(
@@ -88,7 +94,9 @@ async function buildCliSignerContext(
     };
   }
   const config = loadConfig(configPath);
-  const pw = resolveCliPassword(opts.argv, env, { earningDir: config.earningDir });
+  const pw = opts.password !== undefined
+    ? { ok: true as const, password: opts.password }
+    : resolveCliPassword(opts.argv, env, { earningDir: config.earningDir });
   if (!pw.ok) {
     return {
       ok: false,
