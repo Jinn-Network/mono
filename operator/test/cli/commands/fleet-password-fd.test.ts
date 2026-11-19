@@ -8,7 +8,7 @@ import { createFleetScaleCommand, type FleetScaleDeps } from '../../../src/cli/c
 import { resolveCliPassword } from '../../../src/cli/password.js';
 import { createCliSignerContext } from '../../../src/cli/execution-context.js';
 import { findServiceByDisplayIndex } from '../../../src/earning/fleet-display-index.js';
-import { createDefaultFleetState } from '../../../src/earning/types.js';
+import { createDefaultFleetState, createDefaultServiceState, type ServiceState } from '../../../src/earning/types.js';
 import { FleetStateStore } from '../../../src/earning/store.js';
 import { encryptMnemonic } from '../../../src/earning/wallet.js';
 
@@ -22,15 +22,10 @@ const FD_PASSWORD = 'password-from-the-descriptor';
 const ENV_PASSWORD = 'a-different-password-from-env';
 const MNEMONIC = 'test test test test test test test test test test test junk';
 
-const service = (index: number) => ({
-  index,
-  agent_address: '0xA',
-  safe_address: null,
+const service = (index: number): ServiceState => ({
+  ...createDefaultServiceState(index, '0xA'),
   service_id: index,
-  mech_address: null,
-  staking_address: null,
-  step: 'complete' as const,
-  error: null,
+  step: 'complete',
 });
 
 const raw: GatheredStatusRaw = {

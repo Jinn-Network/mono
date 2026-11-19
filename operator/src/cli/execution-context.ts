@@ -23,7 +23,7 @@ import { createClients } from '../adapters/mech/safe.js';
 import { createDirectSafeBroadcaster } from '../adapters/mech/direct-safe-broadcaster.js';
 import { Store } from '../store/store.js';
 import type { BuildEnvelopeInput } from '../errors/envelope.js';
-import { resolveCliPassword, type ResolvedCliPassword } from './password.js';
+import { resolveCliPassword } from './password.js';
 import { checkDaemonGuard, daemonGuardEnvelope } from './daemon-guard.js';
 
 export type NetworkChain = 'base' | 'base-sepolia';
@@ -94,8 +94,8 @@ async function buildCliSignerContext(
     };
   }
   const config = loadConfig(configPath);
-  const pw: ResolvedCliPassword = opts.password !== undefined
-    ? { ok: true, password: opts.password, source: 'fd' }
+  const pw = opts.password !== undefined
+    ? { ok: true as const, password: opts.password }
     : resolveCliPassword(opts.argv, env, { earningDir: config.earningDir });
   if (!pw.ok) {
     return {
