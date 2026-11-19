@@ -2520,10 +2520,10 @@ const RECORDED_PARSES: readonly RecordedParse[] = [
   },
   {
     module: `${RECORDS}/disclosure-extension.ts`, within: "reportDisclosureExtension", call: "ReportDisclosureExtensionSchema.parse(value)",
-    guard: "unguarded",
-    by: "#5418: `ReportRecordSchema` does not check this extension, so `parseReport` admits any value for it, and the"
-      + " one reached call, `readReportDisclosureExtension(report)` in verify.ts on a bundle that carries a disclosure"
-      + " record, is in no `try`.",
+    guard: "admitted first",
+    by: "`ReportRecordSchema` does not check this extension, so verify.ts does (#5418): on a bundle that carries a"
+      + " disclosure record, it safeParses the Report's extension with this schema and refuses with `report.json carries"
+      + " …` when it does not admit it, before the one reached call, `readReportDisclosureExtension(report)`, reads it.",
   },
   {
     module: `${RECORDS}/publication-extension.ts`, within: "runPublicationExtension", call: "RunPublicationExtensionSchema.parse(value)",
