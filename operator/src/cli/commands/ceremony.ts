@@ -2915,7 +2915,7 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
         '',
         ...catalogsNotRead.flatMap((path) => [
           `${receiptPath(dir)} records ${path}, which is not at that path, so this run revokes nothing there: a copy of `
-            + 'it still binds the retiring keys.',
+            + 'it that binds the retiring keys keeps them bound.',
           '',
         ]),
         // A resumed rotation: what is left of it. Finishing a lost rotation: the checks above showed
@@ -3163,7 +3163,7 @@ async function runRotate(ctx: CommandContext, parsed: Parsed, deps: CeremonyComm
           ...otherRevocations.map(({ catalogPath: path }) => `Copy ${path} to the trustRootsPath of every operator that holds it: it `
             + `now revokes the retired keys too. rotate bound their replacements in ${catalogPath} only.`),
           ...catalogsNotRead.map((path) => `${receiptPath(dir)} records ${path}, which is not at that path, so rotate revoked `
-            + 'nothing there: any copy of it still binds the retired keys.'),
+            + 'nothing there: a copy of it that binds the retired keys keeps them bound.'),
           'Restart every daemon: assertFresh makes a changed catalog under a running daemon a hard refusal.',
         ],
       },
@@ -3483,8 +3483,8 @@ Status:
   The plan names each one and counts its anchor. Before anything is minted or anchored, rotate
   refuses when the agent EOA cannot revoke a retiring binding in one of them, and refuses a run
   receipt it cannot read (run-receipt-unreadable). A catalog no longer at the path the run receipt
-  records is not read: the plan and the completion name it, since any copy of it still binds the
-  retired keys. Copy every catalog rotate rewrote to each operator that holds it.
+  records is not read: the plan and the completion name it, since a copy of it that binds the
+  retired keys keeps them bound. Copy every catalog rotate rewrote to each operator that holds it.
 
   A new rotation without --retiring-store (below) mints each new store at
   <dir>/identity/<family>.rotated-<stamp>.enc.json, <stamp> being the UTC second the run started.

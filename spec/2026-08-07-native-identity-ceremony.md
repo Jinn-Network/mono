@@ -1265,9 +1265,9 @@ is minted or anchored, and in the plan as well, rotate refuses when the agent EO
 retiring binding in one of them, and refuses a run receipt that exists but cannot be read
 (`run-receipt-unreadable`), rather than revoke in one catalog and leave the keys bound in the rest.
 A catalog no longer at the path the run receipt records is not read: the plan and the completion
-name it (`catalogsNotRead`), since any copy of it still binds the retired keys. The plan lists each
-other catalog with its revocation anchor digest and counts its anchor and finality wait, and the
-completion says to copy each catalog the run rewrote to every operator that holds it.
+name it (`catalogsNotRead`), since a copy of it that binds the retired keys keeps them bound. The
+plan lists each other catalog with its revocation anchor digest and counts its anchor and finality
+wait, and the completion says to copy each catalog the run rewrote to every operator that holds it.
 
 ## 5. Catalog governance
 
