@@ -1,6 +1,14 @@
 # Native Identity Ceremony — production trust-artifact provisioning
 
-**Version:** 0.15 (§3.2b and §6 law 1 name `init --fresh-anchor` as the act that takes a fresh
+**Version:** 0.16 (§4.5 states what `rotate` does when the operator's keys are bound in more than
+one catalog, after issue #5413: it binds the replacement keys in the catalog it rotates in and
+revokes the retiring bindings in every catalog the run receipt records, each under a fresh
+revocation anchor of its own, and refuses before anything is minted or anchored when the agent EOA
+cannot revoke in one of them or the run receipt cannot be read. §4.5 also states that
+`init --execute` and `join --execute` take the operator directory lock `rotate --execute` takes,
+after issue #5385: the lock record names the verb that holds it, a run that finds it held refuses as
+`rotation-in-progress` or `provisioning-in-progress`, and two init or join runs exclude each other.
+v0.15: §3.2b and §6 law 1 name `init --fresh-anchor` as the act that takes a fresh
 anchor on a re-author, after issue #5377: it keeps the run receipt and the anchors it records, which
 moving the receipt aside drops, and a run interrupted after its anchor was sent resumes onto that
 anchor when re-run without the flag. v0.14: one `rotate --execute` at a time holds an operator
@@ -1115,8 +1123,9 @@ them.
 
 1. Read the config (Agent IRIs, the family's current store, the genesis pin), the earning
    custody, and the Safe-ownership preflight, as `init` does.
-2. Open the current stores and find each key's catalog bindings. `planRevocation` shows the agent
-   EOA is their voucher **before either anchor is sent**; a mismatch refuses with no gas spent.
+2. Open the current stores and find each key's catalog bindings, in the catalog rotate rotates in
+   and in every other catalog the run receipt records (below). `planRevocation` shows the agent
+   EOA is their voucher in each **before any anchor is sent**; a mismatch refuses with no gas spent.
 3. Record `<dir>/ceremony/rotation.json` naming the new store and the retiring store per family,
    then mint the new stores. Every write of the receipt goes to a temporary file in the same
    directory, flushed and renamed over it, so a write that fails or is interrupted leaves the
@@ -1128,7 +1137,13 @@ them.
 6. **Revoke**: submit a fresh `revocation-anchor/v1` anchor and record its locator in the receipt,
    wait for finality, `revokeBinding` with `effectiveTime` = the block time the finality read
    returns.
-7. Mark the receipt complete. Restart every daemon after distributing the catalog.
+7. **Revoke in every other catalog** (v0.16): for each other catalog the run receipt records that
+   still binds a retiring key unrevoked (below), submit a fresh `revocation-anchor/v1` anchor over
+   that catalog's targets and record its locator in the receipt under that catalog's path, wait for
+   finality, `revokeBinding` in that catalog with `effectiveTime` = the block time the finality
+   read returns.
+8. Mark the receipt complete. Restart every daemon after distributing every catalog the run
+   rewrote.
 
 The config moves between the two acts so that no step leaves it naming a store whose bindings the
 catalog revokes: before step 5 it names the retiring store, whose bindings stand, and from step 5
@@ -1158,19 +1173,27 @@ at keys a rotation retired. A new rotation also never skips a family the way a r
 does: it opens the store it retires and refuses unless the catalog binds each key there, so it never
 completes with nothing retired.
 
-One `rotate --execute` at a time holds an operator directory. A run reads `rotation.json` before
-its checks and writes it only after them, so two runs inside that window would each find no
-unfinished rotation and each start one: each would bind keys of its own and repoint the config,
-leaving one set bound and unrevoked in a store the config no longer names. So before it reads the
-config or the receipt, a run takes `<dir>/ceremony/rotate.lock`, a file naming its process, host and
-start time, created exclusively, and removes it however the run ends, including before a refusal
-exits. A run that finds the lock held refuses (`rotation-in-progress`), naming that process, before
-anything is minted, anchored or written. A lock is stale only when the process it names no longer
-exists on this host; a run that finds one takes it over under a second, short-lived exclusive file
-(`rotate.lock.takeover`), so two runs that both find it stale never both take it. A lock whose
-process exists, which may be another program that took a killed run's process number, or that was
-written on another host, is never taken over: the refusal says to remove it when no rotate is
-running. The plan reads only and takes no lock. A new rotation also takes no keys from a store that
+One `init --execute`, `join --execute` or `rotate --execute` at a time holds an operator directory
+(rotate since v0.14; init and join since v0.16, after issue #5385). A rotate reads `rotation.json`
+before its checks and writes it only after them, so two rotations inside that window would each
+find no unfinished rotation and each start one: each would bind keys of its own and repoint the
+config, leaving one set bound and unrevoked in a store the config no longer names. An init or join
+checks once, early, that no rotation replaced or is replacing a family it binds (`rotated-family`),
+and binds that family's keys minutes later, after its anchor's finality wait, so a rotation started
+in between would retire the keys it then binds. So before it reads the config, a catalog or a
+receipt, a run of any of the three takes `<dir>/ceremony/rotate.lock`, a file naming the verb that
+holds it and its process, host and start time, created exclusively, and removes it however the run
+ends, including before a refusal exits. A run that finds the lock held refuses, naming that verb
+and process, before anything is minted, anchored or written: `rotation-in-progress` while a rotate
+holds it, or a run whose record cannot be read or names no verb (only a rotate wrote one before
+v0.16), and `provisioning-in-progress` while an init or join does. Two init or join runs on one
+operator directory exclude each other the same way. A lock is stale only when the process it names
+no longer exists on this host; a run that finds one takes it over under a second, short-lived
+exclusive file (`rotate.lock.takeover`), so two runs that both find it stale never both take it. A
+lock whose process exists, which may be another program that took a killed run's process number,
+or that was written on another host, is never taken over: the refusal says to remove it when no
+init, join or rotate is running. A plan, of any of the three verbs, reads only and takes no lock.
+A new rotation also takes no keys from a store that
 appears at its new store's path after its checks: its mint must be the store on disk, and when it
 is not, the run restores `rotation.json` as it was, removes the stores it minted, and refuses
 (`new-store-exists`) before anything is anchored.
@@ -1202,9 +1225,10 @@ replacement after the key it retires, so the keys it just bound never pass for t
 retiring. The `another-key-bound` check then runs with the named stores' keys set aside as well,
 and refuses while any other key for those roles is bound and unrevoked: the named stores are then
 not all that rotation was retiring. When every binding of the named stores' keys is revoked already,
-the run refuses, as there is nothing to finish. Past those checks the run writes a receipt naming both stores, as a
-new rotation does, and goes on as a rotation whose rebind has landed: it submits a fresh revocation
-anchor and revokes the named stores' keys. A revocation anchor the lost receipt recorded is never
+in the catalog the config names and in every other catalog the run receipt records (below), the run
+refuses, as there is nothing to finish. Past those checks the run writes a receipt naming both stores, as a
+new rotation does, and goes on as a rotation whose rebind has landed: it revokes the named stores'
+keys, under a fresh revocation anchor, in each catalog that still binds them unrevoked. A revocation anchor the lost receipt recorded is never
 declared, so the retired keys stop verifying from the fresh anchor's block time. The flag applies
 only when no rotation is unfinished; on a re-run of an unfinished one it must name the stores that
 receipt retires, and the run resumes it.
@@ -1217,6 +1241,33 @@ It refuses when no rotation is unfinished, since a new rotation would retire the
 names. Use it only for an anchor that will not finalize: if the old one finalizes after all, the
 catalog never declares it, and for a revocation the retired key stops verifying from the fresh
 anchor's block time instead.
+
+**More than one catalog (v0.16).** An operator directory's keys can be bound in more than one
+catalog: a `join` of a provisioned directory into a second catalog binds the keys in
+`<dir>/identity` there and points the config's `trustRootsPath` and genesis pin at it, and the run
+receipt, `<dir>/ceremony/receipt.json`, records every catalog init or join bound those keys in (its
+`catalogPath` and that of each `earlierAnchors` entry). A revocation names a binding digest of its
+own catalog, each catalog holds bindings of its own of the same key, and a verifier opens one
+catalog, so a revocation in one catalog leaves the key bound in every other. Issue #5413 found
+exactly that: a rotation after such a join revoked the retired keys only in the catalog the config
+named, and the earlier catalog still bound them, unrevoked. So `rotate` binds the replacement keys
+in one catalog, `--catalog` or the config's `trustRootsPath`, the one the config names from step 5,
+and revokes the retiring bindings in every catalog the run receipt records. In each other catalog
+at the path the receipt records, it takes every binding of a retiring key to the same Agent that
+the agent EOA has not revoked, plans their revocation at step 2 and revokes them at step 7. Each
+catalog's revocation is an act of its own under §6 law 6, with a fresh anchor of its own: a
+`revocation-anchor/v1` digest commits to its targets, which are bindings of that catalog alone.
+`rotation.json` records each such anchor under `otherRevocationAnchors`, by catalog path, and a
+re-run waits on it again as it does for the other acts, or sends a fresh one under
+`--resubmit-anchor`. rotate binds no replacement in those catalogs: the Agent holds no replacement
+key there, and `join` cannot add a rotated family to a catalog (`rotated-family`). Before anything
+is minted or anchored, and in the plan as well, rotate refuses when the agent EOA cannot revoke a
+retiring binding in one of them, and refuses a run receipt that exists but cannot be read
+(`run-receipt-unreadable`), rather than revoke in one catalog and leave the keys bound in the rest.
+A catalog no longer at the path the run receipt records is not read: the plan and the completion
+name it (`catalogsNotRead`), since any copy of it still binds the retired keys. The plan lists each
+other catalog with its revocation anchor digest and counts its anchor and finality wait, and the
+completion says to copy each catalog the run rewrote to every operator that holds it.
 
 ## 5. Catalog governance
 
