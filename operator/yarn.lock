@@ -1132,7 +1132,7 @@ __metadata:
     "@safe-global/types-kit": "npm:^4.0.1"
     "@scure/bip32": "npm:^2.2.0"
     "@scure/bip39": "npm:^2.2.0"
-    "@secretlint/core": "npm:^13.0.2"
+    "@secretlint/core": "npm:^14.0.1"
     "@secretlint/secretlint-rule-preset-recommend": "npm:^13.0.2"
     "@slicekit/erc8128": "npm:^0.3.3"
     "@types/better-sqlite3": "npm:^7.6.0"
@@ -2183,10 +2183,31 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@secretlint/core@npm:^14.0.1":
+  version: 14.0.1
+  resolution: "@secretlint/core@npm:14.0.1"
+  dependencies:
+    "@secretlint/profiler": "npm:14.0.1"
+    "@secretlint/types": "npm:14.0.1"
+    "@textlint/regexp-string-matcher": "npm:^2.0.3"
+    debug: "npm:^4.4.3"
+    picomatch: "npm:^4.0.7"
+    structured-source: "npm:^4.0.0"
+  checksum: 10c0/e657ef475c9c8af01d629c3970d602c1c30cc138a5d9d7361a12379c9c2cb759200f55f7a59871a7b552090f3fb1416790b087425d779eca34e750c33a8e25c9
+  languageName: node
+  linkType: hard
+
 "@secretlint/profiler@npm:13.1.0":
   version: 13.1.0
   resolution: "@secretlint/profiler@npm:13.1.0"
   checksum: 10c0/f844a5a382010e5ae8428fc200023c67e169e6b131ba0d6de2dd2aafcad80014940c3f7e5f49aee7b33b4d859e6937c5e9c4090e0a15ef52eeebd890ef2fbd0a
+  languageName: node
+  linkType: hard
+
+"@secretlint/profiler@npm:14.0.1":
+  version: 14.0.1
+  resolution: "@secretlint/profiler@npm:14.0.1"
+  checksum: 10c0/5ecc3a6c98656bc25245b6d341915df847f68e2f3696c55c353e22eb8e522c8f395e111f217f2f553731163cb1816b1e6dcde107feac8049e880dc6cab3c1111
   languageName: node
   linkType: hard
 
@@ -2201,6 +2222,13 @@ __metadata:
   version: 13.1.0
   resolution: "@secretlint/types@npm:13.1.0"
   checksum: 10c0/50e02a7ff41bd25569a7b10cafb393cb44ea3442de33c20b9eb22734381d22f229a022b2e2ea64882306d6a30d5207d39aca144b3f7bf8bc967ef6c9fdc2e08a
+  languageName: node
+  linkType: hard
+
+"@secretlint/types@npm:14.0.1":
+  version: 14.0.1
+  resolution: "@secretlint/types@npm:14.0.1"
+  checksum: 10c0/169fd5e319f3c177e84f8989b518e5411cdc07af6cb73272b86539ecffa37329d1054c10f33d03ecd0c597923283b723f2a04b57e7dc76aff3001a36903cb2b0
   languageName: node
   linkType: hard
 
@@ -3060,6 +3088,13 @@ __metadata:
   version: 1.1.0
   resolution: "@standard-schema/spec@npm:1.1.0"
   checksum: 10c0/d90f55acde4b2deb983529c87e8025fa693de1a5e8b49ecc6eb84d1fd96328add0e03d7d551442156c7432fd78165b2c26ff561b970a9a881f046abb78d6a526
+  languageName: node
+  linkType: hard
+
+"@textlint/regexp-string-matcher@npm:^2.0.3":
+  version: 2.0.4
+  resolution: "@textlint/regexp-string-matcher@npm:2.0.4"
+  checksum: 10c0/0491c29e9c3e24b93589557862a7e399d3b7a57baa842e059065f9e69d76b1f931d19fef11699a8a88929fd7321f3b5912de2815b04643acfa1a6bdfb2fca304
   languageName: node
   linkType: hard
 
@@ -5270,6 +5305,13 @@ __metadata:
   version: 4.0.5
   resolution: "picomatch@npm:4.0.5"
   checksum: 10c0/947bc6b6e1ff1e6c5aaf95b107a0839d12802f4f7b867663f67d47accba939ca1cb582cf99dfc30438efa1c4648ac5990967e783e8929c36b03e8440704ef1bd
+  languageName: node
+  linkType: hard
+
+"picomatch@npm:^4.0.7":
+  version: 4.0.7
+  resolution: "picomatch@npm:4.0.7"
+  checksum: 10c0/beb6ae02c43ae44e84883b90830196d9046b1726ead292adcf7f57945e0bb0d992d68563d87e03b484b6f3c9a5c6defda7523477f047d7f0e663f126cc01787f
   languageName: node
   linkType: hard
 
