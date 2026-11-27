@@ -330,11 +330,11 @@ __metadata:
   linkType: hard
 
 "@hono/node-server@npm:^1.19.9 || ^2.0.5, @hono/node-server@npm:^2.0.5":
-  version: 2.1.8
-  resolution: "@hono/node-server@npm:2.1.8"
+  version: 2.1.11
+  resolution: "@hono/node-server@npm:2.1.11"
   peerDependencies:
     hono: ^4 || ^5.0.0-0
-  checksum: 10c0/16900425ef58e908d2d3e12c44206663165ae07d267e68dbc987ac6c1b3f977bbac6b9566be60171efb60d230aeb7c559f4865cd6ff68c50ca99514320d711eb
+  checksum: 10c0/a9c1f543eb2fefe071192114f1c5ba7deb40235a80524b4c4622c00cb862eefc3453af8e6609bdd18fd715ba594b2afb21b4c357edf238db014298b89922baf1
   languageName: node
   linkType: hard
 
@@ -1944,13 +1944,13 @@ __metadata:
   linkType: hard
 
 "@playwright/test@npm:^1.59.1":
-  version: 1.65.0
-  resolution: "@playwright/test@npm:1.65.0"
+  version: 1.65.1
+  resolution: "@playwright/test@npm:1.65.1"
   dependencies:
-    playwright: "npm:1.65.0"
+    playwright: "npm:1.65.1"
   bin:
     playwright: cli.js
-  checksum: 10c0/137a641e1be8035686a165e69d86d242ee7ed5cbe71e5230f9195cb6e65be37a66ba697f16919b508d04c4d682fd4e167d1a755b64ceb545afac780de72b594b
+  checksum: 10c0/f3c0c6ce1d426c84c2ee370e7b7a81fcd4a7a8eaa9d51a880ec853e98ce437482772a09c58c7fbb4444002b127068f076458bec99cecca60c3b51e9ba93e2cc6
   languageName: node
   linkType: hard
 
@@ -3256,65 +3256,65 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@x402/core@npm:^2.14.0, @x402/core@npm:~2.31.0":
-  version: 2.31.0
-  resolution: "@x402/core@npm:2.31.0"
+"@x402/core@npm:^2.14.0, @x402/core@npm:~2.32.0":
+  version: 2.32.0
+  resolution: "@x402/core@npm:2.32.0"
   dependencies:
     zod: "npm:^4.6.6"
-  checksum: 10c0/67333e7049fc0dccc85723f25582e64ab83a4aec7d360b0781028d189535568a4789a948e9f7f6229d2380e353b3355e553f44ed0a5e1517b08d64f64bcee0f3
+  checksum: 10c0/f84412e9d41dc32880b81f8bd3493883a08ee69f983ad0e91a2f69fb99cbe946e4d7be3cbe1345450426581fea9584776f17415dd2da5d685ab52f7dcba65066
   languageName: node
   linkType: hard
 
 "@x402/evm@npm:^2.14.0":
-  version: 2.31.0
-  resolution: "@x402/evm@npm:2.31.0"
+  version: 2.32.0
+  resolution: "@x402/evm@npm:2.32.0"
   dependencies:
-    "@x402/core": "npm:~2.31.0"
+    "@x402/core": "npm:~2.32.0"
     viem: "npm:^2.48.11"
     zod: "npm:^4.6.6"
-  checksum: 10c0/9705d9b9b9418cd2cd829d89f311c3e885285b1d78929b6e7149b1f4a891cac7a9b31dc2ad8d0a90eac8fe394e13405a426a2bdf690e4088791e2aef3b3ca6f6
+  checksum: 10c0/6f39c50b0564040fa6c1c6e29db318ba8963b6473b208d7c40979fb68f2231e56b150f484558aa66888309c7715a7a4ddb6f31d4e4ba0b58c0305999a1651660
   languageName: node
   linkType: hard
 
-"@x402/extensions@npm:~2.31.0":
-  version: 2.31.0
-  resolution: "@x402/extensions@npm:2.31.0"
+"@x402/extensions@npm:~2.32.0":
+  version: 2.32.0
+  resolution: "@x402/extensions@npm:2.32.0"
   dependencies:
     "@noble/curves": "npm:^1.9.0"
     "@scure/base": "npm:^1.2.6"
     "@signinwithethereum/siwe": "npm:^4.1.0"
-    "@x402/core": "npm:~2.31.0"
+    "@x402/core": "npm:~2.32.0"
     ajv: "npm:^8.18.0"
     jose: "npm:^5.9.6"
     tweetnacl: "npm:^1.0.3"
     viem: "npm:^2.48.11"
     zod: "npm:^4.6.6"
-  checksum: 10c0/3ec7adb56608734d16493e3adc9d32ed3a229733dca43dd53d50406d6ec79ad0eedc007acca213411adadbc0e8538140707466c239217270836db2a3fc453795
+  checksum: 10c0/c7c049599e90903319bfa05037d99ebfc485fc0f07ff118b983ec94e355f6ac6f0f4eb2eadfb7a599e25dd0c98f43e895034c415023d6de0c77ee13784a0dbbf
   languageName: node
   linkType: hard
 
 "@x402/fetch@npm:^2.14.0":
-  version: 2.31.0
-  resolution: "@x402/fetch@npm:2.31.0"
+  version: 2.32.0
+  resolution: "@x402/fetch@npm:2.32.0"
   dependencies:
-    "@x402/core": "npm:~2.31.0"
-  checksum: 10c0/de67e0d55c0bc61856556148c8e7477bfd9b98d0c516bf8dc347ee4efaefdc5d21dc6c78a5c922a561196d049d24e5a85afe0d40ded0657421cdff45bf80d517
+    "@x402/core": "npm:~2.32.0"
+  checksum: 10c0/6d57c50b1c3529d80f61092178eee584cb77eae75f2c55ed2b0a7f163390d7ff45b55cc000dd8a252db5d1868021ed007167bfaabd1bee1b69d162558eed7bf7
   languageName: node
   linkType: hard
 
 "@x402/hono@npm:^2.14.0":
-  version: 2.31.0
-  resolution: "@x402/hono@npm:2.31.0"
+  version: 2.32.0
+  resolution: "@x402/hono@npm:2.32.0"
   dependencies:
-    "@x402/core": "npm:~2.31.0"
-    "@x402/extensions": "npm:~2.31.0"
+    "@x402/core": "npm:~2.32.0"
+    "@x402/extensions": "npm:~2.32.0"
   peerDependencies:
-    "@x402/paywall": ^2.31.0
+    "@x402/paywall": ^2.32.0
     hono: ">=4.13.7 <5.0.0"
   peerDependenciesMeta:
     "@x402/paywall":
       optional: true
-  checksum: 10c0/d25d6e1d99c3e68b89d9b23e61fe6073338b29c396853194891fa2892c9d882a02fe1c3be300cdd68e1334c509e4c42c496455c4c949346377a5e14ea2e7d826
+  checksum: 10c0/7941398c73676798f3272337fa1c6170d85ef14e10b6c1e1b235e91db717a0effaa941ad4e795a120ed5501f789bccec9a85e382c64c608298c24892f07298b3
   languageName: node
   linkType: hard
 
@@ -4443,9 +4443,9 @@ __metadata:
   linkType: hard
 
 "hono@npm:^4.11.4, hono@npm:^4.12.10":
-  version: 4.13.18
-  resolution: "hono@npm:4.13.18"
-  checksum: 10c0/c04462570fe9dcdf820b633e6c22d33d414d7608abbed7daadd3ad7c594b2670b4790a16b613658e952367a12082a21f0b556d021c17ccbbc70758eefd80badc
+  version: 4.13.21
+  resolution: "hono@npm:4.13.21"
+  checksum: 10c0/e8c2fb50d3e173f6f1bcc5cc6499967350cd3ec4f616598c2a2c6ab3bb9747605cda06bb393f661544258c16766d08c986856873f0faa7b6aa8cbf9a1071fb38
   languageName: node
   linkType: hard
 
@@ -5141,7 +5141,6 @@ __metadata:
     global-agent: "npm:^3.0.0"
     onnxruntime-common: "npm:1.21.0"
     tar: "npm:^7.0.1"
-  checksum: 10c0/7a2a7c3104da9c64fe9a2a9d04dce255aaabd337741c5369c0627575e03cd165b393f0e11c827ab352726d3f8493adc3ff842a60f135770038fb8d584500baa8
   conditions: (os=win32 | os=darwin | os=linux)
   languageName: node
   linkType: hard
@@ -5186,9 +5185,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ox@npm:0.14.65":
-  version: 0.14.65
-  resolution: "ox@npm:0.14.65"
+"ox@npm:0.14.67":
+  version: 0.14.67
+  resolution: "ox@npm:0.14.67"
   dependencies:
     "@adraffy/ens-normalize": "npm:^1.11.0"
     "@noble/ciphers": "npm:^1.3.0"
@@ -5203,7 +5202,7 @@ __metadata:
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/96eeabb9cb8a4091c0fe9fc433dda5616c873608e5d038116292d61541f9d5d87a77fefdb6b1766233e81a022f54c9a31600c930c69c4cc02b58b0a306f74a7d
+  checksum: 10c0/1c609abc4108e60d3b1031cfed5971c7d704047d934eb7ecd14873fc3a25f4f618c70b3178d64ca4bd2b50924e38b435fd604d5341e87dc62bd5435aba4e4526
   languageName: node
   linkType: hard
 
@@ -5287,23 +5286,23 @@ __metadata:
   languageName: node
   linkType: hard
 
-"playwright-core@npm:1.65.0":
-  version: 1.65.0
-  resolution: "playwright-core@npm:1.65.0"
+"playwright-core@npm:1.65.1":
+  version: 1.65.1
+  resolution: "playwright-core@npm:1.65.1"
   bin:
     playwright-core: cli.js
-  checksum: 10c0/ed905c6fc2457a725c3fdb3ad4500f43c7a1bb2c6e4e8c708e1e314930c7dce446a5756ad073425bf3c6e3ca975e5a35fb0221118e2d51ef7b4b6c6d13d0644c
+  checksum: 10c0/4406d4f8eff668a93aaada8382d25fcce8da5f679e9f31311888178d631ed0270eb40c0288129e41e15709c957a31932cac9753fdb332547a19bc3541d317e44
   languageName: node
   linkType: hard
 
-"playwright@npm:1.65.0":
-  version: 1.65.0
-  resolution: "playwright@npm:1.65.0"
+"playwright@npm:1.65.1":
+  version: 1.65.1
+  resolution: "playwright@npm:1.65.1"
   dependencies:
-    playwright-core: "npm:1.65.0"
+    playwright-core: "npm:1.65.1"
   bin:
     playwright: cli.js
-  checksum: 10c0/a7d71f3ca5bcad0531b5f3c39ae1a9be0da8e74be6fee8510d99b9f5fc07fd5b3d889aa4ca487c70ca29aba8625f74e3c2c7473b4c8a784dc14fefff80474ac3
+  checksum: 10c0/30ce029c9fb2a6e88cf81b150b978fd60edb59b8af5a6460f5576f0fe6e2bb739454109f0ce4904eac63cb2cf10390518d7d71d335fd695b5897734a5af7250d
   languageName: node
   linkType: hard
 
@@ -6165,9 +6164,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"viem@npm:2.57.19":
-  version: 2.57.19
-  resolution: "viem@npm:2.57.19"
+"viem@npm:2.58.6":
+  version: 2.58.6
+  resolution: "viem@npm:2.58.6"
   dependencies:
     "@noble/curves": "npm:1.9.1"
     "@noble/hashes": "npm:1.8.0"
@@ -6175,7 +6174,7 @@ __metadata:
     "@scure/bip39": "npm:1.6.0"
     abitype: "npm:1.2.3"
     isows: "npm:1.0.7"
-    ox: "npm:0.14.65"
+    ox: "npm:0.14.67"
     ws: "npm:8.21.0"
   peerDependencies:
     mppx: ">=0.17.0"
@@ -6185,7 +6184,7 @@ __metadata:
       optional: true
     typescript:
       optional: true
-  checksum: 10c0/27f0e4bb99da71769f8429fc5ca4f1d9f970d9d64cc126eff4072dec2c5177b9301d22b6e9862f2d7e28b3e330eb5218d05174438cc44c54e8ec9eff7d845489
+  checksum: 10c0/5347b189f236925b5683581eb5fa72d96671465c23cf7791911aa1ab189cabe1be0c75665d02011d293a2434ac868c5865c09d9017cb7b0e5cd7f872695a2652
   languageName: node
   linkType: hard
 
