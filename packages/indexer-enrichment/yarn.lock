@@ -46,10 +46,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@electric-sql/pglite@npm:^0.5.16":
-  version: 0.5.16
-  resolution: "@electric-sql/pglite@npm:0.5.16"
-  checksum: 10c0/33262e864d2b288a133f27d18f7def9a92666729a65dc2fa5828d16b5e0f0c8cd2484b27386d7f8cf933573aa57f13eb1e9da4803d3aa6d8829182d30e000fd0
+"@electric-sql/pglite@npm:^0.6.0":
+  version: 0.6.0
+  resolution: "@electric-sql/pglite@npm:0.6.0"
+  checksum: 10c0/925ebc5fc8fce1ba60b5dfa94ca04131db65f73971822e2e22d60d391e3c58ed43aebcd27f2b25bb666fe40047a720471261e8da139554d2b0ceda5f87773620
   languageName: node
   linkType: hard
 
@@ -873,7 +873,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/indexer-enrichment@workspace:."
   dependencies:
-    "@electric-sql/pglite": "npm:^0.5.16"
+    "@electric-sql/pglite": "npm:^0.6.0"
     "@jinn-network/indexer": "portal:../indexer"
     "@types/node": "npm:^22.0.0"
     "@types/pg": "npm:^8.23.1"
