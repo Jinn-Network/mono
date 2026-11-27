@@ -455,9 +455,10 @@ export type WorkspacePublicationHeadRefresh = IdleHeadRefreshOutcome;
  * Colophon form of the floor coupling the heartbeat design states for the operator's requester leg
  * (its §5.4).
  *
- * A prospective launch's Submission capture is not a stage and does not floor: it reads its time
- * before it takes this lock, so a re-sign in that window refuses the capture before the backend
- * sees it, and a resume reads a fresh time (#5324).
+ * A prospective launch's Submission capture is not a stage, but it floors the same way (#5405): it
+ * reads its time before it takes this lock, so a re-sign in that window can pass that time, and
+ * it announces through the same port, at that time or one millisecond after the served head. It
+ * journals the time its entry was signed at, as resume's recovery reconstructs it.
  *
  * Never throws: a lock that cannot be acquired is `faulted` like any other failure, because the
  * caller is a loop and reports outcomes rather than exceptions.

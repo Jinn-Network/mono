@@ -16,12 +16,16 @@ export interface ProductLaunchCaptureDeps {
   readonly workspaceDir: string;
   readonly draftId: string;
   readonly liveClock: () => string;
-  /** The source append is deliberately before the backend submission. */
+  /**
+   * The source append is deliberately before the backend submission. `at` is the earliest the
+   * Submission is announced, read before the source lock; the returned `at` is the timestamp of
+   * the signed source entry, which the capture journals (#5405).
+   */
   readonly announceSubmission?: (input: {
     readonly bytes: Uint8Array;
     readonly digest: `sha256:${string}`;
     readonly at: string;
-  }) => Promise<{ readonly sequence: string; readonly entrySha256: string }>;
+  }) => Promise<{ readonly sequence: string; readonly entrySha256: string; readonly at: string }>;
 }
 
 export function createProductLaunchCapture(deps: ProductLaunchCaptureDeps): LaunchCapturePort {
@@ -77,7 +81,7 @@ export function createProductLaunchCapture(deps: ProductLaunchCaptureDeps): Laun
       capturedSubmissions.set(key, submissionSha256);
       appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
         kind: "submission-captured",
-        at,
+        at: announcement?.at ?? at,
         cellKey: input.cellKey,
         armId: input.armId,
         replicate: input.replicate,

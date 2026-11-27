@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type {
   AttemptUri,
   DeliveryRef,
@@ -13,13 +13,20 @@ import type {
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { computeBeaconOrder, requiredBeaconRound } from "@colophon-claims/check";
 import { itemTaskDigest, parseBenchmark } from "@jinn-network/benchmarking-records";
+import { RECORD_KINDS, type SourceHead } from "@jinn-network/record-discovery-protocol";
 import { readAuditEntries } from "../audit/journal.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { writeCancelMarker } from "../run/cancel-marker.js";
 import type { ProxiedBackend } from "../run/drive.js";
 import { readRunJournalEntries, type RunJournalEntry } from "../run/journal.js";
 import { readRunState, writeRunState } from "../run/state.js";
-import { createWorkspacePublicationHttpHandler, createWorkspacePublicationSource } from "../run/publication-source.js";
+import type { ProductLaunchCaptureDeps } from "../run/publication-capture.js";
+import {
+  createWorkspacePublicationHttpHandler,
+  createWorkspacePublicationSource,
+  refreshWorkspacePublicationHead,
+  withWorkspacePublicationSourceLock,
+} from "../run/publication-source.js";
 import { runJournalPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import type { LocalVenue } from "../venue/venue.js";
@@ -37,6 +44,32 @@ import { runQuote } from "./run-quote.js";
 import { runStatus } from "./run-status.js";
 import { sampleInit } from "./sample.js";
 
+type AnnounceSubmission = NonNullable<ProductLaunchCaptureDeps["announceSubmission"]>;
+
+/**
+ * A prospective capture's announcement, after it has read its Submission's time and before it
+ * takes the source lock (#5405). Unset, every capture announces unchanged.
+ */
+const captureHooks = vi.hoisted(() => ({
+  announce: undefined as
+    | ((input: Parameters<AnnounceSubmission>[0], announce: AnnounceSubmission) => ReturnType<AnnounceSubmission>)
+    | undefined,
+}));
+
+vi.mock("../run/publication-capture.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../run/publication-capture.js")>();
+  return {
+    ...actual,
+    createProductLaunchCapture: (deps: ProductLaunchCaptureDeps) => {
+      const announce = deps.announceSubmission;
+      return actual.createProductLaunchCapture(announce === undefined ? deps : {
+        ...deps,
+        announceSubmission: (input) => captureHooks.announce?.(input, announce) ?? announce(input),
+      });
+    },
+  };
+});
+
 let workspaceDir: string;
 
 beforeEach(() => {
@@ -44,6 +77,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  captureHooks.announce = undefined;
   rmSync(workspaceDir, { recursive: true, force: true });
 });
 
@@ -446,6 +480,132 @@ describe("runLaunch — prospective mounted publication", () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+});
+
+describe("runLaunch — a prospective capture after the source head passed its time (#5405)", () => {
+  const SOURCE_NAME = "colophon-benchmarks";
+  type Capture = Extract<RunJournalEntry, { kind: "submission-captured" }>;
+
+  /** Registers draft-1 beneath an archive mount served for the duration of `run`. */
+  async function withRegisteredDraft(clock: () => string, run: () => Promise<void>): Promise<void> {
+    await setUpLockedDraft(clock);
+    const handler = createWorkspacePublicationHttpHandler(workspaceDir);
+    const server = createServer(async (request, response) => {
+      const externalPath = request.url ?? "/";
+      if (!externalPath.startsWith("/publication/")) { response.writeHead(404).end(); return; }
+      const result = await handler(new Request(`http://127.0.0.1${externalPath.slice("/publication".length)}`, { method: request.method }));
+      response.writeHead(result.status, Object.fromEntries(result.headers));
+      response.end(Buffer.from(await result.arrayBuffer()));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("test server address unavailable");
+      const base = `http://127.0.0.1:${address.port}/publication`;
+      expect((await publicationConfigure(contextFor(clock), { draftId: "draft-1", publicBaseUrl: base })).ok).toBe(true);
+      expect((await publicationRegister(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+      await run();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }
+
+  /** Another draft's announcement, signed at `timestamp`. */
+  async function announceAnotherDraft(timestamp: string): Promise<void> {
+    const bytes = new TextEncoder().encode(`another draft's record at ${timestamp}`);
+    await withWorkspacePublicationSourceLock(workspaceDir, async () => {
+      const source = createWorkspacePublicationSource(workspaceDir, SOURCE_NAME);
+      await source.writer.recover();
+      await source.writer.append({
+        timestamp,
+        announcement: { announcementId: `another-draft:${timestamp}`, action: "available", record: { kind: RECORD_KINDS.task, digest: `sha256:${sha256Hex(bytes)}`, mediaType: "text/plain" } },
+        record: { bytes, contentType: "text/plain" },
+      });
+    });
+  }
+
+  function captures(): Capture[] {
+    return readRunJournalEntries(workspaceDir, "draft-1")
+      .filter((entry): entry is Capture => entry.kind === "submission-captured");
+  }
+
+  async function launch(clock: () => string): Promise<void> {
+    const { backend } = makeStatefulFakeBackend();
+    const outcome = await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(backend) });
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    expect(captures().length).toBeGreaterThan(1);
+    expect(captures().every((entry) => entry.publicationSourceSequence !== undefined)).toBe(true);
+  }
+
+  test("captures a Submission when the heartbeat re-signs the head after the capture read its time", async () => {
+    const clock = makeClock();
+    await withRegisteredDraft(clock, async () => {
+      let passed: SourceHead | undefined;
+      captureHooks.announce = async (input, announce) => {
+        if (passed === undefined) {
+          // Registration signed the head at the fixture clock, which trails this host's, so the
+          // heartbeat re-signs it at this host's clock, past the time the capture read.
+          expect((await refreshWorkspacePublicationHead(workspaceDir, SOURCE_NAME)).status).toBe("refreshed");
+          passed = (await createWorkspacePublicationSource(workspaceDir, SOURCE_NAME).head.getExact())!;
+          expect(Date.parse(passed.issuedAt)).toBeGreaterThan(Date.parse(input.at));
+        }
+        return announce(input);
+      };
+      await launch(clock);
+      const [first] = captures();
+      expect(first!.at).toBe(new Date(Date.parse(passed!.issuedAt) + 1).toISOString());
+      expect(first!.publicationSourceSequence! > passed!.sequence).toBe(true);
+    });
+  });
+
+  test("captures a Submission when another draft announces after the capture read its time, and replays it to its committed receipt", async () => {
+    const clock = makeClock();
+    await withRegisteredDraft(clock, async () => {
+      let first: { readonly passedAt: string; readonly committed: Awaited<ReturnType<AnnounceSubmission>> } | undefined;
+      captureHooks.announce = async (input, announce) => {
+        if (first !== undefined) return announce(input);
+        const passedAt = new Date(Date.parse(input.at) + 1_000).toISOString();
+        await announceAnotherDraft(passedAt);
+        const committed = await announce(input);
+        // The head passes the committed Submission as well before the same capture announces it
+        // again, as a retry would.
+        await announceAnotherDraft(new Date(Date.parse(passedAt) + 1_000).toISOString());
+        expect(await announce(input)).toEqual(committed);
+        first = { passedAt, committed };
+        return committed;
+      };
+      await launch(clock);
+      expect(first!.committed.at).toBe(new Date(Date.parse(first!.passedAt) + 1).toISOString());
+      const captured = captures()[0]!;
+      expect(captured).toMatchObject({
+        at: first!.committed.at,
+        publicationSourceSequence: first!.committed.sequence,
+        publicationEntrySha256: first!.committed.entrySha256,
+      });
+
+      // The crash boundary between the source append and the journal append: resume rebuilds the
+      // capture from the signed source entry, and it is the fact launch journaled.
+      const source = createWorkspacePublicationSource(workspaceDir, SOURCE_NAME);
+      const announcementCount = Object.keys((await source.writer.readState())!.announcements).length;
+      overwriteRunJournal("draft-1", readRunJournalEntries(workspaceDir, "draft-1").filter((entry) => {
+        if (entry.kind === "cell-event") return entry.event.cellKey !== captured.cellKey;
+        if (
+          entry.kind === "submission-captured"
+          || entry.kind === "submission-pinning-evidence"
+          || entry.kind === "submission-accepted"
+          || entry.kind === "observation-accepted"
+          || entry.kind === "delivery"
+          || entry.kind === "evaluation"
+        ) return entry.cellKey !== captured.cellKey;
+        return true;
+      }));
+      const { backend: resumeBackend } = makeStatefulFakeBackend();
+      const resumed = await runResume(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(resumeBackend) });
+      expect(resumed.ok, JSON.stringify(resumed)).toBe(true);
+      expect(captures().filter((entry) => entry.cellKey === captured.cellKey)).toEqual([captured]);
+      expect(Object.keys((await source.writer.readState())!.announcements)).toHaveLength(announcementCount);
+    });
   });
 });
 

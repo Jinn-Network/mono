@@ -55,7 +55,7 @@ import {
   type DriveDeps,
 } from "../run/drive.js";
 import { createProductLaunchCapture } from "../run/publication-capture.js";
-import { createWorkspacePublicationSource, publicArchiveUrl, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
+import { createWorkspacePublicationSource, publicArchiveUrl, recordPath, withWorkspacePublicationSourceLock, type WorkspacePublicationSource } from "../run/publication-source.js";
 import { reconcileReplayedSubmission } from "../run/replayed-submission-recovery.js";
 import { SUBMISSION_MEDIA_TYPE } from "@jinn-network/task-execution-protocol";
 import {
@@ -78,6 +78,7 @@ import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
+import { announceAfterServedHead } from "./publication-report-timestamp.js";
 import type { OperationResult } from "./result.js";
 
 export interface RunLaunchDeps {
@@ -313,9 +314,6 @@ async function createRunLaunchCapture(
     return createProductLaunchCapture({ workspaceDir, draftId, liveClock });
   }
   requireProspectiveRegistrationVerified(publication, draftId);
-  const frozenCaptures = readRunJournalEntries(workspaceDir, draftId).filter(
-    (entry) => entry.kind === "submission-captured" && entry.publicationSourceSequence !== undefined,
-  );
   return createProductLaunchCapture({
     workspaceDir,
     draftId,
@@ -326,25 +324,77 @@ async function createRunLaunchCapture(
         refuse("conflict", `runs.${draftId}.publication.source`, "Run owner and source agent must be the same stable workspace did:key");
       }
       await source.writer.recover();
-      const prior = frozenCaptures.find((entry) => entry.kind === "submission-captured" && entry.submissionSha256 === digest.slice(7));
-      const receipt = await source.writer.append({
-        timestamp: prior?.at ?? at,
-        announcement: {
-          announcementId: `submission:${digest}`,
-          action: "available",
-          record: { kind: "https://spec.jinn.network/records/submission/v1", digest, mediaType: SUBMISSION_MEDIA_TYPE },
+      // `at` was read before this lock, so the head may have passed it by now: through a heartbeat
+      // re-sign, another draft's announcement, or the entry anchors a released hold announces
+      // (#5405). As in every publication stage, it is the earliest the Submission is announced: a
+      // Submission the source already holds is reused with its committed receipt, and any other is
+      // announced at `at` or one millisecond after the served head, whichever is later.
+      const receipt = await announceAfterServedHead(
+        source,
+        `runs.${draftId}.submission-captured.at`,
+        () => `submission:${digest}`,
+      ).announce({
+        idempotencyKey: digest,
+        record: {
+          id: `submission:${digest}`,
+          kind: "https://spec.jinn.network/records/submission/v1",
+          digest,
+          bytes,
+          mediaType: SUBMISSION_MEDIA_TYPE,
+          announcementTimestamp: at,
+          authority: { mode: "owner" },
+          actions: ["announce"],
         },
-        record: { bytes, contentType: SUBMISSION_MEDIA_TYPE },
-      });
+      }) as SubmissionReceipt;
       const base = publication.source.publicBaseUrl!;
       const response = await fetch(publicArchiveUrl(base, recordPath(digest)));
       const observed = response.ok ? new Uint8Array(await response.arrayBuffer()) : undefined;
       if (observed === undefined || observed.length !== bytes.length || !observed.every((byte, index) => byte === bytes[index])) {
         throw new Error("prospective Submission was announced but is not exactly retrievable");
       }
-      return { sequence: receipt.sequence, entrySha256: receipt.entryDigest.slice("sha256:".length) };
+      return {
+        sequence: receipt.sequence,
+        entrySha256: receipt.entryDigest.slice("sha256:".length),
+        // The journal's capture time is the signed entry's timestamp, as recovery reconstructs it.
+        at: await signedSubmissionTimestamp(source, draftId, digest, receipt),
+      };
     }),
   });
+}
+
+type SubmissionReceipt = { readonly sequence: string; readonly entryDigest: `sha256:${string}`; readonly page: string };
+
+/** The timestamp of the signed source entry that announced a prospective Submission. */
+async function signedSubmissionTimestamp(
+  source: WorkspacePublicationSource,
+  draftId: string,
+  digest: `sha256:${string}`,
+  receipt: SubmissionReceipt,
+): Promise<string> {
+  const announcementId = `submission:${digest}`;
+  const pageBytes = await source.archiveStore.getExact(receipt.page);
+  if (pageBytes === undefined) {
+    refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} has no signed archive page`);
+  }
+  let page: { readonly entries?: readonly { readonly entry?: {
+    readonly sequence?: unknown;
+    readonly timestamp?: unknown;
+    readonly announcements?: readonly { readonly announcementId?: unknown; readonly record?: { readonly digest?: unknown } }[];
+  } }[] };
+  try {
+    page = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(pageBytes)) as typeof page;
+  } catch {
+    refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} archive page is not valid UTF-8 JSON`);
+  }
+  const signed = page.entries?.find(({ entry }) =>
+    entry?.sequence === receipt.sequence
+    && sealJson(entry).digest === receipt.entryDigest
+    && entry.announcements?.some((row) => row.announcementId === announcementId && row.record?.digest === digest));
+  const timestamp = signed?.entry?.timestamp;
+  if (typeof timestamp !== "string") {
+    refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} archive binding is invalid`);
+  }
+  return timestamp;
 }
 
 /**
@@ -458,28 +508,7 @@ async function recoverProspectiveSubmissionCaptures(
         continue;
       }
 
-      const pageBytes = await source.archiveStore.getExact(receipt.page);
-      if (pageBytes === undefined) {
-        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} has no signed archive page`);
-      }
-      let page: { readonly entries?: readonly { readonly entry?: {
-        readonly sequence?: unknown;
-        readonly timestamp?: unknown;
-        readonly announcements?: readonly { readonly announcementId?: unknown; readonly record?: { readonly digest?: unknown } }[];
-      } }[] };
-      try {
-        page = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(pageBytes)) as typeof page;
-      } catch {
-        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} archive page is not valid UTF-8 JSON`);
-      }
-      const signed = page.entries?.find(({ entry }) =>
-        entry?.sequence === receipt.sequence
-        && sealJson(entry).digest === receipt.entryDigest
-        && entry.announcements?.some((row) => row.announcementId === announcementId && row.record?.digest === digest));
-      const timestamp = signed?.entry?.timestamp;
-      if (typeof timestamp !== "string") {
-        refuse("record-integrity", `runs.${draftId}.publication.source`, `prospective Submission ${digest} archive binding is invalid`);
-      }
+      const timestamp = await signedSubmissionTimestamp(source, draftId, digest, receipt);
 
       const observed = await fetch(publicArchiveUrl(publication.source.publicBaseUrl!, recordPath(digest)));
       const observedBytes = observed.ok ? new Uint8Array(await observed.arrayBuffer()) : undefined;
